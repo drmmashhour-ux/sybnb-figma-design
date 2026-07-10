@@ -1,0 +1,21 @@
+{
+  "nav": {
+    "signIn": { "ar": "تسجيل الدخول", "en": "Sign In" },
+    "signUp": { "ar": "إنشاء حساب", "en": "Sign Up" },
+    "menu": { "ar": "القائمة", "en": "Menu" }
+  },
+  "hero": {
+    "eyebrow": { "ar": "منصة واحدة لكل احتياج عقاري", "en": "One platform for every property need" },
+    "title": { "ar": "اختر القسم وافتح تجربتك مباشرة", "en": "Choose a division and open the experience" },
+    "subtitle": {
+      "ar": "كل بطاقة تعمل كمدخل مستقل: شعار متحرك، معاينة سريعة، ومسار واضح للعميل.",
+      "en": "Each card is a clean entry point: animated mark, quick preview, and a clear client flow."
+    }
+  },
+  "actions": {
+    "openDivision": { "ar": "افتح القسم", "en": "Open Division" },
+    "howItWorks": { "ar": "كيف يعمل", "en": "How it works" },
+    "ready": { "ar": "متاح", "en": "Ready" },
+    "soon": { "ar": "لاحقاً", "en": "Soon" }
+  }
+}

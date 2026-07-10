@@ -1,0 +1,17 @@
+{
+  "bookingId": "BK-2026-CARD-0001",
+  "userId": "USR-CARD-001",
+  "paymentMethod": "CARD_OR_PREPAID",
+  "processor": "STRIPE",
+  "amount": 49,
+  "currency": "USD",
+  "status": "REQUIRES_PAYMENT_METHOD",
+  "processorPaymentIntentId": "pi_mock_2026_card_prepaid_0001",
+  "processorCustomerId": "cus_mock_2026_0001",
+  "last4": "4242",
+  "cardBrand": "visa",
+  "prepaid": true,
+  "createdAt": "2026-07-01T12:15:00.000Z",
+  "idempotencyKey": "CARD:BK-2026-CARD-0001:USR-CARD-001:49.00:USD",
+  "riskFlags": ["prepaid_card_verify_capture_and_refund_rules"]
+}

@@ -1,0 +1,22 @@
+{
+  "divisionLogos": {
+    "current": "src/shared/brand/BrandLogo.tsx",
+    "registry": "src/shared/brand/logoRegistry.ts",
+    "finalExportFolder": "public/assets/logos"
+  },
+  "previewVideos": {
+    "folder": "public/assets/previews",
+    "fallback": "src/modules/landing/DivisionPreviewAnimation.tsx"
+  },
+  "colors": {
+    "bg": "#0a0f1d",
+    "panel": "#121c2f",
+    "line": "#263651",
+    "blue": "#526cff",
+    "cyan": "#19d7ff",
+    "gold": "#d5a915",
+    "green": "#20d29b",
+    "violet": "#7c35ff"
+  },
+  "fonts": ["Cairo", "Tajawal", "Inter", "system-ui"]
+}

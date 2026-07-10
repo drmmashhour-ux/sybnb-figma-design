@@ -1,0 +1,13 @@
+{
+  "bookingId": "BK-2026-0042",
+  "userId": "USR-LOCAL-WALLET-001",
+  "paymentMethod": "SYRIAN_LOCAL_WALLET",
+  "amount": 10,
+  "currency": "SYP",
+  "transactionReference": "SLW-QR-2026-0001",
+  "senderName": "محمد معاذ المشهور",
+  "senderPhone": "+963 998 191 422",
+  "proofUrl": "/assets/payments/syrian-local-wallet-qr-clean.jpg",
+  "status": "PENDING_REVIEW",
+  "createdAt": "2026-07-01T12:00:00.000Z"
+}

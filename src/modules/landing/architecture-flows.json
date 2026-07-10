@@ -1,0 +1,10 @@
+{
+  "stays": ["browse", "details", "booking-request", "trip-dashboard"],
+  "rentals": ["search", "property-detail", "account-gate", "immocontact"],
+  "buy": ["search", "property-detail", "offer-or-visit", "buyer-dashboard"],
+  "cars": ["search", "car-detail", "contact-gate", "seller-thread"],
+  "marketplace": ["browse", "item-detail", "contact-gate", "seller-dashboard"],
+  "new-construction": ["project-card", "project-sections", "floors-units", "visit-or-contact"],
+  "sell": ["role-selection", "plan-selection", "listing-wizard", "review"],
+  "ride": ["client-location", "category-selection", "driver-tracking", "payment"]
+}

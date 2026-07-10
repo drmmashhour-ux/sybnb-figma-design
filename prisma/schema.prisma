@@ -1,0 +1,507 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+
+  @@map("account_status")
+}
+
+enum RoleName {
+  GUEST
+  HOST
+  SELLER
+  DRIVER
+  ADMIN
+  SUPPORT
+
+  @@map("role_name")
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  PAUSED
+  EXPIRED
+
+  @@map("listing_status")
+}
+
+enum IdDocumentStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+
+  @@map("id_document_status")
+}
+
+enum AvailabilityStatus {
+  BLOCKED
+  AVAILABLE
+
+  @@map("availability_status")
+}
+
+enum ListingDivision {
+  STAYS
+  RENTALS
+  BUY
+  CARS
+  MARKETPLACE
+  NEW_CONSTRUCTION
+
+  @@map("listing_division")
+}
+
+enum BookingStatus {
+  DRAFT
+  REQUESTED
+  PAYMENT_PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  DISPUTED
+
+  @@map("booking_status")
+}
+
+enum PaymentStatus {
+  PENDING_PROOF
+  PENDING_ADMIN_REVIEW
+  APPROVED
+  REJECTED
+  REFUNDED
+
+  @@map("payment_status")
+}
+
+enum WalletEntryType {
+  CREDIT
+  DEBIT
+  HOLD
+  RELEASE
+  REFUND
+
+  @@map("wallet_entry_type")
+}
+
+enum GiftStatus {
+  CREATED
+  SENT
+  CLAIM_PENDING
+  CLAIMED
+  LOCKED
+  EXPIRED
+  ADMIN_BLOCKED
+
+  @@map("gift_status")
+}
+
+enum RideStatus {
+  DRAFT
+  REQUESTED
+  MATCHING
+  DRIVER_ASSIGNED
+  DRIVER_ARRIVING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@map("ride_status")
+}
+
+enum MessageSenderRole {
+  GUEST
+  HOST
+  ADMIN
+  SUPPORT
+
+  @@map("message_sender_role")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String?       @unique
+  phoneHash    String?       @unique @map("phone_hash")
+  passwordHash String?       @map("password_hash")
+  displayName  String        @map("display_name")
+  locale       String        @default("ar-SY")
+  status       AccountStatus @default(ACTIVE)
+  idDocumentRef String?      @map("id_document_ref")
+  idDocumentSubmittedAt DateTime? @map("id_document_submitted_at")
+  idDocumentMimeType String? @map("id_document_mime_type")
+  idDocumentStatus IdDocumentStatus? @map("id_document_status")
+  idDocumentReviewedById String? @map("id_document_reviewed_by_id")
+  idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  roles             UserRole[]
+  sellerProfile     SellerProfile?
+  driverProfile     DriverProfile?
+  listings          Listing[]         @relation("ListingOwner")
+  bookings          Booking[]         @relation("BookingGuest")
+  wallets           Wallet[]
+  sentGifts         WalletGift[]      @relation("GiftSender")
+  claimedGifts      WalletGift[]      @relation("GiftRecipient")
+  rideRequests      RideRequest[]     @relation("RideRider")
+  driverRideMatches RideRequest[]     @relation("RideDriver")
+  auditLogs         AdminAuditLog[]   @relation("AuditActor")
+  listingReviews    ListingReview[]   @relation("ReviewGuest")
+  sentMessages      Message[]         @relation("MessageSender")
+  paymentProofs     PaymentProof[]    @relation("PaymentPayer")
+  listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+
+  @@map("users")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  role      RoleName
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@index([role])
+  @@map("user_roles")
+}
+
+model SellerProfile {
+  id             String        @id @default(uuid())
+  userId         String        @unique @map("user_id")
+  legalName      String        @map("legal_name")
+  sellerType     String        @map("seller_type")
+  documentStatus ListingStatus @default(DRAFT) @map("document_status")
+  planCode       String?       @map("plan_code")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("seller_profiles")
+}
+
+model DriverProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  licenseHash     String?  @map("license_hash")
+  vehicleMake     String?  @map("vehicle_make")
+  vehicleModel    String?  @map("vehicle_model")
+  vehiclePlate    String?  @map("vehicle_plate")
+  active          Boolean  @default(false)
+  lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("driver_profiles")
+}
+
+model Location {
+  id          String   @id @default(uuid())
+  country    String   @default("SY")
+  governorate String
+  city        String
+  area        String?
+  street      String?
+  addressLine String?  @map("address_line")
+  geo         Unsupported("geometry(Point,4326)")?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  listings       Listing[]
+  pickupRides    RideRequest[] @relation("RidePickup")
+  dropoffRides   RideRequest[] @relation("RideDropoff")
+
+  @@index([governorate, city])
+  @@map("locations")
+}
+
+model Listing {
+  id          String          @id @default(uuid())
+  ownerId     String          @map("owner_id")
+  locationId  String?         @map("location_id")
+  division    ListingDivision
+  titleAr     String          @map("title_ar")
+  titleEn     String?         @map("title_en")
+  description String?
+  status      ListingStatus   @default(DRAFT)
+  priceMinor  Int             @map("price_minor")
+  currency    String          @default("SYP")
+  instantBookEnabled Boolean  @default(false) @map("instant_book_enabled")
+  expiresAt   DateTime?       @map("expires_at")
+  metadata    Json            @default("{}")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  owner          User                  @relation("ListingOwner", fields: [ownerId], references: [id])
+  location       Location?             @relation(fields: [locationId], references: [id])
+  media          ListingMedia[]
+  bookings       Booking[]
+  availability   ListingAvailability[]
+  reviews        ListingReview[]
+  inquiryThreads MessageThread[]
+
+  @@index([division, status])
+  @@index([ownerId])
+  @@map("listings")
+}
+
+model ListingAvailability {
+  id                 String              @id @default(uuid())
+  listingId          String              @map("listing_id")
+  date               DateTime            @db.Date
+  status             AvailabilityStatus  @default(BLOCKED)
+  priceOverrideMinor Int?                @map("price_override_minor")
+  note               String?
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, date])
+  @@index([listingId, date])
+  @@map("listing_availability")
+}
+
+model ListingMedia {
+  id        String   @id @default(uuid())
+  listingId String   @map("listing_id")
+  url       String
+  kind      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@map("listing_media")
+}
+
+model Booking {
+  id          String        @id @default(uuid())
+  listingId   String        @map("listing_id")
+  guestId     String        @map("guest_id")
+  status      BookingStatus @default(REQUESTED)
+  checkIn     DateTime?     @map("check_in")
+  checkOut    DateTime?     @map("check_out")
+  amountMinor Int           @map("amount_minor")
+  currency    String        @default("SYP")
+  metadata    Json          @default("{}")
+  guestCheckedInAt  DateTime? @map("guest_checked_in_at")
+  guestCheckedOutAt DateTime? @map("guest_checked_out_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  listing  Listing       @relation(fields: [listingId], references: [id])
+  guest    User          @relation("BookingGuest", fields: [guestId], references: [id])
+  payments PaymentProof[]
+  review   ListingReview?
+  messageThread MessageThread?
+
+  @@index([guestId, status])
+  @@index([listingId, status])
+  @@map("bookings")
+}
+
+model PaymentProof {
+  id              String        @id @default(uuid())
+  bookingId       String?       @map("booking_id")
+  userId          String        @map("user_id")
+  provider        String
+  status          PaymentStatus @default(PENDING_PROOF)
+  amountMinor     Int           @map("amount_minor")
+  currency        String        @default("SYP")
+  proofAssetUrl   String?       @map("proof_asset_url")
+  providerRef     String?       @map("provider_ref")
+  adminNote       String?       @map("admin_note")
+  reviewedById    String?       @map("reviewed_by_id")
+  reviewedAt      DateTime?     @map("reviewed_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  booking Booking? @relation(fields: [bookingId], references: [id])
+  payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@map("payment_proofs")
+}
+
+model ListingReview {
+  id              String    @id @default(uuid())
+  listingId       String    @map("listing_id")
+  bookingId       String    @unique @map("booking_id")
+  guestId         String    @map("guest_id")
+  rating          Int
+  comment         String?
+  hiddenAt        DateTime? @map("hidden_at")
+  hiddenByAdminId String?   @map("hidden_by_admin_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  guest   User    @relation("ReviewGuest", fields: [guestId], references: [id])
+
+  @@index([listingId, hiddenAt])
+  @@map("listing_reviews")
+}
+
+model MessageThread {
+  id        String   @id @default(uuid())
+  bookingId String?  @unique @map("booking_id")
+  listingId String?  @map("listing_id")
+  guestId   String?  @map("guest_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  listing  Listing?  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  guest    User?     @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([listingId, guestId])
+  @@map("message_threads")
+}
+
+model Message {
+  id           String            @id @default(uuid())
+  threadId     String            @map("thread_id")
+  senderUserId String            @map("sender_user_id")
+  senderRole   MessageSenderRole @map("sender_role")
+  body         String
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender User          @relation("MessageSender", fields: [senderUserId], references: [id])
+
+  @@index([threadId, createdAt])
+  @@map("messages")
+}
+
+model Wallet {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  currency          String   @default("SYP")
+  cachedBalanceMinor Int     @default(0) @map("cached_balance_minor")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries WalletEntry[]
+
+  @@unique([userId, currency])
+  @@map("wallets")
+}
+
+model WalletEntry {
+  id              String          @id @default(uuid())
+  walletId        String          @map("wallet_id")
+  type            WalletEntryType
+  amountMinor     Int             @map("amount_minor")
+  currency        String          @default("SYP")
+  referenceType   String          @map("reference_type")
+  referenceId     String          @map("reference_id")
+  idempotencyKey  String          @unique @map("idempotency_key")
+  note            String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@index([walletId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("wallet_entries")
+}
+
+model WalletGift {
+  id                     String     @id @default(uuid())
+  senderUserId            String     @map("sender_user_id")
+  recipientUserId         String?    @map("recipient_user_id")
+  recipientPhoneHash      String     @map("recipient_phone_hash")
+  amountMinor             Int        @map("amount_minor")
+  currency                String     @default("SYP")
+  message                 String?
+  status                  GiftStatus @default(CREATED)
+  claimAttemptCount       Int        @default(0) @map("claim_attempt_count")
+  lockedUntil             DateTime?  @map("locked_until")
+  expiresAt               DateTime   @map("expires_at")
+  createdAt               DateTime   @default(now()) @map("created_at")
+  updatedAt               DateTime   @updatedAt @map("updated_at")
+
+  sender    User  @relation("GiftSender", fields: [senderUserId], references: [id])
+  recipient User? @relation("GiftRecipient", fields: [recipientUserId], references: [id])
+
+  @@index([recipientPhoneHash, status])
+  @@index([senderUserId, createdAt])
+  @@map("wallet_gifts")
+}
+
+model OtpAttemptLock {
+  id             String   @id @default(uuid())
+  purpose        String
+  subjectHash    String   @map("subject_hash")
+  attemptCount   Int      @default(0) @map("attempt_count")
+  lockedUntil    DateTime? @map("locked_until")
+  lastAttemptAt  DateTime? @map("last_attempt_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([purpose, subjectHash])
+  @@map("otp_attempt_locks")
+}
+
+model RideRequest {
+  id              String     @id @default(uuid())
+  riderId          String     @map("rider_id")
+  driverId         String?    @map("driver_id")
+  pickupLocationId String?    @map("pickup_location_id")
+  dropoffLocationId String?   @map("dropoff_location_id")
+  status          RideStatus @default(REQUESTED)
+  requestedAt     DateTime   @default(now()) @map("requested_at")
+  fareMinor       Int?       @map("fare_minor")
+  currency        String     @default("SYP")
+  pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
+  dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
+  metadata        Json       @default("{}")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  rider          User      @relation("RideRider", fields: [riderId], references: [id])
+  driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
+  pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
+  dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
+
+  @@index([status, requestedAt])
+  @@index([driverId, status])
+  @@map("ride_requests")
+}
+
+model AdminAuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?  @map("actor_user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  before      Json?
+  after       Json?
+  ipHash      String?  @map("ip_hash")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("admin_audit_logs")
+}

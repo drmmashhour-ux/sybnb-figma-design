@@ -1,0 +1,36 @@
+{
+  "roles": ["GUEST", "HOST", "SELLER", "DRIVER", "ADMIN", "SUPPORT"],
+  "currencies": ["SYP", "USD"],
+  "launchDivisions": ["STAYS", "RENTALS", "BUY", "CARS", "MARKETPLACE", "NEW_CONSTRUCTION"],
+  "adminReviewQueues": [
+    "seller_profiles",
+    "listings",
+    "payment_proofs",
+    "wallet_gifts",
+    "bookings",
+    "ride_requests"
+  ],
+  "defaultLocations": [
+    {
+      "country": "SY",
+      "governorate": "Damascus",
+      "city": "Damascus",
+      "area": "Al-Malki",
+      "street": "Main access road"
+    },
+    {
+      "country": "SY",
+      "governorate": "Damascus",
+      "city": "Damascus",
+      "area": "Abu Rummaneh",
+      "street": "Central street"
+    },
+    {
+      "country": "SY",
+      "governorate": "Rif Dimashq",
+      "city": "Damascus Countryside",
+      "area": "Airport Road",
+      "street": "Damascus International Airport route"
+    }
+  ]
+}

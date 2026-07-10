@@ -1,0 +1,21 @@
+{
+  "mode": "css-animation-now-video-later",
+  "videoSpecs": {
+    "format": "mp4",
+    "orientation": "vertical",
+    "durationSeconds": 4,
+    "loop": true,
+    "muted": true
+  },
+  "files": {
+    "stays": "/assets/previews/stays-preview.mp4",
+    "rentals": "/assets/previews/rentals-preview.mp4",
+    "buy": "/assets/previews/buy-preview.mp4",
+    "cars": "/assets/previews/cars-preview.mp4",
+    "marketplace": "/assets/previews/marketplace-preview.mp4",
+    "new-construction": "/assets/previews/new-construction-preview.mp4",
+    "sell": "/assets/previews/sell-preview.mp4",
+    "ride": "/assets/previews/ride-preview.mp4"
+  },
+  "swapRule": "Set DivisionPreviewAnimation previewMode to video and pass the matching src."
+}

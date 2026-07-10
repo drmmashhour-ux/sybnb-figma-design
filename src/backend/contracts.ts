@@ -1,0 +1,238 @@
+export type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+
+export type AuthRole = 'GUEST' | 'HOST' | 'SELLER' | 'DRIVER' | 'ADMIN' | 'SUPPORT'
+
+export type ApiEndpoint = {
+  method: ApiMethod
+  path: string
+  auth: 'public' | 'user' | 'admin'
+  roles?: AuthRole[]
+  purpose: string
+}
+
+export const API_ENDPOINTS: ApiEndpoint[] = [
+  {
+    method: 'GET',
+    path: '/api/health',
+    auth: 'public',
+    purpose: 'Check API service and PostgreSQL connectivity.',
+  },
+  {
+    method: 'GET',
+    path: '/api/contracts',
+    auth: 'public',
+    purpose: 'Read the prototype endpoint and security contract registry.',
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/register',
+    auth: 'public',
+    purpose: 'Create account with server-side password hashing and phone hashing.',
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/login',
+    auth: 'public',
+    purpose: 'Start a secure session after bcrypt password verification.',
+  },
+  {
+    method: 'GET',
+    path: '/api/listings',
+    auth: 'public',
+    purpose: 'Search approved listings by division, location, dates, price, and guest count.',
+  },
+  {
+    method: 'POST',
+    path: '/api/listings',
+    auth: 'user',
+    roles: ['SELLER', 'HOST'],
+    purpose: 'Create a draft listing owned by the authenticated seller or host.',
+  },
+  {
+    method: 'GET',
+    path: '/api/listings/:id',
+    auth: 'public',
+    purpose: 'Read an approved listing detail page with host and division metadata.',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/listings/:id/submit',
+    auth: 'user',
+    roles: ['SELLER', 'HOST'],
+    purpose: 'Submit a listing for admin review.',
+  },
+  {
+    method: 'POST',
+    path: '/api/bookings',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Create a booking request and reserve the listing dates.',
+  },
+  {
+    method: 'GET',
+    path: '/api/bookings/:id',
+    auth: 'user',
+    roles: ['GUEST', 'HOST', 'ADMIN', 'SUPPORT'],
+    purpose: 'Read a booking detail page for the guest, host, or admin.',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/bookings/:id/dispute',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Let a guest dispute an eligible confirmed or completed booking.',
+  },
+  {
+    method: 'POST',
+    path: '/api/payments/local-wallet-proof',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Upload Syrian local wallet proof for admin approval.',
+  },
+  {
+    method: 'GET',
+    path: '/api/payments/:id',
+    auth: 'user',
+    roles: ['GUEST', 'HOST', 'ADMIN', 'SUPPORT'],
+    purpose: 'Read a payment receipt for the payer, host, or admin.',
+  },
+  {
+    method: 'GET',
+    path: '/api/wallet',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Read wallet balance derived from server-side ledger entries.',
+  },
+  {
+    method: 'POST',
+    path: '/api/wallet/gifts',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Create a gift locked to a server-generated recipient phone hash.',
+  },
+  {
+    method: 'GET',
+    path: '/api/wallet/gifts/:id',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Read safe gift preview fields for a recipient claim link.',
+  },
+  {
+    method: 'POST',
+    path: '/api/wallet/gifts/:id/claim',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Claim a gift with persisted OTP attempt locks and audit logging.',
+  },
+  {
+    method: 'GET',
+    path: '/api/me/overview',
+    auth: 'user',
+    purpose: 'Read the signed-in user dashboard overview.',
+  },
+  {
+    method: 'GET',
+    path: '/api/host/overview',
+    auth: 'user',
+    roles: ['HOST'],
+    purpose: 'Read host listings, requests, and operating totals.',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/host/requests/:id',
+    auth: 'user',
+    roles: ['HOST'],
+    purpose: 'Confirm or cancel a request for a host-owned listing.',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/host/listings/:id/status',
+    auth: 'user',
+    roles: ['HOST'],
+    purpose: 'Pause or resume a host-owned listing.',
+  },
+  {
+    method: 'GET',
+    path: '/api/driver/rides',
+    auth: 'user',
+    roles: ['DRIVER'],
+    purpose: 'Read assigned SR rides for the signed-in driver.',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/driver/rides/:id/status',
+    auth: 'user',
+    roles: ['DRIVER'],
+    purpose: 'Move an assigned SR ride through arriving, in-progress, completed, or cancelled.',
+  },
+  {
+    method: 'GET',
+    path: '/api/admin/review-queue',
+    auth: 'admin',
+    roles: ['ADMIN', 'SUPPORT'],
+    purpose: 'List pending sellers, listings, payments, gifts, and booking disputes.',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/admin/review-queue/:entityType/:entityId',
+    auth: 'admin',
+    roles: ['ADMIN'],
+    purpose: 'Approve or reject an entity and write an immutable audit log.',
+  },
+  {
+    method: 'GET',
+    path: '/api/admin/audit-log',
+    auth: 'admin',
+    roles: ['ADMIN', 'SUPPORT'],
+    purpose: 'Read the latest admin and workflow audit events.',
+  },
+  {
+    method: 'GET',
+    path: '/api/admin/platform-metrics',
+    auth: 'admin',
+    roles: ['ADMIN', 'SUPPORT'],
+    purpose: 'Read platform totals for status, dashboard, and admin operations.',
+  },
+  {
+    method: 'POST',
+    path: '/api/sr/rides',
+    auth: 'user',
+    roles: ['GUEST'],
+    purpose: 'Create SR ride request with pickup/dropoff PostGIS points.',
+  },
+  {
+    method: 'GET',
+    path: '/api/sr/rides/:id',
+    auth: 'user',
+    roles: ['GUEST', 'DRIVER', 'ADMIN', 'SUPPORT'],
+    purpose: 'Read an SR ride detail for the requester, assigned driver, or admin.',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/sr/rides/:id/assign-driver',
+    auth: 'admin',
+    roles: ['ADMIN', 'SUPPORT'],
+    purpose: 'Assign a driver while SR matching engine is still manual/admin controlled.',
+  },
+]
+
+export const PLATFORM_SECURITY_RULES = [
+  'Passwords are scrypt hashes on the server only.',
+  'Session tokens are signed, expiring server-side credentials and never stored in localStorage.',
+  'Suspended or deleted accounts cannot log in or use previously issued sessions.',
+  'Admin and support roles cannot be created through public self-registration.',
+  'Public registration requires a unique email or phone and returns safe conflict errors.',
+  'Phone numbers used for gifts are stored and matched through server-generated hashes.',
+  'Listing, booking, payment, host, and driver actions enforce owner or role checks before mutation.',
+  'Booking dates, wallet gift amounts, and SR ride fares are validated before records are created.',
+  'Booking amount and currency come from the approved listing record, never from client-submitted totals.',
+  'Payment proof uploads for bookings require the signed-in guest who owns that booking.',
+  'Syrian wallet transaction references are required and checked server-side to prevent duplicate proof submission.',
+  'Manual Syrian wallet proofs never settle automatically; admin approval is required before confirmation.',
+  'Wallet balance is a PostgreSQL wallet ledger plus transactional cached balance.',
+  'Gift claim codes are signed per gift, and attempts plus claim status persist in PostgreSQL.',
+  'SR driver assignment requires an active driver account and driver ride status transitions are ordered.',
+  'Admin review decisions, host request decisions, driver status changes, and disputes write audit rows.',
+  'Public listing endpoints expose only approved inventory; drafts and rejected listings stay private.',
+  'Platform metrics and audit logs are restricted to admin/support review flows.',
+] as const

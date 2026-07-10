@@ -1,0 +1,141 @@
+import { db } from '../lib/prisma.mjs'
+import { requireAuth } from '../lib/auth-context.mjs'
+import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+
+export async function handleDriver(req, res, url, context) {
+  if (url.pathname === '/api/driver/rides/pending') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['DRIVER'])
+    const rides = await db().rideRequest.findMany({
+      where: { driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
+      include: {
+        rider: {
+          select: {
+            id: true,
+            displayName: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { requestedAt: 'asc' },
+      take: 20,
+    })
+    return json(res, 200, { ok: true, rides })
+  }
+
+  if (url.pathname === '/api/driver/rides') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['DRIVER'])
+    const rides = await db().rideRequest.findMany({
+      where: { driverId: context.user.id },
+      include: {
+        rider: {
+          select: {
+            id: true,
+            displayName: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { requestedAt: 'desc' },
+      take: 50,
+    })
+    return json(res, 200, {
+      ok: true,
+      overview: {
+        driver: {
+          id: context.user.id,
+          email: context.user.email,
+          displayName: context.user.displayName,
+          roles: context.roles,
+        },
+        totals: {
+          assigned: rides.length,
+          active: rides.filter((ride) => ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status)).length,
+          completed: rides.filter((ride) => ride.status === 'COMPLETED').length,
+          earningsMinor: rides
+            .filter((ride) => ride.status === 'COMPLETED')
+            .reduce((sum, ride) => sum + (ride.fareMinor || 0), 0),
+        },
+        rides,
+      },
+    })
+  }
+
+  const rideMatch = url.pathname.match(/^\/api\/driver\/rides\/([^/]+)\/status$/)
+  if (rideMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const nextStatus = normalizeDriverRideStatus(body.status || body.action)
+    const existing = await db().rideRequest.findFirst({
+      where: { id: rideMatch[1], driverId: context.user.id },
+    })
+
+    if (!existing) {
+      const error = new Error('Ride not found for this driver account.')
+      error.statusCode = 404
+      error.code = 'DRIVER_RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    assertDriverRideTransition(existing.status, nextStatus)
+
+    const ride = await db().rideRequest.update({
+      where: { id: existing.id },
+      data: { status: nextStatus },
+      include: {
+        rider: {
+          select: {
+            id: true,
+            displayName: true,
+            email: true,
+          },
+        },
+      },
+    })
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: `DRIVER_${nextStatus}`,
+        entityType: 'ride_requests',
+        entityId: ride.id,
+        before: existing,
+        after: ride,
+      },
+    })
+
+    return json(res, 200, { ok: true, ride })
+  }
+
+  return false
+}
+
+function normalizeDriverRideStatus(value) {
+  const status = String(value || '').toUpperCase()
+  if (['DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(status)) return status
+
+  const error = new Error('status must be DRIVER_ARRIVING, IN_PROGRESS, COMPLETED, or CANCELLED.')
+  error.statusCode = 400
+  error.code = 'INVALID_DRIVER_RIDE_STATUS'
+  error.expose = true
+  throw error
+}
+
+function assertDriverRideTransition(currentStatus, nextStatus) {
+  const allowed = {
+    DRIVER_ASSIGNED: ['DRIVER_ARRIVING', 'CANCELLED'],
+    DRIVER_ARRIVING: ['IN_PROGRESS', 'CANCELLED'],
+    IN_PROGRESS: ['COMPLETED', 'CANCELLED'],
+  }
+
+  if (allowed[currentStatus]?.includes(nextStatus)) return
+
+  const error = new Error(`Cannot move ride from ${currentStatus} to ${nextStatus}.`)
+  error.statusCode = 400
+  error.code = 'INVALID_DRIVER_RIDE_TRANSITION'
+  error.expose = true
+  throw error
+}
