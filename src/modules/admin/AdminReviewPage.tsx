@@ -814,22 +814,22 @@ function ShortRentAdminCommandDashboard({
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={commandStyles.page}>
-      <header style={commandStyles.header}>
-        <div style={commandStyles.strBrandLockup}>
+      <header className="admin-command-header" style={commandStyles.header}>
+        <div className="admin-brand-lockup" style={commandStyles.strBrandLockup}>
           <BrandLogo logo="stays" size="nav" />
-          <div style={commandStyles.watermark}>STR · STAY TRUST RELAX · FINAL REVIEW · 3055</div>
+          <div className="admin-header-watermark" style={commandStyles.watermark}>STR · STAY TRUST RELAX · FINAL REVIEW · 3055</div>
         </div>
-        <div style={commandStyles.breadcrumb}>
+        <div className="admin-breadcrumb" style={commandStyles.breadcrumb}>
           <strong>{isAr ? 'لوحة الإدارة' : 'Admin dashboard'}</strong>
           <b>/</b>
           <span>{isAr ? 'الإيجار اليومي' : 'Daily rent'}</span>
         </div>
-        <div style={commandStyles.adminIdentity}>
+        <div className="admin-identity" style={commandStyles.adminIdentity}>
           <strong>{adminName}</strong>
-          <small>{adminRole}</small>
+          <small className="admin-identity-role">{adminRole}</small>
           <span style={commandStyles.avatar}>{adminInitial}</span>
-          <span style={commandStyles.notify}>●</span>
-          <b>EN / AR</b>
+          <span className="admin-identity-notify" style={commandStyles.notify}>●</span>
+          <b className="admin-identity-lang">EN / AR</b>
           <button style={commandStyles.circleButton} onClick={() => window.history.back()} aria-label={isAr ? 'السابق' : 'Back'}>←</button>
           <button style={commandStyles.circleButton} onClick={() => window.history.forward()} aria-label={isAr ? 'التالي' : 'Next'}>→</button>
         </div>
@@ -914,7 +914,7 @@ function ShortRentAdminCommandDashboard({
         </section>
       )}
 
-      <section style={commandStyles.adminV2Grid}>
+      <section className="admin-v2-grid" style={commandStyles.adminV2Grid}>
         <aside style={commandStyles.leftRail}>
           <article style={commandStyles.sideCard}>
             <div style={commandStyles.hostRow}>
@@ -1075,7 +1075,7 @@ function ShortRentAdminCommandDashboard({
             {disputeBookingRows.length === 0 ? (
               <AdminEmptyLine text={isAr ? 'لا توجد نزاعات مفتوحة للإيجار اليومي.' : 'No open short-term-rent disputes.'} />
             ) : disputeBookingRows.map((booking) => (
-              <AdminBookingLine key={booking.id} booking={booking} disabled={true} isAr={isAr} lang={lang} selected={booking.id === selectedBooking?.id} onApprove={() => undefined} onReject={() => undefined} onSelect={() => selectBooking(booking)} />
+              <AdminBookingLine key={booking.id} booking={booking} disabled={disabled} isAr={isAr} lang={lang} selected={booking.id === selectedBooking?.id} onApprove={() => onBookingDecision(booking.id, 'APPROVE')} onReject={() => onBookingDecision(booking.id, 'REJECT')} onSelect={() => selectBooking(booking)} />
             ))}
           </div>
         )}

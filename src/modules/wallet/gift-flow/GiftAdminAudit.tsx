@@ -166,7 +166,7 @@ export function GiftAdminAudit({ lang = 'ar', onAction }: GiftAdminAuditProps) {
 
         {notice && <div style={{ ...styles.notice, ...(status === 'error' ? styles.error : {}) }}>{notice}</div>}
 
-        <section style={styles.grid}>
+        <section className="gift-admin-audit-grid" style={styles.grid}>
           <article style={styles.card}>
             <h2 style={styles.cardTitle}>{t.title}</h2>
             {gifts.length ? (

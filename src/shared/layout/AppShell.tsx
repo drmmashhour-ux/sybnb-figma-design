@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
+import { clearGuestSession, getStoredGuestSession } from '../api/platformApi'
+import { Footer } from './Footer'
 
 type Props = {
   lang: Lang
@@ -19,6 +21,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   const isAdminControlRoom = path.startsWith('/admin')
   const routeContext = getRouteContext(path, isAr)
   const showFlowNav = !isLanding && !isAdminControlRoom
+  const guestSession = typeof window !== 'undefined' ? getStoredGuestSession() : null
 
   function goBack() {
     navigate(routeContext.backPath)
@@ -29,11 +32,18 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
     navigate(routeContext.nextPath)
   }
 
+  function signOutGuest() {
+    clearGuestSession()
+    navigate('/')
+  }
+
   return (
     <div className="app-shell" dir={isAr ? 'rtl' : 'ltr'}>
-      <div className="final-isolated-watermark" aria-hidden="true">
-        FINAL · JULY 6 · CAPSULE EDITION · 3055
-      </div>
+      {(isAdvertisingTunnel || isAdminControlRoom) && (
+        <div className="final-isolated-watermark" aria-hidden="true">
+          FINAL · JULY 6 · CAPSULE EDITION · 3055
+        </div>
+      )}
       {!isAdvertisingTunnel && !isAdminControlRoom && (
         <header className="top-nav">
           <button className="brand-lockup" onClick={() => navigate('/')} aria-label="SYBNB home">
@@ -57,7 +67,16 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
                 EN
               </button>
             </div>
-            {isLanding ? (
+            {guestSession ? (
+              <div className="public-auth-actions" aria-label={isAr ? 'حساب العميل' : 'Guest account'}>
+                <button className="menu-action" onClick={() => navigate('/dashboard')}>
+                  {isAr ? `مرحباً، ${guestSession.user.displayName}` : `Hi, ${guestSession.user.displayName}`}
+                </button>
+                <button className="primary-action" onClick={signOutGuest}>
+                  {isAr ? 'تسجيل الخروج' : 'Sign out'}
+                </button>
+              </div>
+            ) : (
               <div className="public-auth-actions">
                 <button className="menu-action" onClick={() => navigate('/account/open')}>
                   {isAr ? 'تسجيل الدخول' : 'Sign in'}
@@ -66,7 +85,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
                   {isAr ? 'إنشاء حساب' : 'Sign up'}
                 </button>
               </div>
-            ) : null}
+            )}
           </nav>
         </header>
       )}
@@ -89,6 +108,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
         </div>
       )}
       {children}
+      {!isAdvertisingTunnel && !isAdminControlRoom && <Footer lang={lang} />}
     </div>
   )
 }
@@ -196,7 +216,7 @@ function getRouteContext(path: string, isAr: boolean) {
       nextPath: '',
     }
   }
-  if (path === '/dashboard') {
+  if (path === '/dashboard' || path === '/account') {
     return {
       section: isAr ? 'حساب العميل' : 'Guest account',
       page: isAr ? 'رحلتي' : 'My trip',

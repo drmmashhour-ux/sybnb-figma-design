@@ -103,6 +103,7 @@ a {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(16px);
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
   min-height: 76px;
@@ -308,6 +309,39 @@ a {
 .primary-action {
   background: #526cff;
   padding: 0 18px;
+}
+
+@media (max-width: 640px) {
+  .top-nav {
+    flex-wrap: wrap;
+    gap: 10px;
+    min-height: 0;
+    padding: 10px 14px;
+  }
+
+  .build-edition-badge,
+  .route-context {
+    display: none;
+  }
+
+  .nav-actions {
+    gap: 6px;
+  }
+
+  .language-switch button {
+    min-width: 38px;
+    padding: 0 8px;
+  }
+
+  .menu-action,
+  .primary-action {
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .public-auth-actions button {
+    white-space: nowrap;
+  }
 }
 
 .landing-page {
@@ -3464,6 +3498,53 @@ a {
 
 .landing-ad-marquee:hover .ad-marquee-track {
   animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ad-marquee-track {
+    animation: none;
+  }
+}
+
+.app-footer {
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 32px;
+  padding: 20px 16px 28px;
+}
+
+.app-footer-links {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.app-footer-links button,
+.app-footer-links a {
+  background: none;
+  border: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 700;
+  min-height: auto;
+  padding: 4px 0;
+  text-decoration: none;
+}
+
+.app-footer-links button:hover,
+.app-footer-links a:hover {
+  color: #d5a915;
+  text-decoration: underline;
+}
+
+.app-footer-rights {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
 }
 
 .ad-marquee-card {
@@ -7592,5 +7673,60 @@ a {
 
   .operations-automation section b {
     grid-column: 2;
+  }
+}
+
+/* AdminReviewPage's three-column command layout is set via inline styles with a combined
+   minmax() floor of ~1060px, which forces mobile browsers to expand their layout viewport to
+   fit rather than shrinking the content — the page becomes unusably zoomed out on a phone.
+   !important is required here to win over the inline style attribute. */
+@media (max-width: 1060px) {
+  .admin-v2-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* AdminReviewPage renders its own header (it bypasses the shared AppShell top-nav), so it needed
+   the same mobile treatment separately: the brand watermark text and identity row (name, role,
+   EN/AR label) are nowrap and were forcing a wide layout viewport on phones. */
+@media (max-width: 760px) {
+  .admin-command-header {
+    grid-template-columns: 1fr !important;
+    justify-items: start !important;
+    row-gap: 10px !important;
+  }
+
+  .admin-breadcrumb {
+    justify-content: flex-start !important;
+  }
+
+  .admin-header-watermark,
+  .admin-identity-role,
+  .admin-identity-lang {
+    display: none !important;
+  }
+
+  .admin-identity {
+    flex-wrap: wrap !important;
+  }
+}
+
+/* RentalsPage (also used by Buy) has two inline-styled grids with fixed-px minimums that don't
+   shrink: the 6-pill search hero (~660px floor) and the two-column results layout (fixed 390px
+   second column). Both forced the mobile layout viewport wider than the device. */
+@media (max-width: 760px) {
+  .rentals-search-hero {
+    display: flex !important;
+    flex-wrap: wrap !important;
+  }
+
+  .rentals-layout {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .gift-admin-audit-grid {
+    grid-template-columns: 1fr !important;
   }
 }
