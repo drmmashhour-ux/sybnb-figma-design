@@ -21,3 +21,12 @@ export const radii = {
   md: 12,
   lg: 18,
 }
+
+export function withAlpha(hex: string, alpha: number) {
+  const value = hex.replace('#', '')
+  const bigint = parseInt(value, 16)
+  const r = (bigint >> 16) & 255
+  const g = (bigint >> 8) & 255
+  const b = bigint & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}

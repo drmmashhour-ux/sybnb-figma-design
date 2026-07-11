@@ -23,6 +23,7 @@ const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPag
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
+const LegalPlaceholderPage = lazyNamed(() => import('../modules/legal/LegalPlaceholderPage'), 'LegalPlaceholderPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
 const OperationsCalendarPage = lazyNamed(() => import('../modules/operations/OperationsCalendarPage'), 'OperationsCalendarPage')
 const PaymentReceiptPage = lazyNamed(() => import('../modules/payments/PaymentReceiptPage'), 'PaymentReceiptPage')
@@ -72,8 +73,8 @@ export function App() {
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
-  const guestProtectedRoute = path === '/dashboard' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/dashboard' || path === '/wallet' ? 'generic' : 'stays'
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/dashboard' || path === '/account' || path === '/wallet' ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
@@ -98,7 +99,7 @@ export function App() {
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
           <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : '/stays'} />
-        ) : path === '/dashboard' ? (
+        ) : path === '/dashboard' || path === '/account' ? (
           <DashboardPage lang={lang} />
         ) : path === '/host' ||
           path === '/host/seller' ||
@@ -131,6 +132,10 @@ export function App() {
           <FinanceReconciliationPage lang={lang} />
         ) : path === '/status' ? (
           <PlatformStatusPage lang={lang} />
+        ) : path === '/terms' ? (
+          <LegalPlaceholderPage lang={lang} page="terms" />
+        ) : path === '/privacy' ? (
+          <LegalPlaceholderPage lang={lang} page="privacy" />
         ) : bookingMatch ? (
           <BookingDetailPage bookingId={bookingMatch[1]} lang={lang} />
         ) : listingMatch ? (

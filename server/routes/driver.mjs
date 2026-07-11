@@ -82,9 +82,24 @@ export async function handleDriver(req, res, url, context) {
 
     assertDriverRideTransition(existing.status, nextStatus)
 
-    const ride = await db().rideRequest.update({
-      where: { id: existing.id },
+    // Re-check status in the WHERE clause (optimistic concurrency): if another request already
+    // moved this ride between our read and this write, this matches zero rows instead of
+    // silently applying a transition that was only valid for the stale status we read.
+    const updateResult = await db().rideRequest.updateMany({
+      where: { id: existing.id, status: existing.status },
       data: { status: nextStatus },
+    })
+
+    if (updateResult.count === 0) {
+      const error = new Error('Ride status changed before this update could apply. Reload and try again.')
+      error.statusCode = 409
+      error.code = 'DRIVER_RIDE_STATUS_CONFLICT'
+      error.expose = true
+      throw error
+    }
+
+    const ride = await db().rideRequest.findUnique({
+      where: { id: existing.id },
       include: {
         rider: {
           select: {

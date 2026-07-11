@@ -7,6 +7,7 @@ import {
   fetchListingQuote,
   fetchListingReviews,
   fetchPrototypeListing,
+  sendListingInquiryMessage,
   type PlatformBooking,
   type PlatformListing,
   type PlatformListingReview,
@@ -102,6 +103,9 @@ const copy = {
     share: 'مشاركة',
     requestOnlyAfterAccount: 'افتح حسابك أو سجّل الدخول أولاً، ثم أرسل طلب الحجز.',
     bottomContact: 'تواصل',
+    inquirySentTitle: 'تم إرسال طلبك',
+    inquirySentCopy: 'وصل طلبك إلى البائع/المضيف عبر صندوق الرسائل داخل SYBNB. لا حاجة للدفع الآن — سيتواصل معك الطرف الآخر من خلال المنصة.',
+    openInbox: 'فتح صندوق الرسائل',
   },
   en: {
     back: 'Back',
@@ -178,6 +182,9 @@ const copy = {
     share: 'Share',
     requestOnlyAfterAccount: 'Open an account or sign in first, then send the booking request.',
     bottomContact: 'Contact',
+    inquirySentTitle: 'Your request was sent',
+    inquirySentCopy: "Your request reached the seller/host through SYBNB's inbox. No payment needed now — they'll follow up with you through the platform.",
+    openInbox: 'Open inbox',
   },
 }
 
@@ -197,6 +204,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const isAr = lang === 'ar'
   const [listing, setListing] = useState<PlatformListing | null>(null)
   const [booking, setBooking] = useState<PlatformBooking | null>(null)
+  const [inquirySent, setInquirySent] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const messageRef = useRef<HTMLElement | null>(null)
@@ -356,17 +364,36 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     setStatus('saving')
     setMessage('')
 
+    // Only STAYS is a real paid booking. Every other division ("Contact seller" / "Request
+    // item" / "Book visit") is a lightweight inquiry — it must never create a PAYMENT_PENDING
+    // booking for the full listing price. Route it through the same message-thread inquiry
+    // used by Rentals/Buy instead (see sendListingInquiryMessage / RentalsPage.tsx).
+    if (listing.division !== 'STAYS') {
+      try {
+        const introBody = isAr
+          ? `طلب تواصل جديد بخصوص "${title}".`
+          : `New inquiry about "${title}".`
+        await sendListingInquiryMessage(listing.id, introBody)
+        setInquirySent(true)
+        setStatus('ready')
+      } catch (error) {
+        setStatus('error')
+        setMessage(error instanceof Error ? error.message : t.error)
+      }
+      return
+    }
+
     try {
       const nextBooking = await createPrototypeBooking({
         listingId: listing.id,
         amountMinor: displayedTotalMinor,
         currency: listing.currency,
-        checkIn: listing.division === 'STAYS' ? dateRange.checkIn : undefined,
-        checkOut: listing.division === 'STAYS' ? dateRange.checkOut : undefined,
+        checkIn: dateRange.checkIn,
+        checkOut: dateRange.checkOut,
         cancellationProtectionPurchased: cancellationProtection,
         cancellationProtectionFeeMinor: cancellationProtection ? protectionFeeMinor : undefined,
-        acceptedTerms: listing.division === 'STAYS' ? true : undefined,
-        termsVersion: listing.division === 'STAYS' ? t.agreementVersion : undefined,
+        acceptedTerms: true,
+        termsVersion: t.agreementVersion,
       })
       setBooking(nextBooking)
       setStatus('ready')
@@ -476,8 +503,8 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </section>
 
             <section style={styles.bookingSteps}>
-              <h2>{t.howToBook}</h2>
-              {t.stepRows.slice(0, 4).map((step, index) => (
+              <h2>{detailCopy.howToBook}</h2>
+              {detailCopy.stepRows.slice(0, 4).map((step, index) => (
                 <div key={step} style={styles.bookingStep}>
                   <b>{index + 1}</b>
                   <span>{step}</span>
@@ -657,6 +684,16 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </section>
           )}
 
+          {inquirySent && (
+            <section style={styles.panel}>
+              <strong>{t.inquirySentTitle}</strong>
+              <p style={styles.body}>{t.inquirySentCopy}</p>
+              <button style={styles.primaryButton} onClick={() => (window.location.hash = '/immocontact')}>
+                {t.openInbox}
+              </button>
+            </section>
+          )}
+
           <section style={styles.bottomActionBar}>
             {listing.division === 'STAYS' && !booking && (
               <label style={{ ...styles.agreementBox, gridColumn: '1 / -1' }}>
@@ -679,9 +716,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <button style={styles.secondaryButton} onClick={openContactTunnel}>
               {t.bottomContact}
             </button>
-            <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
-              {status === 'saving' ? t.saving : customerReady ? actionLabel : t.dashboard}
-            </button>
+            {!inquirySent && (
+              <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
+                {status === 'saving' ? t.saving : customerReady ? actionLabel : t.dashboard}
+              </button>
+            )}
           </section>
         </>
       )}
@@ -730,26 +769,46 @@ function detailCopyForDivision(division: string, lang: Lang, fallback: typeof co
       mapTitle: lang === 'ar' ? 'موقع العقار' : 'Property location',
       mapCopy: lang === 'ar' ? 'موقع العقار المختار يظهر هنا. افتح خرائط Google لمراجعة المنطقة قبل إرسال الطلب.' : 'The selected property location appears here. Open Google Maps to review the area before sending the request.',
       mapPin: lang === 'ar' ? 'موقع العقار' : 'Property location',
+      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
+      stepRows: lang === 'ar'
+        ? ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب التواصل', 'تواصل مع المالك داخل SYBNB']
+        : ['Review property details', 'Sign in or create account', 'Send contact request', 'Coordinate with the owner inside SYBNB'],
     },
     BUY: {
       mapTitle: lang === 'ar' ? 'موقع العقار' : 'Property location',
       mapCopy: lang === 'ar' ? 'موقع العقار المختار يظهر هنا. راجع المنطقة قبل طلب الزيارة.' : 'The selected property location appears here. Review the area before requesting a visit.',
       mapPin: lang === 'ar' ? 'موقع العقار' : 'Property location',
+      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
+      stepRows: lang === 'ar'
+        ? ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب الزيارة', 'نسّق موعد الزيارة داخل SYBNB']
+        : ['Review property details', 'Sign in or create account', 'Send visit request', 'Coordinate the visit inside SYBNB'],
     },
     CARS: {
       mapTitle: lang === 'ar' ? 'موقع المركبة' : 'Vehicle location',
       mapCopy: lang === 'ar' ? 'موقع المركبة أو المعرض يظهر هنا. افتح خرائط Google قبل التواصل مع البائع.' : 'The vehicle or showroom location appears here. Open Google Maps before contacting the seller.',
       mapPin: lang === 'ar' ? 'موقع المركبة' : 'Vehicle location',
+      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
+      stepRows: lang === 'ar'
+        ? ['راجع تفاصيل المركبة', 'سجّل الدخول أو أنشئ حساباً', 'تواصل مع البائع', 'نسّق الفحص والمعاينة داخل SYBNB']
+        : ['Review vehicle details', 'Sign in or create account', 'Contact the seller', 'Coordinate inspection inside SYBNB'],
     },
     MARKETPLACE: {
       mapTitle: lang === 'ar' ? 'موقع العرض' : 'Offer location',
       mapCopy: lang === 'ar' ? 'موقع العرض يظهر هنا. راجع المنطقة قبل إرسال طلب المنتج.' : 'The offer location appears here. Review the area before requesting the item.',
       mapPin: lang === 'ar' ? 'موقع العرض' : 'Offer location',
+      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
+      stepRows: lang === 'ar'
+        ? ['راجع تفاصيل المنتج', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب المنتج', 'نسّق الاستلام مع البائع داخل SYBNB']
+        : ['Review item details', 'Sign in or create account', 'Send item request', 'Coordinate pickup with the seller inside SYBNB'],
     },
     NEW_CONSTRUCTION: {
       mapTitle: lang === 'ar' ? 'موقع المشروع' : 'Project location',
       mapCopy: lang === 'ar' ? 'موقع المشروع يظهر هنا. افتح خرائط Google قبل حجز الزيارة.' : 'The project location appears here. Open Google Maps before booking a visit.',
       mapPin: lang === 'ar' ? 'موقع المشروع' : 'Project location',
+      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
+      stepRows: lang === 'ar'
+        ? ['راجع تفاصيل المشروع', 'سجّل الدخول أو أنشئ حساباً', 'احجز موعد زيارة', 'نسّق الزيارة داخل SYBNB']
+        : ['Review project details', 'Sign in or create account', 'Book a visit', 'Coordinate the visit inside SYBNB'],
     },
   }
   return { ...fallback, ...(detailCopy[division] || {}) }

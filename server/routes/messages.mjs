@@ -113,7 +113,22 @@ export async function handleMessages(req, res, url, context) {
       throw error
     }
 
-    const thread = await ensureListingThread(listing.id, guestId)
+    // Only the guest side auto-creates a thread by messaging the listing owner. An owner (isOwner)
+    // can only open a thread a guest already started — otherwise an owner could fabricate an
+    // inquiry thread with an arbitrary guestId they have no real relationship with and message
+    // into it unsolicited.
+    const thread = isOwner
+      ? await db().messageThread.findUnique({ where: { listingId_guestId: { listingId: listing.id, guestId } } })
+      : await ensureListingThread(listing.id, guestId)
+
+    if (!thread) {
+      const error = new Error('This inquiry thread does not exist yet.')
+      error.statusCode = 404
+      error.code = 'THREAD_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
     const messages = await db().message.findMany({
       where: { threadId: thread.id },
       include: { sender: { select: { id: true, displayName: true } } },

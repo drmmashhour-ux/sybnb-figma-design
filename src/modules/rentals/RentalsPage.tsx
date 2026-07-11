@@ -6,6 +6,7 @@ import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../eng
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { fetchApprovedListings, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
+import { colors, withAlpha } from '../../shared/theme/tokens'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
 
 type Props = {
@@ -418,15 +419,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <header style={styles.appHeader}>
-        <strong style={styles.logo}>{t.logo}</strong>
-        <span style={styles.navTitle}>{t.navTitle}</span>
-        <div style={styles.headerActions}>
-          <button style={styles.headerButton} onClick={openAccount}>{t.signup}</button>
-          <button style={styles.headerButtonActive} onClick={openAccount}>{t.login}</button>
-        </div>
-      </header>
-
       <section style={styles.searchCapsule}>
         <div style={styles.searchCapsuleText}>
           <span style={styles.eyebrow}>{t.searchCapsule}</span>
@@ -447,7 +439,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
             ))}
           </div>
         </section>
-        <div style={styles.searchHero}>
+        <div className="rentals-search-hero" style={styles.searchHero}>
           <button style={styles.searchButton} onClick={applySearchCapsule}>{t.search}</button>
           <button style={activeSearchPanel === 'governorate' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'governorate' ? null : 'governorate')}>{selectedGovernorateLabel || t.governorate}</button>
           <button style={activeSearchPanel === 'city' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'city' ? null : 'city')}>{selectedCityLabel || t.city}</button>
@@ -532,7 +524,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
         <span>{mainGroupOptions.find((option) => option.id === visualFilters.propertyType)?.[isAr ? 'ar' : 'en']}</span>
       </section> : null}
 
-      {hasSearched ? <section style={styles.layout}>
+      {hasSearched ? <section className="rentals-layout" style={styles.layout}>
         <section style={styles.resultsPanel}>
           <div style={styles.panelHead}>
             <div style={styles.sortRow}>
@@ -703,83 +695,75 @@ function Info({ label, value }: { label: string; value: string }) {
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#08090e', color: '#fff', padding: '0 clamp(14px, 3vw, 36px) 90px', display: 'grid', gap: 28, maxWidth: 1240, margin: '0 auto' },
-  appHeader: { minHeight: 92, borderBottom: '1px solid rgba(255,255,255,.08)', display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 18, alignItems: 'center', position: 'sticky', top: 0, zIndex: 5, background: 'rgba(8,9,14,.9)', backdropFilter: 'blur(16px)' },
-  logo: { fontSize: 28, letterSpacing: 1, justifySelf: 'start' },
-  navTitle: { color: '#5268ff', fontSize: 18, fontWeight: 950, justifySelf: 'center' },
-  headerActions: { display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' },
-  headerButton: { minHeight: 54, border: '1px solid #232638', borderRadius: 16, background: '#101118', color: '#fff', fontWeight: 950, padding: '0 22px' },
-  headerButtonActive: { minHeight: 54, border: '1px solid #5268ff', borderRadius: 16, background: '#5268ff', color: '#fff', fontWeight: 950, padding: '0 26px', boxShadow: '0 12px 28px rgba(82,104,255,.22)' },
-  langButton: { minHeight: 36, border: 0, background: 'transparent', color: '#a8b0c2', fontWeight: 850 },
-  langButtonActive: { minHeight: 36, border: 0, background: 'transparent', color: '#fff', fontWeight: 950 },
-  searchCapsule: { border: '1px solid #242638', borderRadius: 30, background: 'linear-gradient(135deg, rgba(82,104,255,.16), rgba(17,17,24,.96))', padding: 16, display: 'grid', gap: 14, boxShadow: '0 18px 55px rgba(0,0,0,.22)', position: 'relative', zIndex: 3 },
-  searchCapsuleText: { display: 'grid', gap: 5, justifyItems: 'start', color: '#fff' },
-  mainGroupCapsule: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 22, background: 'rgba(8,9,14,.64)', padding: 12, display: 'grid', gap: 10 },
+  page: { minHeight: '100vh', background: colors.bg, color: colors.text, padding: '0 clamp(14px, 3vw, 36px) 90px', display: 'grid', gap: 28, maxWidth: 1240, margin: '0 auto' },
+  searchCapsule: { border: `1px solid ${colors.line}`, borderRadius: 30, background: `linear-gradient(135deg, ${withAlpha(colors.blue, 0.16)}, ${withAlpha(colors.bg2, 0.96)})`, padding: 16, display: 'grid', gap: 14, boxShadow: '0 18px 55px rgba(0,0,0,.22)', position: 'relative', zIndex: 3 },
+  searchCapsuleText: { display: 'grid', gap: 5, justifyItems: 'start', color: colors.text },
+  mainGroupCapsule: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 22, background: withAlpha(colors.bg, 0.64), padding: 12, display: 'grid', gap: 10 },
   mainGroupGrid: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))' },
-  mainGroupButton: { minHeight: 50, border: '1px solid #30384d', borderRadius: 16, background: '#171b29', color: '#dce5ff', fontWeight: 900 },
-  mainGroupActive: { minHeight: 50, border: '1px solid #5268ff', borderRadius: 16, background: '#5268ff', color: '#fff', fontWeight: 950, boxShadow: '0 12px 26px rgba(82,104,255,.22)' },
-  searchHero: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 999, background: '#111118', padding: 8, display: 'grid', gap: 8, gridTemplateColumns: '120px repeat(5, minmax(108px, 1fr))', alignItems: 'center' },
-  searchButton: { minHeight: 58, border: 0, borderRadius: 18, background: '#5268ff', color: '#fff', fontSize: 18, fontWeight: 950, boxShadow: '0 12px 26px rgba(82,104,255,.24)' },
-  searchPill: { minHeight: 50, border: 0, borderRadius: 999, background: '#20212b', color: '#a8b0c2', fontWeight: 850 },
-  searchPillActive: { minHeight: 50, border: 0, borderRadius: 999, background: '#5268ff', color: '#fff', fontWeight: 950 },
-  searchTouchPanel: { border: '1px solid rgba(82,104,255,.42)', borderRadius: 22, background: '#0d1320', padding: 14, display: 'grid', gap: 12, overflow: 'hidden' },
-  rouletteHeader: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', color: '#dce5ff', flexWrap: 'wrap' },
+  mainGroupButton: { minHeight: 50, border: `1px solid ${colors.line}`, borderRadius: 16, background: colors.panel2, color: colors.text, fontWeight: 900 },
+  mainGroupActive: { minHeight: 50, border: `1px solid ${colors.blue}`, borderRadius: 16, background: colors.blue, color: colors.text, fontWeight: 950, boxShadow: `0 12px 26px ${withAlpha(colors.blue, 0.22)}` },
+  searchHero: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 999, background: colors.bg2, padding: 8, display: 'grid', gap: 8, gridTemplateColumns: '120px repeat(5, minmax(108px, 1fr))', alignItems: 'center' },
+  searchButton: { minHeight: 58, border: 0, borderRadius: 18, background: colors.blue, color: colors.text, fontSize: 18, fontWeight: 950, boxShadow: `0 12px 26px ${withAlpha(colors.blue, 0.24)}` },
+  searchPill: { minHeight: 50, border: 0, borderRadius: 999, background: colors.panel2, color: colors.muted, fontWeight: 850 },
+  searchPillActive: { minHeight: 50, border: 0, borderRadius: 999, background: colors.blue, color: colors.text, fontWeight: 950 },
+  searchTouchPanel: { border: `1px solid ${withAlpha(colors.blue, 0.42)}`, borderRadius: 22, background: colors.bg2, padding: 14, display: 'grid', gap: 12, overflow: 'hidden' },
+  rouletteHeader: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', color: colors.text, flexWrap: 'wrap' },
   rouletteTrack: { display: 'flex', gap: 10, overflowX: 'auto', overscrollBehaviorX: 'contain', scrollSnapType: 'x mandatory', padding: '4px 2px 12px', scrollbarWidth: 'thin' },
-  rouletteOption: { minWidth: 132, minHeight: 54, border: '1px solid #30384d', borderRadius: 18, background: '#171b29', color: '#dce5ff', fontWeight: 900, scrollSnapAlign: 'center', boxShadow: 'inset 0 -10px 22px rgba(0,0,0,.18)' },
-  rouletteOptionActive: { minWidth: 146, minHeight: 58, border: '1px solid #5268ff', borderRadius: 20, background: 'linear-gradient(135deg, #5268ff, #263486)', color: '#fff', fontWeight: 950, scrollSnapAlign: 'center', boxShadow: '0 16px 34px rgba(82,104,255,.28)' },
-  rouletteCounter: { justifySelf: 'center', border: '1px solid rgba(213,169,21,.42)', borderRadius: 999, background: 'rgba(213,169,21,.10)', color: '#f4d676', padding: '5px 14px', fontWeight: 950, fontVariantNumeric: 'tabular-nums' },
+  rouletteOption: { minWidth: 132, minHeight: 54, border: `1px solid ${colors.line}`, borderRadius: 18, background: colors.panel2, color: colors.text, fontWeight: 900, scrollSnapAlign: 'center', boxShadow: 'inset 0 -10px 22px rgba(0,0,0,.18)' },
+  rouletteOptionActive: { minWidth: 146, minHeight: 58, border: `1px solid ${colors.blue}`, borderRadius: 20, background: `linear-gradient(135deg, ${colors.blue}, ${colors.violet})`, color: colors.text, fontWeight: 950, scrollSnapAlign: 'center', boxShadow: `0 16px 34px ${withAlpha(colors.blue, 0.28)}` },
+  rouletteCounter: { justifySelf: 'center', border: `1px solid ${withAlpha(colors.gold, 0.42)}`, borderRadius: 999, background: withAlpha(colors.gold, 0.1), color: colors.gold, padding: '5px 14px', fontWeight: 950, fontVariantNumeric: 'tabular-nums' },
   touchOptions: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))' },
-  touchOption: { minHeight: 46, border: '1px solid #30384d', borderRadius: 14, background: '#171b29', color: '#dce5ff', fontWeight: 850 },
-  touchOptionActive: { minHeight: 46, border: '1px solid #5268ff', borderRadius: 14, background: 'rgba(82,104,255,.92)', color: '#fff', fontWeight: 950 },
-  beforeSearchPanel: { border: '1px solid rgba(82,104,255,.3)', borderRadius: 24, background: 'rgba(82,104,255,.08)', color: '#dce5ff', padding: 22, lineHeight: 1.7, fontWeight: 850 },
-  searchSummary: { border: '1px solid rgba(32,210,155,.36)', borderRadius: 18, background: 'rgba(32,210,155,.08)', color: '#b9ffec', padding: 14, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' },
+  touchOption: { minHeight: 46, border: `1px solid ${colors.line}`, borderRadius: 14, background: colors.panel2, color: colors.text, fontWeight: 850 },
+  touchOptionActive: { minHeight: 46, border: `1px solid ${colors.blue}`, borderRadius: 14, background: withAlpha(colors.blue, 0.92), color: colors.text, fontWeight: 950 },
+  beforeSearchPanel: { border: `1px solid ${withAlpha(colors.blue, 0.3)}`, borderRadius: 24, background: withAlpha(colors.blue, 0.08), color: colors.text, padding: 22, lineHeight: 1.7, fontWeight: 850 },
+  searchSummary: { border: `1px solid ${withAlpha(colors.green, 0.36)}`, borderRadius: 18, background: withAlpha(colors.green, 0.08), color: colors.green, padding: 14, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' },
   flowNav: { display: 'none' },
-  arrowButton: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
-  hero: { border: '1px solid rgba(25,215,255,.38)', borderRadius: 8, background: 'linear-gradient(135deg, rgba(25,215,255,.12), rgba(17,17,24,.94))', padding: 18, display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' },
-  eyebrow: { color: '#19d7ff', letterSpacing: 2, fontWeight: 950, fontSize: 11, margin: 0 },
+  arrowButton: { width: 54, height: 54, borderRadius: 999, border: `1px solid ${colors.line}`, background: colors.bg2, color: colors.text, fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
+  hero: { border: `1px solid ${withAlpha(colors.cyan, 0.38)}`, borderRadius: 8, background: `linear-gradient(135deg, ${withAlpha(colors.cyan, 0.12)}, ${withAlpha(colors.panel2, 0.94)})`, padding: 18, display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' },
+  eyebrow: { color: colors.cyan, letterSpacing: 2, fontWeight: 950, fontSize: 11, margin: 0 },
   title: { margin: '6px 0 0', fontSize: 42, lineHeight: 1.05 },
-  body: { color: '#a8b3c7', margin: '10px 0 0', lineHeight: 1.65 },
+  body: { color: colors.muted, margin: '10px 0 0', lineHeight: 1.65 },
   stepRail: { display: 'grid', gap: 8, alignContent: 'center' },
-  stepPill: { border: '1px solid #30384d', borderRadius: 8, background: 'rgba(13,19,32,.78)', color: '#dce5ff', padding: '10px 12px', fontWeight: 850 },
+  stepPill: { border: `1px solid ${colors.line}`, borderRadius: 8, background: withAlpha(colors.bg2, 0.78), color: colors.text, padding: '10px 12px', fontWeight: 850 },
   layout: { display: 'grid', gap: 36, gridTemplateColumns: 'minmax(0, 1fr) 390px', alignItems: 'start' },
   resultsPanel: { background: 'transparent', padding: 0, display: 'grid', gap: 28 },
-  filterPanel: { border: '1px solid rgba(80,105,255,.42)', borderRadius: 8, background: 'rgba(13,19,32,.72)', padding: 12, display: 'grid', gap: 12 },
-  inlineChoices: { border: '1px solid rgba(82,104,255,.25)', borderRadius: 20, background: 'rgba(82,104,255,.06)', padding: 12, display: 'grid', gap: 12 },
-  filterSummary: { display: 'flex', gap: 8, flexWrap: 'wrap', color: '#dce5ff' },
-  tunnelPanel: { border: '1px solid #242638', borderRadius: 28, background: '#111118', padding: 28, display: 'grid', gap: 18, position: 'sticky', top: 110, boxShadow: '0 24px 70px rgba(0,0,0,.32)' },
-  panelHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', color: '#9aa6ba' },
-  closeFilterButton: { minHeight: 34, border: '1px solid #30384d', borderRadius: 999, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 12px' },
+  filterPanel: { border: `1px solid ${withAlpha(colors.blue, 0.42)}`, borderRadius: 8, background: withAlpha(colors.bg2, 0.72), padding: 12, display: 'grid', gap: 12 },
+  inlineChoices: { border: `1px solid ${withAlpha(colors.blue, 0.25)}`, borderRadius: 20, background: withAlpha(colors.blue, 0.06), padding: 12, display: 'grid', gap: 12 },
+  filterSummary: { display: 'flex', gap: 8, flexWrap: 'wrap', color: colors.text },
+  tunnelPanel: { border: `1px solid ${colors.line}`, borderRadius: 28, background: colors.bg2, padding: 28, display: 'grid', gap: 18, position: 'sticky', top: 110, boxShadow: '0 24px 70px rgba(0,0,0,.32)' },
+  panelHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', color: colors.muted },
+  closeFilterButton: { minHeight: 34, border: `1px solid ${colors.line}`, borderRadius: 999, background: colors.panel2, color: colors.text, fontWeight: 900, padding: '0 12px' },
   sortRow: { display: 'flex', gap: 12, flexWrap: 'wrap' },
-  sortButton: { minHeight: 40, border: 0, borderRadius: 999, background: '#20212b', color: '#a8b0c2', fontWeight: 850, padding: '0 18px' },
-  sortButtonActive: { minHeight: 40, border: 0, borderRadius: 999, background: '#5268ff', color: '#fff', fontWeight: 950, padding: '0 20px' },
+  sortButton: { minHeight: 40, border: 0, borderRadius: 999, background: colors.panel2, color: colors.muted, fontWeight: 850, padding: '0 18px' },
+  sortButtonActive: { minHeight: 40, border: 0, borderRadius: 999, background: colors.blue, color: colors.text, fontWeight: 950, padding: '0 20px' },
   resultGrid: { display: 'grid', gap: 28, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' },
-  resultCard: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 24, background: '#14151d', overflow: 'hidden', display: 'grid', boxShadow: '0 20px 45px rgba(0,0,0,.24)', minHeight: 380 },
-  resultCardActive: { border: '1px solid #5268ff', borderRadius: 24, background: 'rgba(82,104,255,.10)', overflow: 'hidden', display: 'grid', boxShadow: '0 0 0 1px rgba(82,104,255,.24), 0 20px 45px rgba(0,0,0,.24)', minHeight: 380 },
-  resultImage: { width: '100%', aspectRatio: '1 / 1.25', objectFit: 'cover', background: '#111827' },
+  resultCard: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 24, background: colors.panel, overflow: 'hidden', display: 'grid', boxShadow: '0 20px 45px rgba(0,0,0,.24)', minHeight: 380 },
+  resultCardActive: { border: `1px solid ${colors.blue}`, borderRadius: 24, background: withAlpha(colors.blue, 0.1), overflow: 'hidden', display: 'grid', boxShadow: `0 0 0 1px ${withAlpha(colors.blue, 0.24)}, 0 20px 45px rgba(0,0,0,.24)`, minHeight: 380 },
+  resultImage: { width: '100%', aspectRatio: '1 / 1.25', objectFit: 'cover', background: colors.bg2 },
   resultBody: { padding: 18, display: 'grid', gap: 10, alignContent: 'start' },
-  statusPill: { justifySelf: 'start', border: '1px solid rgba(25,215,255,.45)', borderRadius: 999, color: '#19d7ff', padding: '5px 9px', fontSize: 11, fontWeight: 950 },
+  statusPill: { justifySelf: 'start', border: `1px solid ${withAlpha(colors.cyan, 0.45)}`, borderRadius: 999, color: colors.cyan, padding: '5px 9px', fontSize: 11, fontWeight: 950 },
   cardTitle: { margin: 0, fontSize: 22, lineHeight: 1.15 },
-  cardBody: { margin: 0, color: '#9aa6ba', lineHeight: 1.55 },
-  metaRow: { borderTop: '1px solid #27314a', paddingTop: 10, display: 'flex', justifyContent: 'space-between', gap: 12, color: '#9aa6ba' },
-  selectedCard: { border: '1px solid rgba(32,210,155,.42)', borderRadius: 18, background: 'rgba(32,210,155,.08)', padding: 14, display: 'grid', gap: 14 },
-  selectedImage: { width: '100%', aspectRatio: '16 / 10', borderRadius: 14, objectFit: 'cover', background: '#111827' },
+  cardBody: { margin: 0, color: colors.muted, lineHeight: 1.55 },
+  metaRow: { borderTop: `1px solid ${colors.line}`, paddingTop: 10, display: 'flex', justifyContent: 'space-between', gap: 12, color: colors.muted },
+  selectedCard: { border: `1px solid ${withAlpha(colors.green, 0.42)}`, borderRadius: 18, background: withAlpha(colors.green, 0.08), padding: 14, display: 'grid', gap: 14 },
+  selectedImage: { width: '100%', aspectRatio: '16 / 10', borderRadius: 14, objectFit: 'cover', background: colors.bg2 },
   selectedContent: { display: 'grid', gap: 10 },
   selectedTitle: { margin: 0, fontSize: 24 },
-  infoRow: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#9aa6ba', borderTop: '1px solid #27314a', paddingTop: 10 },
-  detailPanel: { border: '1px solid rgba(82,104,255,.42)', borderRadius: 22, background: 'linear-gradient(145deg, rgba(82,104,255,.12), rgba(13,19,32,.82))', padding: 16, display: 'grid', gap: 14 },
+  infoRow: { display: 'flex', justifyContent: 'space-between', gap: 12, color: colors.muted, borderTop: `1px solid ${colors.line}`, paddingTop: 10 },
+  detailPanel: { border: `1px solid ${withAlpha(colors.blue, 0.42)}`, borderRadius: 22, background: `linear-gradient(145deg, ${withAlpha(colors.blue, 0.12)}, ${withAlpha(colors.bg2, 0.82)})`, padding: 16, display: 'grid', gap: 14 },
   trustGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
-  detailSteps: { display: 'grid', gap: 10, margin: 0, paddingInlineStart: 22, color: '#c4ccdc', lineHeight: 1.5 },
-  accountPrompt: { border: '1px solid rgba(82,104,255,.42)', borderRadius: 22, background: 'rgba(82,104,255,.08)', color: '#dce5ff', padding: 16, display: 'grid', gap: 12, lineHeight: 1.6 },
-  docsPanel: { border: '1px solid #30384d', borderRadius: 22, background: '#0d1320', padding: 16, display: 'grid', gap: 10, color: '#a8b3c7' },
-  uploadBox: { minHeight: 74, border: '1px dashed rgba(25,215,255,.58)', borderRadius: 18, color: '#19d7ff', display: 'grid', placeItems: 'center', fontWeight: 950, cursor: 'pointer', background: 'rgba(25,215,255,.05)' },
+  detailSteps: { display: 'grid', gap: 10, margin: 0, paddingInlineStart: 22, color: colors.muted, lineHeight: 1.5 },
+  accountPrompt: { border: `1px solid ${withAlpha(colors.blue, 0.42)}`, borderRadius: 22, background: withAlpha(colors.blue, 0.08), color: colors.text, padding: 16, display: 'grid', gap: 12, lineHeight: 1.6 },
+  docsPanel: { border: `1px solid ${colors.line}`, borderRadius: 22, background: colors.bg2, padding: 16, display: 'grid', gap: 10, color: colors.muted },
+  uploadBox: { minHeight: 74, border: `1px dashed ${withAlpha(colors.cyan, 0.58)}`, borderRadius: 18, color: colors.cyan, display: 'grid', placeItems: 'center', fontWeight: 950, cursor: 'pointer', background: withAlpha(colors.cyan, 0.05) },
   fileInput: { display: 'none' },
-  docList: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.08)', color: '#b9ffec', padding: 10, display: 'grid', gap: 6 },
-  agreementBox: { border: '1px solid rgba(213,169,21,.5)', borderRadius: 18, background: 'rgba(213,169,21,.08)', color: '#f4d676', padding: 14, display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', gap: 10, alignItems: 'start', lineHeight: 1.55 },
-  primaryButton: { minHeight: 58, border: 0, borderRadius: 16, background: '#5268ff', color: '#fff', fontWeight: 950, padding: '0 14px' },
-  secondaryButton: { minHeight: 58, border: '1px solid #30384d', borderRadius: 16, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
-  readyButton: { minHeight: 58, border: '1px solid rgba(32,210,155,.5)', borderRadius: 16, background: 'rgba(32,210,155,.12)', color: '#b9ffec', fontWeight: 950, padding: '0 14px' },
-  panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#9aa6ba', padding: 14 },
-  alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
-  notice: { border: '1px solid rgba(32,210,155,.42)', borderRadius: 8, background: 'rgba(32,210,155,.08)', color: '#b9ffec', padding: 14 },
-  empty: { color: '#9aa6ba' },
+  docList: { border: `1px solid ${withAlpha(colors.green, 0.35)}`, borderRadius: 8, background: withAlpha(colors.green, 0.08), color: colors.green, padding: 10, display: 'grid', gap: 6 },
+  agreementBox: { border: `1px solid ${withAlpha(colors.gold, 0.5)}`, borderRadius: 18, background: withAlpha(colors.gold, 0.08), color: colors.gold, padding: 14, display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', gap: 10, alignItems: 'start', lineHeight: 1.55 },
+  primaryButton: { minHeight: 58, border: 0, borderRadius: 16, background: colors.blue, color: colors.text, fontWeight: 950, padding: '0 14px' },
+  secondaryButton: { minHeight: 58, border: `1px solid ${colors.line}`, borderRadius: 16, background: colors.panel2, color: colors.text, fontWeight: 900, padding: '0 14px' },
+  readyButton: { minHeight: 58, border: `1px solid ${withAlpha(colors.green, 0.5)}`, borderRadius: 16, background: withAlpha(colors.green, 0.12), color: colors.green, fontWeight: 950, padding: '0 14px' },
+  panel: { border: `1px solid ${colors.line}`, borderRadius: 8, background: colors.bg2, color: colors.muted, padding: 14 },
+  alert: { border: `1px solid ${withAlpha(colors.red, 0.45)}`, borderRadius: 8, background: withAlpha(colors.red, 0.1), color: colors.red, padding: 14 },
+  notice: { border: `1px solid ${withAlpha(colors.green, 0.42)}`, borderRadius: 8, background: withAlpha(colors.green, 0.08), color: colors.green, padding: 14 },
+  empty: { color: colors.muted },
 }

@@ -51,6 +51,8 @@ const copy = {
     printTrip: 'طباعة الرحلة',
     member: 'العضوية الموثقة',
     inTrip: 'في الرحلة',
+    noActiveTrip: 'لا توجد رحلة نشطة حالياً',
+    noActiveTripCopy: 'ابحث عن إقامة واحجزها لتظهر تفاصيل رحلتك هنا.',
     invoice: 'الفاتورة',
     contact: 'الاتصال',
     sos: 'SOS',
@@ -110,6 +112,8 @@ const copy = {
     printTrip: 'Print trip',
     member: 'Verified membership',
     inTrip: 'In trip',
+    noActiveTrip: 'No active trip right now',
+    noActiveTripCopy: 'Search and book a stay to see your trip details here.',
     invoice: 'Invoice',
     contact: 'Contact',
     sos: 'SOS',
@@ -177,8 +181,11 @@ export function DashboardPage({ lang }: Props) {
 
   const activeBooking = overview?.bookings[0]
   const activeListing = activeBooking?.listing
-  const activeTitle = activeListing ? labelForListing(activeListing, lang) : isAr ? 'فيلا النخيل الملكية' : 'Royal Palm Villa'
-  const activeReference = activeBooking?.id ? `BK-${activeBooking.id.slice(0, 4).toUpperCase()}-${activeBooking.id.slice(4, 8).toUpperCase()}` : 'BK-2026-0042'
+  const activeTitle = activeListing ? labelForListing(activeListing, lang) : ''
+  const activeReference = activeBooking?.id ? `BK-${activeBooking.id.slice(0, 4).toUpperCase()}-${activeBooking.id.slice(4, 8).toUpperCase()}` : ''
+  const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
+  const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
+  const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
   const activeStep = Math.max(2, activeTripStep(overview))
   const pastTrips = overview?.bookings.slice(1, 3).map((booking) => normalizePastTrip(booking, lang)) || []
   const walletRows = normalizeWalletRows(overview, lang)
@@ -191,9 +198,9 @@ export function DashboardPage({ lang }: Props) {
       <section style={styles.accountTop}>
         <button style={styles.iconButton} onClick={() => void loadOverview()} aria-label={t.refresh}>♢</button>
         <div style={styles.profile}>
-          <span style={styles.avatar}>أ</span>
+          <span style={styles.avatar}>{avatarLetter}</span>
           <div>
-            <strong>{isAr ? 'أحمد محمد' : 'Ahmad Mohammad'}</strong>
+            <strong>{displayName}</strong>
             <span>SYBNB STAYS · {t.member}</span>
           </div>
         </div>
@@ -203,12 +210,21 @@ export function DashboardPage({ lang }: Props) {
 
       <section style={styles.desktopHero}>
         <div style={styles.tripCard}>
-          <div style={styles.tripMeta}>
-            <span style={styles.datePill}>{t.tripDates}</span>
-            <span style={styles.activePill}>{t.inTrip}</span>
-          </div>
-          <h1 style={styles.tripTitle}>{activeTitle}</h1>
-          <p style={styles.tripRef}>{activeReference}</p>
+          {activeBooking ? (
+            <>
+              <div style={styles.tripMeta}>
+                {activeTripDates && <span style={styles.datePill}>{activeTripDates}</span>}
+                <span style={styles.activePill}>{t.inTrip}</span>
+              </div>
+              <h1 style={styles.tripTitle}>{activeTitle}</h1>
+              <p style={styles.tripRef}>{activeReference}</p>
+            </>
+          ) : (
+            <>
+              <h1 style={styles.tripTitle}>{t.noActiveTrip}</h1>
+              <p style={styles.tripRef}>{t.noActiveTripCopy}</p>
+            </>
+          )}
           <div style={styles.tripActions}>
             <button style={styles.sosButton} onClick={() => (window.location.hash = activeBooking ? `/booking/dispute/${activeBooking.id}` : '/immocontact')}>
               {t.sos} ⚠
@@ -296,7 +312,7 @@ export function DashboardPage({ lang }: Props) {
 
       <section style={styles.previousTrips}>
         <h2>{t.previousTrips}</h2>
-        {(pastTrips.length ? pastTrips : fallbackTrips(lang)).map((trip) => (
+        {pastTrips.length ? pastTrips.map((trip) => (
           <article key={trip.id} style={styles.previousTrip}>
             <img style={styles.tripThumb} src={trip.image} alt="" />
             <div>
@@ -305,27 +321,10 @@ export function DashboardPage({ lang }: Props) {
             </div>
             <b>{t.completed}</b>
           </article>
-        ))}
+        )) : <p style={styles.mutedText}>{t.empty}</p>}
       </section>
     </main>
   )
-}
-
-function fallbackTrips(lang: Lang) {
-  return [
-    {
-      id: 'dubai-marina',
-      title: lang === 'ar' ? 'شقة مارينا دبي' : 'Dubai Marina Apartment',
-      dates: lang === 'ar' ? '12 - 18 يناير 2026' : 'Jan 12 - 18, 2026',
-      image: '/assets/divisions/daily-rental.webp',
-    },
-    {
-      id: 'mountain-cabin',
-      title: lang === 'ar' ? 'كوخ جبال الألب' : 'Alpine Mountain Cabin',
-      dates: lang === 'ar' ? '5 - 10 ديسمبر 2025' : 'Dec 5 - 10, 2025',
-      image: '/assets/filter-photos/properties/cabin.webp',
-    },
-  ]
 }
 
 function bookingImage(booking: PlatformOverview['bookings'][number]) {
@@ -337,9 +336,15 @@ function normalizePastTrip(booking: PlatformOverview['bookings'][number], lang: 
   return {
     id: booking.id,
     title: booking.listing ? labelForListing(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase(),
-    dates: booking.checkIn && booking.checkOut ? `${booking.checkIn} - ${booking.checkOut}` : lang === 'ar' ? 'رحلة محفوظة' : 'Saved trip',
+    dates: booking.checkIn && booking.checkOut ? tripDateRange(booking.checkIn, booking.checkOut, lang) : lang === 'ar' ? 'رحلة محفوظة' : 'Saved trip',
     image: bookingImage(booking),
   }
+}
+
+function tripDateRange(checkIn: string, checkOut: string, lang: Lang) {
+  const locale = lang === 'ar' ? 'ar-SY' : 'en-US'
+  const format = (value: string) => new Date(value).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })
+  return `${format(checkIn)} - ${format(checkOut)}`
 }
 
 function labelForListing(listing: NonNullable<PlatformOverview['bookings'][number]['listing']>, lang: Lang) {

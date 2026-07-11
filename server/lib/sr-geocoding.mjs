@@ -75,13 +75,20 @@ const CATEGORY_RATES = {
 // Live-tracking surcharge for riders who opt out of low-data mode, mirroring the previous flat-fare model.
 const LIVE_TRACKING_SURCHARGE_MINOR = 2500
 
+// SYBNB SR only operates in Syria. A client-supplied override (device GPS) landing wildly outside
+// the country is almost certainly bad data (GPS glitch or manipulation), not a real pickup/dropoff
+// — fall back to gazetteer text-matching instead of trusting it and computing a wild fare.
+const SYRIA_BOUNDS = { minLat: 32, maxLat: 37.5, minLng: 35, maxLng: 43 }
+
 function isValidCoords(value) {
   return (
     value &&
     Number.isFinite(value.lat) &&
     Number.isFinite(value.lng) &&
-    Math.abs(value.lat) <= 90 &&
-    Math.abs(value.lng) <= 180
+    value.lat >= SYRIA_BOUNDS.minLat &&
+    value.lat <= SYRIA_BOUNDS.maxLat &&
+    value.lng >= SYRIA_BOUNDS.minLng &&
+    value.lng <= SYRIA_BOUNDS.maxLng
   )
 }
 
