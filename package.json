@@ -8,9 +8,14 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "api:dev": "node server/index.mjs",
-    "preflight": "node scripts/preflight-v6.mjs",
-    "audit:touch": "node scripts/audit-touch-v6.mjs",
-    "smoke": "npm run smoke:api && npm run smoke:routes",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:api": "vitest run test/api",
+    "test:security": "vitest run test/security",
+    "test:smoke": "npm run smoke:api && npm run smoke:routes",
+    "test:e2e": "echo 'No Playwright suite: browser smoke coverage is performed via Claude Code preview tooling, not an automated e2e runner. See docs/security/SYBNB_V6_TEST_STRATEGY.md.' && exit 0",
+    "test:ci": "npm run test:unit && npm run test:api && npm run test:security && npm run test:smoke",
+    "smoke": "npm run test:smoke",
     "smoke:api": "node scripts/smoke-v6.mjs",
     "smoke:routes": "node scripts/smoke-routes-v6.mjs",
     "db:validate": "prisma validate",
@@ -31,6 +36,9 @@
   },
   "devDependencies": {
     "@prisma/client": "^6.19.3",
-    "prisma": "^6.19.3"
+    "@types/supertest": "^7.2.0",
+    "prisma": "^6.19.3",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.10"
   }
 }
