@@ -42,10 +42,15 @@ Full detail in `SYBNB_V6_SECURITY_AUDIT_2026_07_10.md` and `SYBNB_V6_THREAT_MODE
 
 ## Test readiness
 
-93 automated tests across 10 Vitest files (unit/API/security), plus 16 smoke checks, all passing
-against a real local Postgres database — see `SYBNB_V6_TEST_STRATEGY.md` for the coverage map and
-`SYBNB_V6_RELEASE_GATE.md` for the full gate-by-gate run. No Playwright/e2e runner; browser-level
-verification is manual, via `Claude_Preview` tooling, each time frontend code changes.
+**Updated (same-day follow-up pass):** 114 Vitest tests across 12 files (unit/API/security/guard),
+16 smoke checks, and a new repository-owned Playwright suite (15 checks × 2 browser projects), all
+running against a genuinely isolated `sybnb_v6_test` database — never the development database. An
+earlier version of this suite (93 tests) was found to run against the shared development database;
+that gap is now closed with a fail-closed application-level guard, not just a config change — see
+`docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md` for the full design and
+`docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md` for the proof (development database confirmed
+byte-identical, MD5-verified, across two full suite runs). See `SYBNB_V6_TEST_STRATEGY.md` for the
+coverage map and `SYBNB_V6_RELEASE_GATE.md` for the full gate-by-gate run.
 
 ## Infrastructure readiness
 
@@ -84,12 +89,19 @@ documented gaps.
 
 ## Recommendation
 
-**READY FOR REVIEW.**
+**READY FOR INDEPENDENT REVIEW.**
 
-All work for this order is complete: security repairs verified, 93 tests + 16 smoke checks
-passing, build/types/schema/audit all clean, `main` untouched, everything committed to
-`security/sybnb-v6-predeployment` (not merged), no destructive or unauthorized actions taken. This
-branch is ready for the owner to review the diff and the findings above. It is **not**
-recommended to jump directly to READY TO MERGE, READY FOR STAGING, or READY TO DEPLOY without an
-explicit decision on F-01/F-02 (deferred, launch-relevant) and the legal/payment items, which are
-product decisions this phase deliberately did not make unilaterally.
+*(Updated same-day: previously READY FOR REVIEW with an open HIGH database-isolation blocker; that
+blocker is now resolved, and this recommendation is upgraded accordingly — see
+`docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md` and `docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md`.)*
+
+All work for this order is complete: security repairs verified, 114 tests + 16 smoke checks + a
+new Playwright browser suite all passing against a genuinely isolated test database,
+build/types/schema/audit all clean, `main` untouched, everything committed to
+`security/sybnb-v6-predeployment` (not merged), no destructive or unauthorized actions taken
+against the development database or LECIPM. This branch is ready for the owner to review the diff
+and the findings above. It is **not** recommended to jump directly to READY TO MERGE or READY FOR
+STAGING without an explicit decision on F-01/F-02 (deferred, launch-relevant) and the legal/payment
+items, which are product decisions this phase deliberately did not make unilaterally — and without
+a human triage of the two newly-found, honestly-left-failing test cases (320px responsive overflow;
+WebKit's default keyboard-navigation behavior, which is expected and not a bug).

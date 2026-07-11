@@ -1,8 +1,18 @@
 # SYBNB V6 — Automated Test Strategy
 
-Date: 2026-07-10. Companion to `SYBNB_V6_SECURITY_AUDIT_2026_07_10.md` and
-`SYBNB_V6_THREAT_MODEL.md` — describes the test foundation added on the
+Date: 2026-07-10 (updated same-day: test-database isolation implemented). Companion to
+`SYBNB_V6_SECURITY_AUDIT_2026_07_10.md`, `SYBNB_V6_THREAT_MODEL.md`, and
+`docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md` — describes the test foundation added on the
 `security/sybnb-v6-predeployment` branch.
+
+**Update:** the database-isolation gap described lower in this document (in the "No Playwright"
+and "Reproducibility" sections below) has been resolved — the suite now runs against a dedicated
+`sybnb_v6_test` database, never the development database. See
+`docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md` for the full design and
+`docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md` for the proof (dev-database row counts and
+timestamps confirmed byte-identical before/after two full suite runs). The historical framing
+below is left intact rather than rewritten, since it accurately describes the state at the time it
+was written and the reasoning that led to the fix.
 
 ## Stack and why
 
@@ -66,9 +76,14 @@ HTTP requests, so parallel workers would race on the same rows.
 | Messaging | `test/api/messaging.test.mjs` |
 | Headers / CORS | `test/security/headers-and-cors.test.mjs` |
 | Smoke / routes | `scripts/smoke-v6.mjs`, `scripts/smoke-routes-v6.mjs` (pre-existing, restored; not Vitest — plain Node scripts run via `npm run test:smoke`) |
+| Test-database safety guard | `test/unit/test-db-guard.test.mjs`, `test/security/test-db-guard-integration.test.mjs` (`npm run test:guard`) |
+| Browser smoke (Chromium + WebKit) | `test/browser/smoke.spec.ts` (`npm run test:browser`) — landing, search, login/invalid-login, unauthorized host/admin routes, legal draft badge, verification-status label, keyboard nav/focus, responsive overflow at 320/390/768/1280px |
 
-93 tests across 10 Vitest files, plus 16 smoke checks (8 API + 8 route), all passing as of this
-phase — see `SYBNB_V6_RELEASE_GATE.md` for the full validation matrix.
+114 Vitest tests across 12 files (93 from the original test-foundation phase + 21 new
+test-database-guard tests), plus 16 smoke checks (8 API + 8 route) and 15 Playwright checks per
+browser project, all passing as of this phase (Playwright: 2 genuine findings left honestly
+failing rather than hidden — see `docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md`'s "Browser smoke
+suite" section) — see `SYBNB_V6_RELEASE_GATE.md` for the full validation matrix.
 
 ## Test-user cleanup and the audit-log constraint
 
@@ -101,7 +116,14 @@ mechanically reproducible by anyone, but currently point at whichever database `
   in this environment; payment-proof approval is tested via the manual admin-review path only.
 - **Multi-instance rate-limiter behavior** — the limiter is explicitly single-instance (see
   `SYBNB_V6_RATE_LIMIT_POLICY.md`); no test simulates a multi-process deployment.
-- **Real keyboard-driven `:focus-visible` behavior** — see the accessibility notes in
-  `SYBNB_V6_PREDEPLOYMENT_READINESS.md`; Chromium's focus-visible heuristic doesn't reliably
-  trigger from script-dispatched (non-trusted) events in headless automation, so this was
-  spot-checked rather than asserted in an automated test.
+- **Real keyboard-driven `:focus-visible` behavior — now resolved.** The original manual pass
+  couldn't confirm this via script-dispatched (non-trusted) `.focus()` calls, which don't reliably
+  trigger Chromium's focus-visible heuristic. `test/browser/smoke.spec.ts`'s Playwright suite uses
+  `page.keyboard.press('Tab')`, a real trusted input event, and confirms a visible outline appears
+  on Chromium. (On WebKit, Tab doesn't reach the button at all by default — a genuine, documented
+  WebKit/Safari platform behavior, not a focus-visible-styling gap; see
+  `docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md`.)
+- **A genuine, newly-discovered responsive bug**: the header overflows at a 320px viewport width
+  (`test/browser/smoke.spec.ts`'s responsive-overflow suite). Left failing rather than fixed — not
+  one of the four accessibility repairs this phase's order authorized (skip-navigation,
+  error-association, visible focus, contrast).

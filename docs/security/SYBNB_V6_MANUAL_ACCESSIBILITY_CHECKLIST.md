@@ -6,6 +6,13 @@ landing page and the guest auth wizard (`src/modules/account/GuestAccountPage.ts
 representative unauthenticated flow. Safari/Firefox: **NOT RUN** — no tooling available in this
 environment. This is a spot-check, not exhaustive coverage of every page.
 
+> **Update (same day, follow-up pass):** three of the findings below were repaired (skip
+> navigation, error association) or confirmed already-fine (visible focus, via a real Playwright
+> keyboard press rather than a script-dispatched one) — see
+> `docs/security/SYBNB_V6_RELEASE_GATE.md`'s "Accessibility repairs" section for exactly what
+> changed and why. The findings are left as originally written below for the historical record;
+> read the release-gate doc for current status.
+
 ## Keyboard order
 
 **PASS.** Tab order on the landing page and auth wizard reaches every interactive element

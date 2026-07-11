@@ -8,7 +8,22 @@ Date: 2026-07-10. Branch: `security/sybnb-v6-predeployment`. **Not merged to `ma
 - **`main` verified unchanged:** local `main` and `origin/main` both resolve to `f4a395c...` as of this review.
 - **Secure baseline tag verified unchanged:** `sybnb-v6-secure-baseline-2026-07-10` still resolves to `9de21dd...`, which dereferences to `f4a395c...` — identical to `main`.
 
-## ⚠ Read this first: open release blocker
+## ✅ Update: the release blocker below is now resolved
+
+The database-isolation gap described in this section (and classified HIGH below) has been closed
+in a follow-up commit on this same branch. A dedicated `sybnb_v6_test` database, owned by a
+dedicated `sybnb_v6_test_role` Postgres role, now backs every database-touching test/smoke/browser
+command, enforced by a fail-closed application-level guard
+(`server/lib/test-db-guard.mjs`, wired into `server/lib/prisma.mjs`'s `db()`) that refuses to
+construct a database connection unless the target is unmistakably the isolated test database.
+Full design, the reasoning for why Postgres-ACL-level blocking was attempted and found
+ineffective, and the repeatability proof (development database confirmed byte-identical across two
+full suite runs, MD5-verified row counts + unmoved timestamps) are in
+`docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md`. The original finding is left intact below,
+unedited, as the accurate historical record of what was found and why it mattered — only this note
+was added above it.
+
+## ⚠ Original finding (historical — see resolution above)
 
 **The 93 automated tests added on this branch run against the same database used for ordinary
 local development/QA (`.env`'s `DATABASE_URL`, redacted parse: an 8-character database name at
