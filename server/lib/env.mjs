@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { safePositiveInt } from './rate-limit.mjs'
 
 export function loadEnv(path = '.env') {
   const file = resolve(process.cwd(), path)
@@ -41,6 +42,19 @@ export function validateProductionConfig() {
   }
   if (process.env.DISABLE_RATE_LIMIT === '1') {
     problems.push('DISABLE_RATE_LIMIT must not be "1" in production.')
+  }
+
+  // A typo'd RATE_LIMIT_<NAME>_MAX/_WINDOW_MS (non-numeric, zero, negative, non-integer) would
+  // silently fall back to the caller's default at request time (see
+  // server/lib/rate-limit.mjs's safePositiveInt) rather than crash — safe at runtime, but a
+  // production deployment should still be told loudly at startup that one of its rate-limit
+  // overrides is malformed, rather than quietly running with a value nobody intended.
+  const sentinel = Symbol('invalid')
+  for (const [key, rawValue] of Object.entries(process.env)) {
+    if (!/^RATE_LIMIT_.+_(MAX|WINDOW_MS)$/.test(key)) continue
+    if (safePositiveInt(rawValue, sentinel) === sentinel) {
+      problems.push(`${key}="${rawValue}" is not a valid positive integer — fix or unset it.`)
+    }
   }
 
   if (problems.length) {

@@ -29,6 +29,22 @@ export function assertValidPhone(value, fieldName = 'phone') {
   return trimmed
 }
 
+// hashPassword() (server/lib/security.mjs) already enforces an 8-character minimum before
+// hashing — this adds the same check earlier (a clean 400 instead of falling through to
+// hashPassword's own error) plus a maximum length, which nothing previously enforced. The max
+// exists so an arbitrarily large request body can't force an equally arbitrarily large input
+// through scrypt; 256 characters is far beyond any real passphrase.
+export function assertValidPassword(value, { fieldName = 'password', minLength = 8, maxLength = 256, required = true } = {}) {
+  if (value == null || value === '') {
+    if (required) fail('VALIDATION_PASSWORD_REQUIRED', `${fieldName} is required.`)
+    return undefined
+  }
+  const str = String(value)
+  if (str.length < minLength) fail('VALIDATION_PASSWORD_TOO_SHORT', `${fieldName} must be at least ${minLength} characters.`)
+  if (str.length > maxLength) fail('VALIDATION_PASSWORD_TOO_LONG', `${fieldName} must be ${maxLength} characters or fewer.`)
+  return str
+}
+
 export function assertEnum(value, allowed, fieldName) {
   if (!allowed.includes(value)) {
     fail('VALIDATION_INVALID_ENUM', `${fieldName} must be one of: ${allowed.join(', ')}.`)

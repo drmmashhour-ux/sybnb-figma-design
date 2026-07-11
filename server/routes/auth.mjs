@@ -1,7 +1,9 @@
 import { db } from '../lib/prisma.mjs'
 import { createSessionToken, hashPassword, hashPhone, verifyPassword } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { assertNoUnknownFields, assertValidEmail, assertValidPhone } from '../lib/validate.mjs'
+import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPassword, assertValidPhone } from '../lib/validate.mjs'
+
+const NAME_FIELD_MAX_LENGTH = 120
 
 const PUBLIC_REGISTER_ROLES = new Set(['GUEST', 'HOST', 'SELLER', 'DRIVER'])
 
@@ -36,9 +38,13 @@ export async function handleAuth(req, res, url) {
 
     const validEmail = body.email ? assertValidEmail(body.email) : undefined
     const validPhone = body.phone ? assertValidPhone(body.phone) : undefined
+    const validPassword = assertValidPassword(body.password)
+    const displayName = assertBoundedString(body.displayName, { fieldName: 'displayName', maxLength: NAME_FIELD_MAX_LENGTH })
+    const firstName = assertBoundedString(body.firstName, { fieldName: 'firstName', maxLength: NAME_FIELD_MAX_LENGTH })
+    const lastName = assertBoundedString(body.lastName, { fieldName: 'lastName', maxLength: NAME_FIELD_MAX_LENGTH })
 
     const phoneHash = validPhone ? hashPhone(validPhone) : undefined
-    const passwordHash = hashPassword(body.password)
+    const passwordHash = hashPassword(validPassword)
 
     try {
       const user = await db().user.create({
@@ -46,7 +52,7 @@ export async function handleAuth(req, res, url) {
           email: validEmail,
           phoneHash,
           passwordHash,
-          displayName: body.displayName || validEmail || 'SYBNB User',
+          displayName: displayName || [firstName, lastName].filter(Boolean).join(' ') || validEmail || 'SYBNB User',
           roles: {
             create: { role },
           },
@@ -78,10 +84,28 @@ export async function handleAuth(req, res, url) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
     assertNoUnknownFields(body, ['email', 'phone', 'password'], 'login body')
-    const where = body.email
-      ? { email: body.email }
-      : body.phone
-        ? { phoneHash: hashPhone(body.phone) }
+
+    if (body.email && body.phone) {
+      const error = new Error('Provide either email or phone, not both.')
+      error.statusCode = 400
+      error.code = 'LOGIN_IDENTIFIER_AMBIGUOUS'
+      error.expose = true
+      throw error
+    }
+
+    // Normalized identically to registration (assertValidEmail trims + lowercases) — previously
+    // this compared the raw, un-normalized request value against the always-normalized stored
+    // value, so a legitimate user logging in with a different letter case than they registered
+    // with (e.g. "User@Example.com" vs the stored "user@example.com") would be rejected as
+    // "invalid credentials" even with the correct password.
+    const validEmail = body.email ? assertValidEmail(body.email) : undefined
+    const validPhone = body.phone ? assertValidPhone(body.phone) : undefined
+    assertValidPassword(body.password)
+
+    const where = validEmail
+      ? { email: validEmail }
+      : validPhone
+        ? { phoneHash: hashPhone(validPhone) }
         : undefined
 
     if (!where) {

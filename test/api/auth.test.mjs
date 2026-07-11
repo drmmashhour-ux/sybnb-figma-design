@@ -66,6 +66,65 @@ describe('POST /api/auth/register', () => {
     expect(res.body.error.code).toBe('VALIDATION_UNKNOWN_FIELDS')
   })
 
+  it('rejects a password shorter than the minimum', async () => {
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email: uniqueTestEmail('register-short-password'),
+      password: 'short1',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_PASSWORD_TOO_SHORT')
+  })
+
+  it('rejects a password longer than the maximum', async () => {
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email: uniqueTestEmail('register-long-password'),
+      password: 'x'.repeat(257),
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_PASSWORD_TOO_LONG')
+  })
+
+  it('rejects a missing password', async () => {
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email: uniqueTestEmail('register-no-password'),
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_PASSWORD_REQUIRED')
+  })
+
+  it('rejects a displayName over the length bound', async () => {
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email: uniqueTestEmail('register-long-name'),
+      password: 'correct-horse-battery',
+      displayName: 'x'.repeat(121),
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_TOO_LONG')
+  })
+
+  it('falls back to a combined firstName + lastName as displayName when no explicit displayName is given', async () => {
+    const email = uniqueTestEmail('register-first-last')
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email,
+      password: 'correct-horse-battery',
+      firstName: 'Layla',
+      lastName: 'Haddad',
+    })
+
+    expect(res.status).toBe(201)
+    expect(res.body.user.displayName).toBe('Layla Haddad')
+    trackTestUser(res.body.user.id)
+  })
+
   it('rejects a duplicate email with 409', async () => {
     const email = uniqueTestEmail('register-dup')
     const first = await request(app).post('/api/auth/register').send({
@@ -161,5 +220,49 @@ describe('POST /api/auth/login', () => {
     const res = await request(app).get('/api/auth/login')
     expect(res.status).toBe(405)
     expect(res.headers.allow).toContain('POST')
+  })
+
+  it('logs in successfully with a different letter-case email than was registered (regression: login now normalizes like registration)', async () => {
+    const mixedCaseEmail = registeredEmail
+      .split('')
+      .map((char, i) => (i % 2 === 0 ? char.toUpperCase() : char))
+      .join('')
+    expect(mixedCaseEmail).not.toBe(registeredEmail) // sanity: the transform actually changed something
+    expect(mixedCaseEmail.toLowerCase()).toBe(registeredEmail) // ...but is still the same address
+
+    const res = await request(app).post('/api/auth/login').send({
+      email: mixedCaseEmail,
+      password: 'correct-horse-battery',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+  })
+
+  it('rejects a login request supplying both email and phone as ambiguous', async () => {
+    const res = await request(app).post('/api/auth/login').send({
+      email: registeredEmail,
+      phone: '+963900000000',
+      password: 'correct-horse-battery',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('LOGIN_IDENTIFIER_AMBIGUOUS')
+  })
+
+  it('rejects a missing password at login', async () => {
+    const res = await request(app).post('/api/auth/login').send({ email: registeredEmail })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_PASSWORD_REQUIRED')
+  })
+
+  it('rejects a malformed email at login before ever touching the database (same error for any account)', async () => {
+    const res = await request(app).post('/api/auth/login').send({
+      email: 'not-an-email',
+      password: 'irrelevant-password',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_INVALID_EMAIL')
   })
 })
