@@ -4,10 +4,10 @@ import type { VisualFilterArt, VisualFilterGroup } from './filterTypes'
 const VISUAL_FILTER_CONFIG_KEY = 'sybnb_visual_filter_groups_v1'
 export const VISUAL_FILTER_CONFIG_EVENT = 'sybnb_visual_filter_groups_changed'
 
+// Sort options ("Newest" / "Lowest price" / "Highest price") intentionally have no photoSrc here:
+// a stock property photo can't represent an abstract sort order, so these fall back to the
+// drawn SortPicture icon (lines + direction arrow) instead of a misleading real photo.
 const visualFilterPhotoSrc: Partial<Record<VisualFilterArt, string>> = {
-  'sort-newest': '/assets/filter-photos/sort/newest.webp',
-  'sort-low': '/assets/filter-photos/sort/lowest-price.webp',
-  'sort-high': '/assets/filter-photos/sort/highest-price.webp',
   'price-any': '/assets/filter-photos/price/any-price.webp',
   'price-low': '/assets/filter-photos/price/economy.webp',
   'price-mid': '/assets/filter-photos/price/medium.webp',
@@ -449,21 +449,6 @@ export function visualFilterGroupsForDivision(division: SearchDivision): VisualF
 
 function carVisualFilterGroups() {
   return visualFilterGroupsById(['sort', 'priceBand', 'carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition', 'trust']).map((group) => {
-    if (group.id === 'sort') {
-      return {
-        ...group,
-        options: group.options.map((option) => ({
-          ...option,
-          photoSrc:
-            option.id === 'priceLow'
-              ? visualFilterPhotoSrc['car-economy']
-              : option.id === 'priceHigh'
-                ? visualFilterPhotoSrc['car-luxury']
-                : visualFilterPhotoSrc['car-sedan'],
-        })),
-      }
-    }
-
     if (group.id === 'priceBand') {
       return {
         ...group,
@@ -487,21 +472,6 @@ function carVisualFilterGroups() {
 
 function newConstructionVisualFilterGroups() {
   return visualFilterGroupsById(['sort', 'priceBand', 'propertyType', 'amenities', 'views', 'access', 'trust', 'payments']).map((group) => {
-    if (group.id === 'sort') {
-      return {
-        ...group,
-        options: group.options.map((option) => ({
-          ...option,
-          photoSrc:
-            option.id === 'priceLow'
-              ? visualFilterPhotoSrc['property-apartment']
-              : option.id === 'priceHigh'
-                ? visualFilterPhotoSrc['property-villa']
-                : visualFilterPhotoSrc['property-project'],
-        })),
-      }
-    }
-
     if (group.id === 'priceBand') {
       return {
         ...group,
@@ -544,21 +514,6 @@ function newConstructionVisualFilterGroups() {
 
 function marketplaceVisualFilterGroups() {
   return visualFilterGroupsById(['sort', 'priceBand', 'marketCategory', 'condition', 'payments']).map((group) => {
-    if (group.id === 'sort') {
-      return {
-        ...group,
-        options: group.options.map((option) => ({
-          ...option,
-          photoSrc:
-            option.id === 'priceLow'
-              ? visualFilterPhotoSrc['market-services']
-              : option.id === 'priceHigh'
-                ? visualFilterPhotoSrc['market-electronics']
-                : visualFilterPhotoSrc['market-furniture'],
-        })),
-      }
-    }
-
     if (group.id === 'priceBand') {
       return {
         ...group,

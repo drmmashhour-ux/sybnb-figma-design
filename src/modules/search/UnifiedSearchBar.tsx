@@ -111,6 +111,8 @@ const T = {
     keyword: 'كلمة البحث',
     keywordPlaceholder: 'اكتب اسم، موديل، حي، أو خدمة...',
     filters: 'خيارات العملاء',
+    showFilters: 'عرض الفلاتر',
+    hideFilters: 'إخفاء الفلاتر',
     dailyCalendar: 'تقويم الإيجار اليومي',
     dailyCalendarHint: 'اختر تاريخ الدخول والخروج قبل عرض النتائج اليومية.',
     minPrice: 'أقل سعر',
@@ -178,6 +180,8 @@ const T = {
     keyword: 'Keyword',
     keywordPlaceholder: 'Search name, model, area, or service...',
     filters: 'Filters',
+    showFilters: 'Show filters',
+    hideFilters: 'Hide filters',
     dailyCalendar: 'Daily rent calendar',
     dailyCalendarHint: 'Choose check-in and check-out before viewing daily stay results.',
     minPrice: 'Min price',
@@ -276,6 +280,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
   const t = T[lang]
   const isAr = lang === 'ar'
   const [openCalendar, setOpenCalendar] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
   const [value, setValue] = useState<UnifiedSearchValue>(() => ({
     governorate: 'damascus',
     city: 'damascus-city',
@@ -512,11 +517,17 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
         ) : null}
 
         <section style={styles.filtersPanel}>
-          <div style={styles.filtersHead}>
+          <button type="button" style={styles.filtersHead} onClick={() => setShowFilters((current) => !current)} aria-expanded={showFilters}>
             <strong>{t.filters}</strong>
-            <span>{selectedFilterLabels(filterGroups, filterSelection, lang).length}</span>
-          </div>
-          <VisualFilterPanel groups={filterGroups} lang={lang} selection={filterSelection} onChange={updateFilters} compact />
+            <span style={styles.filtersHeadRight}>
+              <span style={styles.filtersCount}>{selectedFilterLabels(filterGroups, filterSelection, lang).length}</span>
+              <span aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
+              {showFilters ? t.hideFilters : t.showFilters}
+            </span>
+          </button>
+          {showFilters ? (
+            <VisualFilterPanel groups={filterGroups} lang={lang} selection={filterSelection} onChange={updateFilters} compact />
+          ) : null}
         </section>
 
         {isStay ? (
@@ -730,7 +741,9 @@ const styles: Record<string, CSSProperties> = {
   calendarEngineHead: { alignItems: 'center', display: 'flex', gap: 12, justifyContent: 'space-between' },
   openCalendarButton: { minHeight: 52, border: '1px solid #4f6cff', borderRadius: 14, background: '#171b29', color: '#fff', fontWeight: 950 },
   filtersPanel: { border: '1px solid #30384d', borderRadius: 16, background: '#0c1220', display: 'grid', gap: 12, padding: 12 },
-  filtersHead: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#d5a915', fontSize: 13 },
+  filtersHead: { alignItems: 'center', background: 'transparent', border: 0, color: '#d5a915', display: 'flex', fontSize: 13, fontWeight: 950, justifyContent: 'space-between', gap: 12, minHeight: 44, padding: 0, textAlign: 'start', width: '100%' },
+  filtersHeadRight: { alignItems: 'center', display: 'flex', gap: 8 },
+  filtersCount: { alignItems: 'center', background: 'rgba(213,169,21,.16)', borderRadius: 999, color: '#d5a915', display: 'inline-flex', fontSize: 12, fontWeight: 950, height: 22, justifyContent: 'center', minWidth: 22, padding: '0 6px' },
   filterGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 },
   counterPhotoGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))' },
   counterPhotoCard: { alignItems: 'center', border: '1px solid #30384d', borderRadius: 16, background: '#111827', display: 'grid', gap: 12, gridTemplateColumns: '76px minmax(0, 1fr)', minHeight: 142, padding: 12 },
