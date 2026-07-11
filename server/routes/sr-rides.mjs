@@ -60,7 +60,7 @@ export async function handleSrRides(req, res, url, context) {
         SET
           pickup_geo = ${quote.pickupCoords ? `SRID=4326;POINT(${quote.pickupCoords.lng} ${quote.pickupCoords.lat})` : null}::geometry,
           dropoff_geo = ${quote.dropoffCoords ? `SRID=4326;POINT(${quote.dropoffCoords.lng} ${quote.dropoffCoords.lat})` : null}::geometry
-        WHERE id = ${ride.id}::uuid
+        WHERE id::text = ${ride.id}
       `
     }
 

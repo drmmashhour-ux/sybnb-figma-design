@@ -10,6 +10,10 @@
 // successfully, and that every backend route those pages depend on responds with the correct
 // status code (particularly the auth-denial paths, which are the highest-value thing to catch a
 // regression on automatically).
+//
+// Loads .env.test before server/index.mjs's own loadEnv('.env') runs — see
+// scripts/require-test-env.mjs — so this runs against the isolated test database.
+import './require-test-env.mjs'
 import { server } from '../server/index.mjs'
 
 let failures = 0

@@ -2,6 +2,11 @@
 // already running on 3051) and hits a representative set of endpoints, checking status codes only
 // (deep behavioral coverage lives in test/api and test/security — this script is the fast,
 // no-database-fixture-needed "is the API basically alive and routed correctly" check).
+//
+// Must load .env.test before server/index.mjs's own loadEnv('.env') gets a chance to run, so
+// this smoke check runs against the isolated test database like every other automated check —
+// never the development database. See scripts/require-test-env.mjs.
+import './require-test-env.mjs'
 import { server } from '../server/index.mjs'
 
 let failures = 0

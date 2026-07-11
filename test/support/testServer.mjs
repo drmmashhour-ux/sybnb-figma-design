@@ -31,14 +31,20 @@ export function uniqueTestPhone() {
 
 // Tracks every user id this test run created, for cleanup. Domain rows (bookings, payment
 // proofs, ride requests, listings) referencing these users are deleted in cleanupTestUsers().
+//
 // A test user that ever acted as an admin/support/driver (approving a review, claiming a ride,
-// etc.) leaves an admin_audit_logs row behind, and is deliberately NOT deleted here or by any
-// other tooling: the security-hardening order this test suite was built under explicitly
-// prohibits audit-history deletion, and admin_audit_logs.actorUserId has no cascade — the only
-// way to delete such a user is to delete their audit rows first, which is exactly what's
-// prohibited. These rows are permanent, harmless test artifacts, clearly identifiable by their
-// @sybnb.test email domain; see docs/security/SYBNB_V6_TEST_STRATEGY.md for the accepted
-// trade-off (no automated or human-run cleanup path is provided for them by design).
+// etc.) leaves an admin_audit_logs row behind, and this fine-grained cleanup deliberately leaves
+// that user in place rather than deleting their audit rows first (admin_audit_logs.actorUserId
+// has no cascade). Historically (when this suite ran against the shared development database)
+// this was load-bearing: the security order this suite was built under prohibits deleting real
+// audit history, and there was no way to tell "real" from "test" audit rows except by leaving
+// every referenced user alone. Now that tests run against the isolated `sybnb_v6_test` database
+// (see docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md), that constraint no longer applies here —
+// every row in this database is synthetic and disposable — but the fine-grained cleanup is left
+// as-is anyway since it's harmless and keeps each test file's own footprint small between runs.
+// For a guaranteed-clean slate (e.g. proving repeatability across two full suite runs), use
+// test/support/resetTestDatabase.mjs's full TRUNCATE-based reset instead, which is what
+// test/support/setup.env.mjs calls once at the start of every db-backed Vitest run.
 const createdUserIds = new Set()
 
 export function trackTestUser(id) {

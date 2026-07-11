@@ -8,19 +8,22 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "api:dev": "node server/index.mjs",
-    "test": "vitest run",
-    "test:unit": "vitest run test/unit",
-    "test:api": "vitest run test/api",
-    "test:security": "vitest run test/security",
+    "test": "npm run test:unit && npm run test:api && npm run test:security",
+    "test:guard": "vitest run --config vitest.unit.config.ts test/unit/test-db-guard.test.mjs test/security/test-db-guard-integration.test.mjs",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:api": "vitest run --config vitest.config.ts test/api",
+    "test:security": "vitest run --config vitest.config.ts test/security",
     "test:smoke": "npm run smoke:api && npm run smoke:routes",
-    "test:e2e": "echo 'No Playwright suite: browser smoke coverage is performed via Claude Code preview tooling, not an automated e2e runner. See docs/security/SYBNB_V6_TEST_STRATEGY.md.' && exit 0",
-    "test:ci": "npm run test:unit && npm run test:api && npm run test:security && npm run test:smoke",
+    "test:browser": "node scripts/require-test-env.mjs && playwright test",
+    "test:e2e": "npm run test:browser",
+    "test:ci": "npm run test:guard && npm run test:unit && npm run test:api && npm run test:security && npm run test:smoke && npm run test:browser",
     "smoke": "npm run test:smoke",
     "smoke:api": "node scripts/smoke-v6.mjs",
     "smoke:routes": "node scripts/smoke-routes-v6.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "db:test:push": "node scripts/db-test-push.mjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",
@@ -35,6 +38,7 @@
     "vite": "^6.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@prisma/client": "^6.19.3",
     "@types/supertest": "^7.2.0",
     "prisma": "^6.19.3",
