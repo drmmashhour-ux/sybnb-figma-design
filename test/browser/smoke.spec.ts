@@ -21,6 +21,34 @@ test.describe('landing page', () => {
   })
 })
 
+test.describe('content security policy — evidence of which response carries which CSP', () => {
+  test('the frontend HTML carries its own <meta> CSP, scoped for a static asset origin', async ({ page }) => {
+    await page.goto('/')
+    const cspMeta = page.locator('meta[http-equiv="Content-Security-Policy"]')
+    await expect(cspMeta).toHaveCount(1)
+    const content = await cspMeta.getAttribute('content')
+    expect(content).toContain("default-src 'self'")
+    expect(content).toContain("script-src 'self'")
+    expect(content).not.toContain('unsafe-eval')
+    expect(content).not.toContain('*')
+  })
+
+  test('the frontend does not rely on the API\'s CSP header — no CSP header is present on the HTML response itself', async ({ request, baseURL }) => {
+    // Confirms the two are genuinely separate: the frontend origin's own response has no CSP
+    // header of its own (its protection is the <meta> tag above), while the API origin (checked
+    // in the next test) sets a real header — this pins down which mechanism protects which layer,
+    // per the independent-review finding that these were previously conflated in documentation.
+    const res = await request.get(baseURL || 'http://127.0.0.1:5190')
+    expect(res.headers()['content-security-policy']).toBeUndefined()
+  })
+
+  test('the API origin sets its own strict header-based CSP, unrelated to the frontend\'s policy', async () => {
+    const apiBase = process.env.PLAYWRIGHT_API_BASE_URL || 'http://127.0.0.1:3061'
+    const res = await fetch(`${apiBase}/api/health`)
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; frame-ancestors 'none'")
+  })
+})
+
 test.describe('search', () => {
   test('the stays search page loads', async ({ page }) => {
     await page.goto('/#/stays')
@@ -138,7 +166,7 @@ test.describe('keyboard navigation and visible focus', () => {
 })
 
 test.describe('responsive overflow', () => {
-  for (const width of [320, 390, 768, 1280]) {
+  for (const width of [320, 360, 390, 412, 768, 1280, 1440]) {
     test(`no horizontal overflow on the landing page at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 })
       await page.goto('/')

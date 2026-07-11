@@ -1,8 +1,17 @@
 # SYBNB V6 — Rate Limit Policy
 
-Date: 2026-07-10. Describes the abuse-protection limiter added under security audit finding F-08
-(`docs/security/SYBNB_V6_THREAT_MODEL.md`). Implementation: `server/lib/rate-limit.mjs`, wired into
-`server/index.mjs`.
+Date: 2026-07-10 (updated 2026-07-11, independent-review follow-up). Describes the abuse-protection
+limiter added under security audit finding F-08 (`docs/security/SYBNB_V6_THREAT_MODEL.md`).
+Implementation: `server/lib/rate-limit.mjs`, wired into `server/index.mjs`.
+
+**Two bugs found and fixed in the 2026-07-11 pass** (full detail: F-20, F-21 in the threat model):
+`TRUST_PROXY` was read once at module-import time, before `.env` had even been loaded, so a
+`TRUST_PROXY` set only in `.env` (not a real shell environment variable) would silently never take
+effect — now read lazily on every call. `RATE_LIMIT_<NAME>_MAX`/`_WINDOW_MS` overrides were passed
+straight through `Number(...)` with no validation — a non-numeric, zero, or negative value could
+silently disable the limit (`NaN`) or block every request (`0`) from one environment-variable typo
+— now validated, falling back to the coded default on anything invalid, with
+`validateProductionConfig()` refusing to start in production if any configured override is bad.
 
 ## How it works
 

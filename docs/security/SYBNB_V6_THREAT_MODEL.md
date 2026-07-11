@@ -84,10 +84,26 @@ full evidence and code context; this document classifies each finding and tracks
 - **Severity:** Medium (subsumed by F-08's rate-limiting repair for the login endpoint specifically)
 - **Status:** Repaired this phase as part of F-08's rate limiter, scoped specifically to `/api/auth/login` and `/api/auth/register`.
 
-### F-06 — sessionStorage token exposure / no CSP as containment
+### F-06 — sessionStorage token exposure / no frontend CSP as containment
 - **Severity:** Medium (architecture-level, "Needs confirmation" on real-world exploitability given the near-zero first-party XSS surface found)
-- **Proposed repair:** CSP header (see F-13) as containment; **do not migrate off sessionStorage** this phase per the order's explicit instruction.
-- **Status:** Partially addressed via F-13's CSP header this phase; full architectural change deferred and documented as the approved next step, not auto-implemented.
+- **Correction (independent-review pass, 2026-07-11):** this finding previously said F-13's CSP
+  header provided some containment for this risk. **That was inaccurate and has been corrected.**
+  F-13's CSP is applied by `server/lib/security-headers.mjs` to **API responses only** — the API
+  never serves the frontend's HTML/JS (a fact the original F-13 evidence already stated, but the
+  conclusion here didn't follow from it). It does nothing to contain an XSS vector in the React
+  application itself, which is served entirely separately. See
+  `docs/security/SYBNB_V6_FRONTEND_CSP_PLAN.md` for the real frontend CSP added in response to this
+  correction, and exactly what it does and does not cover.
+- **Proposed repair:** a real frontend-origin CSP (now added, see the plan doc above) as partial
+  containment; **do not migrate off sessionStorage** this phase per the order's explicit
+  instruction.
+- **Status:** Partially addressed — a working `<meta>`-tag frontend CSP now exists and is verified
+  (see the plan doc's evidence section), but `frame-ancestors` cannot be delivered via `<meta>` at
+  all (browsers ignore it there) and the production `connect-src` origin isn't decided yet (no
+  production environment exists) — both classified EXTERNAL INFRASTRUCTURE REQUIRED /
+  OWNER DECISION REQUIRED, not silently treated as solved. The full sessionStorage-to-httpOnly-
+  cookie architectural change remains deferred and documented as the approved next step, not
+  auto-implemented.
 
 ### F-07 — Horizontal-escalation coverage confirmed by pattern, not exhaustive live testing
 - **Severity:** Needs confirmation
@@ -97,7 +113,17 @@ full evidence and code context; this document classifies each finding and tracks
 ### F-09 — No centralized input-validation schema
 - **Severity:** Low-Medium
 - **Proposed repair:** targeted validation helper introduced for the highest-risk write endpoints (auth, admin decisions) without a platform-wide rewrite.
-- **Status:** Partially addressed this phase (validation helper added, applied narrowly); full platform-wide adoption deferred as a larger, non-narrow effort.
+- **Status:** Partially addressed this phase (validation helper added, applied narrowly); full platform-wide adoption deferred as a larger, non-narrow effort. **Extended in the independent-review follow-up pass (2026-07-11):** `server/routes/auth.mjs` now also validates password presence/min/max length (`assertValidPassword`) and bounds `displayName`/`firstName`/`lastName` (`assertBoundedString`) on registration, and normalizes email/phone identically to registration before the lookup on login (fixing a real bug — see F-19). Still narrowly scoped to auth; still not a platform-wide schema.
+
+### F-19 — Login did not normalize the identifier the same way registration did (found during independent-review follow-up)
+- **Severity:** Low (correctness/availability bug, not a security bypass — if anything it was overly strict, rejecting legitimate logins, never granting unauthorized access)
+- **Affected path/symbol:** `server/routes/auth.mjs`'s login handler, `where: { email: body.email }`.
+- **Evidence:** registration normalizes email via `assertValidEmail` (trim + lowercase) before storing; login used the raw, un-normalized request value directly in the `findUnique` lookup. A user registering with mixed-case email casing and later logging in with different casing than they happened to type at registration would be told "invalid credentials" despite a correct password.
+- **Failure scenario:** legitimate user lockout, not an authorization bypass.
+- **Proposed repair:** normalize login's email/phone through the same `assertValidEmail`/`assertValidPhone` helpers registration already uses before constructing the lookup `where` clause.
+- **Tests required:** a regression test registering with one casing and logging in with a different casing, asserting success — added to `test/api/auth.test.mjs` and confirmed it would have failed against the pre-fix code (verified by re-reading the old lookup logic, not by reverting and re-running).
+- **Deployment-blocking:** No — was already fixed by the time this finding was written.
+- **Status:** Repaired this phase (independent-review follow-up, 2026-07-11).
 
 ### F-11 — No malware-scanning integration point
 - **Severity:** Informational
@@ -134,6 +160,26 @@ full evidence and code context; this document classifies each finding and tracks
 - **Tests required:** functional test with a well-formed nonexistent UUID (401) and a malformed-subject token (401, not 500) — both added to `test/api/authorization.test.mjs`.
 - **Deployment-blocking:** No.
 - **Status:** Repaired this phase (Phase 5, discovered via test-writing) — narrow, in-scope hardening of a file already touched for F-03; does not alter the authentication architecture.
+
+### F-20 — TRUST_PROXY read at module-import time instead of call time (found in independent review)
+- **Severity:** Low-Medium
+- **Affected path/symbol:** `server/lib/rate-limit.mjs`'s module-level `const TRUST_PROXY = process.env.TRUST_PROXY === '1'`.
+- **Evidence:** `server/index.mjs` calls `loadEnv()` (which populates `process.env` from `.env`) *after* its own `import` statements — including this module's — have already executed. A module-level constant reading `process.env.TRUST_PROXY` at that point would silently capture `false` even when `.env` sets `TRUST_PROXY=1`, since the import happens before the env file is read.
+- **Failure scenario:** a production deployment relying solely on `.env` (not a real shell-exported environment variable) to enable `TRUST_PROXY` would have it silently never take effect — the opposite of "unsafe," but a real functional/operational bug (the app-behind-a-real-proxy scenario the flag exists for would silently not work).
+- **Proposed repair:** read `process.env.TRUST_PROXY` lazily, inside `clientIp()`, on every call.
+- **Tests required:** unit tests confirming call-time (not import-time) reads; an HTTP-level test confirming `TRUST_PROXY` set immediately before a request is honored — added to `test/unit/rate-limit.test.mjs` and `test/security/rate-limit-http.test.mjs`.
+- **Deployment-blocking:** No (functional correctness, not a new exposure — the flag defaulting to "off" is the safe default either way).
+- **Status:** Repaired this phase (independent-review follow-up, 2026-07-11).
+
+### F-21 — No validation on RATE_LIMIT_* numeric environment overrides (found in independent review)
+- **Severity:** Low
+- **Affected path/symbol:** `server/lib/rate-limit.mjs`'s `limitConfig()`, using `Number(...)` directly on `process.env[...]` without checking the result.
+- **Evidence:** `Number('')` is `0`, `Number('not-a-number')` is `NaN`. A max of `0` would block every request on that rule; a max of `NaN` makes every `count >= max` comparison false, silently disabling the limit entirely — either from a single typo'd environment variable.
+- **Failure scenario:** operational misconfiguration causing either an availability incident (limit of 0) or a silently-disabled rate limit (NaN) — not an attacker-controlled input, since these are deployment environment variables, not request data.
+- **Proposed repair:** `safePositiveInt()` — reject non-numeric, non-integer, zero, or negative overrides, falling back to the rule's coded default instead. Also wired into `validateProductionConfig()` so a production startup fails loudly if any configured `RATE_LIMIT_*` variable is invalid, rather than silently running with an unintended value.
+- **Tests required:** unit tests for each invalid-value class (non-numeric, zero, negative, non-integer) confirming fallback to the default; an HTTP-level regression test; production-config-validation tests — added to `test/unit/rate-limit.test.mjs`, `test/security/rate-limit-http.test.mjs`, and a new `test/unit/env-production-config.test.mjs`.
+- **Deployment-blocking:** No (defensive hardening against misconfiguration, not a currently-exploited gap).
+- **Status:** Repaired this phase (independent-review follow-up, 2026-07-11).
 
 ### F-05, F-10 — Informational/needs-confirmation notes
 - **F-05** (no account deletion endpoint): Informational, documented, no action — product-scope decision.

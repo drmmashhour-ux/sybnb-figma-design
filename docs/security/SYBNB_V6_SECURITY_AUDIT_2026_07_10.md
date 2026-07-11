@@ -114,10 +114,21 @@ dependency were ever compromised. This is the concrete, actionable gap, not the 
 itself.
 
 **Recommendation (per the order's explicit instruction not to auto-migrate):** do not move tokens off
-`sessionStorage` in this phase. Add a CSP header restricting `script-src`/`connect-src` as
-defense-in-depth (Phase 6). A cookie+CSRF-token architecture is the long-term safer pattern but is a
-breaking authentication-model change explicitly out of scope for "narrow, evidence-supported repairs"
+`sessionStorage` in this phase. Add a CSP restricting `script-src`/`connect-src` as
+defense-in-depth (Phase 6) — **on the frontend origin that actually holds the token**, not the API.
+A cookie+CSRF-token architecture is the long-term safer pattern but is a breaking
+authentication-model change explicitly out of scope for "narrow, evidence-supported repairs"
 per this order's own stop condition (Phase 3).
+
+**Correction (independent-review pass, 2026-07-11):** the Phase 6 repair that followed this
+recommendation added a CSP header to the API (`server/lib/security-headers.mjs`) only — it does
+not protect the frontend/`sessionStorage` this section is actually about, since the API never
+serves the frontend's HTML/JS. This was flagged in independent review and corrected: a real
+frontend-origin CSP now exists (a `<meta>` tag in `index.html`), documented in full in
+`docs/security/SYBNB_V6_FRONTEND_CSP_PLAN.md`, including what it covers and what's still
+EXTERNAL INFRASTRUCTURE REQUIRED / OWNER DECISION REQUIRED (`frame-ancestors` cannot be delivered
+via `<meta>` at all; the production `connect-src` origin isn't decided since no production
+environment exists yet).
 
 ---
 

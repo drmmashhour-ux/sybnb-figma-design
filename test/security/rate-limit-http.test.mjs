@@ -55,4 +55,68 @@ describe('rate limiting wired to POST /api/auth/login', () => {
     expect(last.status).toBe(429)
     expect(last.headers['x-content-type-options']).toBe('nosniff')
   })
+
+  it('an invalid RATE_LIMIT_AUTH_LOGIN_MAX env value falls back to the rule\'s coded default instead of breaking the route', async () => {
+    // Regression check for the numeric-validation fix in server/lib/rate-limit.mjs: a garbage
+    // override must not silently produce "no limit" (NaN comparisons) or "block everything" (0).
+    process.env.RATE_LIMIT_AUTH_LOGIN_MAX = 'not-a-number'
+    const res = await request(app).post('/api/auth/login').send({ email: 'nobody3@sybnb.test', password: 'wrong-password' })
+    // The rule's coded default is 10 (server/index.mjs's RATE_LIMIT_RULES) — a single request
+    // must still be allowed through (401 for bad credentials), not immediately 429.
+    expect(res.status).toBe(401)
+  })
+})
+
+// Separate describe block: exercises TRUST_PROXY through the real HTTP pipeline (not just the
+// unit-level clientIp() checks in test/unit/rate-limit.test.mjs), confirming the call-time-read
+// fix actually takes effect when a request is rate-limited by IP.
+describe('TRUST_PROXY is honored end-to-end when rate-limiting by IP', () => {
+  let app
+
+  beforeAll(() => {
+    app = testApp()
+  })
+
+  beforeEach(() => {
+    __resetRateLimitsForTests()
+    process.env.RATE_LIMIT_AUTH_LOGIN_MAX = '1'
+    process.env.RATE_LIMIT_AUTH_LOGIN_WINDOW_MS = '60000'
+  })
+
+  afterEach(() => {
+    process.env.RATE_LIMIT_AUTH_LOGIN_MAX = '1000'
+    delete process.env.RATE_LIMIT_AUTH_LOGIN_WINDOW_MS
+    delete process.env.TRUST_PROXY
+    __resetRateLimitsForTests()
+  })
+
+  it('two different X-Forwarded-For values are NOT trusted (share one bucket) when TRUST_PROXY is unset', async () => {
+    delete process.env.TRUST_PROXY
+    const first = await request(app)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '1.1.1.1')
+      .send({ email: 'xff-a@sybnb.test', password: 'wrong-password' })
+    const second = await request(app)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '2.2.2.2') // different spoofed header, but ignored -> same real socket -> same bucket
+      .send({ email: 'xff-b@sybnb.test', password: 'wrong-password' })
+
+    expect(first.status).toBe(401)
+    expect(second.status).toBe(429) // both hit the same actual connection's bucket
+  })
+
+  it('two different X-Forwarded-For values ARE trusted (separate buckets) when TRUST_PROXY=1', async () => {
+    process.env.TRUST_PROXY = '1'
+    const first = await request(app)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '198.51.100.10')
+      .send({ email: 'xff-c@sybnb.test', password: 'wrong-password' })
+    const second = await request(app)
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', '198.51.100.11')
+      .send({ email: 'xff-d@sybnb.test', password: 'wrong-password' })
+
+    expect(first.status).toBe(401)
+    expect(second.status).toBe(401) // independent bucket, not rate-limited despite max=1
+  })
 })
