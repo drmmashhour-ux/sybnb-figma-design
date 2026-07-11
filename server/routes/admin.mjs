@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -546,13 +546,67 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
     return tx.user.findUnique({ where: { id: entityId }, select: ID_DOCUMENT_SAFE_SELECT })
   }
 
-  const existing = await tx.booking.findUnique({ where: { id: entityId } })
+  const existing = await tx.booking.findUnique({
+    where: { id: entityId },
+    include: { payments: true, listing: true },
+  })
   if (!existing || !['REQUESTED', 'DISPUTED'].includes(existing.status)) throw reviewStateError('BOOKING_NOT_REVIEWABLE')
   const updatedBooking = await tx.booking.updateMany({
     where: { id: entityId, status: existing.status },
     data: { status: decision === 'APPROVED' ? 'CONFIRMED' : 'CANCELLED' },
   })
   if (updatedBooking.count === 0) throw reviewStateError('BOOKING_NOT_REVIEWABLE')
+
+  // Rejecting a REQUESTED booking or ruling against the host in a DISPUTED one both cancel a
+  // booking that already has an approved payment (the HOLD/admin-share CREDIT were created back
+  // when the payment proof was approved, well before this decision). Without reversing them here,
+  // the guest's money and the admin's commission are stranded forever with no other code path that
+  // ever cleans them up — this mirrors the guest/host-initiated cancellation reversal in
+  // bookings.mjs and host.mjs, but with a full refund (no cancellation fee) since the guest didn't
+  // choose to cancel.
+  if (decision !== 'APPROVED') {
+    const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
+    if (approvedPayment) {
+      const split = bookingFinanceSplit(existing, approvedPayment.amountMinor)
+      const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
+
+      await tx.paymentProof.updateMany({
+        where: {
+          bookingId: existing.id,
+          status: { in: ['PENDING_PROOF', 'PENDING_ADMIN_REVIEW', 'APPROVED'] },
+        },
+        data: {
+          status: 'REFUNDED',
+          adminNote: 'Auto-refunded after admin rejected/ruled against this booking.',
+          reviewedById: actorUserId,
+          reviewedAt: new Date(),
+        },
+      })
+
+      await recordWalletEntry(tx, {
+        userId: existing.guestId,
+        type: 'REFUND',
+        amountMinor: approvedPayment.amountMinor,
+        currency: existing.currency,
+        referenceType: 'booking_refund',
+        referenceId: existing.id,
+        keyParts: ['booking-admin-reject-refund', existing.id, approvedPayment.id],
+        note: 'Guest refund after admin rejected/ruled against this booking.',
+      })
+
+      await recordWalletEntry(tx, {
+        userId: adminRecipientId,
+        type: 'DEBIT',
+        amountMinor: split.adminShareMinor,
+        currency: existing.currency,
+        referenceType: 'booking_admin_share_reversal',
+        referenceId: existing.id,
+        keyParts: ['booking-admin-reject-admin-share-reversal', existing.id, approvedPayment.id],
+        note: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
+      })
+    }
+  }
+
   return tx.booking.findUnique({ where: { id: entityId } })
 }
 

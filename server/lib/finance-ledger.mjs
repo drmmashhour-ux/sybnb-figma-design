@@ -196,6 +196,22 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
         keyParts: ['booking-admin-share', proof.bookingId, proof.id, actorUserId],
         note: 'SYBNB/admin share collected after verified guest payment.',
       })
+      // The cancellation-protection fee (if purchased) is excluded from staySplitBaseMinor above,
+      // so it never flows into adminShareMinor — record it as its own revenue entry here instead of
+      // letting it silently vanish from the ledger. It's a non-refundable protection premium, so
+      // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
+      if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
+        await recordWalletEntry(tx, {
+          userId: actorUserId,
+          type: 'CREDIT',
+          amountMinor: split.cancellationProtectionFeeMinor,
+          currency: proof.currency,
+          referenceType: 'booking_protection_fee',
+          referenceId: proof.bookingId,
+          keyParts: ['booking-protection-fee', proof.bookingId, proof.id, actorUserId],
+          note: 'SYBNB/admin collected the non-refundable cancellation-protection fee.',
+        })
+      }
     }
   } else if (proof.provider === 'seller_plan') {
     // No booking involved: this is a seller/dealer/developer plan payment. Approving it is

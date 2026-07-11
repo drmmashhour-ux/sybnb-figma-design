@@ -78,10 +78,14 @@ export async function handleBookings(req, res, url, context) {
           note: 'Guest refund after guest cancelled a protected booking.',
         })
 
+        // adminShareMinor never included the protection fee (it's excluded from the split base and
+        // recorded as its own 'booking_protection_fee' CREDIT at approval time — see
+        // approvePaymentProof), so it must be reversed in full here, not reduced by the fee again.
+        // The protection fee itself is a non-refundable premium and is never reversed.
         await recordWalletEntry(tx, {
           userId: adminRecipientId,
           type: 'DEBIT',
-          amountMinor: Math.max(0, split.adminShareMinor - (protectedByAddOn ? split.cancellationProtectionFeeMinor : 0)),
+          amountMinor: split.adminShareMinor,
           currency: existing.currency,
           referenceType: 'booking_admin_share_reversal',
           referenceId: existing.id,
