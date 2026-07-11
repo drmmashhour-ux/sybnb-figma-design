@@ -7,10 +7,20 @@ export async function getAuthContext(req) {
   const session = token ? verifySessionToken(token) : null
   if (!session?.sub) return null
 
-  const user = await db().user.findUnique({
-    where: { id: session.sub },
-    include: { roles: true },
-  })
+  // A validly-signed token can only carry a malformed subject if AUTH_SECRET was ever weaker or
+  // compromised, or the user id format changes in the future — treat that the same as "no such
+  // user" (fail closed to 401) instead of letting Prisma's UUID-parse error (P2023) surface as an
+  // unhandled 500.
+  let user
+  try {
+    user = await db().user.findUnique({
+      where: { id: session.sub },
+      include: { roles: true },
+    })
+  } catch (error) {
+    if (error?.code === 'P2023') return null
+    throw error
+  }
   if (!user || user.status !== 'ACTIVE') return null
 
   return {
