@@ -39,6 +39,9 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
 
   return (
     <div className="app-shell" dir={isAr ? 'rtl' : 'ltr'}>
+      <a className="skip-link" href="#main-content">
+        {isAr ? 'تخطي إلى المحتوى الرئيسي' : 'Skip to main content'}
+      </a>
       {(isAdvertisingTunnel || isAdminControlRoom) && (
         <div className="final-isolated-watermark" aria-hidden="true">
           FINAL · JULY 6 · CAPSULE EDITION · 3055
@@ -107,7 +110,9 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
           )}
         </div>
       )}
-      {children}
+      <div id="main-content" tabIndex={-1}>
+        {children}
+      </div>
       {!isAdvertisingTunnel && !isAdminControlRoom && <Footer lang={lang} />}
     </div>
   )

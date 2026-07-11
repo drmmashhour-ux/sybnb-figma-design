@@ -223,7 +223,7 @@ const styles: Record<string, CSSProperties> = {
     minHeight: 56,
     border: 0,
     borderRadius: 12,
-    background: '#5268ff',
+    background: '#4760ff',
     color: '#fff',
     fontWeight: 900,
     fontSize: 18,
@@ -247,7 +247,7 @@ const styles: Record<string, CSSProperties> = {
   },
   segmentActive: {
     minHeight: 48,
-    border: '1px solid #5268ff',
+    border: '1px solid #4760ff',
     borderRadius: 12,
     background: '#18224a',
     color: '#fff',

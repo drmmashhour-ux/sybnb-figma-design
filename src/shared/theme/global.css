@@ -81,6 +81,24 @@ a {
     #0a0f1d;
 }
 
+.skip-link {
+  position: absolute;
+  top: -999px;
+  left: 0;
+  z-index: 1000;
+  background: #12142a;
+  color: #f7f8ff;
+  padding: 12px 20px;
+  border-radius: 0 0 8px 0;
+  border: 1px solid rgba(82, 104, 255, 0.6);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
 .final-isolated-watermark {
   background: rgba(213, 169, 21, 0.14);
   border: 1px solid rgba(213, 169, 21, 0.42);

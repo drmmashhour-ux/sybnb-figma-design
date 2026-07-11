@@ -285,7 +285,15 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
           </p>
         )}
         <p style={styles.policy}>{policy}</p>
-        {message ? <strong style={message === t.error ? styles.error : styles.success}>{message}</strong> : null}
+        {message ? (
+          <strong
+            role={message === t.error ? 'alert' : 'status'}
+            aria-live={message === t.error ? 'assertive' : 'polite'}
+            style={message === t.error ? styles.error : styles.success}
+          >
+            {message}
+          </strong>
+        ) : null}
         <button style={styles.primaryButton} onClick={() => void complete()} disabled={saving}>
           {saving ? '...' : mode === 'signup' ? t.openAccount : t.signInAccount}
         </button>
@@ -332,7 +340,7 @@ const styles: Record<string, CSSProperties> = {
   input: { minHeight: 54, border: '1px solid #232638', borderRadius: 13, background: '#111118', color: '#fff', padding: '0 14px', fontWeight: 800 },
   codeBoxes: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 },
   codeBox: { minHeight: 52, border: '1px solid #232638', borderRadius: 10, background: '#111118', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 950 },
-  primaryButton: { minHeight: 58, border: 0, borderRadius: 12, background: '#5268ff', color: '#fff', fontWeight: 950, padding: '0 16px', fontSize: 16 },
+  primaryButton: { minHeight: 58, border: 0, borderRadius: 12, background: '#4760ff', color: '#fff', fontWeight: 950, padding: '0 16px', fontSize: 16 },
   secondaryButton: { minHeight: 54, border: '1px solid #30384d', borderRadius: 12, background: '#111118', color: '#fff', fontWeight: 900, padding: '0 14px' },
   policy: { border: '1px solid rgba(213,169,21,.35)', borderRadius: 8, background: 'rgba(213,169,21,.08)', color: '#d5a915', padding: 12, margin: 0, lineHeight: 1.6 },
   notice: { border: '1px solid rgba(82,104,255,.45)', borderRadius: 8, background: 'rgba(82,104,255,.1)', color: '#dce3ff', padding: 12, margin: 0, lineHeight: 1.6, fontWeight: 850 },
