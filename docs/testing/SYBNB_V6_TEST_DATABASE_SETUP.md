@@ -129,10 +129,17 @@ history (`prisma/migrations/001` through `007`) is not authoritative — checked
 `prisma migrate status` against the development database: **6 of the 7 migration folders have
 never actually been applied there.** The real development schema was built through a mix of
 hand-applied raw SQL and direct schema edits, predating and outside of what the migration folders
-describe. Using `migrate deploy` against a blank test database would therefore reproduce a
-*different, incomplete* schema, not the one the application actually runs against today.
-`db push` derives the schema directly from the current `prisma/schema.prisma`, which — after
-verification below — matches the tables the running application code actually reads and writes.
+describe. `db push` derives the schema directly from the current `prisma/schema.prisma`, which —
+after verification below — matches the tables the running application code actually reads and
+writes.
+
+**Independent-review follow-up:** `docs/testing/SYBNB_V6_MIGRATION_FIDELITY_ASSESSMENT.md` actually
+ran `migrate deploy` against a disposable blank database to prove this precisely rather than infer
+it. Result: the migration chain applies cleanly (it isn't broken), but is missing one entire table
+(`listing_availability`) relative to the current schema — while getting `id` columns' native
+`uuid` type and `ride_requests`'s spatial GiST indexes *more* physically correct than `db push`
+does. Neither method alone is a perfect match for the current schema; see that document for the
+full comparison and the proposed (not yet implemented) fix.
 
 **Tables created:** every model in `prisma/schema.prisma` (verified: 21 application tables,
 matching table-for-table between the freshly-bootstrapped test database and the development
