@@ -16,10 +16,26 @@ Date: 2026-07-10. Companion to `SYBNB_V6_SECURITY_AUDIT_2026_07_10.md` and
   database-level guarantees (WHERE-guarded `updateMany` for optimistic concurrency, unique
   constraints, real transactions) that a mock would either have to reimplement or silently skip —
   either way defeating the point of testing them.
-- **No Playwright.** Browser-level verification (rendering, click-through flows, responsive
-  layout, screenshots) is performed via the already-established `mcp__Claude_Preview__*` tooling
-  during interactive development sessions instead of a separate headless-browser test runner.
-  `npm run test:e2e` is a documented no-op pointing back here rather than a broken/empty suite.
+- **No Playwright (revised 2026-07-10, independent-review pass).** Browser-level verification to
+  date has been performed via the `mcp__Claude_Preview__*` tooling during interactive development
+  sessions. **Correction to the original framing of this section:** that tooling is a Claude Code
+  session capability, not a repository-owned, `npm`-invocable command — another developer running
+  only `git clone` + the commands in this repo cannot reproduce those checks. It does not count as
+  committed CI automation and this doc previously implied otherwise. `npm run test:e2e` remains a
+  documented no-op (not a broken/empty suite), but should be read as "browser regression testing
+  is currently a manual, tool-assisted step outside this repository," not "covered by an
+  equivalent automated suite."
+  Playwright was considered for the minimum smoke list (landing, search, login, unauthorized
+  host/admin access, responsive overflow, verification-status labels, legal draft badge) during
+  this review pass and **deliberately deferred**, not added, for one concrete reason: this same
+  review pass found that the existing 93 Vitest tests run against the shared local development
+  database (name intentionally redacted — see the database-isolation finding in
+  `docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md`), not an isolated test database. Adding a new
+  browser-test suite that would also exercise that same shared database, before that isolation
+  gap is resolved, would compound the exact problem just flagged as a release blocker rather than
+  help close it. Browser
+  automation is marked a **staging prerequisite**, to be added once a dedicated test database
+  exists for it to run against.
 
 ## Directory layout
 
@@ -66,6 +82,18 @@ was built under explicitly prohibits audit-history deletion, and there is no cas
 first — exactly what's prohibited. These are harmless, clearly-identifiable (`@sybnb.test` email
 domain) artifacts left behind by running the suite; there is deliberately no cleanup path for them,
 automated or human-run. See `test/support/testServer.mjs` for the in-code version of this note.
+
+## Reproducibility by another developer
+
+The Vitest suite (`npm run test:unit` / `test:api` / `test:security` / `test:ci`) and the smoke
+scripts (`npm run smoke:api` / `smoke:routes`) depend only on repository-committed `devDependencies`
+(`vitest`, `supertest`, `@types/supertest`) and a reachable Postgres instance via `DATABASE_URL` —
+nothing in the test invocation path calls out to Claude Code, an MCP server, or any tool outside
+`npm`/`node`. Another developer with Node installed, `npm ci`, and a Postgres instance reachable at
+their own `DATABASE_URL` can run the same commands and get the same pass/fail result. **This is
+independent of, and does not resolve,** the database-isolation finding above: the commands are
+mechanically reproducible by anyone, but currently point at whichever database `.env` names — see
+`docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md` for why that matters before running them again.
 
 ## What is not covered
 

@@ -1,8 +1,16 @@
 # SYBNB V6 — Release Validation Gate
 
 Date: 2026-07-10. Branch: `security/sybnb-v6-predeployment`. Every gate below was run against the
-actual working tree on this branch, against the real local Postgres database (`sybnb_v6`), not a
-mock or a stale cache.
+actual working tree on this branch, against the real local Postgres database (name redacted; see
+below), not a mock or a stale cache.
+
+> **Update (independent-review pass, same date):** the database referenced below was
+> subsequently confirmed to be the same database used for ordinary manual development/QA, not an
+> isolated test database — see `docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md`, classified
+> **HIGH — release blocker**. The gate results below are preserved as historical evidence from
+> when they were run; the test suite was **not re-run** during the independent-review pass, per
+> that finding. Treat every "PASS" below involving the test suite/database as **not currently
+> re-verified**, pending a dedicated `sybnb_v6_test` database.
 
 | Gate | Command | Result |
 |---|---|---|
