@@ -23,6 +23,67 @@ full suite runs, MD5-verified row counts + unmoved timestamps) are in
 unedited, as the accurate historical record of what was found and why it mattered — only this note
 was added above it.
 
+## ✅ Round 2: independent-review findings on PR #1, and what was corrected
+
+After the database-isolation resolution above, PR #1 was reviewed independently by the owner and
+returned **REQUEST CHANGES** with 8 findings. All 8 were addressed on this same branch (no new PR,
+no merge). Summary — full detail in each area's own doc:
+
+1. **Frontend CSP overclaim** — corrected. `SYBNB_V6_THREAT_MODEL.md` (F-06) and
+   `SYBNB_V6_SECURITY_AUDIT_2026_07_10.md` previously said the API's CSP contained frontend XSS
+   risk; it doesn't (the API never serves the frontend). Both corrected in place. A real frontend
+   CSP now exists (`<meta>` tag in `index.html`), documented with evidence in
+   `docs/security/SYBNB_V6_FRONTEND_CSP_PLAN.md` — `frame-ancestors` (impossible via `<meta>`) and
+   the production `connect-src` origin (no production environment exists yet) are both classified
+   EXTERNAL INFRASTRUCTURE REQUIRED / OWNER DECISION REQUIRED, not silently treated as solved.
+2. **Test-role database permissions** — proven, not just asserted. `scripts/audit-test-role-
+   privileges.mjs` checks role attributes, memberships, schema-create privilege, table ownership,
+   every explicit table/function privilege, and — going further than a catalog check — actually
+   attempts a real `INSERT` against the development `users` table inside a rolled-back transaction.
+   Result: genuinely blocked by Postgres with a real permission-denied error, confirmed alongside
+   the metadata checks all reporting zero privilege of any kind.
+3. **`TRUST_PROXY` read at import time** — real bug, fixed. `server/lib/rate-limit.mjs` captured
+   `process.env.TRUST_PROXY` in a module-level constant, before `server/index.mjs`'s own
+   `loadEnv()` call had populated `process.env` from `.env` — silently ignoring a `.env`-only
+   setting. Now read lazily on every call. Covered by 9 new unit tests and 2 new HTTP-level tests
+   (direct connections ignoring a spoofed header vs. trusted-proxy mode honoring it, through the
+   real request pipeline, not just the unit function).
+4. **No numeric validation on rate-limit overrides** — fixed. A non-numeric, zero, negative, or
+   non-integer `RATE_LIMIT_<NAME>_MAX`/`_WINDOW_MS` now falls back to the coded default instead of
+   silently producing "no limit" (`NaN` comparisons) or "block everything" (`0`).
+   `validateProductionConfig()` also now scans every configured `RATE_LIMIT_*` variable at startup
+   and refuses to start in production with an invalid one. 10 new unit tests, 1 new HTTP regression
+   test.
+5. **Incomplete auth input validation** — fixed. Registration now enforces password
+   presence/min/max length and bounds `displayName`/`firstName`/`lastName`. **A real bug was found
+   and fixed in the process**: login compared the raw, un-normalized request email against the
+   always-lowercased stored value — a legitimate user logging in with different letter case than
+   they registered with would have been rejected as "invalid credentials." Login now normalizes
+   identically to registration, rejects simultaneous email+phone as ambiguous, and requires a
+   password. 12 new tests, including a regression test that would have failed against the old code.
+6. **Genuine 320px header overflow** — fixed, not just documented. Root cause: `.nav-actions` had
+   no wrap capability at the breakpoint that actually applies at narrow widths (a more specific,
+   later `display: contents` rule that flattens it into `.top-nav`'s grid — an earlier attempted
+   fix targeted the wrong, overridden rule), and a scaled logo image visually bled 26px past its
+   own box. Both fixed narrowly (a new `max-width: 400px` breakpoint restoring wrap, and clipping
+   the logo's transform-bleed) without hiding any navigation, changing desktop, or touching Arabic
+   RTL/English LTR rendering — verified visually in both languages. Chromium: 18/18, zero
+   unexplained failures (was 14/15). WebKit: 16/18 (the 2 remaining failures are the
+   already-documented, genuine WebKit/Safari keyboard-navigation platform default, not this bug).
+7. **Unverified migration fidelity** — actually tested, not just inferred. A real, disposable
+   database had `prisma migrate deploy` run against it and its resulting schema was diff'd against
+   the `db push`-built `sybnb_v6_test`. Result documented in
+   `docs/testing/SYBNB_V6_MIGRATION_FIDELITY_ASSESSMENT.md`: migrations apply cleanly to a blank
+   database (they aren't broken) but are missing one entire table (`listing_availability`) relative
+   to the current schema, while getting `id` columns' native `uuid` type and `ride_requests`'s
+   spatial indexes more physically correct than `db push`. Neither method alone is a perfect match;
+   classified as a release blocker for ever using `migrate deploy` alone for a fresh
+   production/staging database until that gap is closed (not attempted here — broad migration-
+   history repair is out of scope for this pass).
+8. **Password reset / session revocation** — unchanged, correctly still deferred. Confirmed these
+   remain documented as launch-relevant, staging/production blockers (not merge blockers) in
+   `SYBNB_V6_AUTH_DECISIONS_REQUIRED.md`; nothing implemented, consistent with every prior pass.
+
 ## ⚠ Original finding (historical — see resolution above)
 
 **The 93 automated tests added on this branch run against the same database used for ordinary

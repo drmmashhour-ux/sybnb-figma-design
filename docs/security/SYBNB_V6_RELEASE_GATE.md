@@ -1,5 +1,51 @@
 # SYBNB V6 — Release Validation Gate
 
+Date: 2026-07-10, updated 2026-07-11 (independent-review round 2 — 8 findings addressed, see
+`docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md`). Branch: `security/sybnb-v6-predeployment`.
+
+## Gate matrix — round 2 (current, 2026-07-11)
+
+Full sequence run **twice**, back to back, against the isolated `sybnb_v6_test` database, with an
+identical result both times.
+
+| Gate | Command | Result |
+|---|---|---|
+| Test-database safety guard | `npm run test:guard` | PASS — 21/21 (both runs) |
+| Unit tests | `npm run test:unit` | PASS — 66/66 (both runs) |
+| API tests | `npm run test:api` | PASS — 69/69 (both runs) |
+| Security tests | `npm run test:security` | PASS — 19/19 (both runs) |
+| Smoke checks | `npm run test:smoke` | PASS — 15/15, 1 skipped (both runs) |
+| Browser — Chromium | `npm run test:browser -- --project=chromium` | PASS — **21/21, zero unexplained failures** (both runs) |
+| Browser — WebKit | `npm run test:browser -- --project=webkit` | PASS — 19/21 (both runs) — 2 documented WebKit/Safari platform-default failures (keyboard nav skips buttons by default), not app bugs |
+| TypeScript | `npx tsc --noEmit` | PASS — 0 errors |
+| Prisma schema validity | `npx prisma validate` | PASS |
+| Production build | `npx vite build` | PASS |
+| Dependency audit | `npm audit` | PASS — 0 vulnerabilities |
+| Secret scan | manual grep across every file changed this round | PASS — no real secrets, only doc prose and test-fixture literals |
+| `git diff --check` | — | PASS — 0 whitespace errors |
+| Final `git status` | — | PASS — only this round's own files |
+| Development-database integrity | row-count + MD5 snapshot before/after both full runs | PASS — MD5 `802f37de6bee4a0d5d6784668afc4402`, byte-identical to the very first snapshot taken at the start of the database-isolation work, unchanged through this entire round |
+
+**Classification key:** PASS / FAIL / BASELINE FAILURE / RESOURCE BLOCKED / NOT RUN — every gate
+this round resolved to PASS; none hit FAIL, BASELINE FAILURE, RESOURCE BLOCKED, or NOT RUN.
+
+### What changed since the previous gate matrix (below)
+
+- 21 new/updated automated tests (rate-limiter TRUST_PROXY + numeric validation, production-config
+  validation, auth input validation + the login-normalization bug fix, 3 new CSP-evidence
+  Playwright tests) — Chromium Playwright count rose from 15 to 21 checks total (18 functional + 3
+  CSP-evidence), all passing with **zero unexplained failures**, closing the "known, currently-
+  failing 320px overflow" gap entirely.
+- `server/lib/auth-context.mjs` unaffected this round; new changes are in `server/lib/rate-limit.mjs`,
+  `server/lib/env.mjs`, `server/lib/validate.mjs`, `server/routes/auth.mjs`, `index.html`,
+  `src/shared/theme/global.css`.
+- No schema, migration, or production/development-data changes — verified via the dev-database
+  MD5 check above and via `git diff --name-status main...HEAD` (no `prisma/` changes).
+
+---
+
+## Original gate matrix (2026-07-10, historical) — before either review round
+
 Date: 2026-07-10. Branch: `security/sybnb-v6-predeployment`. Every gate below was run against the
 actual working tree on this branch, against the real local Postgres database (name redacted; see
 below), not a mock or a stale cache.

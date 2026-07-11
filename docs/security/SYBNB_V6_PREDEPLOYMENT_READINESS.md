@@ -34,9 +34,13 @@ Full detail in `SYBNB_V6_SECURITY_AUDIT_2026_07_10.md` and `SYBNB_V6_THREAT_MODE
   current single-process deployment; a multi-instance production deployment needs a shared store
   first (see `SYBNB_V6_RATE_LIMIT_POLICY.md`).
 - **Sessions remain in `sessionStorage`** (not migrated to httpOnly cookies) — F-06 in the threat
-  model. Explicitly not changed this phase per the order's instruction; CSP now provides some
-  containment. This is the largest remaining architectural item and needs its own dedicated,
-  reviewed effort, not a rushed fix folded into this phase.
+  model. Explicitly not changed this phase per the order's instruction. A real frontend-origin CSP
+  now provides partial containment (corrected in a later pass — the original API-only CSP did not
+  protect the frontend at all; see `docs/security/SYBNB_V6_FRONTEND_CSP_PLAN.md`), but
+  `frame-ancestors` still isn't enforceable via the current `<meta>`-tag delivery mechanism
+  (EXTERNAL INFRASTRUCTURE REQUIRED once a production static host exists). This is the largest
+  remaining architectural item and needs its own dedicated, reviewed effort, not a rushed fix
+  folded into this phase.
 - No secrets found in this phase's diff or in the full git-history scan performed during the audit
   (see `SYBNB_V6_SECURITY_AUDIT_2026_07_10.md` §"Secrets/config").
 
@@ -89,19 +93,30 @@ documented gaps.
 
 ## Recommendation
 
-**READY FOR INDEPENDENT REVIEW.**
+**READY FOR INDEPENDENT REVIEW** (unchanged classification; substance strengthened).
 
-*(Updated same-day: previously READY FOR REVIEW with an open HIGH database-isolation blocker; that
-blocker is now resolved, and this recommendation is upgraded accordingly — see
-`docs/testing/SYBNB_V6_TEST_DATABASE_SETUP.md` and `docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md`.)*
+*(Updated 2026-07-11: PR #1 was independently reviewed and returned REQUEST CHANGES with 8
+findings — all 8 addressed on this same branch; see the "Round 2" section of
+`docs/review/SYBNB_V6_SECURITY_BRANCH_REVIEW.md` for the full list and what changed. Two real bugs
+were found and fixed in the process — a login email-normalization bug (F-19) and a
+`TRUST_PROXY`-read-at-import-time bug (F-20) — neither was a security bypass, both are now
+verified fixed with regression tests. The previously-known 320px responsive-overflow bug is now
+**fixed**, not just documented (Chromium: 21/21, zero unexplained failures). The frontend CSP
+overclaim in this and other docs has been corrected, and a real (if partial) frontend CSP now
+exists — see `docs/security/SYBNB_V6_FRONTEND_CSP_PLAN.md`.)*
 
-All work for this order is complete: security repairs verified, 114 tests + 16 smoke checks + a
-new Playwright browser suite all passing against a genuinely isolated test database,
-build/types/schema/audit all clean, `main` untouched, everything committed to
-`security/sybnb-v6-predeployment` (not merged), no destructive or unauthorized actions taken
-against the development database or LECIPM. This branch is ready for the owner to review the diff
-and the findings above. It is **not** recommended to jump directly to READY TO MERGE or READY FOR
-STAGING without an explicit decision on F-01/F-02 (deferred, launch-relevant) and the legal/payment
-items, which are product decisions this phase deliberately did not make unilaterally — and without
-a human triage of the two newly-found, honestly-left-failing test cases (320px responsive overflow;
-WebKit's default keyboard-navigation behavior, which is expected and not a bug).
+All work for both review rounds is complete: 175 automated tests (114 Vitest + a 21-check
+Playwright suite on Chromium, all passing with zero unexplained failures, plus 19/21 on WebKit —
+the 2 remaining are a documented, genuine WebKit/Safari platform default, not an app bug) + 16
+smoke checks, all against a genuinely isolated test database, proven twice consecutively with
+identical results and an unchanged development database (MD5-verified). Build/types/schema/audit
+all clean, `main` untouched, everything committed to `security/sybnb-v6-predeployment` (not
+merged), no destructive or unauthorized actions taken against the development database or LECIPM.
+
+It is **not** recommended to jump directly to READY TO MERGE or READY FOR STAGING without: an
+explicit decision on F-01/F-02 (password reset, session revocation — deferred, launch-relevant);
+the legal/payment items (product decisions this phase deliberately did not make unilaterally); and
+an owner decision on the migration-fidelity gap (`docs/testing/SYBNB_V6_MIGRATION_FIDELITY_ASSESSMENT.md`
+— `migrate deploy` alone cannot currently reproduce the full schema, a release blocker specifically
+for ever using it to bootstrap a fresh production/staging database, though not a blocker for
+continuing to use the isolated test database's current `db push` bootstrap).
