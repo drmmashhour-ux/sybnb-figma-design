@@ -20,3 +20,31 @@ export function loadEnv(path = '.env') {
     }
   }
 }
+
+// Security audit finding "production configuration validation" (Phase 6, minimum repair #8):
+// fails loudly at startup rather than silently running with dev-only-safe defaults in production.
+// Only called when NODE_ENV=production (see index.mjs) — local dev is unaffected.
+export function validateProductionConfig() {
+  const problems = []
+
+  if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16) {
+    problems.push('AUTH_SECRET must be set to a value at least 16 characters long.')
+  }
+  if (!process.env.PHONE_HASH_SECRET || process.env.PHONE_HASH_SECRET.length < 16) {
+    problems.push('PHONE_HASH_SECRET must be set to a value at least 16 characters long.')
+  }
+  if (!process.env.DATABASE_URL) {
+    problems.push('DATABASE_URL must be set.')
+  }
+  if (!process.env.CORS_ORIGIN) {
+    problems.push('CORS_ORIGIN must be set explicitly in production — the built-in dev fallback only allows localhost origins.')
+  }
+  if (process.env.DISABLE_RATE_LIMIT === '1') {
+    problems.push('DISABLE_RATE_LIMIT must not be "1" in production.')
+  }
+
+  if (problems.length) {
+    const message = `Refusing to start with NODE_ENV=production and unsafe configuration:\n${problems.map((p) => `  - ${p}`).join('\n')}`
+    throw new Error(message)
+  }
+}
