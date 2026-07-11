@@ -420,7 +420,7 @@ export type PlatformOverview = {
 }
 
 export type PlatformHostOverview = {
-  host: ApiUser
+  host: ApiUser & { idDocumentStatus?: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null }
   totals: {
     listings: number
     approvedListings: number
@@ -638,6 +638,12 @@ export function getStoredGuestSession(): PlatformAuthSession | null {
   } catch {
     return null
   }
+}
+
+export function clearGuestSession() {
+  sessionStorage.removeItem(GUEST_SESSION_KEY)
+  sessionStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
 }
 
 export function getStoredStaffSession(requiredRole?: 'ADMIN' | 'HOST' | 'SELLER' | 'DRIVER'): PlatformAuthSession | null {

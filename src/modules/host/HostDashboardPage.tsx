@@ -84,6 +84,8 @@ const copy = {
     verifiedCarSeller: 'بائع مركبات موثوق',
     verifiedBuilder: 'مطور عقاري موثوق',
     verifiedMarketplaceSeller: 'بائع موثوق',
+    pendingVerification: 'التوثيق قيد المراجعة',
+    notVerifiedYet: 'غير موثق بعد',
     healthDegree: 'درجة الصحة',
     excellentMonth: 'أداء ممتاز هذا الشهر',
     lessThanTwoHours: 'أقل من ساعتين',
@@ -93,6 +95,7 @@ const copy = {
     bookingsImpact: 'زيادة الحجوزات',
     slaMaintenance: 'الحفاظ على SLA',
     activeListings: 'الإعلانات النشطة',
+    createNewListing: 'إضافة إعلان جديد',
     activeCars: 'المركبات النشطة',
     activeProjects: 'المشاريع النشطة',
     activeProducts: 'المنتجات النشطة',
@@ -191,6 +194,8 @@ const copy = {
     verifiedCarSeller: 'Verified vehicle seller',
     verifiedBuilder: 'Verified developer',
     verifiedMarketplaceSeller: 'Verified seller',
+    pendingVerification: 'Verification in review',
+    notVerifiedYet: 'Not verified yet',
     healthDegree: 'Health score',
     excellentMonth: 'Excellent performance this month',
     lessThanTwoHours: 'Less than 2 hours',
@@ -200,6 +205,7 @@ const copy = {
     bookingsImpact: 'More bookings',
     slaMaintenance: 'SLA maintenance',
     activeListings: 'Active listings',
+    createNewListing: 'Create new listing',
     activeCars: 'Active cars',
     activeProjects: 'Active projects',
     activeProducts: 'Active products',
@@ -292,6 +298,12 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     100,
   )
   const healthScore = clamp(Math.round((trustScore + averageQualityScore + responseScore) / 3), 0, 100)
+  const isDocumentVerified = overview?.host.idDocumentStatus === 'APPROVED'
+  const verificationStatusText = isDocumentVerified
+    ? providerCopy.verifiedLabel
+    : overview?.host.idDocumentStatus === 'PENDING_REVIEW'
+      ? t.pendingVerification
+      : t.notVerifiedYet
   const dashboardCurrency = visibleListings[0]?.currency || overview?.requests[0]?.currency || 'SYP'
   const activeListingsLabel = isAr
     ? `${visibleListings.length} ${providerCopy.activeUnit}`
@@ -429,14 +441,14 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         </div>
         <div style={styles.hostIdentity}>
           <strong>{providerCopy.dashboardTitle}</strong>
-          <span>{providerCopy.verifiedLine(overview?.host.displayName)}</span>
+          <span>{providerCopy.verifiedLine(overview?.host.displayName, verificationStatusText)}</span>
         </div>
         <div style={styles.avatar}>{(overview?.host.displayName || 'A').slice(0, 1)}</div>
       </section>
 
       <section style={styles.providerHealth}>
         <article style={styles.healthHero}>
-          <span>{providerCopy.verifiedLabel} SYBNB</span>
+          <span>SYBNB · {verificationStatusText}</span>
           <strong>{trustScore}%</strong>
           <small>{t.lessThanTwoHours}</small>
         </article>
@@ -487,6 +499,11 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <h2>{t.activeListings}</h2>
           <small>{providerCopy.subtitle}</small>
           <span>{activeListingsLabel}</span>
+          {mode === 'host' && (
+            <button style={styles.primaryButton} onClick={() => (window.location.hash = '/sell/listing-wizard')}>
+              + {t.createNewListing}
+            </button>
+          )}
         </div>
         <div style={styles.hostTable}>
           <div style={styles.hostTableHead}>
@@ -760,7 +777,6 @@ function matchesProviderFocus(listing: Pick<PlatformListing, 'division'>, focus?
 }
 
 function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focus?: ProviderFocus) {
-  const nameFallback = isAr ? 'أحمد العتيبة' : 'Ahmad Al Otaiba'
   if (focus === 'cars') {
     return {
       dashboardTitle: t.carSellerDashboard,
@@ -769,7 +785,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       filtersHint: t.carsFiltersHint,
       inventoryTitle: t.activeCars,
       activeUnit: isAr ? 'مركبات حاليا' : 'active cars',
-      verifiedLine: (name?: string) => `${name || nameFallback} · ${t.verifiedCarSeller}`,
+      verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
   if (focus === 'newConstruction') {
@@ -780,7 +796,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       filtersHint: t.newConstructionFiltersHint,
       inventoryTitle: t.activeProjects,
       activeUnit: isAr ? 'مشاريع حاليا' : 'active projects',
-      verifiedLine: (name?: string) => `${name || nameFallback} · ${t.verifiedBuilder}`,
+      verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
   if (focus === 'marketplace') {
@@ -791,7 +807,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       filtersHint: t.marketplaceFiltersHint,
       inventoryTitle: t.activeProducts,
       activeUnit: isAr ? 'منتجات حاليا' : 'active products',
-      verifiedLine: (name?: string) => `${name || nameFallback} · ${t.verifiedMarketplaceSeller}`,
+      verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
   if (focus === 'stays') {
@@ -802,7 +818,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       filtersHint: t.staysFiltersHint,
       inventoryTitle: t.hostingInventory,
       activeUnit: isAr ? 'استضافات حاليا' : 'active stays',
-      verifiedLine: (name?: string) => `${name || nameFallback} · ${t.verifiedHost}`,
+      verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
   return {
@@ -812,7 +828,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
     filtersHint: t.filtersHint,
     inventoryTitle: t.inventory,
     activeUnit: isAr ? 'إعلانات حاليا' : 'active listings',
-    verifiedLine: (name?: string) => `${name || nameFallback} · ${t.verifiedHost}`,
+    verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
   }
 }
 
@@ -954,9 +970,9 @@ const styles: Record<string, CSSProperties> = {
   goldButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#d5a915', color: '#08090f', fontWeight: 950 },
   activeListings: { display: 'grid', gap: 16 },
   sectionHead: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'end' },
-  hostTable: { border: '1px solid #242735', borderRadius: 8, background: '#101016', overflow: 'hidden' },
-  hostTableHead: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13 },
-  hostTableRow: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px', gap: 12, alignItems: 'center', padding: '18px', borderBottom: '1px solid #242735' },
+  hostTable: { border: '1px solid #242735', borderRadius: 8, background: '#101016', overflowX: 'auto', overflowY: 'hidden' },
+  hostTableHead: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13, minWidth: 710 },
+  hostTableRow: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px', gap: 12, alignItems: 'center', padding: '18px', borderBottom: '1px solid #242735', minWidth: 710 },
   tableQuality: { height: 7, borderRadius: 999, background: '#23222b', overflow: 'hidden', display: 'block' },
   statusPill: { borderRadius: 8, padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 12 },
   statusGreen: { background: 'rgba(32,210,155,.14)', color: '#20d29b', border: '1px solid rgba(32,210,155,.42)' },

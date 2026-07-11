@@ -139,6 +139,7 @@ export async function handleHost(req, res, url, context) {
           email: context.user.email,
           displayName: context.user.displayName,
           roles: context.roles,
+          idDocumentStatus: context.user.idDocumentStatus,
         },
         totals,
         listings,
