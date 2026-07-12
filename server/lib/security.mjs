@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
 
 const PASSWORD_PREFIX = 'scrypt:v1'
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
@@ -62,6 +62,24 @@ export function verifyGiftClaimCode(gift, code) {
   const expected = Buffer.from(giftClaimCode(gift))
   const candidate = Buffer.from(String(code || ''))
   return candidate.length === expected.length && timingSafeEqual(candidate, expected)
+}
+
+// Real, random one-time email verification codes (guest-signup identity check). Unlike
+// giftClaimCode (deterministic on purpose, so it never needs storage), this is stored hashed and
+// single-use -- see server/lib/email-verification.mjs.
+export function generateEmailVerificationCode() {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0')
+}
+
+export function hashEmailVerificationCode(code) {
+  const secret = requiredSecret('AUTH_SECRET')
+  return createHmac('sha256', secret).update(String(code || '')).digest('hex')
+}
+
+export function verifyEmailVerificationCodeHash(code, storedHash) {
+  const expected = Buffer.from(String(storedHash || ''), 'hex')
+  const candidate = Buffer.from(hashEmailVerificationCode(code), 'hex')
+  return candidate.length === expected.length && candidate.length > 0 && timingSafeEqual(candidate, expected)
 }
 
 export function createSessionToken(user) {

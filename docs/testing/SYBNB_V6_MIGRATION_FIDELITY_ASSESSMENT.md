@@ -1,5 +1,20 @@
 # SYBNB V6 — Migration Fidelity Assessment
 
+**RESOLVED 2026-07-12.** `prisma/migrations/011_listing_availability/migration.sql` was added,
+creating the previously-missing `listing_availability` table and `availability_status` enum.
+Re-verified with the same method as below: a fresh disposable database
+(`sybnb_v6_migration_check_2`), `prisma migrate deploy` (all 11 migrations applied with zero
+errors), then diffed its table list against the development database. Every table `migrate
+deploy` produces now matches every model in `prisma/schema.prisma` exactly — the 9 remaining
+tables present only in the development database (`agreement_acceptances`, `ai_brain_signals`,
+`booking_drafts`, `disputes`, `guest_id_verifications`, `host_profiles`, `listing_declarations`,
+`room_types`, `verification_codes`) have no corresponding model in `schema.prisma` and are
+confirmed dead/legacy tables from earlier prototype iterations, not a fidelity gap. `migrate
+deploy` can now be used to bootstrap a fresh production/staging database. Disposable database
+dropped after verification; development database untouched throughout.
+
+---
+
 Date: 2026-07-11. Written in response to an independent-review finding: the isolated test database
 (`sybnb_v6_test`) is bootstrapped via `prisma db push`, not `prisma migrate deploy`, and no prior
 document had actually proven *why*, or precisely *what* the difference is. This assessment does

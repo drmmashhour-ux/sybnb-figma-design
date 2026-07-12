@@ -3615,17 +3615,13 @@ a {
 }
 
 .landing-hero-mark {
-  align-items: center;
-  border: 2px solid #d9b800;
-  border-radius: 50%;
-  color: #d9b800;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid #d9b800;
+  border-radius: 16px;
   display: none;
-  font-size: 58px;
-  font-weight: 200;
-  height: 112px;
-  justify-content: center;
-  line-height: 1;
-  width: 112px;
+  object-fit: cover;
+  width: 100%;
 }
 
 .landing-hero h1 {
@@ -4310,7 +4306,7 @@ a {
   }
 
   .landing-hero-mark {
-    display: inline-flex;
+    display: block;
   }
 
   .landing-hero h1 {
@@ -5218,6 +5214,17 @@ a {
   font-size: 12px;
   font-weight: 950;
   text-transform: uppercase;
+}
+
+.search-result-offer-badge {
+  background: rgba(213, 169, 21, 0.16);
+  border-radius: 999px;
+  color: #d5a915;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 3px 10px;
+  width: fit-content;
 }
 
 .search-result-body h2 {
@@ -6654,6 +6661,15 @@ a {
   gap: 20px;
   grid-template-columns: minmax(260px, 1fr) auto minmax(160px, 1fr);
   min-height: 64px;
+}
+
+.ai-brain-alert {
+  background: rgba(255, 96, 96, 0.1);
+  border: 1px solid rgba(255, 96, 96, 0.45);
+  border-radius: 8px;
+  color: #ffd1d1;
+  margin: 16px 24px;
+  padding: 14px;
 }
 
 .ai-brain-top > div {

@@ -2,10 +2,23 @@ import { db } from '../lib/prisma.mjs'
 import { createSessionToken, hashPassword, hashPhone, verifyPassword } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPassword, assertValidPhone } from '../lib/validate.mjs'
+import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerificationCode } from '../lib/email-verification.mjs'
 
 const NAME_FIELD_MAX_LENGTH = 120
 
 const PUBLIC_REGISTER_ROLES = new Set(['GUEST', 'HOST', 'SELLER', 'DRIVER'])
+
+// 'guest-signup' gates the Rentals/Buy/Stays open-account flow (unchanged). 'staff-login' gates
+// sign-in for roles that reach admin/host/driver dashboards -- previously "verified" only by a
+// client-side-only code box (src/engines/security/verificationCodeEngine.ts) that the server never
+// checked at all, so it provided zero real protection. 'password-reset' gates the new
+// forgot-password endpoint below.
+const ALLOWED_EMAIL_CODE_PURPOSES = new Set(['guest-signup', 'staff-login', 'password-reset'])
+const STAFF_ROLES_REQUIRING_OTP = new Set(['ADMIN', 'HOST', 'DRIVER'])
+
+function resolveEmailCodePurpose(value) {
+  return ALLOWED_EMAIL_CODE_PURPOSES.has(value) ? value : 'guest-signup'
+}
 
 // A hash of a value nobody will ever type as a real password — used only to give the "no such
 // account" path the same scrypt cost as the "wrong password" path (security audit finding F-03).
@@ -15,6 +28,65 @@ const PUBLIC_REGISTER_ROLES = new Set(['GUEST', 'HOST', 'SELLER', 'DRIVER'])
 const DUMMY_PASSWORD_HASH = hashPassword('not-a-real-password-timing-decoy')
 
 export async function handleAuth(req, res, url) {
+  // Real email OTP for guest self-registration (Rentals/Buy/Stays "open account" gate). Chosen
+  // over SMS: no per-message carrier cost, no SMS-gateway account needed. Pre-signup, so these
+  // two endpoints intentionally take no auth token.
+  if (url.pathname === '/api/auth/email-code/send') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['email', 'purpose'], 'email-code send body')
+    const validEmail = assertValidEmail(body.email)
+    const purpose = resolveEmailCodePurpose(body.purpose)
+    const result = await sendEmailVerificationCode(validEmail, purpose)
+    return json(res, 200, result)
+  }
+
+  if (url.pathname === '/api/auth/email-code/verify') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['email', 'code', 'purpose'], 'email-code verify body')
+    const validEmail = assertValidEmail(body.email)
+    const code = assertBoundedString(body.code, { fieldName: 'code', maxLength: 12, required: true })
+    const purpose = resolveEmailCodePurpose(body.purpose)
+    const result = await consumeEmailVerificationCode(validEmail, code, purpose)
+    if (!result.ok) {
+      const error = new Error('The verification code is invalid or expired.')
+      error.statusCode = 400
+      error.code = result.reason
+      error.expose = true
+      throw error
+    }
+    return json(res, 200, { ok: true })
+  }
+
+  // Real forgot-password flow (security audit finding F-01). The client must first send + verify
+  // an email code with purpose='password-reset' via the two endpoints above, then call this one --
+  // never trusts a client-supplied "I verified it" boolean, same pattern as guest registration's
+  // hasRecentlyVerifiedEmail check below. Always returns ok:true regardless of whether the email
+  // matches an account, so this endpoint can't be used to enumerate registered accounts.
+  if (url.pathname === '/api/auth/password-reset') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['email', 'newPassword'], 'password-reset body')
+    const validEmail = assertValidEmail(body.email)
+    const validPassword = assertValidPassword(body.newPassword)
+
+    const verified = await hasRecentlyVerifiedEmail(validEmail, 'password-reset')
+    if (!verified) {
+      const error = new Error('Verify your email with the access code before resetting the password.')
+      error.statusCode = 403
+      error.code = 'EMAIL_NOT_VERIFIED'
+      error.expose = true
+      throw error
+    }
+
+    await db().user.updateMany({
+      where: { email: validEmail },
+      data: { passwordHash: hashPassword(validPassword) },
+    })
+    return json(res, 200, { ok: true })
+  }
+
   if (url.pathname === '/api/auth/register') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
@@ -42,6 +114,51 @@ export async function handleAuth(req, res, url) {
     const displayName = assertBoundedString(body.displayName, { fieldName: 'displayName', maxLength: NAME_FIELD_MAX_LENGTH })
     const firstName = assertBoundedString(body.firstName, { fieldName: 'firstName', maxLength: NAME_FIELD_MAX_LENGTH })
     const lastName = assertBoundedString(body.lastName, { fieldName: 'lastName', maxLength: NAME_FIELD_MAX_LENGTH })
+
+    // Guest self-registration (the Rentals/Buy/Stays "open account" gate) must prove email
+    // ownership before an account is created — the frontend's old phone-code step never actually
+    // checked anything server-side. Checked after basic input-shape validation so a malformed
+    // request always gets a validation error first, not a business-rule rejection.
+    if (role === 'GUEST') {
+      if (!validEmail) {
+        const error = new Error('email is required for guest registration.')
+        error.statusCode = 400
+        error.code = 'EMAIL_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const verified = await hasRecentlyVerifiedEmail(validEmail, 'guest-signup')
+      if (!verified) {
+        const error = new Error('Verify your email before opening an account.')
+        error.statusCode = 403
+        error.code = 'EMAIL_NOT_VERIFIED'
+        error.expose = true
+        throw error
+      }
+    }
+
+    // Host/Driver self-registration reaches the same staff dashboards as login does (the internal
+    // access gate has no separate signup step) — gated with the same real 'staff-login' email OTP
+    // as sign-in below, replacing what used to be a purely decorative, server-unchecked code box
+    // (src/engines/security/verificationCodeEngine.ts). Admin cannot self-register at all
+    // (PUBLIC_REGISTER_ROLES above), so it never reaches this branch.
+    if (STAFF_ROLES_REQUIRING_OTP.has(role)) {
+      if (!validEmail) {
+        const error = new Error('email is required for this account type.')
+        error.statusCode = 400
+        error.code = 'EMAIL_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const verified = await hasRecentlyVerifiedEmail(validEmail, 'staff-login')
+      if (!verified) {
+        const error = new Error('Verify your email with the access code before opening this account.')
+        error.statusCode = 403
+        error.code = 'EMAIL_NOT_VERIFIED'
+        error.expose = true
+        throw error
+      }
+    }
 
     const phoneHash = validPhone ? hashPhone(validPhone) : undefined
     const passwordHash = hashPassword(validPassword)
@@ -129,6 +246,29 @@ export async function handleAuth(req, res, url) {
       error.code = 'INVALID_CREDENTIALS'
       error.expose = true
       throw error
+    }
+
+    // Real email-OTP gate for staff sign-in (admin/host/driver dashboards), checked only after
+    // credentials are already confirmed valid so this can't be used to enumerate accounts by
+    // timing/response-shape. Replaces the old client-side-only code box that the server never
+    // verified at all (StaffAccessPage.tsx / verificationCodeEngine.ts).
+    const needsStaffOtp = user.roles.some((entry) => STAFF_ROLES_REQUIRING_OTP.has(entry.role))
+    if (needsStaffOtp) {
+      if (!validEmail) {
+        const error = new Error('Sign in with email and the access code for this account type.')
+        error.statusCode = 400
+        error.code = 'STAFF_EMAIL_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const verified = await hasRecentlyVerifiedEmail(validEmail, 'staff-login')
+      if (!verified) {
+        const error = new Error('Verify your email with the access code before signing in.')
+        error.statusCode = 403
+        error.code = 'STAFF_OTP_REQUIRED'
+        error.expose = true
+        throw error
+      }
     }
 
     return json(res, 200, {

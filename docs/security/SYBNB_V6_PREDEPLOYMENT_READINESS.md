@@ -4,6 +4,21 @@ Date: 2026-07-10. Branch: `security/sybnb-v6-predeployment` (not merged to `main
 closes out the "SYBNB V6 — Security Hardening and Automated Test Foundation" order. It does not
 authorize deployment; see Recommendation at the end.
 
+**Update 2026-07-12 — F-01 resolved, plus a related bug found and fixed in the same pass.**
+Password reset is now real: `POST /api/auth/password-reset` requires a real email-OTP
+verification (`purpose='password-reset'`) via the existing `/api/auth/email-code/send|verify`
+endpoints before it will change a password, and never reveals whether an email matches an
+account. Reused the existing `EmailVerificationCode` infrastructure (no new vendor/cost). While
+building this, found that staff sign-in (admin/host/driver, `StaffAccessPage.tsx`) had a
+verification-code UI that was **entirely client-side and never checked by the server at all**
+(`src/engines/security/verificationCodeEngine.ts`, now deleted) — it looked like 2FA but provided
+zero real protection. Fixed by gating `/api/auth/login` (and HOST/DRIVER self-registration) on the
+same real email-OTP mechanism, purpose='staff-login'. Verified live: wrong/no-OTP login now
+returns `403 STAFF_OTP_REQUIRED`; correct OTP + password succeeds; old password is rejected after
+reset. All 155 existing automated tests (66 unit + 70 API + 19 security) still pass; the 4 test
+files that registered HOST/DRIVER accounts directly were updated to verify email first, matching
+the new real requirement. F-02 (session revocation) remains open.
+
 ## Code readiness
 
 - TypeScript: clean (`npx tsc --noEmit`, 0 errors).
@@ -115,8 +130,8 @@ merged), no destructive or unauthorized actions taken against the development da
 
 It is **not** recommended to jump directly to READY TO MERGE or READY FOR STAGING without: an
 explicit decision on F-01/F-02 (password reset, session revocation — deferred, launch-relevant);
-the legal/payment items (product decisions this phase deliberately did not make unilaterally); and
-an owner decision on the migration-fidelity gap (`docs/testing/SYBNB_V6_MIGRATION_FIDELITY_ASSESSMENT.md`
-— `migrate deploy` alone cannot currently reproduce the full schema, a release blocker specifically
-for ever using it to bootstrap a fresh production/staging database, though not a blocker for
-continuing to use the isolated test database's current `db push` bootstrap).
+the legal/payment items (product decisions this phase deliberately did not make unilaterally).
+
+**Update 2026-07-12:** the migration-fidelity gap is now closed — see the RESOLVED note at the top
+of `docs/testing/SYBNB_V6_MIGRATION_FIDELITY_ASSESSMENT.md`. `prisma migrate deploy` can now
+bootstrap a correct, complete fresh production/staging database.

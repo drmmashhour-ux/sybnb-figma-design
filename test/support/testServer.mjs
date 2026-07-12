@@ -1,3 +1,4 @@
+import request from 'supertest'
 import { server } from '../../server/index.mjs'
 import { db } from '../../server/lib/prisma.mjs'
 
@@ -19,6 +20,25 @@ const RUN_ID = Date.now().toString(36)
 export function uniqueTestEmail(label) {
   counter += 1
   return `t-${RUN_ID}-${counter}-${label}${TEST_EMAIL_SUFFIX}`
+}
+
+// GUEST self-registration now requires a real, server-verified email code (see
+// server/lib/email-verification.mjs) — this drives the actual send+verify endpoints exactly as a
+// real client must, using the dev-only devCode response instead of a mailbox. Fixture setup for
+// non-GUEST roles (HOST/SELLER/DRIVER) is unaffected; only GUEST is gated.
+// purpose defaults to 'guest-signup' (matches the server's own default) -- pass 'staff-login' for
+// HOST/DRIVER/ADMIN test accounts, which now require the same real email-OTP gate at
+// registration/sign-in as guests do (see server/routes/auth.mjs STAFF_ROLES_REQUIRING_OTP).
+export async function verifyEmailForTest(app, email, purpose = 'guest-signup') {
+  const sendRes = await request(app).post('/api/auth/email-code/send').send({ email, purpose })
+  const code = sendRes.body.devCode
+  if (!code) {
+    throw new Error('Test email-code send did not return a devCode — is NODE_ENV=production set?')
+  }
+  const verifyRes = await request(app).post('/api/auth/email-code/verify').send({ email, code, purpose })
+  if (!verifyRes.body.ok) {
+    throw new Error(`Test email-code verify failed: ${JSON.stringify(verifyRes.body)}`)
+  }
 }
 
 export function uniqueTestPhone() {

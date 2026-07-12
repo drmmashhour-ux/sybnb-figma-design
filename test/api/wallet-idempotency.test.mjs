@@ -2,7 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail } from '../support/testServer.mjs'
+import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
 
 // Exercises the idempotency guarantee recordWalletEntry() relies on to survive concurrent/retried
 // approvals (see finance-ledger.mjs's approvePaymentProof race-condition comment) — a deterministic
@@ -13,9 +13,11 @@ describe('recordWalletEntry idempotency', () => {
 
   beforeAll(async () => {
     app = testApp()
+    const email = uniqueTestEmail('wallet-idempotency')
+    await verifyEmailForTest(app, email, 'staff-login')
     const res = await request(app).post('/api/auth/register').send({
       role: 'HOST',
-      email: uniqueTestEmail('wallet-idempotency'),
+      email,
       password: 'correct-horse-battery',
     })
     userId = res.body.user.id

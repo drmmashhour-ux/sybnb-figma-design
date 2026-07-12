@@ -62,6 +62,13 @@ test.describe('login', () => {
     // registers a fresh, uniquely-named user this spec then logs in as through the actual UI.
     const apiBase = process.env.PLAYWRIGHT_API_BASE_URL || 'http://127.0.0.1:3061'
     const email = `pw-login-${Date.now()}@sybnb.test`
+    // GUEST registration now requires a verified email code (see server/lib/email-verification.mjs)
+    // — drive the real send+verify endpoints exactly as the app's own signup UI does, using the
+    // dev-only devCode response instead of a mailbox.
+    const sendCodeRes = await request.post(`${apiBase}/api/auth/email-code/send`, { data: { email } })
+    const { devCode } = await sendCodeRes.json()
+    const verifyRes = await request.post(`${apiBase}/api/auth/email-code/verify`, { data: { email, code: devCode } })
+    expect(verifyRes.ok()).toBe(true)
     const registerRes = await request.post(`${apiBase}/api/auth/register`, {
       data: { role: 'GUEST', email, password: 'correct-horse-battery' },
     })

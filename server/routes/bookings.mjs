@@ -9,6 +9,7 @@ import {
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
+import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
 
 export async function handleBookings(req, res, url, context) {
   const cancelMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/cancel$/)
@@ -354,6 +355,14 @@ export async function handleBookings(req, res, url, context) {
       ? await computeStayTotalMinor(listing, checkIn, checkOut)
       : { totalMinor: listing.priceMinor, nights: 0, perNight: [] }
 
+    // The listing itself is always priced in SYP; a guest who chose to pay in USD (matching
+    // whatever they were quoted at GET /api/listings/:id/quote?currency=USD) gets the exact same
+    // conversion + round-up-to-$5 applied here, so the booking is never created for a different
+    // amount than what was quoted.
+    const wantsUsd = body.currency === 'USD'
+    const amountMinor = wantsUsd ? sypMinorToRoundedUsdMinor(quote.totalMinor) : quote.totalMinor
+    const currency = wantsUsd ? 'USD' : listing.currency
+
     return tx.booking.create({
       data: {
         listingId: listing.id,
@@ -361,8 +370,8 @@ export async function handleBookings(req, res, url, context) {
         status: 'PAYMENT_PENDING',
         checkIn,
         checkOut,
-        amountMinor: quote.totalMinor,
-        currency: listing.currency,
+        amountMinor,
+        currency,
         metadata: buildBookingMetadata(body, listing),
       },
     })

@@ -186,7 +186,7 @@ export function DashboardPage({ lang }: Props) {
   const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
   const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
   const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
-  const activeStep = Math.max(2, activeTripStep(overview))
+  const activeStep = activeBooking ? activeTripStep(overview) : -1
   const pastTrips = overview?.bookings.slice(1, 3).map((booking) => normalizePastTrip(booking, lang)) || []
   const walletRows = normalizeWalletRows(overview, lang)
   const protectedFunds = overview?.payments
@@ -250,8 +250,8 @@ export function DashboardPage({ lang }: Props) {
               <small>{t.wallet}</small>
             </button>
             <button style={styles.trustTile} onClick={() => (window.location.hash = '/trust-center')}>
-              <span>{t.trustScore}</span>
-              <strong>94</strong>
+              <span>{isAr ? 'الحماية والأمان' : 'Protection & safety'}</span>
+              <strong>↗</strong>
               <small>{isAr ? 'مركز الثقة' : 'Trust Center'}</small>
             </button>
           </section>

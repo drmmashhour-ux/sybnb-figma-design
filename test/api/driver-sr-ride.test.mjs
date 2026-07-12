@@ -1,9 +1,11 @@
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail } from '../support/testServer.mjs'
+import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
+  if (role === 'GUEST') await verifyEmailForTest(app, email)
+  if (role === 'HOST' || role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
   const res = await request(app).post('/api/auth/register').send({
     role,
     email,

@@ -221,6 +221,23 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       where: { userId: proof.userId },
       data: { documentStatus: 'APPROVED' },
     })
+    // The full plan fee is 100% platform revenue (there's no host/counterparty to split with,
+    // unlike a booking) — previously this approval never recorded any wallet entry at all, so
+    // real, collected seller-plan revenue was invisible everywhere: admin finance totals, the
+    // income projection, all of it. Recorded the same way booking commission is: a CREDIT to the
+    // approving admin's own wallet, which is what the revenue-summary rollup reads from.
+    if (actorUserId) {
+      await recordWalletEntry(tx, {
+        userId: actorUserId,
+        type: 'CREDIT',
+        amountMinor: proof.amountMinor,
+        currency: proof.currency,
+        referenceType: 'seller_plan_fee',
+        referenceId: proof.id,
+        keyParts: ['seller-plan-fee', proof.id, actorUserId],
+        note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
+      })
+    }
   }
 
   return proof

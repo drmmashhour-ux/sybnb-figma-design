@@ -1,7 +1,7 @@
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { __resetRateLimitsForTests } from '../../server/lib/rate-limit.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail } from '../support/testServer.mjs'
+import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
 
 describe('POST /api/auth/register', () => {
   let app
@@ -15,8 +15,9 @@ describe('POST /api/auth/register', () => {
     await cleanupTestUsers()
   })
 
-  it('creates a GUEST account with a valid email + password', async () => {
+  it('creates a GUEST account with a valid email + password, after verifying the email code', async () => {
     const email = uniqueTestEmail('register-ok')
+    await verifyEmailForTest(app, email)
     const res = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
@@ -30,6 +31,18 @@ describe('POST /api/auth/register', () => {
     expect(res.body.user.roles).toContain('GUEST')
     expect(typeof res.body.token).toBe('string')
     trackTestUser(res.body.user.id)
+  })
+
+  it('rejects a GUEST registration whose email was never verified (F-EMAIL-01)', async () => {
+    const email = uniqueTestEmail('register-unverified')
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email,
+      password: 'correct-horse-battery',
+    })
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('EMAIL_NOT_VERIFIED')
   })
 
   it('rejects a role that cannot be self-registered', async () => {
@@ -112,6 +125,7 @@ describe('POST /api/auth/register', () => {
 
   it('falls back to a combined firstName + lastName as displayName when no explicit displayName is given', async () => {
     const email = uniqueTestEmail('register-first-last')
+    await verifyEmailForTest(app, email)
     const res = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
@@ -127,6 +141,7 @@ describe('POST /api/auth/register', () => {
 
   it('rejects a duplicate email with 409', async () => {
     const email = uniqueTestEmail('register-dup')
+    await verifyEmailForTest(app, email)
     const first = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
@@ -154,6 +169,7 @@ describe('POST /api/auth/login', () => {
     __resetRateLimitsForTests()
 
     registeredEmail = uniqueTestEmail('login-target')
+    await verifyEmailForTest(app, registeredEmail)
     const res = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email: registeredEmail,

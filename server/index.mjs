@@ -7,6 +7,7 @@ import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { checkRateLimit, clientIp } from './lib/rate-limit.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { applySecurityHeaders } from './lib/security-headers.mjs'
+import { handleAccommodations } from './routes/accommodations.mjs'
 import { handleAdmin } from './routes/admin.mjs'
 import { handleAuth } from './routes/auth.mjs'
 import { handleBookings } from './routes/bookings.mjs'
@@ -44,6 +45,8 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
 const RATE_LIMIT_RULES = [
   { name: 'AUTH_LOGIN', method: 'POST', pattern: /^\/api\/auth\/login$/, max: 10, windowMs: 5 * 60 * 1000, byUser: false },
   { name: 'AUTH_REGISTER', method: 'POST', pattern: /^\/api\/auth\/register$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
+  { name: 'AUTH_EMAIL_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/email-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
+  { name: 'AUTH_EMAIL_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/email-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false },
   { name: 'PUBLIC_SEARCH', method: 'GET', pattern: /^\/api\/listings$/, max: 60, windowMs: 60 * 1000, byUser: false },
   { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true },
@@ -58,7 +61,10 @@ function matchRateLimitRule(req, url) {
   return RATE_LIMIT_RULES.find((rule) => rule.method === req.method && rule.pattern.test(url.pathname))
 }
 
-const server = createServer(async (req, res) => {
+// Extracted so both the local dev server below (http.createServer) and the Vercel serverless
+// entry (api/[...path].mjs) run the exact same request-handling logic — no behavioral drift
+// between "npm run api:dev" and production between the two entry points.
+export async function handleRequest(req, res) {
   const url = publicUrl(req)
 
   try {
@@ -112,11 +118,14 @@ const server = createServer(async (req, res) => {
   } catch (error) {
     handleRouteError(res, error)
   }
-})
+}
+
+const server = createServer(handleRequest)
 
 async function dispatch(req, res, url, context) {
   for (const handler of [
     handleAuth,
+    handleAccommodations,
     handleListings,
     handleBookings,
     handlePayments,
