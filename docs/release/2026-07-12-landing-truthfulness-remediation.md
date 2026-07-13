@@ -69,8 +69,29 @@ and related fixes) was already live in production from an earlier deployment in 
 uncommitted working tree. This remediation's deploy therefore re-shipped that already-live code
 unchanged, plus this one isolated fix.
 
-This has since been corrected: see the "Git traceability" section below for the deliberate
-commit(s) created to give production a specific, inspectable commit hash.
+This has since been corrected — see "Git traceability" below.
+
+## Git traceability
+
+Two deliberate commits were created on `security/sybnb-v6-predeployment` after the fact, matching
+the working tree exactly as it stood when deployed (no functional changes made during the commit
+step, no redeploy performed to create them):
+
+- `b6fd5c1` — "Ship referral program, session revocation, and pre-deploy hardening": every file
+  belonging to the referral-and-hardening release (everything documented in
+  `2026-07-12-referral-and-hardening.md`), which was already live in production before this
+  remediation.
+- `69b30de` — "Remove fabricated landing-page metrics": `src/modules/landing/LandingPage.tsx`
+  plus this document. Isolated so the remediation has its own traceable commit distinct from the
+  larger release.
+
+Not included in either commit: `.claude/launch.json` (local dev-server tooling config, not part
+of the deployed application, contains no secrets — Vercel port config only). `.vercel/` was
+already gitignored and untracked.
+
+Production (`sybnb.app`) now corresponds exactly to commit `69b30de`. No push has been made — the
+branch remains local-only ahead of `origin/security/sybnb-v6-predeployment` until separately
+authorized.
 
 ## Process-deviation check
 
