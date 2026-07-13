@@ -44,6 +44,7 @@ const copy = {
     phone: 'رقم الهاتف',
     password: 'كلمة المرور',
     repeatPassword: 'تأكيد كلمة المرور',
+    referralCode: 'رمز الإحالة (اختياري)',
     sendCode: 'إرسال رمز إلى البريد',
     resendCode: 'إعادة الإرسال',
     sendingCode: 'جارٍ الإرسال...',
@@ -94,6 +95,7 @@ const copy = {
     phone: 'Phone number',
     password: 'Password',
     repeatPassword: 'Repeat password',
+    referralCode: 'Referral code (optional)',
     sendCode: 'Send code to email',
     resendCode: 'Resend',
     sendingCode: 'Sending...',
@@ -133,6 +135,7 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
+  const [referralCode, setReferralCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
   const [code, setCode] = useState('')
   const [codeConfirmed, setCodeConfirmed] = useState(false)
@@ -230,6 +233,7 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
         email: email.trim(),
         phone: phone.trim(),
         password,
+        referralCode: referralCode.trim() || undefined,
       })
       if (mode === 'signup' && idDocumentFile) {
         await submitGuestIdDocument(idDocumentFile)
@@ -293,6 +297,15 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
           <input dir="ltr" inputMode="tel" style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder={t.phone} />
           <input style={styles.input} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t.password} />
           {mode === 'signup' ? <input style={styles.input} type="password" value={repeatPassword} onChange={(event) => setRepeatPassword(event.target.value)} placeholder={t.repeatPassword} /> : null}
+          {mode === 'signup' ? (
+            <input
+              dir="ltr"
+              style={styles.input}
+              value={referralCode}
+              onChange={(event) => setReferralCode(event.target.value)}
+              placeholder={t.referralCode}
+            />
+          ) : null}
         </div>
         <div style={styles.codeRow}>
           <button

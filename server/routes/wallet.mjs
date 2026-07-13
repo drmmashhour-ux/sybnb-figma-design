@@ -105,6 +105,14 @@ export async function handleWallet(req, res, url, context) {
     })
 
     if (!gift || gift.status !== 'SENT') throw giftClaimError()
+    // Lazily expired on access, same pattern as completeExpiredBookings()/expireOldListings()
+    // elsewhere in this codebase -- a gift's expiresAt was always shown to the sender/admin and
+    // the frontend even has a dedicated "expired" error state, but nothing server-side ever
+    // checked it: a gift could be claimed indefinitely past its displayed expiration date.
+    if (gift.expiresAt < new Date()) {
+      await db().walletGift.updateMany({ where: { id: gift.id, status: 'SENT' }, data: { status: 'EXPIRED' } })
+      throw giftClaimError('This gift has expired.', 'GIFT_EXPIRED')
+    }
     if (gift.recipientPhoneHash !== phoneHash) {
       await registerFailedGiftClaim(gift)
       throw giftClaimError()

@@ -3,6 +3,8 @@ import { createSessionToken, hashPassword, hashPhone, verifyPassword } from '../
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPassword, assertValidPhone } from '../lib/validate.mjs'
 import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerificationCode } from '../lib/email-verification.mjs'
+import { requireAuth } from '../lib/auth-context.mjs'
+import { attachReferralOnRegister, generateUniqueReferralCode } from '../lib/referrals.mjs'
 
 const NAME_FIELD_MAX_LENGTH = 120
 
@@ -27,7 +29,22 @@ function resolveEmailCodePurpose(value) {
 // even though the error message is identical either way.
 const DUMMY_PASSWORD_HASH = hashPassword('not-a-real-password-timing-decoy')
 
-export async function handleAuth(req, res, url) {
+export async function handleAuth(req, res, url, context) {
+  // Real server-side logout (security audit finding F-02). Bumping sessionVersion makes every
+  // previously-issued token for this user fail the check in getAuthContext (auth-context.mjs),
+  // even though its signature and exp are still technically valid -- a stateless signed token has
+  // no other way to be revoked before it naturally expires. Coarse-grained by design (revokes
+  // every device's session, not just the caller's) since there's no per-session store.
+  if (url.pathname === '/api/auth/logout') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    await db().user.update({
+      where: { id: context.user.id },
+      data: { sessionVersion: { increment: 1 } },
+    })
+    return json(res, 200, { ok: true })
+  }
+
   // Real email OTP for guest self-registration (Rentals/Buy/Stays "open account" gate). Chosen
   // over SMS: no per-message carrier cost, no SMS-gateway account needed. Pre-signup, so these
   // two endpoints intentionally take no auth token.
@@ -80,9 +97,12 @@ export async function handleAuth(req, res, url) {
       throw error
     }
 
+    // Bumping sessionVersion here invalidates any session issued before the reset (F-02) -- e.g.
+    // an attacker who stole a session token loses it the moment the legitimate owner resets their
+    // password, instead of the token staying valid until its own 7-day expiry regardless.
     await db().user.updateMany({
       where: { email: validEmail },
-      data: { passwordHash: hashPassword(validPassword) },
+      data: { passwordHash: hashPassword(validPassword), sessionVersion: { increment: 1 } },
     })
     return json(res, 200, { ok: true })
   }
@@ -90,7 +110,7 @@ export async function handleAuth(req, res, url) {
   if (url.pathname === '/api/auth/register') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
-    assertNoUnknownFields(body, ['role', 'email', 'phone', 'password', 'displayName', 'firstName', 'lastName'], 'registration body')
+    assertNoUnknownFields(body, ['role', 'email', 'phone', 'password', 'displayName', 'firstName', 'lastName', 'referralCode'], 'registration body')
     const role = body.role || 'GUEST'
     if (!PUBLIC_REGISTER_ROLES.has(role)) {
       const error = new Error('This role cannot be self-registered.')
@@ -164,20 +184,30 @@ export async function handleAuth(req, res, url) {
     const passwordHash = hashPassword(validPassword)
 
     try {
-      const user = await db().user.create({
-        data: {
-          email: validEmail,
-          phoneHash,
-          passwordHash,
-          displayName: displayName || [firstName, lastName].filter(Boolean).join(' ') || validEmail || 'SYBNB User',
-          roles: {
-            create: { role },
+      const user = await db().$transaction(async (tx) => {
+        const referralCode = await generateUniqueReferralCode(tx)
+        const created = await tx.user.create({
+          data: {
+            email: validEmail,
+            phoneHash,
+            passwordHash,
+            displayName: displayName || [firstName, lastName].filter(Boolean).join(' ') || validEmail || 'SYBNB User',
+            referralCode,
+            roles: {
+              create: { role },
+            },
+            wallets: {
+              create: { currency: 'SYP' },
+            },
           },
-          wallets: {
-            create: { currency: 'SYP' },
-          },
-        },
-        include: { roles: true },
+          include: { roles: true },
+        })
+
+        if (body.referralCode) {
+          await attachReferralOnRegister(tx, { newUserId: created.id, referralCode: body.referralCode })
+        }
+
+        return created
       })
 
       return json(res, 201, {
@@ -289,5 +319,6 @@ function publicUser(user) {
     locale: user.locale,
     status: user.status,
     roles: user.roles.map((item) => item.role),
+    referralCode: user.referralCode,
   }
 }

@@ -88,6 +88,9 @@ export function createSessionToken(user) {
   const payload = {
     sub: user.id,
     roles: user.roles?.map((role) => role.role) || [],
+    // Checked against the user's live sessionVersion on every request (auth-context.mjs) -- the
+    // only way a stateless signed token can be revoked before its own expiry (F-02).
+    sv: user.sessionVersion ?? 0,
     iat: issuedAt,
     exp: issuedAt + SESSION_TTL_SECONDS,
   }

@@ -143,6 +143,15 @@ model User {
   idDocumentStatus IdDocumentStatus? @map("id_document_status")
   idDocumentReviewedById String? @map("id_document_reviewed_by_id")
   idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
+  // Bumped on logout and on password reset; embedded as a claim in every session token and
+  // checked on every request (server/lib/auth-context.mjs). A stateless HMAC-signed token has no
+  // other way to be revoked before its 7-day expiry -- this is the whole mechanism (security audit
+  // finding F-02).
+  sessionVersion Int         @default(0) @map("session_version")
+  // Shareable referral code, generated once at account creation (server/lib/referrals.mjs). Every
+  // user has one, whether or not they ever refer anyone -- generated lazily would need a
+  // read-then-write race guard for no benefit, since it's nearly free to always have one.
+  referralCode String        @unique @map("referral_code")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
@@ -163,8 +172,39 @@ model User {
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
   accommodations    Accommodation[]   @relation("AccommodationOwner")
   hostInsights      HostInsight[]     @relation("HostInsightOwner")
+  referralsMade     Referral[]        @relation("ReferralReferrer")
+  referredAs        Referral?         @relation("ReferralReferee")
 
   @@map("users")
+}
+
+enum ReferralStatus {
+  PENDING
+  REWARDED
+
+  @@map("referral_status")
+}
+
+// Double-sided referral program (riders/hosts/drivers bring new users, both sides get rewarded --
+// same "give X, get Y" shape as Lyft/Uber's referral programs). The referee's signup bonus is
+// credited immediately at registration (server/routes/auth.mjs); the referrer's reward is only
+// credited once the referee completes their first *paid* STR booking (server/lib/referrals.mjs),
+// not merely on signup -- otherwise this would be trivially farmable with throwaway accounts that
+// never generate any real revenue.
+model Referral {
+  id                  String         @id @default(uuid())
+  referrerUserId      String         @map("referrer_user_id")
+  refereeUserId       String         @unique @map("referee_user_id")
+  status              ReferralStatus @default(PENDING)
+  qualifyingBookingId String?        @map("qualifying_booking_id")
+  rewardedAt          DateTime?      @map("rewarded_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  referrer User @relation("ReferralReferrer", fields: [referrerUserId], references: [id])
+  referee  User @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerUserId, status])
+  @@map("referrals")
 }
 
 model UserRole {

@@ -183,7 +183,7 @@ export async function handleAdmin(req, res, url, context) {
             include: {
               listing: {
                 include: {
-                  owner: { select: { id: true, displayName: true, email: true } },
+                  owner: { select: { id: true, displayName: true, email: true, idDocumentStatus: true } },
                 },
               },
             },

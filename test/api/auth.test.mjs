@@ -282,3 +282,118 @@ describe('POST /api/auth/login', () => {
     expect(res.body.error.code).toBe('VALIDATION_INVALID_EMAIL')
   })
 })
+
+describe('POST /api/auth/logout (F-02 session revocation)', () => {
+  let app
+
+  beforeAll(() => {
+    app = testApp()
+    __resetRateLimitsForTests()
+  })
+
+  afterAll(async () => {
+    await cleanupTestUsers()
+  })
+
+  async function registerAndLogin() {
+    const email = uniqueTestEmail('logout')
+    await verifyEmailForTest(app, email)
+    const registerRes = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email,
+      password: 'correct-horse-battery',
+    })
+    trackTestUser(registerRes.body.user.id)
+    return { email, token: registerRes.body.token }
+  }
+
+  it('a token works for authenticated requests before logout', async () => {
+    const { token } = await registerAndLogin()
+    const res = await request(app).get('/api/me/overview').set('authorization', `Bearer ${token}`)
+    expect(res.status).toBe(200)
+  })
+
+  it('the same token is rejected after logout, even though it has not expired (F-02)', async () => {
+    const { token } = await registerAndLogin()
+
+    const logoutRes = await request(app).post('/api/auth/logout').set('authorization', `Bearer ${token}`)
+    expect(logoutRes.status).toBe(200)
+    expect(logoutRes.body.ok).toBe(true)
+
+    const res = await request(app).get('/api/me/overview').set('authorization', `Bearer ${token}`)
+    expect(res.status).toBe(401)
+    expect(res.body.error.code).toBe('AUTH_REQUIRED')
+  })
+
+  it('a new login after logout issues a fresh, working token', async () => {
+    const { email, token } = await registerAndLogin()
+    await request(app).post('/api/auth/logout').set('authorization', `Bearer ${token}`)
+
+    const loginRes = await request(app).post('/api/auth/login').send({
+      email,
+      password: 'correct-horse-battery',
+    })
+    expect(loginRes.status).toBe(200)
+
+    const res = await request(app).get('/api/me/overview').set('authorization', `Bearer ${loginRes.body.token}`)
+    expect(res.status).toBe(200)
+  })
+
+  it('rejects logout without a token', async () => {
+    const res = await request(app).post('/api/auth/logout')
+    expect(res.status).toBe(401)
+    expect(res.body.error.code).toBe('AUTH_REQUIRED')
+  })
+
+  it('rejects GET on the logout route with 405', async () => {
+    const res = await request(app).get('/api/auth/logout')
+    expect(res.status).toBe(405)
+    expect(res.headers.allow).toContain('POST')
+  })
+})
+
+describe('POST /api/auth/password-reset also revokes existing sessions (F-02)', () => {
+  let app
+
+  beforeAll(() => {
+    app = testApp()
+    __resetRateLimitsForTests()
+  })
+
+  afterAll(async () => {
+    await cleanupTestUsers()
+  })
+
+  it('a token issued before a password reset stops working after the reset', async () => {
+    const email = uniqueTestEmail('reset-revoke')
+    await verifyEmailForTest(app, email)
+    const registerRes = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email,
+      password: 'original-password-1',
+    })
+    trackTestUser(registerRes.body.user.id)
+    const oldToken = registerRes.body.token
+
+    const preCheck = await request(app).get('/api/me/overview').set('authorization', `Bearer ${oldToken}`)
+    expect(preCheck.status).toBe(200)
+
+    await verifyEmailForTest(app, email, 'password-reset')
+    const resetRes = await request(app).post('/api/auth/password-reset').send({
+      email,
+      newPassword: 'new-password-2',
+    })
+    expect(resetRes.status).toBe(200)
+    expect(resetRes.body.ok).toBe(true)
+
+    const postCheck = await request(app).get('/api/me/overview').set('authorization', `Bearer ${oldToken}`)
+    expect(postCheck.status).toBe(401)
+    expect(postCheck.body.error.code).toBe('AUTH_REQUIRED')
+
+    const loginRes = await request(app).post('/api/auth/login').send({
+      email,
+      password: 'new-password-2',
+    })
+    expect(loginRes.status).toBe(200)
+  })
+})

@@ -22,6 +22,15 @@ export function uniqueTestEmail(label) {
   return `t-${RUN_ID}-${counter}-${label}${TEST_EMAIL_SUFFIX}`
 }
 
+// User.referralCode is required + unique (server/lib/referrals.mjs normally generates a
+// collision-checked one at registration) -- tests that create a User row directly via Prisma,
+// bypassing /api/auth/register entirely (e.g. to bootstrap an ADMIN, which cannot self-register),
+// need to supply one by hand. Uniqueness within a test run is all that matters here.
+export function uniqueTestReferralCode() {
+  counter += 1
+  return `T${RUN_ID}${counter}`.toUpperCase().slice(0, 12)
+}
+
 // GUEST self-registration now requires a real, server-verified email code (see
 // server/lib/email-verification.mjs) — this drives the actual send+verify endpoints exactly as a
 // real client must, using the dev-only devCode response instead of a mailbox. Fixture setup for

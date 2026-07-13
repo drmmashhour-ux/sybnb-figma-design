@@ -1,7 +1,8 @@
-// Vercel serverless entry point. Every /api/* request is routed here (the [...path] catch-all
-// filename convention) and handed to the exact same handleRequest() the local dev server
-// (server/index.mjs, `npm run api:dev`) uses -- one request-handling code path, two entry points,
-// so there is no behavioral drift between local dev and this production deployment target.
+// Vercel serverless entry point. Every /api/* request is rewritten here by vercel.json (explicit
+// rewrites, not filename-based catch-all matching -- that convention didn't reliably route
+// multi-segment paths in production) and handed to the exact same handleRequest() the local dev
+// server (server/index.mjs, `npm run api:dev`) uses -- one request-handling code path, two entry
+// points, so there is no behavioral drift between local dev and this production deployment target.
 import { validateProductionConfig } from '../server/lib/env.mjs'
 import { handleRequest } from '../server/index.mjs'
 

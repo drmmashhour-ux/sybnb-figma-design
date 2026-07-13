@@ -6,6 +6,7 @@ import {
   type PlatformOverview,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { ReferralPanel } from '../referrals/ReferralPanel'
 
 type Props = {
   lang: Lang
@@ -304,6 +305,13 @@ export function DashboardPage({ lang }: Props) {
           )) : <p style={styles.mutedText}>{t.noTransactions}</p>}
         </div>
       </section>
+
+      <ReferralPanel
+        lang={lang}
+        referralCode={overview?.user?.referralCode}
+        rewardedCount={overview?.referrals?.rewardedCount || 0}
+        pendingCount={overview?.referrals?.pendingCount || 0}
+      />
 
       <section style={styles.privacyPanel}>
         <button style={styles.secondaryButton} onClick={savePersonalCopy}>{t.saveTrip}</button>

@@ -19,6 +19,71 @@ reset. All 155 existing automated tests (66 unit + 70 API + 19 security) still p
 files that registered HOST/DRIVER accounts directly were updated to verify email first, matching
 the new real requirement. F-02 (session revocation) remains open.
 
+**Update 2026-07-12 — F-02 resolved.** Added `User.sessionVersion` (migration `012_session_version`,
+default `0`), embedded as an `sv` claim in every session token (`createSessionToken`) and checked
+against the live DB value on every request (`getAuthContext`) — a mismatch is treated as an
+expired session even though the token's own signature and `exp` are still valid, since a stateless
+HMAC-signed token has no other revocation mechanism before its 7-day TTL. Added a real
+`POST /api/auth/logout` (bumps `sessionVersion`, requires auth) and wired the client's
+`clearGuestSession`/`clearStoredStaffSession` to call it (best-effort — the local session clears
+regardless of whether the network call succeeds). `POST /api/auth/password-reset` now also bumps
+`sessionVersion`, so a stolen session token is invalidated the moment the legitimate owner resets
+their password, not just on its own expiry. Revocation is coarse-grained (revokes every session for
+the user, not a single device/token) — a dedicated `Session` table would be needed for per-device
+revocation, judged unnecessary for this launch's scale. All 161 tests pass (66 unit + 76 API + 19
+security, including 6 new logout/revocation tests); `npx tsc --noEmit` clean.
+
+**Update 2026-07-12 — Pre-deployment audit sweep: 4 real UI/backend mismatches found and fixed,
+migration fidelity re-verified.** Requested explicitly before any production deploy of the F-02
+work above. Findings, in order of severity:
+
+1. **ID verification bypass (highest severity).** `BookingDetailPage.tsx` hides the payment button
+   behind `hasIdDocument = Boolean(booking?.guest?.idDocumentRef)`, but neither
+   `/api/payments/stripe/create-checkout-session` nor `/api/payments/local-wallet-proof`
+   (`server/routes/payments.mjs`) checked this server-side — any authenticated guest could pay via
+   a direct API call without ever uploading an ID. Fixed: both endpoints now call
+   `requireIdDocumentUploaded(context.user)`, mirroring the exact client-side condition (upload
+   required, not yet-reviewed status — review still happens async via the admin queue, unchanged).
+2. **Cancellation-fee timing mismatch.** Covered in a separate pass just before this one — the
+   guest-facing "free cancellation until 3 days before check-in" copy was never enforced by
+   `server/routes/bookings.mjs`, which charged the flat $10 fee regardless of timing. Fixed:
+   `isWithinFreeCancellationWindow()` now gates the fee on the actual check-in date.
+3. **Gift expiry never enforced.** `WalletGift.expiresAt` was always shown to senders/admins (and
+   the frontend has a dedicated "expired" error state), but `server/routes/wallet.mjs`'s claim
+   endpoint never checked it — a gift could be claimed indefinitely past its displayed expiration.
+   Fixed with the same lazy-expire-on-access pattern already used by
+   `completeExpiredBookings()`/`expireOldListings()` elsewhere in this codebase.
+4. **Dispute-window copy overstated an SLA.** `BookingDetailPage.tsx`'s guarantee row promised
+   "dispute support available within 48 hours" — a support-responsiveness claim with no tracking
+   or enforcement anywhere. Softened to "you can open a dispute at any time and the SYBNB team will
+   review it" rather than building unrelated SLA-tracking infrastructure for a marketing line.
+
+**Also found, judged not to need a code change:** `GET /api/wallet/gifts/:id` (gift preview, used
+by a recipient who hasn't claimed yet and may not have an account tied to the gift) requires only
+`requireAuth(context)` with no sender/recipient ownership check. This looks like an IDOR at first
+read, but the gift's UUID is the actual capability/credential in this flow (same pattern as a
+gift-card claim link) — a real recipient's `recipientUserId` isn't set until after claiming, so
+requiring ownership would break the legitimate preview-before-claim flow for first-time recipients.
+Left as-is; flagged here rather than silently fixed or silently ignored.
+
+**Re-verified clean, no changes needed:**
+- **Migration fidelity**, including the new `012_session_version` migration: disposable-database
+  diff against `schema.prisma` shows zero drift across all 12 migrations (only the expected
+  pre-existing, non-blocking physical-fidelity notes from the original assessment — `id` column
+  type and GiST index declarations that `db push` doesn't reproduce from bare `schema.prisma`,
+  unrelated to migration correctness).
+- **Route/auth coverage**: every mutating endpoint across all 13 route files requires auth with
+  correctly-scoped roles and ownership checks; no missing `requireAuth`, no bare `where: { id }`
+  lookups on sensitive data.
+- **Instant Book, commission percentages (10% STR / 5% marketplace), host payout timing (14-day
+  hold)**: all confirmed to match between displayed copy and actual enforcement.
+- **Environment/deployment config**: every `process.env.*` the server reads is documented in
+  `.env.example` with consistent naming; `vercel.json`'s function/rewrite config is internally
+  consistent; `TRUST_PROXY` gating is correctly implemented (no spoofable-header trust without it).
+
+All 168 tests pass (66 unit + 83 API + 19 security, including 5 new tests for the ID-verification
+and gift-expiry fixes); `npx tsc --noEmit` clean.
+
 ## Code readiness
 
 - TypeScript: clean (`npx tsc --noEmit`, 0 errors).

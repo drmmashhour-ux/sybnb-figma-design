@@ -23,6 +23,13 @@ export async function getAuthContext(req) {
   }
   if (!user || user.status !== 'ACTIVE') return null
 
+  // Revocation check (F-02): a stateless signed token has no server-side record of its own, so
+  // "logging out" or resetting a password can't delete it -- instead those actions bump
+  // user.sessionVersion, and any token minted before that bump (recorded as its `sv` claim at
+  // issuance) is treated as expired even though its signature and `exp` are still valid.
+  const tokenVersion = Number.isInteger(session.sv) ? session.sv : 0
+  if (tokenVersion !== user.sessionVersion) return null
+
   return {
     user,
     roles: user.roles.map((item) => item.role),

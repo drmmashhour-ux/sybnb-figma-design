@@ -5,6 +5,7 @@ type ApiUser = {
   email: string | null
   displayName: string
   roles: string[]
+  referralCode?: string
 }
 
 type AuthResponse = {
@@ -422,6 +423,17 @@ export type PlatformOverview = {
     sent: Array<Record<string, unknown>>
     claimed: Array<Record<string, unknown>>
   }
+  referrals: {
+    made: Array<{
+      id: string
+      status: 'PENDING' | 'REWARDED'
+      createdAt: string
+      rewardedAt: string | null
+      referee: { id: string; displayName: string }
+    }>
+    rewardedCount: number
+    pendingCount: number
+  }
 }
 
 export type PlatformHostOverview = {
@@ -658,14 +670,17 @@ export async function createGuestAccountSession(input: {
   email: string
   phone: string
   password: string
+  referralCode?: string
 }) {
   const displayName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || 'SYBNB Guest'
+  const trimmedReferralCode = input.referralCode?.trim()
   const account = {
     email: input.email,
     password: input.password,
     displayName,
     role: 'GUEST',
     phone: input.phone,
+    ...(trimmedReferralCode ? { referralCode: trimmedReferralCode } : {}),
   }
 
   let session: PlatformAuthSession
@@ -758,7 +773,18 @@ export function getStoredGuestSession(): PlatformAuthSession | null {
   }
 }
 
+// Best-effort real server-side logout (F-02): tells the server to bump this user's sessionVersion
+// so the token being discarded here can't be replayed even if someone else has a copy of it. The
+// local session is cleared regardless of whether this call succeeds -- a network failure here
+// must never block the user from leaving their session, it just means server-side revocation
+// happens a little late (or not at all, until the token's own 7-day expiry) for that one call.
+function requestServerLogout(token: string | null) {
+  if (!token) return
+  void apiRequest<{ ok: true }>('/api/auth/logout', { method: 'POST', token }).catch(() => {})
+}
+
 export function clearGuestSession() {
+  requestServerLogout(sessionStorage.getItem(GUEST_SESSION_TOKEN_KEY))
   sessionStorage.removeItem(GUEST_SESSION_KEY)
   sessionStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
   window.dispatchEvent(new Event('sybnb-session-changed'))
@@ -806,6 +832,7 @@ export async function createStaffAccountSession(
 }
 
 export function clearStoredStaffSession() {
+  requestServerLogout(sessionStorage.getItem(STAFF_SESSION_TOKEN_KEY))
   sessionStorage.removeItem(STAFF_SESSION_KEY)
   sessionStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
 }
@@ -1820,6 +1847,7 @@ async function register(body: {
   displayName: string
   role: string
   phone?: string
+  referralCode?: string
 }) {
   return apiRequest<AuthResponse>('/api/auth/register', {
     method: 'POST',

@@ -11,6 +11,19 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
 
+// Must match src/shared/booking/cancellationPolicy.ts's STANDARD_FREE_CANCELLATION_DAYS_BEFORE_CHECKIN
+// -- that frontend module only computes the *displayed* cutoff date; this is what was actually
+// enforced (nothing, previously -- the flat fee below applied regardless of timing, contradicting
+// the "free cancellation until N days before check-in" copy guests were shown).
+const FREE_CANCELLATION_DAYS_BEFORE_CHECKIN = 3
+
+function isWithinFreeCancellationWindow(checkIn) {
+  if (!checkIn) return false
+  const cutoff = new Date(checkIn)
+  cutoff.setUTCDate(cutoff.getUTCDate() - FREE_CANCELLATION_DAYS_BEFORE_CHECKIN)
+  return Date.now() < cutoff.getTime()
+}
+
 export async function handleBookings(req, res, url, context) {
   const cancelMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/cancel$/)
   if (cancelMatch) {
@@ -41,12 +54,17 @@ export async function handleBookings(req, res, url, context) {
       throw error
     }
 
+    // Computed once, outside the transaction, so the fee-waiver decision reflects the moment the
+    // guest actually clicked cancel, not whatever instant the transaction happens to run at.
+    const freeCancellationWindow = isWithinFreeCancellationWindow(existing.checkIn)
+
     const booking = await db().$transaction(async (tx) => {
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
       const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
 
       if (approvedPayment) {
         const protectedByAddOn = split.cancellationProtectionPurchased
+        const feeWaived = protectedByAddOn || freeCancellationWindow
         const guestRefundAmountMinor = protectedByAddOn
           ? Math.max(0, approvedPayment.amountMinor - split.cancellationProtectionFeeMinor)
           : approvedPayment.amountMinor
@@ -94,7 +112,7 @@ export async function handleBookings(req, res, url, context) {
           note: 'Admin/SYBNB share reversed because the guest-cancelled booking was refunded.',
         })
 
-        if (!protectedByAddOn) {
+        if (!feeWaived) {
           await recordWalletEntry(tx, {
             userId: existing.guestId,
             type: 'DEBIT',
@@ -103,7 +121,7 @@ export async function handleBookings(req, res, url, context) {
           referenceType: 'booking_guest_cancel_fee',
           referenceId: existing.id,
           keyParts: ['booking-guest-cancel-fee-guest', existing.id, approvedPayment.id],
-          note: 'Guest cancellation admin fee after cancelling a paid booking without cancellation protection.',
+          note: 'Guest cancellation admin fee for cancelling within 3 days of check-in without cancellation protection.',
           })
 
           await recordWalletEntry(tx, {
@@ -147,10 +165,11 @@ export async function handleBookings(req, res, url, context) {
           ...booking,
           cancellationNote: body.note || body.reason || undefined,
           cancellationFee: {
-            amountMinor: booking.metadata?.cancellationProtectionPurchased === true ? 0 : CANCELLATION_ADMIN_FEE_MINOR,
+            amountMinor: (booking.metadata?.cancellationProtectionPurchased === true || freeCancellationWindow) ? 0 : CANCELLATION_ADMIN_FEE_MINOR,
             currency: CANCELLATION_ADMIN_FEE_CURRENCY,
             chargedTo: 'GUEST',
             waivedByProtection: booking.metadata?.cancellationProtectionPurchased === true,
+            waivedByFreeCancellationWindow: freeCancellationWindow,
           },
         },
       },
