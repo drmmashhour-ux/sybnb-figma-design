@@ -87,7 +87,6 @@ export function LandingPage({ lang }: Props) {
   const movieSrc = isAr ? '/assets/videos/str-promo-ar.mp4' : '/assets/videos/str-promo-en.mp4'
   const heroVideoSrc = isAr ? '/assets/videos/hero-highlight-ar.mp4' : '/assets/videos/hero-highlight-en.mp4'
   const [moviePlaying, setMoviePlaying] = useState(false)
-  const activeCount = DIVISIONS.filter((division) => division.status === 'active').length
   const showAbout = () => document.getElementById('platform-about')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
@@ -235,11 +234,6 @@ export function LandingPage({ lang }: Props) {
         })}
       </section>
 
-      <section className="landing-stats" aria-label={isAr ? 'أرقام المنصة' : 'Platform numbers'}>
-        <div><strong>12,450+</strong><span>{isAr ? 'عقارات مسجلة' : 'Registered properties'}</span></div>
-        <div><strong>85K+</strong><span>{isAr ? 'مستخدمون نشطون' : 'Active users'}</span></div>
-        <div><strong>{activeCount + 6}</strong><span>{isAr ? 'مناطق مغطاة' : 'Covered areas'}</span></div>
-      </section>
     </main>
   )
 }
