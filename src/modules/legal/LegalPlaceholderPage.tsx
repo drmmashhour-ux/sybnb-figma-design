@@ -192,6 +192,7 @@ export function LegalPlaceholderPage({ lang, page }: Props) {
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <article style={styles.card}>
+        <p style={styles.draftBadge}>{isAr ? 'مسودة — غير نهائية' : 'DRAFT — NOT FINAL'}</p>
         <h1 style={styles.title}>{section.title}</h1>
         <p style={styles.effectiveDate}>{t.effectiveDatePrefix}{EFFECTIVE_DATE[lang]}</p>
         {section.sections.map((entry) => (
@@ -225,6 +226,17 @@ const styles = {
     fontSize: 24,
     fontWeight: 950,
     margin: '0 0 6px',
+  },
+  draftBadge: {
+    alignSelf: 'flex-start',
+    border: '1px solid rgba(244,214,118,0.42)',
+    borderRadius: 8,
+    color: '#f4d676',
+    display: 'inline-flex',
+    fontSize: 12,
+    fontWeight: 900,
+    margin: '0 0 14px',
+    padding: '6px 10px',
   },
   effectiveDate: {
     color: 'rgba(255,255,255,0.5)',

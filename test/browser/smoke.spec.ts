@@ -150,7 +150,8 @@ test.describe('verification-status label', () => {
 // difference, not an application bug — recorded here rather than papered over, consistent with
 // this suite's "webkit" label never being represented as real Safari coverage.
 test.describe('keyboard navigation and visible focus', () => {
-  test('Tab reaches the login control from a fresh page load', async ({ page }) => {
+  test('Tab reaches the login control from a fresh page load', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', 'WebKit follows Safari default keyboard navigation unless Full Keyboard Access is enabled.')
     await page.goto('/')
     let reachedLogin = false
     for (let i = 0; i < 10 && !reachedLogin; i += 1) {
@@ -160,7 +161,8 @@ test.describe('keyboard navigation and visible focus', () => {
     expect(reachedLogin).toBe(true)
   })
 
-  test('the focused element receives a real, trusted-input-triggered visible outline', async ({ page }) => {
+  test('the focused element receives a real, trusted-input-triggered visible outline', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', 'WebKit follows Safari default keyboard navigation unless Full Keyboard Access is enabled.')
     await page.goto('/')
     await page.keyboard.press('Tab')
     const outlineStyle = await page.evaluate(() => getComputedStyle(document.activeElement as Element).outlineStyle)
