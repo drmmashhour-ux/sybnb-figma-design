@@ -14,7 +14,7 @@ import {
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
-import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
+import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
@@ -56,9 +56,11 @@ const copy = {
     accountReady: 'تم تجهيز حساب العميل',
     stepRows: ['راجع تفاصيل الغرفة', 'سجّل الدخول أو أنشئ حساباً', 'أرسل الحجز', 'ادفع داخل SYBNB', 'استلم رقم التأكيد'],
     contact: 'فتح التواصل',
-    payCurrency: 'عملة الدفع',
-    payCash: 'SYP',
+    payCurrency: 'الدفع بالدولار فقط',
     payUsd: 'USD',
+    nightlyPrice: 'السعر لليلة',
+    stayLength: 'مدة الإقامة',
+    estimatedTotal: 'إجمالي الحجز',
     usdRoundingNote: '',
     protectionChoice: 'اختيار الحماية',
     standardRate: 'السعر العادي',
@@ -132,9 +134,11 @@ const copy = {
     accountReady: 'Guest account ready',
     stepRows: ['Review room details', 'Sign in or create account', 'Send booking', 'Pay inside SYBNB', 'Receive confirmation number'],
     contact: 'Open contact',
-    payCurrency: 'Payment currency',
-    payCash: 'SYP',
+    payCurrency: 'USD payment only',
     payUsd: 'USD',
+    nightlyPrice: 'Nightly price',
+    stayLength: 'Stay length',
+    estimatedTotal: 'Booking total',
     usdRoundingNote: '',
     protectionChoice: 'Protection choice',
     standardRate: 'Standard rate',
@@ -203,12 +207,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [offlineMapReady, setOfflineMapReady] = useState(false)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
   const [dateRange, setDateRange] = useState<DateRange>(
-    bookingDraft.dateRange || loadSearchDatesDraft() || { checkIn: '', checkOut: '' },
+    bookingDraft.dateRange || loadSearchDatesDraft() || defaultStayDateRange(),
   )
-  const [showDatePicker, setShowDatePicker] = useState(false)
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number; perNight: Array<{ date: string; priceMinor: number }> } | null>(null)
-  const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>(bookingDraft.payCurrency ?? 'SYP')
+  const [payCurrency] = useState<'USD'>('USD')
   const [offerSummary, setOfferSummary] = useState<{ count: number; cheapestMinor: number | null }>({ count: 0, cheapestMinor: null })
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [siblingRooms, setSiblingRooms] = useState<PlatformListing[]>([])
@@ -509,55 +512,26 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                     <section style={styles.panel}>
                       <strong>{t.specialOfferBadge(offerSummary.count, 180)}</strong>
                       {offerSummary.cheapestMinor != null && (
-                        <span>{moneyText(offerSummary.cheapestMinor, listing.currency, lang)} / {isAr ? 'ليلة' : 'night'}</span>
+                        <span>{moneyText(sypMinorToRoundedUsdMinor(offerSummary.cheapestMinor), 'USD', lang)} / {isAr ? 'ليلة' : 'night'}</span>
                       )}
                     </section>
                   )}
-                  <section style={styles.protectionChoice}>
-                    <strong>{t.datesTitle}</strong>
-                    {showDatePicker ? (
-                      <DateRangePicker
-                        lang={lang}
-                        value={dateRange}
-                        onChange={setDateRange}
-                        onClose={() => setShowDatePicker(false)}
-                        disabledDates={disabledDates}
-                        disabledHint={t.datesRequired}
-                      />
-                    ) : (
-                      <div style={styles.dateFieldsRow}>
-                        <DateField
-                          lang={lang}
-                          label={isAr ? 'تاريخ الدخول' : 'Check-in'}
-                          value={dateRange.checkIn}
-                          onClick={() => setShowDatePicker(true)}
-                        />
-                        <DateField
-                          lang={lang}
-                          label={isAr ? 'تاريخ الخروج' : 'Check-out'}
-                          value={dateRange.checkOut}
-                          onClick={() => setShowDatePicker(true)}
-                        />
-                      </div>
-                    )}
-                  </section>
-
-                  <section style={styles.protectionChoice}>
-                    <strong>{t.payCurrency}</strong>
-                    <div style={styles.protectionOptions}>
-                      <button
-                        style={payCurrency === 'SYP' ? styles.protectionOptionActive : styles.protectionOption}
-                        onClick={() => setPayCurrency('SYP')}
-                      >
-                        <b>{t.payCash}</b>
-                      </button>
-                      <button
-                        style={payCurrency === 'USD' ? styles.protectionOptionActive : styles.protectionOption}
-                        onClick={() => setPayCurrency('USD')}
-                      >
-                        <b>{t.payUsd}</b>
-                      </button>
-                    </div>
+                  <section style={styles.priceSummary}>
+                    <article style={styles.priceSummaryCard}>
+                      <span>{t.nightlyPrice}</span>
+                      <strong>{moneyText(fallbackNightlyMinor, 'USD', lang)}</strong>
+                      <small>{t.payCurrency}</small>
+                    </article>
+                    <article style={styles.priceSummaryCard}>
+                      <span>{t.stayLength}</span>
+                      <strong>{stayQuote?.nights ?? billableNights} {isAr ? 'ليالٍ' : 'nights'}</strong>
+                      <small>{freeCancellationLabel(dateRange.checkIn, cancellationProtection, lang)}</small>
+                    </article>
+                    <article style={styles.priceSummaryCardStrong}>
+                      <span>{t.estimatedTotal}</span>
+                      <strong>{moneyText(cancellationProtection ? protectedTotalMinor : displayedTotalMinor, 'USD', lang)}</strong>
+                      <small>{cancellationProtection ? t.protectedRate : t.standardRate}</small>
+                    </article>
                   </section>
 
                   <section style={styles.protectionChoice}>
@@ -591,22 +565,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                     </div>
                   </section>
 
-                  {payCurrency === 'SYP' && stayQuote && stayQuote.perNight.some((night) => night.priceMinor < listing.priceMinor) && (
-                    <section style={styles.grid}>
-                      {stayQuote.perNight.map((night) => (
-                        <Info
-                          key={night.date}
-                          label={night.date}
-                          value={
-                            night.priceMinor < listing.priceMinor
-                              ? `${moneyText(night.priceMinor, payCurrency, lang)} · ${t.specialOfferNight}`
-                              : moneyText(night.priceMinor, payCurrency, lang)
-                          }
-                          dir={isAr ? 'rtl' : 'ltr'}
-                        />
-                      ))}
-                    </section>
-                  )}
                 </>
               )}
             </section>
@@ -707,7 +665,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       {listingTitleText(room, lang)}
                       {room.hasActiveOffer ? ` · ${t.specialOfferNight}` : ''}
                     </span>
-                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(room.priceMinor, room.currency, lang)}</strong>
+                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(sypMinorToRoundedUsdMinor(room.priceMinor), 'USD', lang)}</strong>
                     <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${room.id}`)}>
                       {t.openRoom}
                     </button>
@@ -717,8 +675,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </section>
           )}
 
-          <section style={styles.grid}>
-            <Info label={t.price} value={moneyText(listing.priceMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+          <section style={styles.metaStrip}>
             <Info label={t.owner} value={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()} />
             <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
           </section>
@@ -744,6 +701,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       )}
     </main>
   )
+}
+
+function defaultStayDateRange(): DateRange {
+  const checkIn = new Date(Date.now() + 1000 * 60 * 60 * 24)
+  const checkOut = new Date(Date.now() + 1000 * 60 * 60 * 24 * 3)
+  return { checkIn: toISODate(checkIn), checkOut: toISODate(checkOut) }
 }
 
 function toISODate(date: Date) {
@@ -863,7 +826,7 @@ function readListingReturnPath() {
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '24px 16px 112px', display: 'grid', gap: 16, maxWidth: 1080, margin: '0 auto' },
+  page: { minHeight: '100vh', background: '#08090d', color: '#fff', padding: '20px 14px 112px', display: 'grid', gap: 14, maxWidth: 1080, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   flowNav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
   arrowButton: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
@@ -874,7 +837,7 @@ const styles: Record<string, CSSProperties> = {
   mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
   mediaBadge: { position: 'absolute', insetInlineStart: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   instantBookBadge: { position: 'absolute', insetInlineStart: 14, top: 14, borderRadius: 999, background: 'rgba(213,169,21,.9)', color: '#1a1400', fontWeight: 950, border: '1px solid rgba(255,255,255,.25)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
-  detailBody: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', padding: 20, display: 'grid', gap: 18 },
+  detailBody: { border: '1px solid #263146', borderRadius: 8, background: '#10141f', padding: 18, display: 'grid', gap: 16, boxShadow: '0 18px 60px rgba(0,0,0,.24)' },
   titleBlock: { display: 'grid', gap: 8, justifyItems: 'center', textAlign: 'center' },
   locationLine: { color: '#9aa6ba', fontWeight: 800 },
   tabRow: { display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
@@ -889,10 +852,10 @@ const styles: Record<string, CSSProperties> = {
   accountHint: { border: '1px solid rgba(82,104,255,.45)', borderRadius: 8, background: 'rgba(82,104,255,.1)', color: '#dfe5ff', padding: 12, fontWeight: 900 },
   heroContent: { padding: 18, display: 'grid', gap: 12, alignContent: 'center' },
   eyebrow: { color: '#d5a915', letterSpacing: 2, fontWeight: 900, fontSize: 11, margin: 0 },
-  title: { margin: 0, fontSize: 42, lineHeight: 1.05 },
+  title: { margin: 0, fontSize: 38, lineHeight: 1.08 },
   body: { color: '#9aa6ba', lineHeight: 1.65, margin: 0 },
   actions: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
-  primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 14px' },
+  primaryButton: { minHeight: 54, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 16px', fontSize: 18 },
   secondaryButton: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
   secondaryLinkButton: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px', display: 'grid', placeItems: 'center', textDecoration: 'none' },
   grid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' },
@@ -903,7 +866,7 @@ const styles: Record<string, CSSProperties> = {
   secureGateGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   secureInput: { minHeight: 48, border: '1px solid #30384d', borderRadius: 8, background: '#0d1320', color: '#fff', padding: '0 12px', fontWeight: 800 },
   secureError: { color: '#ffabab', fontSize: 13 },
-  protectionChoice: { border: '1px solid rgba(213,169,21,.5)', borderRadius: 8, background: 'rgba(213,169,21,.08)', padding: 14, display: 'grid', gap: 12 },
+  protectionChoice: { border: '1px solid rgba(213,169,21,.42)', borderRadius: 8, background: '#15140d', padding: 14, display: 'grid', gap: 12 },
   dateFieldsRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   mapPanel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 12 },
   mapCanvas: { minHeight: 260, border: '1px solid rgba(82,104,255,.4)', borderRadius: 8, background: '#0c1220', display: 'grid', placeItems: 'center', color: '#fff', overflow: 'hidden', position: 'relative' },
@@ -914,9 +877,13 @@ const styles: Record<string, CSSProperties> = {
   offlineMapReady: { alignItems: 'center', border: '1px solid rgba(32,210,155,.5)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#9fffe1', display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr) auto', padding: 14 },
   offlineMapButton: { minHeight: 44, border: '1px solid rgba(229,184,11,.7)', borderRadius: 8, background: '#171b29', color: '#f7d45f', fontWeight: 950, padding: '0 14px' },
   offlineMapSavedButton: { minHeight: 44, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 18px' },
+  priceSummary: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+  priceSummaryCard: { border: '1px solid #30384d', borderRadius: 8, background: '#0d1320', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
+  priceSummaryCardStrong: { border: '1px solid rgba(32,210,155,.65)', borderRadius: 8, background: 'rgba(32,210,155,.12)', padding: 14, display: 'grid', gap: 6, color: '#d8fff3' },
+  metaStrip: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' },
   protectionOptions: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' },
   protectionOption: { minHeight: 118, border: '1px solid #30384d', borderRadius: 8, background: '#0d1320', color: '#fff', padding: 14, textAlign: 'start', display: 'grid', gap: 8 },
-  protectionOptionActive: { minHeight: 118, border: '1px solid #20d29b', borderRadius: 8, background: 'rgba(32,210,155,.12)', color: '#fff', padding: 14, textAlign: 'start', display: 'grid', gap: 8 },
+  protectionOptionActive: { minHeight: 118, border: '1px solid #20d29b', borderRadius: 8, background: '#133326', color: '#fff', padding: 14, textAlign: 'start', display: 'grid', gap: 8 },
   cancellationCutoff: { color: '#20d29b', fontStyle: 'normal', fontWeight: 800, fontSize: 13 },
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14, display: 'grid', gap: 12 },

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
+import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { SearchStateCard } from './SearchStates'
 import { UnifiedSearchBar } from './UnifiedSearchBar'
@@ -170,7 +171,8 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         toApiDivision(value?.division || effectiveInitialDivision),
         value ? toListingSearchFilters(value) : {},
       )
-      setListings(results)
+      const visibleResults = isStaysEntry ? results.filter((listing) => !isSampleListing(listing)) : results
+      setListings(visibleResults)
       setState('empty')
     } catch {
       setListings([])
@@ -236,14 +238,11 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                 <img src={listingImage(listing)} alt="" loading="lazy" />
                 <div className="search-result-body">
                   <span className="search-result-status">{statusText(listing.status, lang)}</span>
-                  {listing.hasActiveOffer && (
-                    <span className="search-result-offer-badge">{lang === 'ar' ? '🔥 عرض خاص' : '🔥 Special offer'}</span>
-                  )}
                   <h2>{listingTitleText(listing, lang)}</h2>
                   <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
                   <div className="search-result-meta">
                     <span>{t.price}</span>
-                    <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
+                    <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.division === 'STAYS' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor, listing.division === 'STAYS' ? 'USD' : listing.currency, lang)}</strong>
                   </div>
                   <div className="search-result-actions">
                     <button
