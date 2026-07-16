@@ -171,10 +171,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [stepIndex, setStepIndex] = useState(0)
   const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
-  const [title, setTitle] = useState(draft.title ?? (isAr ? 'شقة مفروشة قرب المالكي' : 'Furnished apartment near Malki'))
-  const [description, setDescription] = useState(
-    draft.description ?? (isAr ? 'شقة جاهزة للسكن مع وصول سريع للخدمات.' : 'Ready-to-live apartment with quick service access.'),
-  )
+  const [title, setTitle] = useState(draft.title ?? '')
+  const [description, setDescription] = useState(draft.description ?? '')
   const [governorate, setGovernorate] = useState(draft.governorate || 'damascus')
   const [city, setCity] = useState(draft.city || 'damascus-city')
   const [area, setArea] = useState(draft.area || 'old-city')
@@ -510,7 +508,7 @@ export function SellerListingWizard({ lang }: Props) {
                 <span>{isAdvertisingFlow ? (isAr ? 'اسم الحملة الإعلانية' : 'Campaign name') : isAr ? 'عنوان الإعلان' : 'Listing title'}</span>
                 <input
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder={isAdvertisingFlow ? (isAr ? 'مثال: إعلان مشروع جديد' : 'Example: New project campaign') : isAr ? 'مثال: شقة مفروشة قرب المالكي' : 'Example: Furnished apartment near Malki'}
+                  placeholder={isAdvertisingFlow ? (isAr ? 'اسم الحملة' : 'Campaign name') : isAr ? 'اكتب عنوان الإعلان' : 'Write the listing title'}
                   value={title}
                 />
               </label>
@@ -518,7 +516,7 @@ export function SellerListingWizard({ lang }: Props) {
                 <span>{isAdvertisingFlow ? (isAr ? 'وصف الإعلان' : 'Ad description') : isAr ? 'وصف مختصر' : 'Short description'}</span>
                 <textarea
                   onChange={(event) => setDescription(event.target.value)}
-                  placeholder={isAdvertisingFlow ? (isAr ? 'اكتب هدف الإعلان والجمهور المطلوب.' : 'Write the ad goal and target audience.') : isAr ? 'اكتب أهم تفاصيل العقار بوضوح.' : 'Write the key property details clearly.'}
+                  placeholder={isAdvertisingFlow ? (isAr ? 'اكتب هدف الإعلان والجمهور المطلوب.' : 'Write the ad goal and target audience.') : isAr ? 'اكتب الوصف بوضوح.' : 'Write the description clearly.'}
                   value={description}
                 />
               </label>
