@@ -989,6 +989,31 @@ a {
   padding: 0 14px;
 }
 
+.seller-price-input-shell {
+  align-items: center;
+  background: #0a0f1d;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 54px;
+  padding: 0 14px;
+}
+
+.seller-price-input-shell b {
+  color: #20d29b;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.seller-price-input-shell input {
+  background: transparent;
+  border: 0;
+  min-height: 52px;
+  padding: 0;
+}
+
 .seller-verification-box {
   background: rgba(82, 108, 255, 0.08);
   border: 1px solid rgba(82, 108, 255, 0.26);
@@ -2094,6 +2119,7 @@ a {
 .seller-host-calendar-panel-head {
   align-items: end;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
 }
@@ -2124,6 +2150,36 @@ a {
   color: #f7f8ff;
   font-weight: 900;
   min-height: 44px;
+  padding: 0 10px;
+}
+
+.seller-host-month-switcher {
+  align-items: center;
+  background: rgba(10, 15, 29, 0.76);
+  border: 1px solid #263651;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  padding: 6px;
+}
+
+.seller-host-month-switcher b {
+  color: #f7f8ff;
+  font-size: 13px;
+  font-weight: 950;
+  text-align: center;
+}
+
+.seller-host-month-switcher button {
+  background: #121c2f;
+  border: 1px solid #263651;
+  border-radius: 7px;
+  color: #f7f8ff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 950;
+  min-height: 34px;
   padding: 0 10px;
 }
 
@@ -2166,6 +2222,19 @@ a {
   color: #20d29b;
 }
 
+.seller-host-booking-grid button.booked {
+  background: rgba(213, 169, 21, 0.22);
+  border-color: #d5a915;
+}
+
+.seller-host-booking-grid button.booked span {
+  color: #d5a915;
+}
+
+.seller-host-options-capsule {
+  border-color: rgba(82, 108, 255, 0.48);
+}
+
 .seller-host-reservation-card {
   background: rgba(213, 169, 21, 0.12);
   border: 1px solid rgba(213, 169, 21, 0.48);
@@ -2174,6 +2243,10 @@ a {
   gap: 10px;
   min-height: 176px;
   padding: 14px;
+}
+
+.seller-host-reservation-card.compact {
+  min-height: auto;
 }
 
 .seller-host-reservation-card span {

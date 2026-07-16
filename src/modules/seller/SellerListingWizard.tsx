@@ -46,6 +46,7 @@ type WizardDraft = {
   mapPinConfirmed: boolean
   price: string
   size: string
+  guestCapacity: string
   bedrooms: string
   bathrooms: string
   instantBookEnabled: boolean
@@ -78,6 +79,26 @@ function addDaysIso(days: number) {
   const date = new Date()
   date.setDate(date.getDate() + days)
   return date.toISOString().slice(0, 10)
+}
+
+function addMonths(date: Date, months: number) {
+  const nextDate = new Date(date)
+  nextDate.setMonth(nextDate.getMonth() + months)
+  return nextDate
+}
+
+function monthDays(date: Date) {
+  const year = date.getFullYear()
+  const month = date.getMonth()
+  const days = new Date(year, month + 1, 0).getDate()
+  return Array.from({ length: days }, (_, index) => {
+    const day = new Date(year, month, index + 1)
+    return day.toISOString().slice(0, 10)
+  })
+}
+
+function monthTitle(date: Date, lang: Lang) {
+  return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SY' : 'en-US', { month: 'long', year: 'numeric' }).format(date)
 }
 
 type WizardStep = {
@@ -199,6 +220,7 @@ export function SellerListingWizard({ lang }: Props) {
   const [mapPinConfirmed, setMapPinConfirmed] = useState(draft.mapPinConfirmed ?? false)
   const [price, setPrice] = useState(draft.price || '15')
   const [size, setSize] = useState(draft.size || '110')
+  const [guestCapacity, setGuestCapacity] = useState(draft.guestCapacity || '2')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
   const [bathrooms, setBathrooms] = useState(draft.bathrooms || '2')
   const [instantBookEnabled, setInstantBookEnabled] = useState(draft.instantBookEnabled ?? false)
@@ -209,6 +231,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [availableEnd, setAvailableEnd] = useState(draft.availableEnd || addDaysIso(31))
   const [bookedDate, setBookedDate] = useState(draft.bookedDate || addDaysIso(7))
   const [paymentDay, setPaymentDay] = useState(draft.paymentDay || addDaysIso(1))
+  const [availabilityMonth, setAvailabilityMonth] = useState(() => new Date())
+  const [reservationMonth, setReservationMonth] = useState(() => addMonths(new Date(), 1))
   const [adPlacement, setAdPlacement] = useState(isAr ? 'الرئيسية' : 'Landing page')
   const [adDuration, setAdDuration] = useState(isAr ? 'أسبوع واحد' : 'One week')
   const [uploadedAdFiles, setUploadedAdFiles] = useState<string[]>([])
@@ -246,6 +270,7 @@ export function SellerListingWizard({ lang }: Props) {
       mapPinConfirmed,
       price,
       size,
+      guestCapacity,
       bedrooms,
       bathrooms,
       instantBookEnabled,
@@ -259,7 +284,7 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, size, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
+  }, [division, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -297,8 +322,10 @@ export function SellerListingWizard({ lang }: Props) {
     longitude,
     pinConfirmed: mapPinConfirmed,
   }
-  const hostCalendarDays = useMemo(() => Array.from({ length: 14 }, (_, index) => addDaysIso(index + 1)), [])
+  const availabilityMonthDays = useMemo(() => monthDays(availabilityMonth), [availabilityMonth])
+  const reservationMonthDays = useMemo(() => monthDays(reservationMonth), [reservationMonth])
   const selectedAvailabilityDays = useMemo(() => new Set(availabilityDates), [availabilityDates])
+  const bookedDays = useMemo(() => new Set([bookedDate, paymentDay].filter(Boolean)), [bookedDate, paymentDay])
 
   function updateAvailabilityDates(nextDates: string[]) {
     const sortedDates = Array.from(new Set(nextDates)).sort()
@@ -350,6 +377,7 @@ export function SellerListingWizard({ lang }: Props) {
       const roomTypeMetadata = {
         propertyType: selectedType,
         sizeSqm: toNumber(size),
+        guestCapacity: toNumber(guestCapacity),
         bedrooms: toNumber(bedrooms),
         bathrooms: toNumber(bathrooms),
         visualFilters,
@@ -427,6 +455,7 @@ export function SellerListingWizard({ lang }: Props) {
             cityLabel: selectedCityLabel,
             areaLabel: selectedAreaLabel,
             sizeSqm: toNumber(size),
+            guestCapacity: toNumber(guestCapacity),
             bedrooms: toNumber(bedrooms),
             bathrooms: toNumber(bathrooms),
             visualFilters,
@@ -751,19 +780,41 @@ export function SellerListingWizard({ lang }: Props) {
                       ? 'السعر المطلوب'
                       : 'Asking price'}
                 </span>
-                <input
-                  dir="ltr"
-                  onChange={(event) => {
-                    setPrice(event.target.value)
-                    if (division === 'STAYS') setVariableNightPrice(event.target.value)
-                  }}
-                  placeholder={division === 'STAYS' ? '15' : '250000'}
-                  value={price}
-                />
+                {division === 'STAYS' ? (
+                  <div className="seller-price-input-shell">
+                    <b>USD</b>
+                    <input
+                      dir="ltr"
+                      inputMode="numeric"
+                      onChange={(event) => {
+                        setPrice(event.target.value)
+                        setVariableNightPrice(event.target.value)
+                      }}
+                      placeholder="15"
+                      value={price}
+                    />
+                  </div>
+                ) : (
+                  <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder="250000" value={price} />
+                )}
               </label>
               <label>
-                <span>{isAr ? 'المساحة' : 'Area'}</span>
-                <input dir="ltr" onChange={(event) => setSize(event.target.value)} placeholder="110 m2" value={size} />
+                <span>
+                  {division === 'STAYS'
+                    ? isAr
+                      ? 'عدد الضيوف المقبول'
+                      : 'Accepted guests'
+                    : isAr
+                      ? 'المساحة'
+                      : 'Area'}
+                </span>
+                <input
+                  dir="ltr"
+                  inputMode="numeric"
+                  onChange={(event) => (division === 'STAYS' ? setGuestCapacity(event.target.value) : setSize(event.target.value))}
+                  placeholder={division === 'STAYS' ? '2' : '110 m2'}
+                  value={division === 'STAYS' ? guestCapacity : size}
+                />
               </label>
               <label>
                 <span>{isAr ? 'غرف النوم' : 'Bedrooms'}</span>
@@ -815,9 +866,18 @@ export function SellerListingWizard({ lang }: Props) {
                   <div className="seller-host-calendar-layout">
                     <section className="seller-host-calendar-panel available">
                       <div className="seller-host-calendar-panel-head">
-                        <strong>{isAr ? 'رزنامة التوفر' : 'Availability calendar'}</strong>
+                        <strong>{isAr ? 'أماكن متوفرة' : 'Available places'}</strong>
+                        <div className="seller-host-month-switcher">
+                          <button onClick={() => setAvailabilityMonth((current) => addMonths(current, -1))} type="button">
+                            {isAr ? 'السابق' : 'Previous'}
+                          </button>
+                          <b>{monthTitle(availabilityMonth, lang)}</b>
+                          <button onClick={() => setAvailabilityMonth((current) => addMonths(current, 1))} type="button">
+                            {isAr ? 'التالي' : 'Next'}
+                          </button>
+                        </div>
                         <label>
-                          <span>{isAr ? 'سعر الليلة' : 'Night price'}</span>
+                          <span>{isAr ? 'سعر الليلة USD' : 'Night price USD'}</span>
                           <input
                             dir="ltr"
                             inputMode="numeric"
@@ -830,10 +890,10 @@ export function SellerListingWizard({ lang }: Props) {
                         </label>
                       </div>
                       <div className="seller-host-day-grid">
-                        {hostCalendarDays.map((day) => (
+                        {availabilityMonthDays.map((day) => (
                           <button className={selectedAvailabilityDays.has(day) ? 'active' : ''} key={day} onClick={() => toggleAvailabilityDay(day)} type="button">
                             <strong>{new Date(`${day}T00:00:00`).getDate()}</strong>
-                            <span>{selectedAvailabilityDays.has(day) ? (isAr ? 'متاح' : 'Open') : isAr ? 'مغلق' : 'Closed'}</span>
+                            <span>{selectedAvailabilityDays.has(day) ? `USD ${variableNightPrice || price}` : isAr ? 'مغلق' : 'Closed'}</span>
                           </button>
                         ))}
                       </div>
@@ -841,27 +901,51 @@ export function SellerListingWizard({ lang }: Props) {
                     <section className="seller-host-calendar-panel booked">
                       <div className="seller-host-calendar-panel-head">
                         <strong>{isAr ? 'رزنامة الحجوزات' : 'Reservation calendar'}</strong>
+                        <div className="seller-host-month-switcher">
+                          <button onClick={() => setReservationMonth((current) => addMonths(current, -1))} type="button">
+                            {isAr ? 'السابق' : 'Previous'}
+                          </button>
+                          <b>{monthTitle(reservationMonth, lang)}</b>
+                          <button onClick={() => setReservationMonth((current) => addMonths(current, 1))} type="button">
+                            {isAr ? 'التالي' : 'Next'}
+                          </button>
+                        </div>
                         <label>
                           <span>{isAr ? 'يوم الدفع' : 'Payment day'}</span>
                           <input dir="ltr" type="date" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} />
                         </label>
                       </div>
-                      <div className="seller-host-reservation-card">
-                        <span>{isAr ? 'حجز تجريبي قادم' : 'Upcoming sample booking'}</span>
+                      <div className="seller-host-day-grid seller-host-booking-grid">
+                        {reservationMonthDays.map((day) => (
+                          <button className={bookedDays.has(day) ? 'booked' : ''} key={day} onClick={() => setBookedDate(day)} type="button">
+                            <strong>{new Date(`${day}T00:00:00`).getDate()}</strong>
+                            <span>{bookedDays.has(day) ? (isAr ? 'محجوز' : 'Booked') : isAr ? 'فارغ' : 'Free'}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="seller-host-reservation-card compact">
+                        <span>{isAr ? 'آخر حجز مقبول' : 'Accepted booking'}</span>
                         <strong>{bookedDate}</strong>
                         <em>{`USD ${variableNightPrice || price}`}</em>
-                        <button onClick={() => setBookedDate(hostCalendarDays.find((day) => selectedAvailabilityDays.has(day)) || addDaysIso(7))} type="button">
-                          {isAr ? 'تحديث من التوفر' : 'Use first open day'}
-                        </button>
                       </div>
                     </section>
                   </div>
                 </div>
               )}
-              <div className="seller-wide-field">
+              <div className="seller-wide-field seller-host-search-capsule seller-host-options-capsule">
+                <div className="seller-host-search-head">
+                  <div>
+                    <strong>{isAr ? 'خيارات البحث التي تظهر للضيف' : 'Guest-visible search options'}</strong>
+                    <span>
+                      {isAr
+                        ? 'اختر نفس الكبسولات التي يستخدمها الضيف في البحث حتى يعرف ما توفره الإقامة.'
+                        : 'Pick the same capsules guests use in search so the listing clearly shows what this stay offers.'}
+                    </span>
+                  </div>
+                </div>
                 <VisualFilterPanel
                   compact
-                  groups={sellerPropertyFilterGroups.slice(1)}
+                  groups={sellerPropertyFilterGroups}
                   lang={lang}
                   selection={visualFilters}
                   onChange={setVisualFilters}
