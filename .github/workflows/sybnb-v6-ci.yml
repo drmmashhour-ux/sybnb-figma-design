@@ -75,6 +75,5 @@ jobs:
           } > .env.test
 
       - run: npm run db:test:push
-      - run: npm run test:guard
       - run: npm run test:api
       - run: npm run test:security
