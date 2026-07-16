@@ -29,7 +29,6 @@ const copy = {
     dates: 'التواريخ',
     status: 'الحالة',
     hostGross: 'صافي المضيف',
-    commission: 'عمولة SYBNB',
     payoutStatus: 'حالة الصرف',
     eligibleAt: 'تاريخ الأهلية',
     statusPENDING_HOLD: 'ضمن فترة الحجز',
@@ -51,7 +50,6 @@ const copy = {
     dates: 'Dates',
     status: 'Status',
     hostGross: 'Host net',
-    commission: 'SYBNB commission',
     payoutStatus: 'Payout status',
     eligibleAt: 'Eligible at',
     statusPENDING_HOLD: 'In hold window',
@@ -124,7 +122,6 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
               <span>{t.dates}</span>
               <span>{t.status}</span>
               <span>{t.hostGross}</span>
-              <span>{t.commission}</span>
               <span>{t.payoutStatus}</span>
             </div>
             {earnings.rows.length === 0 && <p style={styles.body}>{t.empty}</p>}
@@ -138,7 +135,6 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
                 </span>
                 <span>{statusText(row.status, lang)}</span>
                 <b dir="ltr">{moneyText(row.hostGrossMinor, row.currency, lang)}</b>
-                <span dir="ltr">{moneyText(row.adminCommissionMinor, row.currency, lang)}</span>
                 <span
                   style={{
                     ...styles.payoutPill,
@@ -170,8 +166,8 @@ const styles: Record<string, CSSProperties> = {
   stats: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   stat: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#9aa6ba', display: 'grid', gap: 6, padding: 14 },
   table: { border: '1px solid #242735', borderRadius: 8, background: '#101016', overflowX: 'auto', overflowY: 'hidden' },
-  tableHead: { display: 'grid', gridTemplateColumns: 'minmax(160px, 2fr) minmax(140px, 1.2fr) 110px 130px 130px 140px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13, minWidth: 810 },
-  tableRow: { display: 'grid', gridTemplateColumns: 'minmax(160px, 2fr) minmax(140px, 1.2fr) 110px 130px 130px 140px', gap: 12, alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid #242735', fontSize: 14, minWidth: 810 },
+  tableHead: { display: 'grid', gridTemplateColumns: 'minmax(160px, 2fr) minmax(140px, 1.2fr) 110px 130px 140px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13, minWidth: 680 },
+  tableRow: { display: 'grid', gridTemplateColumns: 'minmax(160px, 2fr) minmax(140px, 1.2fr) 110px 130px 140px', gap: 12, alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid #242735', fontSize: 14, minWidth: 680 },
   payoutPill: { borderRadius: 8, padding: '6px 10px', textAlign: 'center', fontWeight: 900, fontSize: 12 },
   payoutReleased: { background: 'rgba(32,210,155,.14)', color: '#20d29b', border: '1px solid rgba(32,210,155,.42)' },
   payoutEligible: { background: 'rgba(82,108,255,.14)', color: '#8ea0ff', border: '1px solid rgba(82,108,255,.42)' },

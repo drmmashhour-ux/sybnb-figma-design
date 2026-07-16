@@ -43,7 +43,7 @@ export async function handleHost(req, res, url, context) {
       ).map((entry) => entry.referenceId),
     )
 
-    const rows = bookings.map((booking) => buildPayoutRow(booking, releasedBookingIds))
+    const rows = bookings.map((booking) => hostSafePayoutRow(buildPayoutRow(booking, releasedBookingIds)))
 
     const totals = rows.reduce(
       (acc, row) => {
@@ -645,4 +645,9 @@ function normalizeHostListingStatus(value) {
   error.code = 'INVALID_HOST_LISTING_STATUS'
   error.expose = true
   throw error
+}
+
+function hostSafePayoutRow(row) {
+  const { adminCommissionMinor, ...safeRow } = row
+  return safeRow
 }

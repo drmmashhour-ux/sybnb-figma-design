@@ -72,7 +72,7 @@ async function firstAdminId(tx) {
   return admin?.userId
 }
 
-async function finalizeStripeSession(session) {
+export async function finalizeStripeSession(session) {
   const bookingId = session.metadata?.bookingId
   if (!bookingId || session.payment_status !== 'paid') return null
 
@@ -98,11 +98,36 @@ async function finalizeStripeSession(session) {
       },
     })
 
-    return approvePaymentProof(tx, {
+    const actorUserId = await firstAdminId(tx)
+    const approved = await approvePaymentProof(tx, {
       proofId: created.id,
-      actorUserId: await firstAdminId(tx),
+      actorUserId,
       note: 'Auto-approved: Stripe confirmed the card charge was captured.',
     })
+
+    await tx.adminAuditLog.create({
+      data: {
+        actorUserId: actorUserId || null,
+        action: 'STRIPE_PAYMENT_AUTO_APPROVED',
+        entityType: 'payment_proofs',
+        entityId: approved.id,
+        before: {
+          status: created.status,
+          provider: created.provider,
+          providerRef: created.providerRef,
+          bookingId: created.bookingId,
+        },
+        after: {
+          status: approved.status,
+          provider: approved.provider,
+          providerRef: approved.providerRef,
+          bookingId: approved.bookingId,
+          stripeSessionId: session.id,
+        },
+      },
+    })
+
+    return approved
   })
 }
 

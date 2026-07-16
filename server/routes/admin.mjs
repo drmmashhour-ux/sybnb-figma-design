@@ -5,6 +5,16 @@ import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOL
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
+function payoutNotEligibleError() {
+  const error = new Error(
+    `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
+  )
+  error.statusCode = 400
+  error.code = 'PAYOUT_NOT_ELIGIBLE'
+  error.expose = true
+  return error
+}
+
 export async function handleAdmin(req, res, url, context) {
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
   if (hideReviewMatch) {
@@ -66,7 +76,7 @@ export async function handleAdmin(req, res, url, context) {
       const completedBookings = await db().booking.findMany({
         where: { status: 'COMPLETED' },
         include: {
-          listing: { include: { owner: { select: { id: true, displayName: true } } } },
+          listing: { include: { owner: { select: { id: true, displayName: true, payoutMethod: true } } } },
           payments: true,
         },
         orderBy: { checkOut: 'asc' },
@@ -96,6 +106,7 @@ export async function handleAdmin(req, res, url, context) {
             listingTitle: booking.listing?.titleAr,
             hostId: booking.listing?.ownerId,
             hostName: booking.listing?.owner?.displayName,
+            hostPayoutMethod: booking.listing?.owner?.payoutMethod || null,
             checkOut: booking.checkOut,
             eligibleAt: payoutEligibleAt(booking.checkOut),
             eligibleNow: isPayoutEligible(booking),
@@ -128,28 +139,29 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
 
-    if (!isPayoutEligible(booking)) {
-      const error = new Error(
-        `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
-      )
-      error.statusCode = 400
-      error.code = 'PAYOUT_NOT_ELIGIBLE'
-      error.expose = true
-      throw error
-    }
-
-    const approvedPayment = booking.payments.find((payment) => payment.status === 'APPROVED')
-    const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor)
-
     const entry = await db().$transaction(async (tx) => {
+      const guarded = await tx.booking.updateMany({
+        where: { id: booking.id, status: 'COMPLETED' },
+        data: { updatedAt: new Date() },
+      })
+      if (guarded.count !== 1) throw payoutNotEligibleError()
+
+      const freshBooking = await tx.booking.findUnique({
+        where: { id: booking.id },
+        include: { listing: true, payments: true },
+      })
+      if (!freshBooking || !isPayoutEligible(freshBooking)) throw payoutNotEligibleError()
+
+      const approvedPayment = freshBooking.payments.find((payment) => payment.status === 'APPROVED')
+      const split = bookingFinanceSplit(freshBooking, approvedPayment?.amountMinor || freshBooking.amountMinor)
       const released = await recordWalletEntry(tx, {
-        userId: booking.listing.ownerId,
+        userId: freshBooking.listing.ownerId,
         type: 'RELEASE',
         amountMinor: split.hostGrossMinor,
-        currency: booking.currency,
+        currency: freshBooking.currency,
         referenceType: 'booking_payout',
-        referenceId: booking.id,
-        keyParts: ['booking-host-release', booking.id, approvedPayment?.id],
+        referenceId: freshBooking.id,
+        keyParts: ['booking-host-release', freshBooking.id, approvedPayment?.id],
         note: `Host payout released by admin after the ${PAYOUT_HOLD_DAYS}-day hold following stay completion.`,
       })
 
@@ -158,8 +170,8 @@ export async function handleAdmin(req, res, url, context) {
           actorUserId: context.user.id,
           action: 'ADMIN_PAYOUT_RELEASED',
           entityType: 'bookings',
-          entityId: booking.id,
-          before: booking,
+          entityId: freshBooking.id,
+          before: freshBooking,
           after: { walletEntry: released },
         },
       })

@@ -1745,7 +1745,6 @@ export type PlatformHostEarningsRow = {
   checkOut: string | null
   status: string
   hostGrossMinor: number
-  adminCommissionMinor: number
   cleaningFeeMinor: number
   taxesMinor: number
   currency: string
