@@ -177,7 +177,7 @@ export function SellerListingWizard({ lang }: Props) {
   const [city, setCity] = useState(draft.city || 'damascus-city')
   const [area, setArea] = useState(draft.area || 'old-city')
   const [address, setAddress] = useState(draft.address ?? (isAr ? 'قرب شارع رئيسي' : 'Near a main street'))
-  const [price, setPrice] = useState(draft.price || '250000')
+  const [price, setPrice] = useState(draft.price || '15')
   const [size, setSize] = useState(draft.size || '110')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
   const [bathrooms, setBathrooms] = useState(draft.bathrooms || '2')
@@ -233,6 +233,7 @@ export function SellerListingWizard({ lang }: Props) {
   const selectedGovernorateLabel = labelFor(lang, selectedGovernorateData)
   const selectedCityLabel = labelFor(lang, selectedCityData)
   const selectedAreaLabel = labelFor(lang, selectedAreaData)
+  const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
 
   function chooseGovernorate(value: string) {
     const nextGovernorate = getGovernorate(value)
@@ -290,7 +291,7 @@ export function SellerListingWizard({ lang }: Props) {
               titleEn: title,
               description,
               priceMinor: toMinor(price),
-              currency: 'SYP',
+              currency: 'USD',
               instantBookEnabled,
               metadata: roomTypeMetadata,
             })
@@ -301,7 +302,7 @@ export function SellerListingWizard({ lang }: Props) {
               titleEn: title,
               description,
               priceMinor: toMinor(price),
-              currency: 'SYP',
+              currency: 'USD',
               instantBookEnabled,
               metadata: roomTypeMetadata,
             })
@@ -317,7 +318,7 @@ export function SellerListingWizard({ lang }: Props) {
           titleEn: title,
           description,
           priceMinor: toMinor(price),
-          currency: 'SYP',
+          currency: listingCurrency,
           instantBookEnabled: division === 'STAYS' ? instantBookEnabled : false,
           metadata: {
             advertising: isAdvertisingFlow,
@@ -355,7 +356,7 @@ export function SellerListingWizard({ lang }: Props) {
   function startAnotherRoomType() {
     setTitle(isAr ? '' : '')
     setDescription('')
-    setPrice('150000')
+    setPrice('15')
     setSize('40')
     setBedrooms('1')
     setBathrooms('1')
@@ -595,8 +596,16 @@ export function SellerListingWizard({ lang }: Props) {
           {activeStep.id === 'price' && !isAdvertisingFlow && (
             <div className="seller-wizard-section seller-form-grid">
               <label>
-                <span>{isAr ? 'السعر المطلوب' : 'Asking price'}</span>
-                <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder="250000" value={price} />
+                <span>
+                  {division === 'STAYS'
+                    ? isAr
+                      ? 'السعر بالدولار لكل ليلة'
+                      : 'USD nightly price'
+                    : isAr
+                      ? 'السعر المطلوب'
+                      : 'Asking price'}
+                </span>
+                <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder={division === 'STAYS' ? '15' : '250000'} value={price} />
               </label>
               <label>
                 <span>{isAr ? 'المساحة' : 'Area'}</span>
@@ -641,8 +650,12 @@ export function SellerListingWizard({ lang }: Props) {
               </div>
               <div className="seller-money-note">
                 {isAr
-                  ? 'السعر يظهر للزوار كما يكتبه البائع، مع إمكانية التفاوض عبر IMMOContact.'
-                  : 'The price appears to visitors as entered, with negotiation through IMMOContact.'}
+                  ? division === 'STAYS'
+                    ? 'الإقامات القصيرة تظهر للضيف بالدولار فقط.'
+                    : 'السعر يظهر للزوار كما يكتبه البائع، مع إمكانية التفاوض عبر IMMOContact.'
+                  : division === 'STAYS'
+                    ? 'Short stays are shown to guests in USD only.'
+                    : 'The price appears to visitors as entered, with negotiation through IMMOContact.'}
               </div>
             </div>
           )}
