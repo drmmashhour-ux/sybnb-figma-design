@@ -1280,7 +1280,7 @@ export function SellerListingWizard({ lang }: Props) {
                 <div className="seller-host-plan-methods">
                   {[
                     { id: 'shamCash', ar: 'Sham Cash', en: 'Sham Cash' },
-                    { id: 'card', ar: 'بطاقة / Stripe', en: 'Card / Stripe' },
+                    { id: 'card', ar: 'بطاقة / Mastercard', en: 'Card / Mastercard' },
                   ].map((method) => (
                     <button
                       className={listingPlanPaymentMethod === method.id ? 'active' : ''}
@@ -1294,6 +1294,35 @@ export function SellerListingWizard({ lang }: Props) {
                       {method[lang]}
                     </button>
                   ))}
+                </div>
+                <div className="seller-host-plan-payment-details">
+                  {listingPlanPaymentMethod === 'shamCash' ? (
+                    <>
+                      <span>{isAr ? 'تفاصيل Sham Cash' : 'Sham Cash details'}</span>
+                      <strong>{isAr ? 'حوّل مبلغ الخطة إلى حساب SYBNB ثم احفظ رقم العملية.' : 'Send the plan amount to the SYBNB Sham Cash account, then save the transaction number.'}</strong>
+                      <div>
+                        <b>{isAr ? 'المستلم' : 'Receiver'}</b>
+                        <p>SYBNB Platform</p>
+                      </div>
+                      <div>
+                        <b>{isAr ? 'المبلغ' : 'Amount'}</b>
+                        <p>{`USD ${selectedListingPlan.priceUsd}`}</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <span>{isAr ? 'تفاصيل البطاقة' : 'Card details'}</span>
+                      <strong>{isAr ? 'ادفع الخطة ببطاقة Mastercard أو Visa عبر Stripe التجريبي.' : 'Pay the plan by Mastercard or Visa through Stripe test payment.'}</strong>
+                      <div>
+                        <b>{isAr ? 'نوع الدفع' : 'Payment type'}</b>
+                        <p>Mastercard / Visa</p>
+                      </div>
+                      <div>
+                        <b>{isAr ? 'المبلغ' : 'Amount'}</b>
+                        <p>{`USD ${selectedListingPlan.priceUsd}`}</p>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className={`seller-host-plan-status ${listingPlanPaymentConfirmed ? 'confirmed' : ''}`}>
                   <span>

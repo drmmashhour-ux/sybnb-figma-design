@@ -1514,6 +1514,53 @@ a {
   border-color: #20d29b;
 }
 
+.seller-host-plan-payment-details {
+  background: rgba(15, 25, 43, 0.72);
+  border: 1px solid rgba(82, 108, 255, 0.34);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.seller-host-plan-payment-details span,
+.seller-host-plan-payment-details strong {
+  grid-column: 1 / -1;
+}
+
+.seller-host-plan-payment-details span {
+  color: #20d29b;
+  font-weight: 950;
+}
+
+.seller-host-plan-payment-details strong {
+  color: #f7f8ff;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.seller-host-plan-payment-details div {
+  background: #101a2c;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.seller-host-plan-payment-details b {
+  color: #9aa7bd;
+  font-size: 13px;
+}
+
+.seller-host-plan-payment-details p {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 950;
+  margin: 0;
+}
+
 .seller-host-plan-status {
   align-items: center;
   background: rgba(213, 169, 21, 0.08);
