@@ -43,7 +43,7 @@ const copy = {
     agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي.',
     agreementRequired: 'يجب قبول اتفاقية الإيجار اليومي قبل إرسال طلب الحجز.',
     agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
-    agreementVersionLabel: 'الإصدار 1',
+    agreementVersionLabel: '',
     confirm: 'تأكيد وإرسال طلب الحجز',
     saving: 'جار الإرسال',
     datesMissing: 'اختر تاريخ الدخول والخروج من صفحة الإعلان أولاً.',
@@ -67,7 +67,7 @@ const copy = {
     agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action.',
     agreementRequired: 'You must accept the short-term rental agreement before sending the booking request.',
     agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
-    agreementVersionLabel: 'Version 1',
+    agreementVersionLabel: '',
     confirm: 'Confirm and send booking request',
     saving: 'Sending',
     datesMissing: 'Choose check-in and check-out dates on the listing page first.',
@@ -230,7 +230,7 @@ export function BookingReviewPage({ listingId, lang }: Props) {
               <span>
                 <strong>{t.agreementTitle}</strong>
                 <small>{t.agreementCopy}</small>
-                <em>{t.agreementVersionLabel}</em>
+                {t.agreementVersionLabel && <em>{t.agreementVersionLabel}</em>}
               </span>
             </label>
             <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void confirmBooking()}>

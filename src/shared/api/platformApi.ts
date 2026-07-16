@@ -122,6 +122,8 @@ const PROTOTYPE_OWNER = {
   displayName: 'SYBNB Verified Provider',
 }
 
+const LOCAL_FALLBACK_BOOKINGS_KEY = 'sybnb-v6-local-fallback-bookings'
+
 const FALLBACK_APPROVED_LISTINGS: PlatformListing[] = [
   {
     id: 'fallback-stay-malki-apartment',
@@ -1485,16 +1487,26 @@ export async function createPrototypeBooking(input: {
   acceptedTerms?: boolean
   termsVersion?: string
 }) {
-  const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; booking: PlatformBooking }>('/api/bookings', {
-    method: 'POST',
-    token: session.token,
-    body: input,
-  })
-  return response.booking
+  try {
+    const session = await ensurePrototypeGuestSession()
+    const response = await apiRequest<{ ok: true; booking: PlatformBooking }>('/api/bookings', {
+      method: 'POST',
+      token: session.token,
+      body: input,
+    })
+    return response.booking
+  } catch (error) {
+    if (input.listingId.startsWith('fallback-')) {
+      return createLocalFallbackBooking(input)
+    }
+    throw error
+  }
 }
 
 export async function fetchPrototypeBooking(bookingId: string) {
+  const localBooking = getLocalFallbackBooking(bookingId)
+  if (localBooking) return localBooking
+
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{
     ok: true
@@ -1503,6 +1515,71 @@ export async function fetchPrototypeBooking(bookingId: string) {
     token: session.token,
   })
   return response.booking
+}
+
+function createLocalFallbackBooking(input: {
+  listingId: string
+  amountMinor: number
+  currency: string
+  checkIn?: string
+  checkOut?: string
+  cancellationProtectionPurchased?: boolean
+  cancellationProtection?: boolean
+  cancellationProtectionFeeMinor?: number
+  acceptedTerms?: boolean
+  termsVersion?: string
+}) {
+  const listing = FALLBACK_APPROVED_LISTINGS.find((item) => item.id === input.listingId)
+  if (!listing) throw new Error('Fallback listing not found')
+
+  const now = new Date().toISOString()
+  const booking: PlatformBooking & { listing?: PlatformListing; payments?: PlatformPaymentProof[] } = {
+    id: `fallback-booking-${Date.now()}`,
+    listingId: input.listingId,
+    guestId: 'prototype-checkout-guest',
+    status: 'DRAFT',
+    checkIn: input.checkIn || null,
+    checkOut: input.checkOut || null,
+    amountMinor: input.amountMinor,
+    currency: input.currency,
+    metadata: {
+      source: 'local-fallback-inspection',
+      cancellationProtectionPurchased: Boolean(input.cancellationProtectionPurchased || input.cancellationProtection),
+      cancellationProtectionFeeMinor: input.cancellationProtectionFeeMinor || 0,
+      acceptedTerms: Boolean(input.acceptedTerms),
+      termsVersion: input.termsVersion || null,
+    },
+    createdAt: now,
+    updatedAt: now,
+    guest: {
+      id: 'prototype-checkout-guest',
+      displayName: 'SYBNB Demo Guest',
+      email: null,
+    },
+    listing,
+    payments: [],
+  }
+
+  const bookings = readLocalFallbackBookings()
+  bookings[booking.id] = booking
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(LOCAL_FALLBACK_BOOKINGS_KEY, JSON.stringify(bookings))
+  }
+  return booking
+}
+
+function getLocalFallbackBooking(bookingId: string) {
+  return readLocalFallbackBookings()[bookingId] || null
+}
+
+function readLocalFallbackBookings(): Record<string, PlatformBooking & { listing?: PlatformListing; payments?: PlatformPaymentProof[] }> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = sessionStorage.getItem(LOCAL_FALLBACK_BOOKINGS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
 }
 
 export async function disputePrototypeBooking(bookingId: string, note?: string) {
