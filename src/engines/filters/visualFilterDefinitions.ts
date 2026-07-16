@@ -339,6 +339,21 @@ export const carBrandFilterGroup: VisualFilterGroup = {
     { id: 'kia', label: { ar: 'كيا', en: 'Kia' }, art: 'car-kia' },
     { id: 'mercedes', label: { ar: 'مرسيدس', en: 'Mercedes' }, art: 'car-mercedes' },
     { id: 'bmw', label: { ar: 'BMW', en: 'BMW' }, art: 'car-bmw' },
+    { id: 'nissan', label: { ar: 'نيسان', en: 'Nissan' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-sedan'] },
+    { id: 'honda', label: { ar: 'هوندا', en: 'Honda' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-economy'] },
+    { id: 'chevrolet', label: { ar: 'شيفروليه', en: 'Chevrolet' }, art: 'car-suv', photoSrc: visualFilterPhotoSrc['car-suv'] },
+    { id: 'ford', label: { ar: 'فورد', en: 'Ford' }, art: 'car-pickup', photoSrc: visualFilterPhotoSrc['car-pickup'] },
+    { id: 'mitsubishi', label: { ar: 'ميتسوبيشي', en: 'Mitsubishi' }, art: 'car-suv', photoSrc: visualFilterPhotoSrc['car-van'] },
+    { id: 'mazda', label: { ar: 'مازدا', en: 'Mazda' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-luxury'] },
+    { id: 'lexus', label: { ar: 'لكزس', en: 'Lexus' }, art: 'car-luxury', photoSrc: visualFilterPhotoSrc['car-luxury'] },
+    { id: 'audi', label: { ar: 'أودي', en: 'Audi' }, art: 'car-luxury', photoSrc: visualFilterPhotoSrc['car-bmw'] },
+    { id: 'volkswagen', label: { ar: 'فولكس فاغن', en: 'Volkswagen' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-hyundai'] },
+    { id: 'peugeot', label: { ar: 'بيجو', en: 'Peugeot' }, art: 'car-economy', photoSrc: visualFilterPhotoSrc['car-economy'] },
+    { id: 'renault', label: { ar: 'رينو', en: 'Renault' }, art: 'car-economy', photoSrc: visualFilterPhotoSrc['car-kia'] },
+    { id: 'suzuki', label: { ar: 'سوزوكي', en: 'Suzuki' }, art: 'car-economy', photoSrc: visualFilterPhotoSrc['car-economy'] },
+    { id: 'isuzu', label: { ar: 'إيسوزو', en: 'Isuzu' }, art: 'car-pickup', photoSrc: visualFilterPhotoSrc['car-pickup'] },
+    { id: 'changan', label: { ar: 'شانجان', en: 'Changan' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-sedan'] },
+    { id: 'byd', label: { ar: 'BYD', en: 'BYD' }, art: 'car-electric', photoSrc: visualFilterPhotoSrc['car-electric'] },
   ],
 }
 
@@ -462,6 +477,20 @@ function carVisualFilterGroups() {
                 : option.id === 'high'
                   ? visualFilterPhotoSrc['car-luxury']
                   : visualFilterPhotoSrc['car-sedan'],
+        })),
+      }
+    }
+    if (group.id === 'condition') {
+      return {
+        ...group,
+        options: group.options.map((option) => ({
+          ...option,
+          photoSrc:
+            option.id === 'new'
+              ? visualFilterPhotoSrc['car-luxury']
+              : option.id === 'used'
+                ? visualFilterPhotoSrc['car-economy']
+                : option.photoSrc,
         })),
       }
     }
