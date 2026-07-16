@@ -21,18 +21,19 @@ function metadataNumber(metadata: Record<string, unknown> | undefined, key: stri
 }
 
 export function guestFeeSummary(booking: BookingLike): GuestFeeSummary {
-  const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
+  const totalMinor = Math.max(0, Math.round(booking.amountMinor || 0))
   const metadata = booking.listing?.metadata
   const bookingMetadata = booking.metadata
-  const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
 
-  const cleaningFeeMinor = metadataNumber(metadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * 0.05) : 0)
-  const taxesMinor = metadataNumber(metadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * 0.02) : 0)
+  // Guest checkout must keep the exact confirmed quote. Fees appear only when they were
+  // explicitly configured; there are no hidden automatic cleaning, tax, or platform fees.
+  const cleaningFeeMinor = metadataNumber(metadata, 'cleaningFeeMinor')
+  const taxesMinor = metadataNumber(metadata, 'taxesMinor')
   const extraFeesMinor = metadataNumber(metadata, 'extraFeesMinor')
   const cancellationProtectionPurchased = bookingMetadata?.cancellationProtectionPurchased === true
-  const cancellationProtectionFeeMinor = cancellationProtectionPurchased
-    ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * 0.03)
-    : 0
+  const cancellationProtectionFeeMinor = cancellationProtectionPurchased ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') : 0
+  const itemizedFeesMinor = cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
+  const stayAmountMinor = Math.max(0, totalMinor - itemizedFeesMinor)
 
   return {
     stayAmountMinor,
@@ -41,6 +42,6 @@ export function guestFeeSummary(booking: BookingLike): GuestFeeSummary {
     extraFeesMinor,
     cancellationProtectionFeeMinor,
     cancellationProtectionPurchased,
-    totalMinor: stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor,
+    totalMinor,
   }
 }
