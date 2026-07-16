@@ -227,9 +227,10 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   // listing's own (always-SYP) base price — that fallback must go through the same USD
   // conversion+rounding as the real quote does, or a guest who already switched to USD would
   // briefly see a raw SYP number mislabeled as dollars (e.g. "300,000 USD" instead of "$20").
-  const displayedTotalMinor = stayQuote?.totalMinor ?? (
-    payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(listing?.priceMinor ?? 0) : listing?.priceMinor ?? 0
-  )
+  const selectedNights = isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut) ? nightsBetween(dateRange.checkIn, dateRange.checkOut) : 0
+  const billableNights = Math.max(selectedNights, 1)
+  const fallbackNightlyMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(listing?.priceMinor ?? 0) : listing?.priceMinor ?? 0
+  const displayedTotalMinor = stayQuote?.totalMinor ?? fallbackNightlyMinor * billableNights
   const protectionFeeMinor = Math.round(displayedTotalMinor * 0.03)
   const protectedTotalMinor = displayedTotalMinor + protectionFeeMinor
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null

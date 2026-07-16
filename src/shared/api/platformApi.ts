@@ -1756,13 +1756,14 @@ async function ensurePrototypeGuestSession() {
   const guestSession = getStoredGuestSession()
   if (guestSession) return guestSession
 
-  return ensurePrototypeSession({
-    email: 'guest@sybnb.local',
-    password: 'StrongPass123',
-    displayName: 'SYBNB Guest',
-    role: 'GUEST',
-    phone: '+963900000001',
+  const session = await apiRequest<AuthResponse>('/api/auth/checkout-guest', {
+    method: 'POST',
+    body: { source: 'guest-checkout' },
   })
+  sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return session
 }
 
 async function ensurePrototypeAdminSession() {

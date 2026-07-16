@@ -40,7 +40,7 @@ const copy = {
     cancellationProtection: 'حماية الإلغاء',
     totalDue: 'الإجمالي المستحق',
     agreementTitle: 'اتفاقية الإيجار اليومي',
-    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (10% من قيمة الإيجار) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
+    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي.',
     agreementRequired: 'يجب قبول اتفاقية الإيجار اليومي قبل إرسال طلب الحجز.',
     agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
     agreementVersionLabel: 'الإصدار 1',
@@ -64,7 +64,7 @@ const copy = {
     cancellationProtection: 'Cancellation protection',
     totalDue: 'Total due',
     agreementTitle: 'Short-Term Rental Agreement',
-    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (10% of the rent amount) from the host payout for managing the booking, payment, and protection.',
+    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action.',
     agreementRequired: 'You must accept the short-term rental agreement before sending the booking request.',
     agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
     agreementVersionLabel: 'Version 1',
@@ -126,9 +126,9 @@ export function BookingReviewPage({ listingId, lang }: Props) {
   }
 
   const nights = stayQuote?.nights ?? (isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut) ? nightsBetween(dateRange.checkIn, dateRange.checkOut) : 0)
-  const stayAmountMinor = stayQuote?.totalMinor ?? (
-    payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(listing?.priceMinor ?? 0) : listing?.priceMinor ?? 0
-  )
+  const billableNights = Math.max(nights, 1)
+  const fallbackNightlyMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(listing?.priceMinor ?? 0) : listing?.priceMinor ?? 0
+  const stayAmountMinor = stayQuote?.totalMinor ?? fallbackNightlyMinor * billableNights
   const protectionFeeMinor = cancellationProtection ? Math.round(stayAmountMinor * 0.03) : 0
   const totalDueMinor = stayAmountMinor + protectionFeeMinor
 

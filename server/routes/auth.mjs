@@ -107,6 +107,40 @@ export async function handleAuth(req, res, url, context) {
     return json(res, 200, { ok: true })
   }
 
+  if (url.pathname === '/api/auth/checkout-guest') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['source'], 'checkout guest body')
+
+    const email = 'checkout-guest@sybnb.local'
+    let user = await db().user.findUnique({ where: { email }, include: { roles: true } })
+
+    if (!user) {
+      user = await db().$transaction(async (tx) => {
+        const referralCode = await generateUniqueReferralCode(tx)
+        return tx.user.create({
+          data: {
+            email,
+            displayName: 'SYBNB Checkout Guest',
+            referralCode,
+            roles: { create: { role: 'GUEST' } },
+            wallets: { create: { currency: 'SYP' } },
+          },
+          include: { roles: true },
+        })
+      })
+    } else if (!user.roles.some((entry) => entry.role === 'GUEST')) {
+      await db().userRole.create({ data: { userId: user.id, role: 'GUEST' } })
+      user = await db().user.findUnique({ where: { email }, include: { roles: true } })
+    }
+
+    return json(res, 200, {
+      ok: true,
+      user: publicUser(user),
+      token: createSessionToken(user),
+    })
+  }
+
   if (url.pathname === '/api/auth/register') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
