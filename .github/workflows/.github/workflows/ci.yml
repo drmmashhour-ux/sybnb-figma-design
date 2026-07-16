@@ -1,0 +1,80 @@
+name: SYBNB V6 CI
+
+on:
+  push:
+    branches:
+      - security/sybnb-v6-predeployment
+      - main
+  pull_request:
+
+jobs:
+  protocol-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: node --test protocol-live-check.mjs
+      - run: npm run test:unit
+      - run: npm run build
+
+  db-backed-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: sybnb_v6_test_role
+          POSTGRES_PASSWORD: ci_test_password
+          POSTGRES_DB: sybnb_v6_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U sybnb_v6_test_role -d sybnb_v6_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://sybnb_v6_test_role:ci_test_password@127.0.0.1:5432/sybnb_v6_test
+      AUTH_SECRET: ci-only-auth-secret-at-least-32-characters
+      PHONE_HASH_SECRET: ci-only-phone-hash-secret-32-characters
+      CORS_ORIGIN: http://127.0.0.1:5173
+      PGPASSWORD: ci_test_password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Enable PostGIS on the test database
+        run: psql -h 127.0.0.1 -U sybnb_v6_test_role -d sybnb_v6_test -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+
+      - name: Materialize .env.test
+        run: |
+          {
+            echo "NODE_ENV=test"
+            echo "DATABASE_URL=${DATABASE_URL}"
+            echo "AUTH_SECRET=${AUTH_SECRET}"
+            echo "PHONE_HASH_SECRET=${PHONE_HASH_SECRET}"
+            echo "CORS_ORIGIN=${CORS_ORIGIN}"
+          } > .env.test
+
+      - run: npm run db:test:push
+      - run: npm run test:guard
+      - run: npm run test:api
+      - run: npm run test:security
