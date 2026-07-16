@@ -123,6 +123,7 @@ const PROTOTYPE_OWNER = {
 }
 
 const LOCAL_FALLBACK_BOOKINGS_KEY = 'sybnb-v6-local-fallback-bookings'
+const LOCAL_FALLBACK_PAYMENT_PROOFS_KEY = 'sybnb-v6-local-fallback-payment-proofs'
 
 const FALLBACK_APPROVED_LISTINGS: PlatformListing[] = [
   {
@@ -1200,11 +1201,68 @@ export async function confirmStripePayment(sessionId: string) {
 }
 
 export async function fetchPrototypePaymentProof(proofId: string) {
+  const localProof = getLocalFallbackPaymentProof(proofId)
+  if (localProof) return localProof
+
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof }>(`/api/payments/${proofId}`, {
     token: session.token,
   })
   return response.proof
+}
+
+export function createLocalFallbackPaymentProof(input: {
+  bookingId: string
+  provider: string
+  amountMinor: number
+  currency: string
+  providerRef: string
+  proofAssetUrl?: string | null
+}) {
+  const booking = getLocalFallbackBooking(input.bookingId)
+  if (!booking && !input.bookingId.startsWith('fallback-booking-')) throw new Error('Fallback booking not found')
+
+  const now = new Date().toISOString()
+  const autoApprovedLocalProvider = input.provider === 'stripe_test' || input.provider === 'syrian_local_wallet'
+  const proof: PlatformPaymentProof = {
+    id: `fallback-payment-${Date.now()}`,
+    bookingId: input.bookingId,
+    userId: booking?.guestId || 'prototype-checkout-guest',
+    provider: input.provider,
+    status: autoApprovedLocalProvider ? 'APPROVED' : 'PENDING_ADMIN_REVIEW',
+    amountMinor: input.amountMinor,
+    currency: input.currency,
+    proofAssetUrl: input.proofAssetUrl || null,
+    providerRef: input.providerRef,
+    adminNote: autoApprovedLocalProvider ? 'local_payment_approved' : null,
+    reviewedById: autoApprovedLocalProvider ? 'local-payment-test' : null,
+    reviewedAt: autoApprovedLocalProvider ? now : null,
+    user: booking?.guest
+      ? { id: booking.guest.id, displayName: booking.guest.displayName, email: booking.guest.email || null }
+      : { id: 'prototype-checkout-guest', displayName: 'SYBNB Demo Guest', email: null },
+    booking: booking || undefined,
+  }
+
+  const proofs = readLocalFallbackPaymentProofs()
+  proofs[proof.id] = proof
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(LOCAL_FALLBACK_PAYMENT_PROOFS_KEY, JSON.stringify(proofs))
+  }
+  return proof
+}
+
+function getLocalFallbackPaymentProof(proofId: string) {
+  return readLocalFallbackPaymentProofs()[proofId] || null
+}
+
+function readLocalFallbackPaymentProofs(): Record<string, PlatformPaymentProof> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = sessionStorage.getItem(LOCAL_FALLBACK_PAYMENT_PROOFS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
 }
 
 export async function reviewPrototypePaymentProof(
