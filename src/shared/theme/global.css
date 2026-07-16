@@ -1380,6 +1380,186 @@ a {
   gap: 10px;
 }
 
+
+.seller-host-plan-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.seller-host-plan-card {
+  background: #121c2f;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  color: #f7f8ff;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  min-height: 220px;
+  padding: 16px;
+  text-align: start;
+}
+
+.seller-host-plan-card.active {
+  background: rgba(32, 210, 155, 0.12);
+  border-color: #20d29b;
+}
+
+.seller-host-plan-card span {
+  color: #9aa7bd;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.seller-host-plan-card strong {
+  color: #ffe381;
+  font-size: 28px;
+}
+
+.seller-host-plan-card ul {
+  color: #dbe3f2;
+  display: grid;
+  gap: 6px;
+  line-height: 1.5;
+  margin: 0;
+  padding-inline-start: 18px;
+}
+
+.seller-host-plan-card b {
+  color: #20d29b;
+  font-size: 13px;
+}
+
+.seller-host-plan-gate,
+.seller-host-plan-lock {
+  background: rgba(10, 15, 29, 0.52);
+  border: 1px solid #263651;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.seller-host-plan-gate-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.seller-host-plan-gate-head div,
+.seller-host-plan-lock {
+  display: grid;
+  gap: 8px;
+}
+
+.seller-host-plan-gate-head span,
+.seller-host-plan-lock span {
+  color: #9aa7bd;
+  font-weight: 900;
+}
+
+.seller-host-plan-gate-head strong,
+.seller-host-plan-lock strong {
+  color: #f7f8ff;
+  font-size: 22px;
+}
+
+.seller-host-plan-lock p {
+  color: #dbe3f2;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.seller-host-plan-lock button {
+  background: #526cff;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 950;
+  min-height: 48px;
+  padding: 10px 14px;
+}
+
+.seller-host-plan-gate-head em {
+  border: 1px solid rgba(213, 169, 21, 0.45);
+  border-radius: 999px;
+  color: #ffe381;
+  font-style: normal;
+  font-weight: 950;
+  padding: 8px 12px;
+}
+
+.seller-host-plan-methods {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.seller-host-plan-methods button,
+.seller-host-plan-status button {
+  background: #121c2f;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  color: #f7f8ff;
+  cursor: pointer;
+  font-weight: 950;
+  min-height: 52px;
+  padding: 10px;
+}
+
+.seller-host-plan-methods button.active,
+.seller-host-plan-status.confirmed button {
+  background: rgba(32, 210, 155, 0.18);
+  border-color: #20d29b;
+}
+
+.seller-host-plan-status {
+  align-items: center;
+  background: rgba(213, 169, 21, 0.08);
+  border: 1px solid rgba(213, 169, 21, 0.32);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.seller-host-plan-status.confirmed {
+  background: rgba(32, 210, 155, 0.12);
+  border-color: rgba(32, 210, 155, 0.4);
+}
+
+.seller-host-plan-status span {
+  color: #dbe3f2;
+  font-weight: 900;
+}
+
+.seller-offer-proof-panel {
+  background: rgba(32, 210, 155, 0.08);
+  border: 1px solid rgba(32, 210, 155, 0.32);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.seller-offer-proof-panel strong {
+  color: #20d29b;
+  font-size: 20px;
+}
+
+.seller-offer-proof-panel span {
+  color: #dbe3f2;
+  line-height: 1.6;
+}
+
+.seller-offer-proof-panel em {
+  color: #ffe381;
+  font-style: normal;
+  font-weight: 950;
+}
+
 .payment-capsule {
   background: linear-gradient(145deg, #111118, #0c0d14);
   border: 1px solid #242638;
@@ -2001,6 +2181,28 @@ a {
   margin-top: 6px;
 }
 
+.seller-upload-grid button.offer-proof {
+  background: rgba(213, 169, 21, 0.1);
+  border-color: rgba(213, 169, 21, 0.55);
+}
+
+.seller-upload-grid button.offer-proof strong::after {
+  color: #ffe381;
+  content: ' · proof';
+  font-size: 12px;
+  font-weight: 950;
+  margin-inline-start: 6px;
+}
+
+html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
+  content: ' · إثبات';
+}
+
+.seller-upload-grid button.offer-proof.uploaded {
+  background: rgba(32, 210, 155, 0.15);
+  border-color: #20d29b;
+}
+
 .seller-wide-field {
   display: grid;
   gap: 8px;
@@ -2229,6 +2431,40 @@ a {
 
 .seller-host-booking-grid button.booked span {
   color: #d5a915;
+}
+
+
+.seller-host-readonly-booking-note {
+  background: rgba(32, 210, 155, 0.08);
+  border: 1px solid rgba(32, 210, 155, 0.24);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.seller-host-readonly-booking-note span {
+  color: #20d29b;
+  font-weight: 950;
+}
+
+.seller-host-readonly-booking-note b {
+  color: #f7f8ff;
+  font-size: 13px;
+}
+
+.seller-host-booking-grid button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.seller-host-booking-grid button.payment {
+  background: rgba(82, 108, 255, 0.16);
+  border-color: rgba(82, 108, 255, 0.62);
+}
+
+.seller-host-booking-grid button.payment span {
+  color: #9fb0ff;
 }
 
 .seller-host-options-capsule {
@@ -8356,5 +8592,18 @@ a {
 @media (max-width: 760px) {
   .gift-admin-audit-grid {
     grid-template-columns: 1fr !important;
+  }
+}
+
+
+@media (max-width: 900px) {
+  .seller-host-plan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .seller-host-plan-status,
+  .seller-host-plan-gate-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

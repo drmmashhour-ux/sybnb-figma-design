@@ -34,6 +34,9 @@ const DIVISION_OPTIONS: Array<{ value: ListingDivision; ar: string; en: string }
 
 type WizardDraft = {
   division: ListingDivision
+  listingPlan: string
+  listingPlanPaymentMethod: string
+  listingPlanPaymentConfirmed: boolean
   selectedType: string
   title: string
   description: string
@@ -126,9 +129,14 @@ const STEPS: WizardStep[] = [
     helper: { ar: 'السعر والمساحة والغرف.', en: 'Price, size, and rooms.' },
   },
   {
+    id: 'plan',
+    title: { ar: 'الخطة والدفع', en: 'Plan and payment' },
+    helper: { ar: 'اختر خطة الإعلان وادفعها قبل رفع الصور والملفات.', en: 'Choose and pay the listing plan before uploading photos and files.' },
+  },
+  {
     id: 'media',
     title: { ar: 'الصور والملفات', en: 'Photos and files' },
-    helper: { ar: 'صور العقار وإثبات الدفع والملكية أو التفويض.', en: 'Property photos, payment proof, and ownership or authorization files.' },
+    helper: { ar: 'ارفع الصور والملفات المسموحة حسب الخطة المدفوعة.', en: 'Upload photos and files allowed by the paid plan.' },
   },
   {
     id: 'review',
@@ -181,6 +189,103 @@ const AD_DURATIONS = [
   { ar: 'ثلاثة أشهر', en: 'Three months' },
 ]
 
+type MediaSlot = {
+  id: string
+  ar: string
+  en: string
+  required?: boolean
+  offerProof?: boolean
+}
+
+const OFFER_PROOF_PREFIX = 'offerProof:'
+const OFFER_PROOF_GROUP_IDS = new Set(['popular', 'amenities', 'meals', 'views', 'access', 'payments'])
+const OFFER_PROOF_EXCLUDED_OPTION_IDS = new Set(['any', 'nearMe', 'rating8', 'verifiedHost', 'fastResponse', 'featuredHost', 'instantBooking'])
+
+function selectedOfferProofMediaSlots(selection: VisualFilterSelection): MediaSlot[] {
+  const seen = new Set<string>()
+  const slots: MediaSlot[] = []
+
+  sellerPropertyFilterGroups.forEach((group) => {
+    if (!OFFER_PROOF_GROUP_IDS.has(group.id)) return
+    const selected = selection[group.id]
+    const selectedIds = Array.isArray(selected) ? selected : selected ? [selected] : []
+
+    selectedIds.forEach((id) => {
+      if (OFFER_PROOF_EXCLUDED_OPTION_IDS.has(id) || seen.has(id)) return
+      const option = group.options.find((item) => item.id === id)
+      if (!option) return
+      seen.add(id)
+      slots.push({
+        id: `${OFFER_PROOF_PREFIX}${id}`,
+        ar: option.label.ar,
+        en: option.label.en,
+        required: true,
+        offerProof: true,
+      })
+    })
+  })
+
+  return slots
+}
+
+const HOST_LISTING_PLANS: Array<{
+  id: string
+  ar: string
+  en: string
+  priceUsd: number
+  services: Record<Lang, string[]>
+  mediaSlots: MediaSlot[]
+}> = [
+  {
+    id: 'basic',
+    ar: 'Basic',
+    en: 'Basic',
+    priceUsd: 9,
+    services: {
+      ar: ['نشر إعلان واحد', 'رفع صور العقار', 'إثبات الملكية الأساسي', 'ظهور في البحث بعد موافقة الإدارة'],
+      en: ['Publish one listing', 'Upload property photos', 'Basic ownership proof', 'Search visibility after admin approval'],
+    },
+    mediaSlots: [
+      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
+      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
+    ],
+  },
+  {
+    id: 'plus',
+    ar: 'Plus',
+    en: 'Plus',
+    priceUsd: 19,
+    services: {
+      ar: ['كل مزايا Basic', 'رفع التفويض أو السند', 'كبسولات البحث مع صور إثبات', 'مراجعة أولوية من الإدارة'],
+      en: ['Everything in Basic', 'Upload authorization or deed', 'Search capsules with proof photos', 'Priority admin review'],
+    },
+    mediaSlots: [
+      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
+      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
+      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
+      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
+    ],
+  },
+  {
+    id: 'premium',
+    ar: 'Premium',
+    en: 'Premium',
+    priceUsd: 39,
+    services: {
+      ar: ['كل مزايا Plus', 'صور وملفات وإثباتات إضافية', 'تمييز أعلى داخل البحث', 'دعم تجهيز الإعلان قبل النشر'],
+      en: ['Everything in Plus', 'Extra photos, files, and proofs', 'Higher search highlight', 'Listing preparation support before publishing'],
+    },
+    mediaSlots: [
+      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
+      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
+      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
+      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
+      { id: 'extraGallery', ar: 'صور إضافية', en: 'Extra gallery' },
+      { id: 'inspectionFiles', ar: 'ملفات الفحص', en: 'Inspection files' },
+    ],
+  },
+]
+
 export function SellerListingWizard({ lang }: Props) {
   const isAr = lang === 'ar'
   const isAdvertisingFlow = useMemo(() => {
@@ -192,7 +297,7 @@ export function SellerListingWizard({ lang }: Props) {
     const stored = window.localStorage.getItem('sybnb_v6_advertising_plan')
     return stored === 'premium' ? 'premium' : 'plus'
   }, [])
-  const adFileSlots =
+  const adFileSlots: MediaSlot[] =
     adPlan === 'premium'
       ? [
           { id: 'desktopBanner', ar: 'بانر سطح المكتب', en: 'Desktop banner' },
@@ -209,6 +314,9 @@ export function SellerListingWizard({ lang }: Props) {
   const draft = useMemo(() => loadDraft(), [])
   const [stepIndex, setStepIndex] = useState(0)
   const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
+  const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'plus')
+  const [listingPlanPaymentMethod, setListingPlanPaymentMethod] = useState(draft.listingPlanPaymentMethod || 'shamCash')
+  const [listingPlanPaymentConfirmed, setListingPlanPaymentConfirmed] = useState(draft.listingPlanPaymentConfirmed ?? false)
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
@@ -262,6 +370,9 @@ export function SellerListingWizard({ lang }: Props) {
     if (typeof window === 'undefined') return
     const nextDraft: WizardDraft = {
       division,
+      listingPlan,
+      listingPlanPaymentMethod,
+      listingPlanPaymentConfirmed,
       selectedType,
       title,
       description,
@@ -290,7 +401,7 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
+  }, [division, listingPlan, listingPlanPaymentMethod, listingPlanPaymentConfirmed, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -314,6 +425,12 @@ export function SellerListingWizard({ lang }: Props) {
     : areaOptions.slice(0, 10)
   ).slice(0, 16)
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
+  const selectedListingPlan = HOST_LISTING_PLANS.find((plan) => plan.id === listingPlan) || HOST_LISTING_PLANS[1]
+  const selectedOfferProofSlots = useMemo(() => selectedOfferProofMediaSlots(visualFilters), [visualFilters])
+  const planAllowsOfferProofs = selectedListingPlan.id !== 'basic'
+  const activeOfferProofSlots = !isAdvertisingFlow && division === 'STAYS' && planAllowsOfferProofs ? selectedOfferProofSlots : []
+  const allowedMediaSlots = isAdvertisingFlow ? adFileSlots : [...selectedListingPlan.mediaSlots, ...activeOfferProofSlots]
+  const missingRequiredOfferProofSlots = activeOfferProofSlots.filter((slot) => !uploadedAdFiles.includes(slot.id))
   const stayNightPrice = Math.max(0, toNumber(variableNightPrice || price))
   const stayCleaningFee = division === 'STAYS' ? Math.max(0, toNumber(cleaningFee)) : 0
   const stayTaxFee = division === 'STAYS' ? Math.max(0, toNumber(taxFee)) : 0
@@ -372,6 +489,23 @@ export function SellerListingWizard({ lang }: Props) {
   }
 
   const next = async () => {
+    if (!isAdvertisingFlow && activeStep.id === 'plan' && !listingPlanPaymentConfirmed) {
+      setSubmitState('error')
+      setSubmitError(isAr ? 'اختر الخطة وادفعها قبل رفع الصور والملفات.' : 'Choose and pay the plan before uploading photos and files.')
+      return
+    }
+    if (!isAdvertisingFlow && activeStep.id === 'media' && missingRequiredOfferProofSlots.length) {
+      setSubmitState('error')
+      setSubmitError(
+        isAr
+          ? `ارفع إثبات واضح للخيارات المختارة: ${missingRequiredOfferProofSlots.map((slot) => slot.ar).join('، ')}`
+          : `Upload clear proof for selected offers: ${missingRequiredOfferProofSlots.map((slot) => slot.en).join(', ')}`,
+      )
+      return
+    }
+    setSubmitState('idle')
+    setSubmitError('')
+
     if (isLast) {
       if (isAdvertisingFlow && (!adFilesSent || !uploadedDocumentFiles.length)) {
         setSubmitState('error')
@@ -381,6 +515,15 @@ export function SellerListingWizard({ lang }: Props) {
       if (!isAdvertisingFlow && !uploadedDocumentFiles.length) {
         setSubmitState('error')
         setSubmitError(isAr ? 'ارفع مستندات البائع أو إثبات الملكية قبل إرسال الإعلان للمراجعة.' : 'Upload seller documents or ownership proof before sending the listing for review.')
+        return
+      }
+      if (!isAdvertisingFlow && missingRequiredOfferProofSlots.length) {
+        setSubmitState('error')
+        setSubmitError(
+          isAr
+            ? `لا يمكن نشر خيار للضيف بدون صورة إثبات: ${missingRequiredOfferProofSlots.map((slot) => slot.ar).join('، ')}`
+            : `Guest-facing offers need proof photos before publish: ${missingRequiredOfferProofSlots.map((slot) => slot.en).join(', ')}`,
+        )
         return
       }
 
@@ -401,6 +544,14 @@ export function SellerListingWizard({ lang }: Props) {
           cleaningFeeMinor: toMinor(cleaningFee),
           taxFeeMinor: toMinor(taxFee),
         },
+        listingPlan: selectedListingPlan.id,
+        listingPlanPriceUsd: selectedListingPlan.priceUsd,
+        listingPlanPaymentMethod,
+        listingPlanPaymentConfirmed,
+        allowedMediaSlots: allowedMediaSlots.map((slot) => slot.id),
+        selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
+        uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
+        missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
         visualFilters,
         availabilityCalendar,
         mapLocation,
@@ -424,6 +575,14 @@ export function SellerListingWizard({ lang }: Props) {
                 areaLabel: selectedAreaLabel,
                 availabilityCalendar,
                 mapLocation,
+                listingPlan: selectedListingPlan.id,
+                listingPlanPriceUsd: selectedListingPlan.priceUsd,
+                listingPlanPaymentMethod,
+                listingPlanPaymentConfirmed,
+                allowedMediaSlots: allowedMediaSlots.map((slot) => slot.id),
+                selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
+                uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
+                missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
               },
             })
             await addAccommodationRoomType(accommodation.id, {
@@ -487,6 +646,14 @@ export function SellerListingWizard({ lang }: Props) {
               cleaningFeeMinor: toMinor(cleaningFee),
               taxFeeMinor: toMinor(taxFee),
             },
+            listingPlan: selectedListingPlan.id,
+            listingPlanPriceUsd: selectedListingPlan.priceUsd,
+            listingPlanPaymentMethod,
+            listingPlanPaymentConfirmed,
+            allowedMediaSlots: allowedMediaSlots.map((slot) => slot.id),
+            selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
+            uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
+            missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
             visualFilters,
             availabilityCalendar,
             mapLocation,
@@ -615,7 +782,18 @@ export function SellerListingWizard({ lang }: Props) {
               <button
                 className={index === stepIndex ? 'active' : ''}
                 key={step.id}
-                onClick={() => setStepIndex(index)}
+                onClick={() => {
+                  if (!isAdvertisingFlow && step.id === 'media' && !listingPlanPaymentConfirmed) {
+                    const planIndex = steps.findIndex((item) => item.id === 'plan')
+                    setStepIndex(planIndex >= 0 ? planIndex : index)
+                    setSubmitState('error')
+                    setSubmitError(isAr ? 'ادفع خطة الإعلان قبل رفع الصور والملفات.' : 'Pay the listing plan before uploading photos and files.')
+                    return
+                  }
+                  setSubmitState('idle')
+                  setSubmitError('')
+                  setStepIndex(index)
+                }}
               >
                 {index + 1}. {step.title[lang]}
               </button>
@@ -971,18 +1149,39 @@ export function SellerListingWizard({ lang }: Props) {
                             {isAr ? 'التالي' : 'Next'}
                           </button>
                         </div>
-                        <label>
-                          <span>{isAr ? 'يوم الدفع' : 'Payment day'}</span>
-                          <input dir="ltr" type="date" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} />
-                        </label>
+                        <div className="seller-host-readonly-booking-note">
+                          <span>{isAr ? 'للعرض فقط' : 'View only'}</span>
+                          <b>{isAr ? 'الحجوزات تأتي من طلبات العملاء المؤكدة' : 'Bookings come from confirmed guest requests'}</b>
+                        </div>
                       </div>
                       <div className="seller-host-day-grid seller-host-booking-grid">
-                        {reservationMonthDays.map((day) => (
-                          <button className={bookedDays.has(day) ? 'booked' : ''} key={day} onClick={() => setBookedDate(day)} type="button">
-                            <strong>{new Date(`${day}T00:00:00`).getDate()}</strong>
-                            <span>{bookedDays.has(day) ? (isAr ? 'محجوز' : 'Booked') : isAr ? 'فارغ' : 'Free'}</span>
-                          </button>
-                        ))}
+                        {reservationMonthDays.map((day) => {
+                          const isAcceptedBooking = day === bookedDate
+                          const isPaymentDay = day === paymentDay
+                          const dayLabel = isAcceptedBooking
+                            ? isAr
+                              ? 'محجوز'
+                              : 'Booked'
+                            : isPaymentDay
+                              ? isAr
+                                ? 'يوم الدفع'
+                                : 'Payment day'
+                              : isAr
+                                ? 'فارغ'
+                                : 'Free'
+                          return (
+                            <button
+                              aria-label={dayLabel}
+                              className={`${isAcceptedBooking ? 'booked' : ''} ${isPaymentDay ? 'payment' : ''}`.trim()}
+                              disabled
+                              key={day}
+                              type="button"
+                            >
+                              <strong>{new Date(`${day}T00:00:00`).getDate()}</strong>
+                              <span>{dayLabel}</span>
+                            </button>
+                          )
+                        })}
                       </div>
                       <div className="seller-host-reservation-card compact">
                         <span>{isAr ? 'آخر حجز مقبول' : 'Accepted booking'}</span>
@@ -1042,39 +1241,170 @@ export function SellerListingWizard({ lang }: Props) {
             </div>
           )}
 
-          {activeStep.id === 'media' && (
+          {activeStep.id === 'plan' && !isAdvertisingFlow && (
             <div className="seller-wizard-section">
-              <div className="seller-upload-grid">
-                {(isAdvertisingFlow
-                  ? adFileSlots
-                  : [
-                      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
-                      { id: 'paymentProof', ar: 'إثبات دفع الخطة', en: 'Plan payment proof' },
-                      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
-                      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
-                      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
-                    ]).map((item) => (
+              <div className="seller-host-plan-grid">
+                {HOST_LISTING_PLANS.map((plan) => (
                   <button
-                    className={uploadedAdFiles.includes(item.id) ? 'uploaded' : ''}
-                    key={item.en}
+                    className={`seller-host-plan-card ${plan.id === selectedListingPlan.id ? 'active' : ''}`}
+                    key={plan.id}
                     onClick={() => {
-                      setUploadedAdFiles((current) => (current.includes(item.id) ? current : [...current, item.id]))
-                      setAdFilesSent(false)
+                      setListingPlan(plan.id)
+                      setListingPlanPaymentConfirmed(false)
+                      setUploadedAdFiles((current) =>
+                        current.filter((id) => plan.mediaSlots.some((slot) => slot.id === id) || (plan.id !== 'basic' && id.startsWith(OFFER_PROOF_PREFIX))),
+                      )
                     }}
+                    type="button"
                   >
-                    <strong>{item[lang]}</strong>
-                    <span>
-                      {uploadedAdFiles.includes(item.id)
-                        ? isAr
-                          ? 'تمت الإضافة'
-                          : 'Added'
-                        : isAr
-                          ? 'إضافة / رفع'
-                          : 'Add / upload'}
-                    </span>
+                    <span>{plan[lang]}</span>
+                    <strong>{`USD ${plan.priceUsd}`}</strong>
+                    <ul>
+                      {plan.services[lang].map((service) => (
+                        <li key={service}>{service}</li>
+                      ))}
+                    </ul>
+                    <b>{isAr ? `${plan.mediaSlots.length} خانات أساسية` : `${plan.mediaSlots.length} core upload slots`}</b>
                   </button>
                 ))}
               </div>
+
+              <div className="seller-host-plan-gate">
+                <div className="seller-host-plan-gate-head">
+                  <div>
+                    <span>{isAr ? 'دفع خطة الإعلان' : 'Listing plan payment'}</span>
+                    <strong>{`${selectedListingPlan[lang]} · USD ${selectedListingPlan.priceUsd}`}</strong>
+                  </div>
+                  <em>{listingPlanPaymentConfirmed ? (isAr ? 'مدفوعة' : 'Paid') : isAr ? 'مطلوبة قبل الرفع' : 'Required before upload'}</em>
+                </div>
+                <div className="seller-host-plan-methods">
+                  {[
+                    { id: 'shamCash', ar: 'Sham Cash', en: 'Sham Cash' },
+                    { id: 'card', ar: 'بطاقة / Stripe', en: 'Card / Stripe' },
+                  ].map((method) => (
+                    <button
+                      className={listingPlanPaymentMethod === method.id ? 'active' : ''}
+                      key={method.id}
+                      onClick={() => {
+                        setListingPlanPaymentMethod(method.id)
+                        setListingPlanPaymentConfirmed(false)
+                      }}
+                      type="button"
+                    >
+                      {method[lang]}
+                    </button>
+                  ))}
+                </div>
+                <div className={`seller-host-plan-status ${listingPlanPaymentConfirmed ? 'confirmed' : ''}`}>
+                  <span>
+                    {listingPlanPaymentConfirmed
+                      ? isAr
+                        ? 'تم دفع الخطة، يمكنك رفع الملفات الآن.'
+                        : 'Plan paid. You can upload files now.'
+                      : isAr
+                        ? 'بعد تأكيد دفع الخطة ستظهر لك خانات الرفع المسموحة.'
+                        : 'After plan payment is confirmed, the allowed upload slots will open.'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setListingPlanPaymentConfirmed(true)
+                      setSubmitState('idle')
+                      setSubmitError('')
+                    }}
+                  >
+                    {isAr ? 'تأكيد دفع الخطة' : 'Confirm plan payment'}
+                  </button>
+                </div>
+              </div>
+              {submitState === 'error' && (
+                <div className="seller-inline-alert">
+                  <strong>{isAr ? 'الخطة مطلوبة' : 'Plan required'}</strong>
+                  <span>{submitError}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeStep.id === 'media' && (
+            <div className="seller-wizard-section">
+              {!isAdvertisingFlow && !listingPlanPaymentConfirmed ? (
+                <div className="seller-host-plan-lock">
+                  <span>{isAr ? 'الرفع مقفل' : 'Uploads locked'}</span>
+                  <strong>{isAr ? 'ادفع خطة الإعلان أولاً' : 'Pay the listing plan first'}</strong>
+                  <p>
+                    {isAr
+                      ? 'كل خطة تفتح عدد ملفات وخدمات مختلف. ارجع إلى خطوة الخطة والدفع لتأكيد الدفع.'
+                      : 'Each plan unlocks different upload slots and services. Return to the plan and payment step to confirm payment.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const planIndex = steps.findIndex((item) => item.id === 'plan')
+                      setStepIndex(planIndex >= 0 ? planIndex : stepIndex)
+                    }}
+                  >
+                    {isAr ? 'العودة إلى الخطة' : 'Back to plan'}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {!isAdvertisingFlow && (
+                    <div className="seller-offer-proof-panel">
+                      <strong>{isAr ? 'إثبات عروض الضيف' : 'Guest offer proof'}</strong>
+                      <span>
+                        {planAllowsOfferProofs
+                          ? isAr
+                            ? 'أي خيار يظهر للضيف يحتاج صورة واضحة باسمه. إذا لم ترفع الإثبات لن يمر الإعلان كعرض حقيقي.'
+                            : 'Every guest-visible offer needs a clear photo under its own name. Without proof, the offer cannot publish as real.'
+                          : isAr
+                            ? 'خطة Basic لا تنشر كبسولات عروض إضافية. اختر Plus أو Premium لتوثيق العروض مثل الموقف أو الفطور.'
+                            : 'Basic does not publish extra offer capsules. Choose Plus or Premium to prove offers like parking or breakfast.'}
+                      </span>
+                      {activeOfferProofSlots.length > 0 && (
+                        <em>
+                          {isAr
+                            ? `مطلوب الآن: ${activeOfferProofSlots.map((slot) => slot.ar).join('، ')}`
+                            : `Required now: ${activeOfferProofSlots.map((slot) => slot.en).join(', ')}`}
+                        </em>
+                      )}
+                    </div>
+                  )}
+                  <div className="seller-upload-grid">
+                    {allowedMediaSlots.map((item) => (
+                    <button
+                      className={`${uploadedAdFiles.includes(item.id) ? 'uploaded' : ''} ${item.offerProof ? 'offer-proof' : ''} ${item.required ? 'required' : ''}`}
+                      key={item.id}
+                      onClick={() => {
+                        setUploadedAdFiles((current) => (current.includes(item.id) ? current : [...current, item.id]))
+                        setAdFilesSent(false)
+                      }}
+                    >
+                      <strong>{item[lang]}</strong>
+                      <span>
+                        {uploadedAdFiles.includes(item.id)
+                          ? isAr
+                            ? 'تمت الإضافة'
+                            : 'Added'
+                          : isAr
+                            ? 'إضافة / رفع'
+                            : 'Add / upload'}
+                      </span>
+                    </button>
+                    ))}
+                  </div>
+                  {!isAdvertisingFlow && missingRequiredOfferProofSlots.length > 0 && (
+                    <div className="seller-inline-alert">
+                      <strong>{isAr ? 'إثبات العروض مطلوب' : 'Offer proof required'}</strong>
+                      <span>
+                        {isAr
+                          ? `ارفع صورة واضحة لكل خيار مختار: ${missingRequiredOfferProofSlots.map((slot) => slot.ar).join('، ')}`
+                          : `Upload a clear photo for each selected option: ${missingRequiredOfferProofSlots.map((slot) => slot.en).join(', ')}`}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
               {isAdvertisingFlow && (
                 <div className={`seller-ad-send-panel ${adFilesSent ? 'sent' : ''}`}>
                   <strong>{adPlan === 'premium' ? (isAr ? 'خطة Premium' : 'Premium plan') : isAr ? 'خطة Plus' : 'Plus plan'}</strong>
@@ -1159,6 +1489,17 @@ export function SellerListingWizard({ lang }: Props) {
                           : 'Upload seller documents before final submission'}
                   </li>
                   {!isAdvertisingFlow && <li>{selectedFilterLabels(sellerPropertyFilterGroups, visualFilters, lang).join(' · ')}</li>}
+                  {!isAdvertisingFlow && activeOfferProofSlots.length > 0 && (
+                    <li>
+                      {missingRequiredOfferProofSlots.length
+                        ? isAr
+                          ? `إثباتات عروض ناقصة: ${missingRequiredOfferProofSlots.map((slot) => slot.ar).join('، ')}`
+                          : `Missing offer proofs: ${missingRequiredOfferProofSlots.map((slot) => slot.en).join(', ')}`
+                        : isAr
+                          ? 'كل عروض الضيف المختارة لها إثباتات مرفوعة'
+                          : 'All selected guest offers have uploaded proof'}
+                    </li>
+                  )}
                 </ul>
               </div>
               {submitState === 'error' && (
