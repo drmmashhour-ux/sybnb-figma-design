@@ -47,7 +47,7 @@ jobs:
       DATABASE_URL: postgresql://sybnb_v6_test_role:ci_test_password@127.0.0.1:5432/sybnb_v6_test
       AUTH_SECRET: ci-only-auth-secret-at-least-32-characters
       PHONE_HASH_SECRET: ci-only-phone-hash-secret-32-characters
-      CORS_ORIGIN: http://127.0.0.1:5173
+      CORS_ORIGIN: http://127.0.0.1:5180
       PGPASSWORD: ci_test_password
 
     steps:
