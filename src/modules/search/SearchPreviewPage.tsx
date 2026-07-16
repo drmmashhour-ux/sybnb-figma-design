@@ -242,7 +242,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                   <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
                   <div className="search-result-meta">
                     <span>{t.price}</span>
-                    <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.division === 'STAYS' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor, listing.division === 'STAYS' ? 'USD' : listing.currency, lang)}</strong>
+                    <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+                      {moneyText(listing.division === 'STAYS' && listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor, listing.division === 'STAYS' ? 'USD' : listing.currency, lang)}
+                    </strong>
                   </div>
                   <div className="search-result-actions">
                     <button

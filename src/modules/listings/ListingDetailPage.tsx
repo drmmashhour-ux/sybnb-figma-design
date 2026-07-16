@@ -226,13 +226,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const actionLabel = useMemo(() => actionForDivision(listing?.division || 'STAYS', lang), [lang, listing?.division])
   const detailCopy = useMemo(() => detailCopyForDivision(listing?.division || 'STAYS', lang, t), [lang, listing?.division, t])
   const returnPath = useMemo(() => readListingReturnPath(), [])
-  // Before dates are picked there's no server-computed stayQuote yet, so this falls back to the
-  // listing's own (always-SYP) base price — that fallback must go through the same USD
-  // conversion+rounding as the real quote does, or a guest who already switched to USD would
-  // briefly see a raw SYP number mislabeled as dollars (e.g. "300,000 USD" instead of "$20").
+  // Before dates are picked there's no server-computed stayQuote yet. Convert only legacy SYP
+  // stays; USD-native stays should flow through unchanged so the guest never sees mixed money.
   const selectedNights = isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut) ? nightsBetween(dateRange.checkIn, dateRange.checkOut) : 0
   const billableNights = Math.max(selectedNights, 1)
-  const fallbackNightlyMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(listing?.priceMinor ?? 0) : listing?.priceMinor ?? 0
+  const fallbackNightlyMinor = payCurrency === 'USD' && listing?.currency === 'SYP'
+    ? sypMinorToRoundedUsdMinor(listing.priceMinor)
+    : listing?.priceMinor ?? 0
   const displayedTotalMinor = stayQuote?.totalMinor ?? fallbackNightlyMinor * billableNights
   const protectionFeeMinor = Math.round(displayedTotalMinor * 0.03)
   const protectedTotalMinor = displayedTotalMinor + protectionFeeMinor

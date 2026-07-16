@@ -127,7 +127,9 @@ export function BookingReviewPage({ listingId, lang }: Props) {
 
   const nights = stayQuote?.nights ?? (isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut) ? nightsBetween(dateRange.checkIn, dateRange.checkOut) : 0)
   const billableNights = Math.max(nights, 1)
-  const fallbackNightlyMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(listing?.priceMinor ?? 0) : listing?.priceMinor ?? 0
+  const fallbackNightlyMinor = payCurrency === 'USD' && listing?.currency === 'SYP'
+    ? sypMinorToRoundedUsdMinor(listing.priceMinor)
+    : listing?.priceMinor ?? 0
   const stayAmountMinor = stayQuote?.totalMinor ?? fallbackNightlyMinor * billableNights
   const protectionFeeMinor = cancellationProtection ? Math.round(stayAmountMinor * 0.03) : 0
   const totalDueMinor = stayAmountMinor + protectionFeeMinor
