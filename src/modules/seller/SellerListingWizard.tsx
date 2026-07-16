@@ -187,6 +187,7 @@ export function SellerListingWizard({ lang }: Props) {
   const [governorate, setGovernorate] = useState(draft.governorate || 'damascus')
   const [city, setCity] = useState(draft.city || 'damascus-city')
   const [area, setArea] = useState(draft.area || 'old-city')
+  const [areaQuery, setAreaQuery] = useState('')
   const [address, setAddress] = useState(draft.address ?? (isAr ? 'قرب شارع رئيسي' : 'Near a main street'))
   const [price, setPrice] = useState(draft.price || '15')
   const [size, setSize] = useState(draft.size || '110')
@@ -254,6 +255,18 @@ export function SellerListingWizard({ lang }: Props) {
   const selectedGovernorateLabel = labelFor(lang, selectedGovernorateData)
   const selectedCityLabel = labelFor(lang, selectedCityData)
   const selectedAreaLabel = labelFor(lang, selectedAreaData)
+  const areaOptions = selectedCityData?.areas || []
+  const normalizedAreaQuery = areaQuery.trim().toLowerCase()
+  const filteredAreaOptions = (normalizedAreaQuery
+    ? areaOptions.filter((item) =>
+        [item.ar, item.en, item.key]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedAreaQuery),
+      )
+    : areaOptions.slice(0, 10)
+  ).slice(0, 16)
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
   const availabilityCalendar = {
     searchCapsuleEnabled,
@@ -269,12 +282,14 @@ export function SellerListingWizard({ lang }: Props) {
     setGovernorate(value)
     setCity(nextCity?.key || '')
     setArea(nextCity?.areas[0]?.key || '')
+    setAreaQuery('')
   }
 
   function chooseCity(value: string) {
     const nextCity = getCity(governorate, value)
     setCity(value)
     setArea(nextCity?.areas[0]?.key || '')
+    setAreaQuery('')
   }
 
   const next = async () => {
@@ -605,12 +620,33 @@ export function SellerListingWizard({ lang }: Props) {
                 </div>
                 <div className="seller-location-group">
                   <span>{isAr ? 'المنطقة / الشارع' : 'Area / street'}</span>
-                  <div className="seller-location-options">
-                    {(selectedCityData?.areas || []).map((item) => (
-                      <button className={item.key === area ? 'active' : ''} key={item.key} onClick={() => setArea(item.key)}>
+                  <div className="seller-location-search-line">
+                    <input
+                      dir={isAr ? 'rtl' : 'ltr'}
+                      onChange={(event) => setAreaQuery(event.target.value)}
+                      placeholder={isAr ? 'ابحث عن المنطقة أو الشارع' : 'Search area or street'}
+                      type="search"
+                      value={areaQuery}
+                    />
+                    <strong>{selectedAreaLabel || (isAr ? 'لم يتم الاختيار' : 'Not selected')}</strong>
+                  </div>
+                  <div className="seller-location-search-results">
+                    {filteredAreaOptions.map((item) => (
+                      <button
+                        className={item.key === area ? 'active' : ''}
+                        key={item.key}
+                        onClick={() => {
+                          setArea(item.key)
+                          setAreaQuery(labelFor(lang, item))
+                        }}
+                        type="button"
+                      >
                         {labelFor(lang, item)}
                       </button>
                     ))}
+                    {!filteredAreaOptions.length && (
+                      <span className="seller-location-empty">{isAr ? 'لا توجد نتيجة مطابقة' : 'No matching area'}</span>
+                    )}
                   </div>
                 </div>
               </div>
