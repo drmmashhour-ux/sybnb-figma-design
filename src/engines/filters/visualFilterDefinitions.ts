@@ -354,6 +354,18 @@ export const carBrandFilterGroup: VisualFilterGroup = {
     { id: 'isuzu', label: { ar: 'إيسوزو', en: 'Isuzu' }, art: 'car-pickup', photoSrc: visualFilterPhotoSrc['car-pickup'] },
     { id: 'changan', label: { ar: 'شانجان', en: 'Changan' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-sedan'] },
     { id: 'byd', label: { ar: 'BYD', en: 'BYD' }, art: 'car-electric', photoSrc: visualFilterPhotoSrc['car-electric'] },
+    { id: 'subaru', label: { ar: 'سوبارو', en: 'Subaru' }, art: 'car-suv', photoSrc: visualFilterPhotoSrc['car-suv'] },
+    { id: 'opel', label: { ar: 'أوبل', en: 'Opel' }, art: 'car-economy', photoSrc: visualFilterPhotoSrc['car-economy'] },
+    { id: 'fiat', label: { ar: 'فيات', en: 'Fiat' }, art: 'car-economy', photoSrc: visualFilterPhotoSrc['car-kia'] },
+    { id: 'citroen', label: { ar: 'سيتروين', en: 'Citroen' }, art: 'car-economy', photoSrc: visualFilterPhotoSrc['car-economy'] },
+    { id: 'jeep', label: { ar: 'جيب', en: 'Jeep' }, art: 'car-suv', photoSrc: visualFilterPhotoSrc['car-suv'] },
+    { id: 'land-rover', label: { ar: 'لاند روفر', en: 'Land Rover' }, art: 'car-luxury', photoSrc: visualFilterPhotoSrc['car-luxury'] },
+    { id: 'volvo', label: { ar: 'فولفو', en: 'Volvo' }, art: 'car-luxury', photoSrc: visualFilterPhotoSrc['car-bmw'] },
+    { id: 'gmc', label: { ar: 'GMC', en: 'GMC' }, art: 'car-pickup', photoSrc: visualFilterPhotoSrc['car-pickup'] },
+    { id: 'dodge', label: { ar: 'دودج', en: 'Dodge' }, art: 'car-suv', photoSrc: visualFilterPhotoSrc['car-pickup'] },
+    { id: 'geely', label: { ar: 'جيلي', en: 'Geely' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-sedan'] },
+    { id: 'mg', label: { ar: 'MG', en: 'MG' }, art: 'car-sedan', photoSrc: visualFilterPhotoSrc['car-hyundai'] },
+    { id: 'haval', label: { ar: 'هافال', en: 'Haval' }, art: 'car-suv', photoSrc: visualFilterPhotoSrc['car-suv'] },
   ],
 }
 
@@ -569,7 +581,22 @@ export function sellerPropertyFilterGroupsFromConfig() {
 }
 
 export function sellerCarFilterGroupsFromConfig() {
-  return visualFilterGroupsById(['carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition'])
+  return visualFilterGroupsById(['carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition']).map((group) => {
+    if (group.id !== 'condition') return group
+
+    return {
+      ...group,
+      options: group.options.map((option) => ({
+        ...option,
+        photoSrc:
+          option.id === 'new'
+            ? visualFilterPhotoSrc['car-luxury']
+            : option.id === 'used'
+              ? visualFilterPhotoSrc['car-economy']
+              : option.photoSrc,
+      })),
+    }
+  })
 }
 
 export function renterPropertyFilterGroupsFromConfig() {
