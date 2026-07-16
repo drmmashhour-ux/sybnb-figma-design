@@ -38,10 +38,9 @@ export async function sendEmailVerificationCode(email, purpose = 'guest-signup')
   const isProduction = process.env.NODE_ENV === 'production'
   let emailSent = false
   let emailError
-  // Outside production the code is returned directly as `devCode` below, so there is nothing a
-  // real email would add -- skip sending even if SMTP happens to be configured, to avoid burning
-  // real email sends during dev/staging testing.
-  if (isProduction && isMailerConfigured()) {
+  // Send real mail in local/staging when Resend/SMTP is configured so owner QA can exercise
+  // the exact staff access flow before launch. Tests stay isolated from external email delivery.
+  if (process.env.NODE_ENV !== 'test' && isMailerConfigured()) {
     try {
       await sendVerificationCodeEmail(normalized, code)
       emailSent = true

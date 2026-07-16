@@ -504,6 +504,107 @@ export function AdminReviewPage({ lang }: Props) {
   )
 }
 
+
+function FaiAdminHelperPanel({
+  auditCount,
+  bookingNeedsApproval,
+  disputeCount,
+  isAr,
+  onOpenView,
+  pendingListings,
+  pendingPayments,
+  readyPayouts,
+  shamCashMatched,
+}: {
+  auditCount: number
+  bookingNeedsApproval: number
+  disputeCount: number
+  isAr: boolean
+  onOpenView: (view: AdminCommandView) => void
+  pendingListings: number
+  pendingPayments: number
+  readyPayouts: number
+  shamCashMatched: boolean
+}) {
+  const signals = [
+    {
+      key: 'payment',
+      label: isAr ? 'سلامة الدفع' : 'Payment integrity',
+      value: pendingPayments,
+      status: pendingPayments > 0 || !shamCashMatched ? 'review' : 'clean',
+      detail: isAr
+        ? 'يراقب دفعات بانتظار القرار ومطابقة شام كاش.'
+        : 'Watches pending payments and Sham Cash reconciliation.',
+      view: 'finance' as AdminCommandView,
+    },
+    {
+      key: 'listing',
+      label: isAr ? 'التحقق قبل النشر' : 'Verify before live',
+      value: pendingListings,
+      status: pendingListings > 0 ? 'review' : 'clean',
+      detail: isAr
+        ? 'أي إعلان جديد يبقى للمراجعة قبل الموافقة.'
+        : 'New listings stay in review before approval.',
+      view: 'hosts' as AdminCommandView,
+    },
+    {
+      key: 'booking',
+      label: isAr ? 'الحجوزات والنزاعات' : 'Bookings and disputes',
+      value: bookingNeedsApproval + disputeCount,
+      status: disputeCount > 0 ? 'risk' : bookingNeedsApproval > 0 ? 'review' : 'clean',
+      detail: isAr
+        ? 'يرتب الطلبات والنزاعات حسب الحاجة للمراجعة.'
+        : 'Prioritizes booking requests and disputes for review.',
+      view: disputeCount > 0 ? 'disputes' as AdminCommandView : 'bookings' as AdminCommandView,
+    },
+    {
+      key: 'payout',
+      label: isAr ? 'الصرف والاحتجاز' : 'Payout hold',
+      value: readyPayouts,
+      status: readyPayouts > 0 ? 'review' : 'clean',
+      detail: isAr
+        ? 'يعرض الصرف الجاهز فقط، ولا يطلق المال تلقائياً.'
+        : 'Shows eligible payouts only; it never releases money automatically.',
+      view: 'finance' as AdminCommandView,
+    },
+  ]
+
+  const statusText = (status: string) => {
+    if (status === 'risk') return isAr ? 'خطر' : 'Risk'
+    if (status === 'review') return isAr ? 'مراجعة' : 'Review'
+    return isAr ? 'نظيف' : 'Clean'
+  }
+
+  return (
+    <section style={commandStyles.faiPanel}>
+      <div style={commandStyles.faiHeader}>
+        <div>
+          <small style={commandStyles.faiEyebrow}>FAI · {isAr ? 'مساعد الإدارة' : 'Admin helper'}</small>
+          <h2 style={{ margin: '4px 0 0' }}>{isAr ? 'فحص ذكي بدون تنفيذ' : 'Smart checks, no automatic action'}</h2>
+          <p style={commandStyles.faiCopy}>
+            {isAr
+              ? 'يعرض المخاطر والمهام من بيانات الإدارة فقط. كل قرار قبول أو صرف يبقى بيد الإدارة.'
+              : 'Reads admin data and points out risks. Approvals and money actions stay human-only.'}
+          </p>
+        </div>
+        <span style={commandStyles.faiAuditPill}>{isAr ? `سجل التدقيق ${auditCount}` : `${auditCount} audit rows`}</span>
+      </div>
+      <div style={commandStyles.faiGrid}>
+        {signals.map((signal) => (
+          <button key={signal.key} style={commandStyles.faiSignal} onClick={() => onOpenView(signal.view)}>
+            <span style={commandStyles.faiSignalTop}>
+              <strong>{signal.label}</strong>
+              <em style={commandTone(signal.status === 'risk' ? 'red' : signal.status === 'review' ? 'gold' : 'green')}>{statusText(signal.status)}</em>
+            </span>
+            <b>{signal.value}</b>
+            <small>{signal.detail}</small>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function matchesSearch(values: Array<unknown>, search: string) {
   if (!search) return true
   return values.some((value) => String(value || '').toLowerCase().includes(search))
@@ -913,6 +1014,18 @@ function ShortRentAdminCommandDashboard({
           <span>{message}</span>
         </section>
       )}
+
+      <FaiAdminHelperPanel
+        isAr={isAr}
+        pendingPayments={pendingPayments}
+        bookingNeedsApproval={bookingNeedsApproval.length}
+        disputeCount={disputeBookingRows.length}
+        pendingListings={queue?.listings.length ?? 0}
+        readyPayouts={payouts.filter((payout) => payout.eligibleNow).length}
+        auditCount={auditLog.length}
+        shamCashMatched={shamCashReconciliation.isMatched}
+        onOpenView={setActiveCommandView}
+      />
 
       <section className="admin-v2-grid" style={commandStyles.adminV2Grid}>
         <aside style={commandStyles.leftRail}>
@@ -1964,6 +2077,14 @@ const commandStyles: Record<string, CSSProperties> = {
   departmentTabActive: { background: 'rgba(82,104,255,.26)', border: '1px solid rgba(82,104,255,.75)', color: '#5268ff', boxShadow: '0 0 0 1px rgba(82,104,255,.14) inset' },
   statsGrid: { display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' },
   warningBanner: { alignItems: 'center', background: 'rgba(230,184,13,.12)', border: '1px solid rgba(230,184,13,.42)', borderRadius: 8, color: '#e6b80d', display: 'flex', gap: 14, justifyContent: 'space-between', padding: '14px 16px' },
+  faiPanel: { background: '#0d111b', border: '1px solid rgba(34,210,143,.28)', borderRadius: 10, display: 'grid', gap: 16, padding: 18 },
+  faiHeader: { alignItems: 'start', display: 'flex', gap: 16, justifyContent: 'space-between' },
+  faiEyebrow: { color: '#22d28f', fontWeight: 950, letterSpacing: 0 },
+  faiCopy: { color: '#9ca3b6', lineHeight: 1.7, margin: '8px 0 0' },
+  faiAuditPill: { border: '1px solid rgba(255,255,255,.12)', borderRadius: 999, color: '#d9deea', fontSize: 12, fontWeight: 900, padding: '7px 11px', whiteSpace: 'nowrap' },
+  faiGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+  faiSignal: { background: '#101522', border: '1px solid rgba(255,255,255,.09)', borderRadius: 8, color: '#f7f7fb', cursor: 'pointer', display: 'grid', gap: 8, minHeight: 132, padding: 14, textAlign: 'start' },
+  faiSignalTop: { alignItems: 'center', display: 'flex', gap: 10, justifyContent: 'space-between' },
   adminV2Grid: { alignItems: 'start', display: 'grid', gap: 20, gridTemplateColumns: 'minmax(270px, .9fr) minmax(420px, 1.15fr) minmax(330px, 1fr)' },
   leftRail: { display: 'grid', gap: 16 },
   centerPanel: { background: '#10121b', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, display: 'grid', gap: 18, minHeight: 560, padding: 20 },

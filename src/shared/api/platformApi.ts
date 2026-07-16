@@ -819,16 +819,27 @@ export async function createStaffAccountSession(
   const email = input?.email?.trim()
   const password = input?.password?.trim()
   const phone = input?.phone?.trim()
-  if (!email || !password || !phone) {
-    throw new Error('Staff credentials are required')
+  if (!email || !password) {
+    throw new Error('Email and password are required')
   }
-  const account = {
-    ...fallbackAccount,
-    email,
-    password,
-    phone,
+
+  let session: AuthResponse
+  if (input?.mode === 'signUp') {
+    if (role === 'ADMIN') {
+      throw new Error('Admin accounts are owner-created. Sign in with an existing admin account.')
+    }
+    if (!phone) {
+      throw new Error('Phone is required for partner signup')
+    }
+    session = await register({
+      ...fallbackAccount,
+      email,
+      password,
+      phone,
+    })
+  } else {
+    session = await login(email, password)
   }
-  const session = input?.mode === 'signUp' ? await createStaffAccount(account) : await ensurePrototypeSession(account)
   sessionStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
   sessionStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
   return session
