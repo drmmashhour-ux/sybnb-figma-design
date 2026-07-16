@@ -2017,6 +2017,99 @@ a {
   font-weight: 500;
 }
 
+.seller-host-search-capsule {
+  background: linear-gradient(145deg, rgba(32, 210, 155, 0.1), rgba(82, 108, 255, 0.08));
+  border: 1px solid rgba(32, 210, 155, 0.38);
+  border-radius: 10px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.seller-host-search-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.seller-host-search-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.seller-host-search-head strong {
+  color: #f7f8ff;
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.seller-host-search-head span {
+  color: #9aa7bd;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.seller-host-search-head button {
+  background: #121c2f;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  color: #f7f8ff;
+  cursor: pointer;
+  font-weight: 950;
+  min-height: 48px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.seller-host-search-head button.active {
+  background: #20d29b;
+  border-color: #20d29b;
+  color: #07110e;
+}
+
+.seller-host-calendar-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.seller-host-calendar-card {
+  background: rgba(10, 15, 29, 0.7);
+  border: 1px solid #263651;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.seller-host-calendar-card.available {
+  border-color: rgba(32, 210, 155, 0.42);
+}
+
+.seller-host-calendar-card.booked {
+  border-color: rgba(213, 169, 21, 0.52);
+}
+
+.seller-host-calendar-card.payment {
+  border-color: rgba(82, 108, 255, 0.52);
+}
+
+.seller-host-calendar-card span {
+  color: #d5a915;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.seller-host-calendar-card input[type='date'] {
+  background: #0a0f1d;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  color: #f7f8ff;
+  min-height: 46px;
+  padding: 0 10px;
+}
+
 .seller-location-capsule {
   background: rgba(10, 15, 29, 0.58);
   border: 1px solid #263651;

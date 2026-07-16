@@ -46,6 +46,11 @@ type WizardDraft = {
   bedrooms: string
   bathrooms: string
   instantBookEnabled: boolean
+  searchCapsuleEnabled: boolean
+  availableStart: string
+  availableEnd: string
+  bookedDate: string
+  paymentDay: string
   visualFilters: VisualFilterSelection
 }
 
@@ -62,6 +67,12 @@ function loadDraft(): Partial<WizardDraft> {
 function clearDraft() {
   if (typeof window === 'undefined') return
   window.sessionStorage.removeItem(DRAFT_STORAGE_KEY)
+}
+
+function addDaysIso(days: number) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
 }
 
 type WizardStep = {
@@ -182,6 +193,11 @@ export function SellerListingWizard({ lang }: Props) {
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
   const [bathrooms, setBathrooms] = useState(draft.bathrooms || '2')
   const [instantBookEnabled, setInstantBookEnabled] = useState(draft.instantBookEnabled ?? false)
+  const [searchCapsuleEnabled, setSearchCapsuleEnabled] = useState(draft.searchCapsuleEnabled ?? true)
+  const [availableStart, setAvailableStart] = useState(draft.availableStart || addDaysIso(1))
+  const [availableEnd, setAvailableEnd] = useState(draft.availableEnd || addDaysIso(31))
+  const [bookedDate, setBookedDate] = useState(draft.bookedDate || addDaysIso(7))
+  const [paymentDay, setPaymentDay] = useState(draft.paymentDay || addDaysIso(1))
   const [adPlacement, setAdPlacement] = useState(isAr ? 'الرئيسية' : 'Landing page')
   const [adDuration, setAdDuration] = useState(isAr ? 'أسبوع واحد' : 'One week')
   const [uploadedAdFiles, setUploadedAdFiles] = useState<string[]>([])
@@ -219,10 +235,15 @@ export function SellerListingWizard({ lang }: Props) {
       bedrooms,
       bathrooms,
       instantBookEnabled,
+      searchCapsuleEnabled,
+      availableStart,
+      availableEnd,
+      bookedDate,
+      paymentDay,
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, selectedType, title, description, governorate, city, area, address, price, size, bedrooms, bathrooms, instantBookEnabled, visualFilters])
+  }, [division, selectedType, title, description, governorate, city, area, address, price, size, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -234,6 +255,13 @@ export function SellerListingWizard({ lang }: Props) {
   const selectedCityLabel = labelFor(lang, selectedCityData)
   const selectedAreaLabel = labelFor(lang, selectedAreaData)
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
+  const availabilityCalendar = {
+    searchCapsuleEnabled,
+    availableStart,
+    availableEnd,
+    bookedDate,
+    paymentDay,
+  }
 
   function chooseGovernorate(value: string) {
     const nextGovernorate = getGovernorate(value)
@@ -271,6 +299,7 @@ export function SellerListingWizard({ lang }: Props) {
         bedrooms: toNumber(bedrooms),
         bathrooms: toNumber(bathrooms),
         visualFilters,
+        availabilityCalendar,
       }
 
       try {
@@ -284,7 +313,13 @@ export function SellerListingWizard({ lang }: Props) {
               city,
               area,
               address,
-              metadata: { uploadedDocumentFiles, governorateLabel: selectedGovernorateLabel, cityLabel: selectedCityLabel, areaLabel: selectedAreaLabel },
+              metadata: {
+                uploadedDocumentFiles,
+                governorateLabel: selectedGovernorateLabel,
+                cityLabel: selectedCityLabel,
+                areaLabel: selectedAreaLabel,
+                availabilityCalendar,
+              },
             })
             await addAccommodationRoomType(accommodation.id, {
               titleAr: title || (isAr ? 'نوع غرفة جديد' : 'New room type'),
@@ -339,6 +374,7 @@ export function SellerListingWizard({ lang }: Props) {
             bedrooms: toNumber(bedrooms),
             bathrooms: toNumber(bathrooms),
             visualFilters,
+            availabilityCalendar,
           },
         })
         clearDraft()
@@ -637,6 +673,45 @@ export function SellerListingWizard({ lang }: Props) {
                   {isAr
                     ? 'تخصم SYBNB عمولة خدمة 10% من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.'
                     : 'SYBNB deducts a 10% service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.'}
+                </div>
+              )}
+              {division === 'STAYS' && (
+                <div className="seller-wide-field seller-host-search-capsule">
+                  <div className="seller-host-search-head">
+                    <div>
+                      <strong>{isAr ? 'كبسولة البحث والرزنامة' : 'Search capsule and calendar'}</strong>
+                      <span>
+                        {isAr
+                          ? 'حدد هل يظهر هذا الإعلان في البحث، ثم ضع أيام التوفر والحجز والدفع.'
+                          : 'Choose whether this listing appears in search, then set availability, booking, and payment dates.'}
+                      </span>
+                    </div>
+                    <button
+                      className={searchCapsuleEnabled ? 'active' : ''}
+                      type="button"
+                      onClick={() => setSearchCapsuleEnabled((current) => !current)}
+                    >
+                      {searchCapsuleEnabled ? (isAr ? 'ظاهر في البحث' : 'Visible in search') : isAr ? 'مخفي من البحث' : 'Hidden from search'}
+                    </button>
+                  </div>
+                  <div className="seller-host-calendar-grid">
+                    <label className="seller-host-calendar-card available">
+                      <span>{isAr ? 'متاح من' : 'Available from'}</span>
+                      <input dir="ltr" type="date" value={availableStart} onChange={(event) => setAvailableStart(event.target.value)} />
+                    </label>
+                    <label className="seller-host-calendar-card available">
+                      <span>{isAr ? 'متاح حتى' : 'Available until'}</span>
+                      <input dir="ltr" type="date" value={availableEnd} onChange={(event) => setAvailableEnd(event.target.value)} />
+                    </label>
+                    <label className="seller-host-calendar-card booked">
+                      <span>{isAr ? 'يوم محجوز' : 'Booked day'}</span>
+                      <input dir="ltr" type="date" value={bookedDate} onChange={(event) => setBookedDate(event.target.value)} />
+                    </label>
+                    <label className="seller-host-calendar-card payment">
+                      <span>{isAr ? 'يوم الدفع' : 'Payment day'}</span>
+                      <input dir="ltr" type="date" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} />
+                    </label>
+                  </div>
                 </div>
               )}
               <div className="seller-wide-field">
