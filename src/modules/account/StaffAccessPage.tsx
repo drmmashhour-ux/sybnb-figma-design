@@ -9,7 +9,7 @@ import {
 } from '../../shared/api/platformApi'
 
 type StaffRole = 'ADMIN' | 'HOST' | 'DRIVER'
-type PartnerType = 'HOST' | 'SELLER' | 'RENTER' | 'BUILDER'
+type PartnerType = 'HOST' | 'SELLER' | 'RENTER' | 'BUILDER' | 'DEALER'
 
 type Props = {
   lang: Lang
@@ -22,6 +22,7 @@ const partnerOptions: Array<{ id: PartnerType; ar: string; en: string; detailAr:
   { id: 'SELLER', ar: 'بائع عقار', en: 'Property seller', detailAr: 'بيع عقار أو أرض', detailEn: 'Homes, land, and resale' },
   { id: 'RENTER', ar: 'مؤجر طويل', en: 'Long-term renter', detailAr: 'إيجار شهري أو سنوي', detailEn: 'Monthly and yearly rentals' },
   { id: 'BUILDER', ar: 'مطور بناء', en: 'New construction', detailAr: 'مشاريع ومبان جديدة', detailEn: 'New projects and builders' },
+  { id: 'DEALER', ar: 'تاجر مركبات', en: 'Vehicle partner', detailAr: 'سيارات جديدة أو مستعملة', detailEn: 'New and used cars' },
 ]
 
 const labels = {
@@ -39,7 +40,9 @@ const labels = {
     backToSignIn: 'العودة لتسجيل الدخول',
     email: 'البريد الإلكتروني',
     emailHelp: 'اكتب البريد كاملاً. سنرسل رمز التأكيد إلى هذا البريد.',
+    emailRepeat: 'أعد كتابة البريد الإلكتروني',
     confirmEmail: 'تأكيد البريد',
+    emailMismatch: 'البريد الإلكتروني وتأكيد البريد غير متطابقين.',
     password: 'كلمة المرور',
     repeatPassword: 'تأكيد كلمة المرور',
     newPassword: 'كلمة المرور الجديدة',
@@ -84,7 +87,9 @@ const labels = {
     backToSignIn: 'Back to sign in',
     email: 'Email address',
     emailHelp: 'Use the full email address. We send the confirmation code here.',
+    emailRepeat: 'Repeat email address',
     confirmEmail: 'Confirm email',
+    emailMismatch: 'Email and repeated email do not match.',
     password: 'Password',
     repeatPassword: 'Repeat password',
     newPassword: 'New password',
@@ -124,6 +129,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgotPassword'>('signIn')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [email, setEmail] = useState('')
+  const [emailRepeat, setEmailRepeat] = useState('')
   const [password, setPassword] = useState('')
   const [passwordRepeat, setPasswordRepeat] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -149,6 +155,11 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     setDevCode('')
     setMessage('')
     setIsErrorMessage(false)
+  }
+
+  function updateEmail(nextEmail: string) {
+    setEmail(nextEmail)
+    resetCodeState()
   }
 
   function switchMode(next: 'signIn' | 'signUp' | 'forgotPassword') {
@@ -199,6 +210,13 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
 
   async function openSession() {
     if (mode === 'forgotPassword') return
+    const normalizedEmail = email.trim().toLowerCase()
+    const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
+    if (mode === 'signUp' && normalizedEmail !== normalizedEmailRepeat) {
+      setIsErrorMessage(true)
+      setMessage(t.emailMismatch)
+      return
+    }
     if (!email.trim() || !password.trim() || !codeConfirmed) {
       setIsErrorMessage(true)
       setMessage(mode === 'signUp' ? t.signUpRequired : t.signInRequired)
@@ -220,7 +238,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     setStatus('loading')
     try {
       await createStaffAccountSession(role, {
-        email: email.trim(),
+        email: normalizedEmail,
         password,
         phone: phone.trim(),
         mode,
@@ -238,15 +256,17 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   }
 
   async function submitPasswordReset() {
-    if (!email.trim() || !newPassword.trim() || !codeConfirmed) {
+    const normalizedEmail = email.trim().toLowerCase()
+    const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
+    if (!email.trim() || normalizedEmail !== normalizedEmailRepeat || !newPassword.trim() || !codeConfirmed) {
       setIsErrorMessage(true)
-      setMessage(t.resetRequired)
+      setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
       return
     }
 
     setStatus('loading')
     try {
-      await resetPasswordWithEmailCode(email.trim(), newPassword)
+      await resetPasswordWithEmailCode(normalizedEmail, newPassword)
       setStatus('idle')
       setNewPassword('')
       setIsErrorMessage(false)
@@ -309,14 +329,28 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               value={email}
               type="email"
               placeholder="name@example.com"
-              onChange={(event) => {
-                setEmail(event.target.value)
-                resetCodeState()
-              }}
+              onChange={(event) => updateEmail(event.target.value)}
               dir="ltr"
             />
             <small style={styles.helpText}>{t.emailHelp}</small>
           </label>
+
+          {(mode === 'signUp' || mode === 'forgotPassword') && (
+            <label style={styles.labelWide}>
+              {t.emailRepeat}
+              <input
+                style={styles.emailInputSecondary}
+                value={emailRepeat}
+                type="email"
+                placeholder="name@example.com"
+                onChange={(event) => {
+                  setEmailRepeat(event.target.value)
+                  setCodeConfirmed(false)
+                }}
+                dir="ltr"
+              />
+            </label>
+          )}
 
           <section style={styles.emailConfirmBox}>
             <div style={styles.confirmHeader}>
@@ -427,6 +461,7 @@ const styles: Record<string, CSSProperties> = {
   label: { display: 'grid', gap: 8, color: '#d9e1f5', fontWeight: 800 },
   labelWide: { display: 'grid', gap: 8, color: '#d9e1f5', fontWeight: 800, gridColumn: '1 / -1' },
   emailInput: { minHeight: 68, border: '1px solid #4760ff', borderRadius: 14, background: '#0b1220', color: '#fff', padding: '0 18px', fontSize: 22, fontWeight: 850, width: '100%', boxSizing: 'border-box' },
+  emailInputSecondary: { minHeight: 62, border: '1px solid #27324d', borderRadius: 14, background: '#0b1220', color: '#fff', padding: '0 18px', fontSize: 20, fontWeight: 800, width: '100%', boxSizing: 'border-box' },
   input: { minHeight: 52, border: '1px solid #27324d', borderRadius: 12, background: '#0b1220', color: '#fff', padding: '0 14px', fontSize: 17, width: '100%', boxSizing: 'border-box' },
   helpText: { color: '#8f9bb3', fontWeight: 700 },
   emailConfirmBox: { border: '1px solid rgba(255,255,255,.1)', borderRadius: 14, background: '#0c111d', display: 'grid', gap: 12, gridColumn: '1 / -1', padding: 14 },
