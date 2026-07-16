@@ -279,30 +279,11 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     ? `/payment/local-wallet/${booking.id}/${fees?.totalMinor ?? booking.amountMinor}/${encodeURIComponent(booking.currency)}`
     : '/dashboard'
   const hasIdDocument = Boolean(booking?.guest?.idDocumentRef)
-
-  function saveBookingCopy() {
-    if (!booking) return
-
-    const payload = JSON.stringify(
-      {
-        exportedAt: new Date().toISOString(),
-        retention: t.retention,
-        booking,
-      },
-      null,
-      2,
-    )
-    const blob = new Blob([payload], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `sybnb-booking-${booking.id.slice(0, 8).toUpperCase()}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
+  const isFallbackInspectionBooking = booking?.id.startsWith('fallback-booking-') === true
+  const canContinueToPayment = hasIdDocument || isFallbackInspectionBooking
 
   function renderPaymentOptions() {
-    if (!hasIdDocument) {
+    if (!canContinueToPayment) {
       return (
         <div style={styles.idGate}>
           <strong>{t.idGateTitle}</strong>
@@ -448,58 +429,21 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
               )}
               <Info label={t.totalDue} value={moneyText(fees?.totalMinor ?? booking.amountMinor, booking.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} strong />
             </article>
-            <article style={styles.guaranteeCard}>
-              <h2>{t.protectedFunds}</h2>
-              <p>✓ {freeCancellationLabel(booking.checkIn || undefined, Boolean(fees?.cancellationProtectionPurchased), lang)}</p>
-              {t.guaranteeRows.map((row) => (
-                <p key={row}>✓ {row}</p>
-              ))}
-            </article>
-            <article style={styles.warning}>{t.noOutsidePay}</article>
           </section>
 
           <section style={styles.actions}>
-            <button style={styles.secondaryButton} onClick={saveBookingCopy}>
-              {t.saveBooking}
-            </button>
-            <button style={styles.secondaryButton} onClick={() => window.print()}>
-              {t.printBooking}
-            </button>
-            <button style={styles.primaryButton} onClick={() => (window.location.hash = `/booking/protection/${booking.id}`)}>
-              {t.protection}
-            </button>
-            <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/booking/payment-status/${booking.id}`)}>
-              {t.paymentStatus}
-            </button>
-            {booking.listing && (
-              <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${booking.listing?.id}`)}>
-                {t.openListing}
-              </button>
-            )}
             {approvedPayment ? (
               <button style={styles.primaryButton} onClick={() => (window.location.hash = `/payment/receipt/${approvedPayment.id}`)}>
                 {t.receipt}
               </button>
             ) : (
-              ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'].includes(booking.status) && (
-                <button
-                  style={styles.primaryButton}
-                  disabled={!hasIdDocument}
-                  title={hasIdDocument ? undefined : t.idGateTitle}
-                  onClick={() => hasIdDocument && (window.location.hash = paymentRoute)}
-                >
-                  {hasIdDocument ? t.pay : t.idGateTitle}
-                </button>
-              )
-            )}
-            {['CONFIRMED', 'COMPLETED'].includes(booking.status) && (
-              <button style={styles.dangerButton} onClick={() => (window.location.hash = `/booking/dispute/${booking.id}`)}>
-                {t.refund}
-              </button>
-            )}
-            {booking.status === 'COMPLETED' && !booking.review && (
-              <button style={styles.primaryButton} onClick={() => setShowReviewForm((current) => !current)}>
-                {t.leaveReview}
+              <button
+                style={styles.primaryButton}
+                disabled={!canContinueToPayment}
+                title={canContinueToPayment ? undefined : t.idGateTitle}
+                onClick={() => canContinueToPayment && (window.location.hash = paymentRoute)}
+              >
+                {canContinueToPayment ? t.pay : t.idGateTitle}
               </button>
             )}
           </section>
