@@ -2068,46 +2068,142 @@ a {
   color: #07110e;
 }
 
-.seller-host-calendar-grid {
+.seller-host-calendar-layout {
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
 }
 
-.seller-host-calendar-card {
+.seller-host-calendar-panel {
   background: rgba(10, 15, 29, 0.7);
   border: 1px solid #263651;
   border-radius: 8px;
   display: grid;
-  gap: 8px;
+  gap: 12px;
   padding: 12px;
 }
 
-.seller-host-calendar-card.available {
+.seller-host-calendar-panel.available {
   border-color: rgba(32, 210, 155, 0.42);
 }
 
-.seller-host-calendar-card.booked {
+.seller-host-calendar-panel.booked {
   border-color: rgba(213, 169, 21, 0.52);
 }
 
-.seller-host-calendar-card.payment {
-  border-color: rgba(82, 108, 255, 0.52);
+.seller-host-calendar-panel-head {
+  align-items: end;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
 }
 
+.seller-host-calendar-panel-head strong {
+  color: #f7f8ff;
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.seller-host-calendar-panel-head label {
+  display: grid;
+  gap: 6px;
+  min-width: 132px;
+}
+
+.seller-host-calendar-panel-head span,
 .seller-host-calendar-card span {
   color: #d5a915;
   font-size: 12px;
   font-weight: 950;
 }
 
-.seller-host-calendar-card input[type='date'] {
+.seller-host-calendar-panel-head input {
   background: #0a0f1d;
   border: 1px solid #263651;
   border-radius: 8px;
   color: #f7f8ff;
-  min-height: 46px;
+  font-weight: 900;
+  min-height: 44px;
   padding: 0 10px;
+}
+
+.seller-host-day-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(7, minmax(54px, 1fr));
+}
+
+.seller-host-day-grid button {
+  background: #121c2f;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  color: #f7f8ff;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  min-height: 68px;
+  padding: 8px 4px;
+  place-items: center;
+}
+
+.seller-host-day-grid button.active {
+  background: rgba(32, 210, 155, 0.18);
+  border-color: #20d29b;
+}
+
+.seller-host-day-grid strong {
+  font-size: 20px;
+  font-weight: 950;
+}
+
+.seller-host-day-grid span {
+  color: #9aa7bd;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.seller-host-day-grid button.active span {
+  color: #20d29b;
+}
+
+.seller-host-reservation-card {
+  background: rgba(213, 169, 21, 0.12);
+  border: 1px solid rgba(213, 169, 21, 0.48);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-height: 176px;
+  padding: 14px;
+}
+
+.seller-host-reservation-card span {
+  color: #d5a915;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.seller-host-reservation-card strong {
+  color: #f7f8ff;
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.seller-host-reservation-card em {
+  color: #20d29b;
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.seller-host-reservation-card button {
+  background: #526cff;
+  border: 1px solid #8ea0ff;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 950;
+  min-height: 44px;
+  padding: 0 12px;
 }
 
 .seller-location-capsule {
@@ -2320,6 +2416,188 @@ a {
 .seller-money-note {
   color: #9aa7bd;
   line-height: 1.65;
+}
+
+.seller-map-panel {
+  background: rgba(10, 15, 29, 0.52);
+  border: 1px solid #263651;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  padding: 14px;
+}
+
+.seller-map-card {
+  background:
+    radial-gradient(circle at 28% 42%, rgba(32, 210, 155, 0.2), transparent 16%),
+    radial-gradient(circle at 72% 68%, rgba(213, 169, 21, 0.17), transparent 18%),
+    #0a0f1d;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  min-height: 260px;
+  overflow: hidden;
+  position: relative;
+}
+
+.seller-map-grid-lines {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-size: 42px 42px;
+  inset: 0;
+  position: absolute;
+}
+
+.seller-map-route {
+  background: rgba(82, 108, 255, 0.48);
+  border-radius: 999px;
+  height: 12px;
+  position: absolute;
+  transform-origin: center;
+}
+
+.seller-map-route-a {
+  left: -8%;
+  top: 52%;
+  transform: rotate(-15deg);
+  width: 116%;
+}
+
+.seller-map-route-b {
+  background: rgba(32, 210, 155, 0.52);
+  height: 10px;
+  left: 18%;
+  top: 16%;
+  transform: rotate(65deg);
+  width: 86%;
+}
+
+.seller-map-pin {
+  align-items: center;
+  background: #d5a915;
+  border: 3px solid #fff4bf;
+  border-radius: 999px 999px 999px 0;
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.38);
+  cursor: pointer;
+  display: flex;
+  height: 46px;
+  justify-content: center;
+  left: 50%;
+  position: absolute;
+  top: 44%;
+  transform: rotate(-45deg);
+  width: 46px;
+}
+
+.seller-map-pin span {
+  background: #0a0f1d;
+  border-radius: 999px;
+  display: block;
+  height: 14px;
+  width: 14px;
+}
+
+.seller-map-pin.confirmed {
+  background: #20d29b;
+  border-color: #b8ffe9;
+}
+
+.seller-map-chip {
+  background: rgba(10, 15, 29, 0.88);
+  border: 1px solid rgba(32, 210, 155, 0.44);
+  border-radius: 8px;
+  bottom: 14px;
+  display: grid;
+  gap: 4px;
+  inset-inline: 14px;
+  padding: 12px;
+  position: absolute;
+}
+
+.seller-map-chip strong {
+  color: #f7f8ff;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.seller-map-chip span {
+  color: #9aa7bd;
+  font-weight: 800;
+}
+
+.seller-map-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.seller-map-controls > div {
+  background: rgba(82, 108, 255, 0.12);
+  border: 1px solid rgba(82, 108, 255, 0.36);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.seller-map-controls strong {
+  color: #f7f8ff;
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.seller-map-controls span {
+  color: #9aa7bd;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.seller-map-controls label {
+  display: grid;
+  gap: 6px;
+}
+
+.seller-map-controls input {
+  background: #0a0f1d;
+  border: 1px solid #263651;
+  border-radius: 8px;
+  color: #f7f8ff;
+  font-weight: 900;
+  min-height: 48px;
+  padding: 0 12px;
+}
+
+.seller-map-controls button {
+  background: #526cff;
+  border: 1px solid #8ea0ff;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 950;
+  min-height: 50px;
+  padding: 0 14px;
+}
+
+.seller-map-controls button.confirmed {
+  background: #20d29b;
+  border-color: #20d29b;
+  color: #07110e;
+}
+
+@media (max-width: 860px) {
+  .seller-host-calendar-layout,
+  .seller-map-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .seller-host-calendar-panel-head {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .seller-host-day-grid {
+    grid-template-columns: repeat(4, minmax(58px, 1fr));
+  }
 }
 
 .seller-review-card {

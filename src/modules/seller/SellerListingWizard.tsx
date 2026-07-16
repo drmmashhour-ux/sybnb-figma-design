@@ -41,12 +41,17 @@ type WizardDraft = {
   city: string
   area: string
   address: string
+  latitude: string
+  longitude: string
+  mapPinConfirmed: boolean
   price: string
   size: string
   bedrooms: string
   bathrooms: string
   instantBookEnabled: boolean
   searchCapsuleEnabled: boolean
+  availabilityDates: string[]
+  variableNightPrice: string
   availableStart: string
   availableEnd: string
   bookedDate: string
@@ -189,12 +194,17 @@ export function SellerListingWizard({ lang }: Props) {
   const [area, setArea] = useState(draft.area || 'old-city')
   const [areaQuery, setAreaQuery] = useState('')
   const [address, setAddress] = useState(draft.address ?? (isAr ? 'قرب شارع رئيسي' : 'Near a main street'))
+  const [latitude, setLatitude] = useState(draft.latitude || '33.5138')
+  const [longitude, setLongitude] = useState(draft.longitude || '36.2765')
+  const [mapPinConfirmed, setMapPinConfirmed] = useState(draft.mapPinConfirmed ?? false)
   const [price, setPrice] = useState(draft.price || '15')
   const [size, setSize] = useState(draft.size || '110')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
   const [bathrooms, setBathrooms] = useState(draft.bathrooms || '2')
   const [instantBookEnabled, setInstantBookEnabled] = useState(draft.instantBookEnabled ?? false)
   const [searchCapsuleEnabled, setSearchCapsuleEnabled] = useState(draft.searchCapsuleEnabled ?? true)
+  const [availabilityDates, setAvailabilityDates] = useState<string[]>(draft.availabilityDates || [addDaysIso(1), addDaysIso(2), addDaysIso(3), addDaysIso(4)])
+  const [variableNightPrice, setVariableNightPrice] = useState(draft.variableNightPrice || '15')
   const [availableStart, setAvailableStart] = useState(draft.availableStart || addDaysIso(1))
   const [availableEnd, setAvailableEnd] = useState(draft.availableEnd || addDaysIso(31))
   const [bookedDate, setBookedDate] = useState(draft.bookedDate || addDaysIso(7))
@@ -231,12 +241,17 @@ export function SellerListingWizard({ lang }: Props) {
       city,
       area,
       address,
+      latitude,
+      longitude,
+      mapPinConfirmed,
       price,
       size,
       bedrooms,
       bathrooms,
       instantBookEnabled,
       searchCapsuleEnabled,
+      availabilityDates,
+      variableNightPrice,
       availableStart,
       availableEnd,
       bookedDate,
@@ -244,7 +259,7 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, selectedType, title, description, governorate, city, area, address, price, size, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
+  }, [division, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, size, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -270,10 +285,32 @@ export function SellerListingWizard({ lang }: Props) {
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
   const availabilityCalendar = {
     searchCapsuleEnabled,
+    availabilityDates,
+    variableNightPrice,
     availableStart,
     availableEnd,
     bookedDate,
     paymentDay,
+  }
+  const mapLocation = {
+    latitude,
+    longitude,
+    pinConfirmed: mapPinConfirmed,
+  }
+  const hostCalendarDays = useMemo(() => Array.from({ length: 14 }, (_, index) => addDaysIso(index + 1)), [])
+  const selectedAvailabilityDays = useMemo(() => new Set(availabilityDates), [availabilityDates])
+
+  function updateAvailabilityDates(nextDates: string[]) {
+    const sortedDates = Array.from(new Set(nextDates)).sort()
+    setAvailabilityDates(sortedDates)
+    if (sortedDates.length) {
+      setAvailableStart(sortedDates[0])
+      setAvailableEnd(sortedDates[sortedDates.length - 1])
+    }
+  }
+
+  function toggleAvailabilityDay(day: string) {
+    updateAvailabilityDates(selectedAvailabilityDays.has(day) ? availabilityDates.filter((item) => item !== day) : [...availabilityDates, day])
   }
 
   function chooseGovernorate(value: string) {
@@ -283,6 +320,7 @@ export function SellerListingWizard({ lang }: Props) {
     setCity(nextCity?.key || '')
     setArea(nextCity?.areas[0]?.key || '')
     setAreaQuery('')
+    setMapPinConfirmed(false)
   }
 
   function chooseCity(value: string) {
@@ -290,6 +328,7 @@ export function SellerListingWizard({ lang }: Props) {
     setCity(value)
     setArea(nextCity?.areas[0]?.key || '')
     setAreaQuery('')
+    setMapPinConfirmed(false)
   }
 
   const next = async () => {
@@ -315,6 +354,7 @@ export function SellerListingWizard({ lang }: Props) {
         bathrooms: toNumber(bathrooms),
         visualFilters,
         availabilityCalendar,
+        mapLocation,
       }
 
       try {
@@ -334,6 +374,7 @@ export function SellerListingWizard({ lang }: Props) {
                 cityLabel: selectedCityLabel,
                 areaLabel: selectedAreaLabel,
                 availabilityCalendar,
+                mapLocation,
               },
             })
             await addAccommodationRoomType(accommodation.id, {
@@ -390,6 +431,7 @@ export function SellerListingWizard({ lang }: Props) {
             bathrooms: toNumber(bathrooms),
             visualFilters,
             availabilityCalendar,
+            mapLocation,
           },
         })
         clearDraft()
@@ -658,9 +700,41 @@ export function SellerListingWizard({ lang }: Props) {
                   value={address}
                 />
               </label>
-              <div className="seller-map-placeholder">
-                <strong>{isAr ? 'تصحيح الموقع لاحقاً' : 'Location correction later'}</strong>
-                <span>{isAr ? 'سيتم ربط الخريطة بعد تثبيت محرك البحث والمواقع.' : 'Map will connect after the search and location engine is stabilized.'}</span>
+              <div className="seller-map-panel">
+                <div className="seller-map-card" aria-label={isAr ? 'خريطة موقع الإعلان' : 'Listing location map'}>
+                  <div className="seller-map-grid-lines" />
+                  <div className="seller-map-route seller-map-route-a" />
+                  <div className="seller-map-route seller-map-route-b" />
+                  <button
+                    aria-label={isAr ? 'تأكيد دبوس الموقع' : 'Confirm map pin'}
+                    className={`seller-map-pin ${mapPinConfirmed ? 'confirmed' : ''}`}
+                    onClick={() => setMapPinConfirmed(true)}
+                    type="button"
+                  >
+                    <span />
+                  </button>
+                  <div className="seller-map-chip">
+                    <strong>{selectedAreaLabel || selectedCityLabel}</strong>
+                    <span>{mapPinConfirmed ? (isAr ? 'تم تأكيد الموقع' : 'Pin confirmed') : isAr ? 'اضغط الدبوس لتأكيد الموقع' : 'Press the pin to confirm'}</span>
+                  </div>
+                </div>
+                <div className="seller-map-controls">
+                  <div>
+                    <strong>{isAr ? 'تثبيت موقع الإعلان' : 'Set listing location'}</strong>
+                    <span>{[selectedCityLabel, selectedAreaLabel, address].filter(Boolean).join(' · ')}</span>
+                  </div>
+                  <label>
+                    <span>{isAr ? 'خط العرض' : 'Latitude'}</span>
+                    <input dir="ltr" inputMode="decimal" onChange={(event) => setLatitude(event.target.value)} value={latitude} />
+                  </label>
+                  <label>
+                    <span>{isAr ? 'خط الطول' : 'Longitude'}</span>
+                    <input dir="ltr" inputMode="decimal" onChange={(event) => setLongitude(event.target.value)} value={longitude} />
+                  </label>
+                  <button className={mapPinConfirmed ? 'confirmed' : ''} onClick={() => setMapPinConfirmed(true)} type="button">
+                    {mapPinConfirmed ? (isAr ? 'تم حفظ الموقع' : 'Location saved') : isAr ? 'تأكيد الموقع على الخريطة' : 'Confirm location on map'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -677,7 +751,15 @@ export function SellerListingWizard({ lang }: Props) {
                       ? 'السعر المطلوب'
                       : 'Asking price'}
                 </span>
-                <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder={division === 'STAYS' ? '15' : '250000'} value={price} />
+                <input
+                  dir="ltr"
+                  onChange={(event) => {
+                    setPrice(event.target.value)
+                    if (division === 'STAYS') setVariableNightPrice(event.target.value)
+                  }}
+                  placeholder={division === 'STAYS' ? '15' : '250000'}
+                  value={price}
+                />
               </label>
               <label>
                 <span>{isAr ? 'المساحة' : 'Area'}</span>
@@ -730,23 +812,49 @@ export function SellerListingWizard({ lang }: Props) {
                       {searchCapsuleEnabled ? (isAr ? 'ظاهر في البحث' : 'Visible in search') : isAr ? 'مخفي من البحث' : 'Hidden from search'}
                     </button>
                   </div>
-                  <div className="seller-host-calendar-grid">
-                    <label className="seller-host-calendar-card available">
-                      <span>{isAr ? 'متاح من' : 'Available from'}</span>
-                      <input dir="ltr" type="date" value={availableStart} onChange={(event) => setAvailableStart(event.target.value)} />
-                    </label>
-                    <label className="seller-host-calendar-card available">
-                      <span>{isAr ? 'متاح حتى' : 'Available until'}</span>
-                      <input dir="ltr" type="date" value={availableEnd} onChange={(event) => setAvailableEnd(event.target.value)} />
-                    </label>
-                    <label className="seller-host-calendar-card booked">
-                      <span>{isAr ? 'يوم محجوز' : 'Booked day'}</span>
-                      <input dir="ltr" type="date" value={bookedDate} onChange={(event) => setBookedDate(event.target.value)} />
-                    </label>
-                    <label className="seller-host-calendar-card payment">
-                      <span>{isAr ? 'يوم الدفع' : 'Payment day'}</span>
-                      <input dir="ltr" type="date" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} />
-                    </label>
+                  <div className="seller-host-calendar-layout">
+                    <section className="seller-host-calendar-panel available">
+                      <div className="seller-host-calendar-panel-head">
+                        <strong>{isAr ? 'رزنامة التوفر' : 'Availability calendar'}</strong>
+                        <label>
+                          <span>{isAr ? 'سعر الليلة' : 'Night price'}</span>
+                          <input
+                            dir="ltr"
+                            inputMode="numeric"
+                            onChange={(event) => {
+                              setVariableNightPrice(event.target.value)
+                              setPrice(event.target.value)
+                            }}
+                            value={variableNightPrice}
+                          />
+                        </label>
+                      </div>
+                      <div className="seller-host-day-grid">
+                        {hostCalendarDays.map((day) => (
+                          <button className={selectedAvailabilityDays.has(day) ? 'active' : ''} key={day} onClick={() => toggleAvailabilityDay(day)} type="button">
+                            <strong>{new Date(`${day}T00:00:00`).getDate()}</strong>
+                            <span>{selectedAvailabilityDays.has(day) ? (isAr ? 'متاح' : 'Open') : isAr ? 'مغلق' : 'Closed'}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="seller-host-calendar-panel booked">
+                      <div className="seller-host-calendar-panel-head">
+                        <strong>{isAr ? 'رزنامة الحجوزات' : 'Reservation calendar'}</strong>
+                        <label>
+                          <span>{isAr ? 'يوم الدفع' : 'Payment day'}</span>
+                          <input dir="ltr" type="date" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} />
+                        </label>
+                      </div>
+                      <div className="seller-host-reservation-card">
+                        <span>{isAr ? 'حجز تجريبي قادم' : 'Upcoming sample booking'}</span>
+                        <strong>{bookedDate}</strong>
+                        <em>{`USD ${variableNightPrice || price}`}</em>
+                        <button onClick={() => setBookedDate(hostCalendarDays.find((day) => selectedAvailabilityDays.has(day)) || addDaysIso(7))} type="button">
+                          {isAr ? 'تحديث من التوفر' : 'Use first open day'}
+                        </button>
+                      </div>
+                    </section>
                   </div>
                 </div>
               )}
