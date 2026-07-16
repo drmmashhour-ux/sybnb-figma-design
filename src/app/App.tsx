@@ -18,7 +18,6 @@ const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLi
 const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDashboardPage'), 'DriverDashboardPage')
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
-const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostInsightsPanel = lazyNamed(() => import('../modules/host/HostInsightsPanel'), 'HostInsightsPanel')
@@ -76,38 +75,20 @@ export function App() {
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingReviewMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/dashboard' || path === '/account' || path === '/wallet' ? 'generic' : 'stays'
-  const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
-  const hasAnyStaffSession = typeof window !== 'undefined' && hasAnyValidStaffSession()
-  const contactProtectedRoute = path === '/immocontact'
-  const needsGuestAccountGate = (guestProtectedRoute && !hasGuestSession) || (contactProtectedRoute && !hasGuestSession && !hasAnyStaffSession)
-
-  if (needsGuestAccountGate && typeof window !== 'undefined') {
-    sessionStorage.setItem('sybnb.v6.guestReturnPath', path)
-  }
 
   return (
     <AppShell lang={lang} onLanguageChange={setLang} path={path}>
       <Suspense fallback={<RouteLoading lang={lang} />}>
-        {needsGuestAccountGate ? (
-          <GuestAccountPage lang={lang} flow={guestGateFlow} returnPath={path} />
-        ) : staffRequiredRole && !hasStaffSession ? (
+        {staffRequiredRole && !hasStaffSession ? (
           <StaffAccessPage lang={lang} role={staffRequiredRole} returnPath={path} />
         ) : isGiftFlowRoute(path) ? (
           <GiftFlowRoutes lang={lang} path={path} />
         ) : isTrustProtectionRoute(path) ? (
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
-          // No hardcoded '/stays' fallback here: when there's no listing id in the URL (e.g. the
-          // Rentals/Buy in-page capsule search's "open account" button, which navigates to plain
-          // /account/open), GuestAccountPage's own returnPath fallback chain reads the specific
-          // return path those pages already write to sessionStorage (sybnb.v6.guestReturnPath)
-          // before the account gate. Hardcoding '/stays' here overrode that and silently sent
-          // every non-listing-scoped signup back to the Stays search page.
-          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : undefined} />
+          guestAccountMatch[1] ? <ListingDetailPage listingId={guestAccountMatch[1]} lang={lang} /> : <SearchPreviewPage lang={lang} initialDivision="stays" entry="stays" />
         ) : path === '/dashboard' || path === '/account' ? (
           <DashboardPage lang={lang} />
         ) : path === '/host' ||
@@ -224,17 +205,6 @@ function hasRequiredStaffSession(requiredRole: 'ADMIN' | 'HOST' | 'DRIVER' | nul
     if (!session.token) return false
     if (requiredRole === 'HOST') return roles.includes('HOST') || roles.includes('SELLER')
     return roles.includes(requiredRole)
-  } catch {
-    return false
-  }
-}
-
-function hasAnyValidStaffSession() {
-  try {
-    const raw = sessionStorage.getItem('sybnb.v6.staffSession')
-    if (!raw) return false
-    const session = JSON.parse(raw) as { token?: string; user?: { roles?: string[] } }
-    return Boolean(session.token && session.user?.roles?.length)
   } catch {
     return false
   }

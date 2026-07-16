@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
-import { clearGuestSession, getStoredGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
 type Props = {
@@ -19,8 +18,6 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   const isAdminControlRoom = path.startsWith('/admin')
   const routeContext = getRouteContext(path, isAr)
   const showFlowNav = !isLanding && !isAdminControlRoom
-  const guestSession = typeof window !== 'undefined' ? getStoredGuestSession() : null
-
   function goBack() {
     navigate(routeContext.backPath)
   }
@@ -30,10 +27,6 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
     navigate(routeContext.nextPath)
   }
 
-  function signOutGuest() {
-    clearGuestSession()
-    navigate('/')
-  }
 
   return (
     <div className="app-shell" dir={isAr ? 'rtl' : 'ltr'}>
@@ -67,25 +60,14 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
                 EN
               </button>
             </div>
-            {guestSession ? (
-              <div className="public-auth-actions" aria-label={isAr ? 'حساب العميل' : 'Guest account'}>
-                <button className="menu-action" onClick={() => navigate('/dashboard')}>
-                  {isAr ? `مرحباً، ${guestSession.user.displayName}` : `Hi, ${guestSession.user.displayName}`}
-                </button>
-                <button className="primary-action" onClick={signOutGuest}>
-                  {isAr ? 'تسجيل الخروج' : 'Sign out'}
-                </button>
-              </div>
-            ) : (
-              <div className="public-auth-actions">
-                <button className="menu-action" onClick={() => navigate('/account/open')}>
-                  {isAr ? 'تسجيل الدخول' : 'Sign in'}
-                </button>
-                <button className="primary-action" onClick={() => navigate('/account/open')}>
-                  {isAr ? 'إنشاء حساب' : 'Sign up'}
-                </button>
-              </div>
-            )}
+            <div className="public-auth-actions">
+              <button className="menu-action" onClick={() => navigate('/stays')}>
+                {isAr ? 'الإقامات' : 'Stays'}
+              </button>
+              <button className="primary-action" onClick={() => navigate('/stays')}>
+                {isAr ? 'احجز الآن' : 'Book now'}
+              </button>
+            </div>
           </nav>
         </header>
       )}
@@ -138,7 +120,7 @@ function getRouteContext(path: string, isAr: boolean) {
       section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
       page: isAr ? 'بحث العقارات' : 'Property search',
       backPath: home,
-      nextPath: '/account/open',
+      nextPath: '/rentals',
     }
   }
   if (path.startsWith('/cars')) {
@@ -181,25 +163,16 @@ function getRouteContext(path: string, isAr: boolean) {
       section: listingContext.section,
       page: listingContext.detailsPage,
       backPath: listingContext.backPath,
-      nextPath: `/account/open/${id}`,
+      nextPath: '',
     }
   }
   if (path.startsWith('/account/open')) {
     const id = path.split('/')[3] || ''
-    const returnPath = readGuestReturnPath()
-    if (!id && returnPath.startsWith('/rentals')) {
-      return {
-        section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
-        page: isAr ? 'فتح حساب المستأجر' : 'Open renter account',
-        backPath: '/rentals',
-        nextPath: '/rentals',
-      }
-    }
     return {
       section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
-      page: isAr ? 'فتح الحساب' : 'Open account',
+      page: isAr ? 'تفاصيل الإقامة' : 'Stay details',
       backPath: id ? `/listing/${id}` : '/stays',
-      nextPath: id ? `/listing/${id}` : '/dashboard',
+      nextPath: id ? `/booking/review/${id}` : '/stays',
     }
   }
   if (path.startsWith('/booking/')) {

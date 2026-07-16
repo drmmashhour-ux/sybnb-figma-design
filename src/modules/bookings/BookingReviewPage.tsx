@@ -75,8 +75,6 @@ const copy = {
   },
 }
 
-const CUSTOMER_GATE_KEY = 'sybnb-v6-customer-account-ready'
-
 const DIVISION_IMAGES: Record<string, string> = {
   STAYS: '/assets/divisions/daily-rental.webp',
 }
@@ -96,11 +94,6 @@ export function BookingReviewPage({ listingId, lang }: Props) {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const ready = sessionStorage.getItem(CUSTOMER_GATE_KEY) === '1' || sessionStorage.getItem(`${CUSTOMER_GATE_KEY}:${listingId}`) === '1'
-      if (!ready) {
-        window.location.hash = `/account/open/${listingId}`
-        return
-      }
       if (!isValidDate(dateRange.checkIn) || !isValidDate(dateRange.checkOut) || nightsBetween(dateRange.checkIn, dateRange.checkOut) < 1) {
         window.location.hash = `/listing/${listingId}`
         return

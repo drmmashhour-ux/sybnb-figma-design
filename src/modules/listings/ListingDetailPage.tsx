@@ -179,7 +179,6 @@ const copy = {
   },
 }
 
-const CUSTOMER_GATE_KEY = 'sybnb-v6-customer-account-ready'
 
 const DIVISION_IMAGES: Record<string, string> = {
   STAYS: '/assets/divisions/daily-rental.webp',
@@ -201,7 +200,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const actionBarRef = useRef<HTMLElement | null>(null)
   const bookingDraft = useMemo(() => loadBookingDraft(listingId), [listingId])
   const [cancellationProtection, setCancellationProtection] = useState(bookingDraft.cancellationProtection ?? false)
-  const [customerReady, setCustomerReady] = useState(false)
   const [offlineMapReady, setOfflineMapReady] = useState(false)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
   const [dateRange, setDateRange] = useState<DateRange>(
@@ -238,22 +236,8 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const accountKey = customerGateKey(listingId)
       const search = new URLSearchParams(window.location.search)
-      const hasResetFlag = search.has('resetAccount')
-      const hasLegacyAccountReadyFlag = search.has('accountReady')
-
-      if (hasResetFlag) {
-        sessionStorage.removeItem(CUSTOMER_GATE_KEY)
-        sessionStorage.removeItem(accountKey)
-        sessionStorage.removeItem('sybnb-v6-guest-token')
-        sessionStorage.removeItem('sybnb.v6.guestSession')
-        setCustomerReady(false)
-      } else {
-        setCustomerReady(sessionStorage.getItem(CUSTOMER_GATE_KEY) === '1' || sessionStorage.getItem(accountKey) === '1')
-      }
-
-      if (hasResetFlag || hasLegacyAccountReadyFlag) {
+      if (search.has('resetAccount') || search.has('accountReady')) {
         search.delete('resetAccount')
         search.delete('accountReady')
         const nextSearch = search.toString()
@@ -376,12 +360,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       setMessage(t.datesRequired)
       return
     }
-    const hasCustomerAccount = customerReady
-    if (!hasCustomerAccount) {
-      window.location.hash = `/account/open/${listing.id}`
-      return
-    }
-
     // STAYS is a real paid booking — matching Airbnb/Booking.com's architecture, browsing and
     // date/currency/protection selection stay on THIS page, but the actual reservation is only
     // ever created on a dedicated review/checkout step (BookingReviewPage), never directly from
@@ -524,7 +502,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           {activeTab === 'terms' && (
             <section style={styles.tabPanel}>
               <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
-              {!customerReady && <div style={styles.accountHint}>{t.requestOnlyAfterAccount}</div>}
               {listing.division === 'STAYS' && (
                 <>
                   {!dateRange.checkIn && offerSummary.count > 0 && (
@@ -744,7 +721,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <Info label={t.price} value={moneyText(listing.priceMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
             <Info label={t.owner} value={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()} />
             <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-            {customerReady ? <Info label={t.accountReady} value="✓" dir={isAr ? 'rtl' : 'ltr'} /> : null}
           </section>
 
           {inquirySent && (
@@ -760,7 +736,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           <section ref={actionBarRef} style={styles.bottomActionBar}>
             {!inquirySent && (
               <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
-                {status === 'saving' ? t.saving : customerReady ? actionLabel : t.dashboard}
+                {status === 'saving' ? t.saving : actionLabel}
               </button>
             )}
           </section>
@@ -856,9 +832,6 @@ function detailCopyForDivision(division: string, lang: Lang, fallback: typeof co
   return { ...fallback, ...(detailCopy[division] || {}) }
 }
 
-function customerGateKey(listingId: string) {
-  return `${CUSTOMER_GATE_KEY}:${listingId}`
-}
 
 function bookingDraftKey(listingId: string) {
   return `sybnb-v6-booking-draft:${listingId}`
