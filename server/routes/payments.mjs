@@ -110,7 +110,6 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
-    requireStripe()
 
     const body = await readJson(req)
     const bookingId = String(body.bookingId || '')
@@ -142,12 +141,13 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
     requireIdDocumentUploaded(context.user)
+    const stripeClient = requireStripe()
 
     const totalMinor = expectedTotalMinor(booking)
     const { currency, unitAmount } = stripeChargeAmount(totalMinor)
     const listingTitle = booking.listing?.titleEn || booking.listing?.titleAr || 'SYBNB stay'
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await stripeClient.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: [
