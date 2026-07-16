@@ -3,6 +3,26 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRide } from '../lib/sr-geocoding.mjs'
 
+const DRIVER_ACTIVE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+
+async function ensureDriverHasNoActiveRide(driverId) {
+  const activeRide = await db().rideRequest.findFirst({
+    where: {
+      driverId,
+      status: { in: DRIVER_ACTIVE_RIDE_STATUSES },
+    },
+    select: { id: true, status: true },
+  })
+
+  if (activeRide) {
+    const error = new Error('Driver already has an active ride.')
+    error.statusCode = 409
+    error.code = 'DRIVER_HAS_ACTIVE_RIDE'
+    error.expose = true
+    throw error
+  }
+}
+
 export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/quote') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
@@ -121,6 +141,8 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    await ensureDriverHasNoActiveRide(driver.id)
+
     // Re-check status in the WHERE clause (optimistic concurrency): if another admin/support
     // agent assigned a driver to this ride between our read and this write, this matches zero
     // rows instead of silently overwriting their assignment.
@@ -166,6 +188,8 @@ export async function handleSrRides(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    await ensureDriverHasNoActiveRide(context.user.id)
 
     // Optimistic-concurrency guard: the WHERE clause re-checks driverId is still null so two
     // drivers tapping "accept" on the same pending ride at the same moment can't both win.
