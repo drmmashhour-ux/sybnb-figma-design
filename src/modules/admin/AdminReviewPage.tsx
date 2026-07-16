@@ -296,7 +296,7 @@ export function AdminReviewPage({ lang }: Props) {
           <button onClick={() => setActiveFilter('listings')}>{t.listings} <span>▤</span></button>
           <button onClick={() => setActiveFilter('payments')}>{t.payments} <span>▭</span></button>
           <button onClick={() => (window.location.hash = '/finance')}>{isAr ? 'المالية' : 'Finance'} <span>▥</span></button>
-          <button onClick={() => (window.location.hash = '/ai-brain')}>AI Brain <span>◉</span></button>
+          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'مساعد FAI' : 'FAI helper'} <span>◉</span></button>
           <button onClick={() => setActiveFilter('audit')}>{isAr ? 'التقارير' : 'Reports'} <span>▧</span></button>
           <button onClick={() => (window.location.hash = '/')}>{t.back} <span>↩</span></button>
         </aside>
@@ -851,7 +851,7 @@ function ShortRentAdminCommandDashboard({
     },
     {
       title: isAr ? 'المخزون والجاهزية' : 'Inventory and readiness',
-      subtitle: isAr ? 'العقارات النشطة وربطها بمراقبة AI' : 'Active stays linked to AI monitoring',
+      subtitle: isAr ? 'العقارات النشطة وربطها بفحص الجاهزية' : 'Active stays linked to readiness checks',
       items: [stats[7]],
     },
   ]
@@ -863,7 +863,7 @@ function ShortRentAdminCommandDashboard({
   const commandViews: Array<{ id: AdminCommandView; label: string; count: number; tone: string }> = [
     { id: 'general', label: isAr ? 'الرصد العام' : 'General watch', count: todayBookings.length, tone: 'blue' },
     { id: 'audit', label: isAr ? 'التدقيق' : 'Audit', count: auditLog.length, tone: 'white' },
-    { id: 'aiBrain', label: isAr ? 'قائمة المراجعة' : 'Review checklist', count: aiReview.reasons.length, tone: 'gold' },
+    { id: 'aiBrain', label: isAr ? 'مساعد FAI' : 'FAI helper', count: aiReview.reasons.length, tone: 'gold' },
     { id: 'disputes', label: isAr ? 'النزاعات' : 'Disputes', count: disputeBookingRows.length, tone: 'red' },
     { id: 'hosts', label: isAr ? 'المضيفين' : 'Hosts', count: listings.length || activeListings, tone: 'green' },
     { id: 'customers', label: isAr ? 'العملاء' : 'Customers', count: bookings.length, tone: 'blue' },
@@ -1062,7 +1062,7 @@ function ShortRentAdminCommandDashboard({
             <div style={commandStyles.aiDecisionHeader}>
               <span style={{ ...commandStyles.aiDecisionBadge, background: aiReview.borderColor }}>{aiReview.label}</span>
               <div>
-                <small>{isAr ? 'قائمة مراجعة آلية — ليست ذكاءً اصطناعياً' : 'Automated checklist — not AI-generated'}</small>
+                <small>{isAr ? 'فحص قواعد فقط — الإدارة تعتمد القرار' : 'Rule check only — admin owns the decision'}</small>
                 <h2>{aiReview.title}</h2>
               </div>
             </div>
@@ -1440,7 +1440,7 @@ function ShortRentAdminCommandDashboard({
           <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
         </article>
         <article style={commandStyles.drawerCard}>
-          <h2>{isAr ? 'قائمة المراجعة' : 'Review checklist'} <small>{isAr ? 'مساعدة فقط، ليست ذكاءً اصطناعياً' : 'ADVISORY ONLY — not AI-generated'}</small></h2>
+          <h2>{isAr ? 'مساعد FAI' : 'FAI helper'} <small>{isAr ? 'مساعدة فقط، لا تنفيذ تلقائي' : 'ADVISORY ONLY — no automatic action'}</small></h2>
           {aiReview.reasons.map((reason) => (
             <p key={reason} style={commandStyles.signalLine}>
               <span>✓</span>
