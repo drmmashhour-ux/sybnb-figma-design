@@ -140,12 +140,12 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
       <section style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
         <button
           style={styles.arrowButton}
-          onClick={() => (window.location.hash = proof?.bookingId ? `/booking/${proof.bookingId}` : '/dashboard')}
+          onClick={() => (window.location.hash = proof?.bookingId ? `/booking/${proof.bookingId}` : '/')}
           aria-label={isAr ? 'السابق' : 'Back'}
         >
           ‹
         </button>
-        <button style={styles.arrowButton} onClick={() => (window.location.hash = '/dashboard')} aria-label={isAr ? 'التالي' : 'Next'}>
+        <button style={styles.arrowButton} onClick={() => (window.location.hash = '/')} aria-label={isAr ? 'التالي' : 'Next'}>
           ›
         </button>
       </section>

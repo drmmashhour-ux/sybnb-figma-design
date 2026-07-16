@@ -254,12 +254,12 @@ function DisputeClosedFeedback({ lang, bookingId }: { lang: Lang; bookingId: str
         <h2>{isAr ? 'كيف كانت معالجة النزاع؟' : 'How was the dispute handling?'}</h2>
         <div className="feedback-stars" aria-label={isAr ? 'تقييم المعالجة' : 'Handling rating'}>
           {[1, 2, 3, 4, 5].map((star) => (
-            <button key={star} onClick={() => (window.location.hash = '/dashboard')}>★</button>
+            <button key={star} onClick={() => (window.location.hash = '/')}>★</button>
           ))}
         </div>
         <textarea placeholder={isAr ? 'اكتب ملاحظتك لتحسين الخدمة...' : 'Write feedback to improve the service...'} />
       </section>
-      <button className="trust-primary" onClick={() => (window.location.hash = '/dashboard')}>{isAr ? 'إرسال التقييم والعودة لرحلتي' : 'Submit feedback and return to my trip'}</button>
+      <button className="trust-primary" onClick={() => (window.location.hash = '/')}>{isAr ? 'إرسال التقييم والعودة لرحلتي' : 'Submit feedback and return to my trip'}</button>
     </main>
   )
 }
@@ -289,7 +289,7 @@ function TrustSuggestion({ title, body, action, muted = false }: { title: string
     <article className="trust-suggestion">
       <h3>{title}</h3>
       <p>{body}</p>
-      <button className={muted ? 'muted' : ''} onClick={() => (window.location.hash = muted ? '/status' : '/dashboard')}>{action}</button>
+      <button className={muted ? 'muted' : ''} onClick={() => (window.location.hash = muted ? '/status' : '/')}>{action}</button>
     </article>
   )
 }

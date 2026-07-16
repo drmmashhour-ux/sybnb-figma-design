@@ -277,7 +277,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const fees = booking ? guestFeeSummary(booking) : undefined
   const paymentRoute = booking
     ? `/payment/local-wallet/${booking.id}/${fees?.totalMinor ?? booking.amountMinor}/${encodeURIComponent(booking.currency)}`
-    : '/dashboard'
+    : '/'
   const hasIdDocument = Boolean(booking?.guest?.idDocumentRef)
   const isFallbackInspectionBooking = booking?.id.startsWith('fallback-booking-') === true
   const canContinueToPayment = hasIdDocument || isFallbackInspectionBooking
@@ -346,7 +346,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
       <section style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
         <button
           style={styles.arrowButton}
-          onClick={() => (window.location.hash = booking?.listing ? `/listing/${booking.listing.id}` : '/dashboard')}
+          onClick={() => (window.location.hash = booking?.listing ? `/listing/${booking.listing.id}` : '/')}
           aria-label={isAr ? 'السابق' : 'Back'}
         >
           ‹

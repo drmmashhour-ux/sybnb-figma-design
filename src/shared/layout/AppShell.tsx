@@ -179,7 +179,7 @@ function getRouteContext(path: string, isAr: boolean) {
     return {
       section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
       page: isAr ? 'الحجز' : 'Booking',
-      backPath: '/dashboard',
+      backPath: '/',
       nextPath: '',
     }
   }
@@ -187,24 +187,16 @@ function getRouteContext(path: string, isAr: boolean) {
     return {
       section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
       page: isAr ? 'الدفع الآمن' : 'Secure payment',
-      backPath: '/dashboard',
+      backPath: '/',
       nextPath: '',
-    }
-  }
-  if (path === '/dashboard' || path === '/account') {
-    return {
-      section: isAr ? 'حساب العميل' : 'Guest account',
-      page: isAr ? 'رحلتي' : 'My trip',
-      backPath: '/stays',
-      nextPath: '/wallet',
     }
   }
   if (path === '/wallet') {
     return {
       section: isAr ? 'حساب العميل' : 'Guest account',
       page: isAr ? 'المحفظة' : 'Wallet',
-      backPath: '/dashboard',
-      nextPath: '/dashboard',
+      backPath: '/',
+      nextPath: '/',
     }
   }
   if (path.startsWith('/host')) {

@@ -57,9 +57,9 @@ const copy = {
     stepRows: ['راجع تفاصيل الغرفة', 'سجّل الدخول أو أنشئ حساباً', 'أرسل الحجز', 'ادفع داخل SYBNB', 'استلم رقم التأكيد'],
     contact: 'فتح التواصل',
     payCurrency: 'عملة الدفع',
-    payCash: 'ليرة سورية',
-    payUsd: 'دولار أمريكي',
-    usdRoundingNote: 'يُقرّب السعر بالدولار للأعلى لأقرب ٥$ لتفادي الحاجة لفكة.',
+    payCash: 'SYP',
+    payUsd: 'USD',
+    usdRoundingNote: '',
     protectionChoice: 'اختيار الحماية',
     standardRate: 'السعر العادي',
     standardCopy: 'سعر أقل، وتطبق رسوم الإلغاء حسب السياسة.',
@@ -133,9 +133,9 @@ const copy = {
     stepRows: ['Review room details', 'Sign in or create account', 'Send booking', 'Pay inside SYBNB', 'Receive confirmation number'],
     contact: 'Open contact',
     payCurrency: 'Payment currency',
-    payCash: 'Syrian Pound',
-    payUsd: 'US Dollar',
-    usdRoundingNote: 'USD prices round up to the nearest $5 so no one needs to make change.',
+    payCash: 'SYP',
+    payUsd: 'USD',
+    usdRoundingNote: '',
     protectionChoice: 'Protection choice',
     standardRate: 'Standard rate',
     standardCopy: 'Lower price; cancellation fees apply by policy.',
@@ -556,7 +556,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                         onClick={() => setPayCurrency('USD')}
                       >
                         <b>{t.payUsd}</b>
-                        <span>{t.usdRoundingNote}</span>
                       </button>
                     </div>
                   </section>
@@ -576,7 +575,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                             ? t.quoteLoading
                             : stayQuote
                               ? `${moneyText(stayQuote.totalMinor, payCurrency, lang)} · ${stayQuote.nights} ${isAr ? 'ليالٍ' : 'nights'}`
-                              : moneyText(listing.priceMinor, payCurrency, lang)}
+                              : `${moneyText(displayedTotalMinor, payCurrency, lang)} · ${billableNights} ${isAr ? 'ليالٍ' : 'nights'}`}
                         </small>
                       </button>
                       <button

@@ -1,6 +1,7 @@
 import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import {
   createSyrianLocalWalletQrPayload,
   SYRIAN_LOCAL_WALLET_QR_ASSET,
@@ -36,6 +37,8 @@ const copy = {
     paymentMethod: 'طريقة الدفع',
     payByCard: 'بطاقة ائتمان',
     payByWallet: 'شام كاش',
+    cardAmount: 'مبلغ البطاقة',
+    walletAmount: 'مبلغ شام كاش',
     cardProcessing: 'جار فتح الدفع بالبطاقة...',
     walletProcessing: 'جار تأكيد شام كاش...',
     cardUnavailable: 'الدفع بالبطاقة غير متاح الآن. استخدم شام كاش أو جرّب لاحقاً.',
@@ -47,10 +50,10 @@ const copy = {
     qrValue: 'رقم الدفع أسفل QR',
     qrPayload: 'محتوى QR',
     confirmedTitle: 'تم تأكيد الحجز',
-    confirmedBody: 'تم حفظ الحجز والدفع بنجاح. يمكن للعميل متابعة رحلته من حسابه أو حفظ رقم المرجع.',
+    confirmedBody: 'تم تأكيد الحجز. احتفظ برقم المرجع وتابع رحلتك.',
     bookingReference: 'رقم مرجع الحجز',
     paymentReference: 'رقم مرجع الدفع',
-    followTrip: 'متابعة الرحلة',
+    followTrip: 'العودة للرئيسية',
     receipt: 'فتح الإيصال',
     apiError: 'تعذر إكمال الدفع الآن',
   },
@@ -62,6 +65,8 @@ const copy = {
     paymentMethod: 'Payment method',
     payByCard: 'Credit card',
     payByWallet: 'Sham Cash',
+    cardAmount: 'Card amount',
+    walletAmount: 'Sham Cash amount',
     cardProcessing: 'Opening card payment...',
     walletProcessing: 'Confirming Sham Cash...',
     cardUnavailable: 'Card payment is not available right now. Use Sham Cash or try again later.',
@@ -73,10 +78,10 @@ const copy = {
     qrValue: 'Payment number under QR',
     qrPayload: 'QR payload',
     confirmedTitle: 'Booking confirmed',
-    confirmedBody: 'The booking and payment are saved. The guest can follow the trip from the account or keep the reference number.',
+    confirmedBody: 'The booking is confirmed. Keep the reference number and continue your trip.',
     bookingReference: 'Booking reference',
     paymentReference: 'Payment reference',
-    followTrip: 'Follow trip',
+    followTrip: 'Back home',
     receipt: 'Open receipt',
     apiError: 'Payment could not be completed right now',
   },
@@ -85,7 +90,11 @@ const copy = {
 export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042', amountMinor = 10, currency = 'SYP' }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
-  const amountDue = Math.max(Number(amountMinor || 10), 1)
+  const walletAmountDue = Math.max(Number(amountMinor || 10), 1)
+  const walletCurrency = currency || 'SYP'
+  const cardAmountDue = walletCurrency === 'USD' ? walletAmountDue : sypMinorToRoundedUsdMinor(walletAmountDue)
+  const cardCurrency = 'USD'
+  const amountDue = walletAmountDue
   const transactionReference = useMemo(
     () => `SLW-${bookingId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`,
     [bookingId],
@@ -100,11 +109,11 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     () =>
       createSyrianLocalWalletQrPayload({
         bookingId,
-        amount: amountDue,
-        currency,
+        amount: walletAmountDue,
+        currency: walletCurrency,
         transactionReference,
       }),
-    [amountDue, bookingId, currency, transactionReference],
+    [bookingId, transactionReference, walletAmountDue, walletCurrency],
   )
 
   useEffect(() => {
@@ -151,21 +160,24 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
       JSON.stringify({
         confirmedAt: new Date().toISOString(),
         bookingId,
-        amountMinor: amountDue,
-        currency,
+        amountMinor: paymentProof.amountMinor,
+        currency: paymentProof.currency,
         transactionReference: paymentProof.providerRef,
         paymentProofId: paymentProof.id,
         status: 'APPROVED',
       }),
     )
-  }, [amountDue, bookingId, currency, paymentProof, transactionReference])
+  }, [bookingId, paymentProof])
 
   function createLocalProof(provider: 'stripe_test' | 'syrian_local_wallet') {
+    const proofAmount = provider === 'stripe_test' ? cardAmountDue : walletAmountDue
+    const proofCurrency = provider === 'stripe_test' ? cardCurrency : walletCurrency
+
     return createLocalFallbackPaymentProof({
       bookingId,
       provider,
-      amountMinor: amountDue,
-      currency,
+      amountMinor: proofAmount,
+      currency: proofCurrency,
       providerRef: provider === 'stripe_test' ? `STRIPE-TEST-${Date.now().toString().slice(-8)}` : transactionReference,
       proofAssetUrl: provider === 'stripe_test' ? 'local-stripe-test' : 'local-sham-cash-confirmed',
     })
@@ -191,7 +203,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     setPaymentError('')
 
     try {
-      if (stripeConfigured) {
+      if (stripeConfigured && walletCurrency === 'USD') {
         const session = await createStripeCheckoutSession(bookingId)
         window.location.href = session.url
         return
@@ -249,7 +261,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
       <PaymentCapsule
         lang={lang}
         methodLabel={paymentProof?.provider === 'stripe_test' ? t.payByCard : t.payByWallet}
-        amountLabel={moneyText(amountDue, currency, lang)}
+        amountLabel={moneyText(paymentProof?.amountMinor ?? walletAmountDue, paymentProof?.currency ?? walletCurrency, lang)}
         destinationCode={paymentProof?.providerRef || transactionReference}
         followCode={bookingId}
         proofCount={isConfirmed ? 1 : 0}
@@ -273,7 +285,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
           <button className="wallet-primary" onClick={() => (window.location.hash = `/payment/receipt/${paymentProof?.id}`)}>
             {t.receipt}
           </button>
-          <button onClick={() => (window.location.hash = '/dashboard')}>{t.followTrip}</button>
+          <button onClick={() => (window.location.hash = '/')}>{t.followTrip}</button>
         </section>
       ) : (
         <>
@@ -281,10 +293,10 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
             <h2>{t.paymentMethod}</h2>
             <div className="wallet-method-row" style={flowStyles.methodRow}>
               <button type="button" className="wallet-primary" disabled={paymentState === 'card'} onClick={payByCreditCard}>
-                {paymentState === 'card' ? t.cardProcessing : t.payByCard}
+                {paymentState === 'card' ? t.cardProcessing : `${t.payByCard} · ${moneyText(cardAmountDue, cardCurrency, lang)}`}
               </button>
               <button type="button" className="wallet-secondary" disabled={paymentState === 'wallet'} onClick={confirmWalletPayment}>
-                {paymentState === 'wallet' ? t.walletProcessing : t.payByWallet}
+                {paymentState === 'wallet' ? t.walletProcessing : `${t.payByWallet} · ${moneyText(walletAmountDue, walletCurrency, lang)}`}
               </button>
             </div>
             {paymentState === 'error' && <p className="wallet-error">{paymentError}</p>}
@@ -319,11 +331,11 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
               </div>
               <div className="wallet-stat">
                 <span>{t.amountDue}</span>
-                <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(amountDue, currency, lang)}</strong>
+                <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(walletAmountDue, walletCurrency, lang)}</strong>
               </div>
               <div className="wallet-stat">
                 <span>{t.currency}</span>
-                <strong>{isAr && currency === 'SYP' ? 'ل.س' : currency}</strong>
+                <strong>{isAr && walletCurrency === 'SYP' ? 'ل.س' : walletCurrency}</strong>
               </div>
             </article>
           </section>

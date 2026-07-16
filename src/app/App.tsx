@@ -13,7 +13,6 @@ const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrai
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
 const BookingReviewPage = lazyNamed(() => import('../modules/bookings/BookingReviewPage'), 'BookingReviewPage')
 const CompetitorsPage = lazyNamed(() => import('../modules/competitors/CompetitorsPage'), 'CompetitorsPage')
-const DashboardPage = lazyNamed(() => import('../modules/dashboard/DashboardPage'), 'DashboardPage')
 const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLivePage'), 'DivisionLivePage')
 const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDashboardPage'), 'DriverDashboardPage')
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
@@ -90,7 +89,7 @@ export function App() {
         ) : guestAccountMatch ? (
           guestAccountMatch[1] ? <ListingDetailPage listingId={guestAccountMatch[1]} lang={lang} /> : <SearchPreviewPage lang={lang} initialDivision="stays" entry="stays" />
         ) : path === '/dashboard' || path === '/account' ? (
-          <DashboardPage lang={lang} />
+          <LandingPage lang={lang} />
         ) : path === '/host' ||
           path === '/host/seller' ||
           path === '/host/stays' ||
