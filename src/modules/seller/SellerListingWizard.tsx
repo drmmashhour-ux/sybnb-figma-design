@@ -45,6 +45,8 @@ type WizardDraft = {
   longitude: string
   mapPinConfirmed: boolean
   price: string
+  cleaningFee: string
+  taxFee: string
   size: string
   guestCapacity: string
   bedrooms: string
@@ -219,6 +221,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [longitude, setLongitude] = useState(draft.longitude || '36.2765')
   const [mapPinConfirmed, setMapPinConfirmed] = useState(draft.mapPinConfirmed ?? false)
   const [price, setPrice] = useState(draft.price || '15')
+  const [cleaningFee, setCleaningFee] = useState(draft.cleaningFee || '0')
+  const [taxFee, setTaxFee] = useState(draft.taxFee || '0')
   const [size, setSize] = useState(draft.size || '110')
   const [guestCapacity, setGuestCapacity] = useState(draft.guestCapacity || '2')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
@@ -269,6 +273,8 @@ export function SellerListingWizard({ lang }: Props) {
       longitude,
       mapPinConfirmed,
       price,
+      cleaningFee,
+      taxFee,
       size,
       guestCapacity,
       bedrooms,
@@ -284,7 +290,7 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
+  }, [division, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -308,10 +314,17 @@ export function SellerListingWizard({ lang }: Props) {
     : areaOptions.slice(0, 10)
   ).slice(0, 16)
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
+  const stayNightPrice = Math.max(0, toNumber(variableNightPrice || price))
+  const stayCleaningFee = division === 'STAYS' ? Math.max(0, toNumber(cleaningFee)) : 0
+  const stayTaxFee = division === 'STAYS' ? Math.max(0, toNumber(taxFee)) : 0
+  const stayBookingTotal = stayNightPrice + stayCleaningFee + stayTaxFee
   const availabilityCalendar = {
     searchCapsuleEnabled,
     availabilityDates,
     variableNightPrice,
+    cleaningFee,
+    taxFee,
+    bookingTotal: String(stayBookingTotal),
     availableStart,
     availableEnd,
     bookedDate,
@@ -380,6 +393,14 @@ export function SellerListingWizard({ lang }: Props) {
         guestCapacity: toNumber(guestCapacity),
         bedrooms: toNumber(bedrooms),
         bathrooms: toNumber(bathrooms),
+        cleaningFeeMinor: toMinor(cleaningFee),
+        taxFeeMinor: toMinor(taxFee),
+        guestVisibleFees: {
+          currency: 'USD',
+          nightlyPriceMinor: toMinor(price),
+          cleaningFeeMinor: toMinor(cleaningFee),
+          taxFeeMinor: toMinor(taxFee),
+        },
         visualFilters,
         availabilityCalendar,
         mapLocation,
@@ -458,6 +479,14 @@ export function SellerListingWizard({ lang }: Props) {
             guestCapacity: toNumber(guestCapacity),
             bedrooms: toNumber(bedrooms),
             bathrooms: toNumber(bathrooms),
+            cleaningFeeMinor: toMinor(cleaningFee),
+            taxFeeMinor: toMinor(taxFee),
+            guestVisibleFees: {
+              currency: 'USD',
+              nightlyPriceMinor: toMinor(price),
+              cleaningFeeMinor: toMinor(cleaningFee),
+              taxFeeMinor: toMinor(taxFee),
+            },
             visualFilters,
             availabilityCalendar,
             mapLocation,
@@ -479,6 +508,8 @@ export function SellerListingWizard({ lang }: Props) {
     setTitle(isAr ? '' : '')
     setDescription('')
     setPrice('15')
+    setCleaningFee('0')
+    setTaxFee('0')
     setSize('40')
     setBedrooms('1')
     setBathrooms('1')
@@ -798,6 +829,36 @@ export function SellerListingWizard({ lang }: Props) {
                   <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder="250000" value={price} />
                 )}
               </label>
+              {division === 'STAYS' && (
+                <label>
+                  <span>{isAr ? 'رسوم التنظيف بالدولار (اختياري)' : 'Cleaning fee USD (optional)'}</span>
+                  <div className="seller-price-input-shell">
+                    <b>USD</b>
+                    <input
+                      dir="ltr"
+                      inputMode="numeric"
+                      onChange={(event) => setCleaningFee(event.target.value)}
+                      placeholder="0"
+                      value={cleaningFee}
+                    />
+                  </div>
+                </label>
+              )}
+              {division === 'STAYS' && (
+                <label>
+                  <span>{isAr ? 'الضريبة بالدولار (اختياري)' : 'Tax USD (optional)'}</span>
+                  <div className="seller-price-input-shell">
+                    <b>USD</b>
+                    <input
+                      dir="ltr"
+                      inputMode="numeric"
+                      onChange={(event) => setTaxFee(event.target.value)}
+                      placeholder="0"
+                      value={taxFee}
+                    />
+                  </div>
+                </label>
+              )}
               <label>
                 <span>
                   {division === 'STAYS'
@@ -926,7 +987,25 @@ export function SellerListingWizard({ lang }: Props) {
                       <div className="seller-host-reservation-card compact">
                         <span>{isAr ? 'آخر حجز مقبول' : 'Accepted booking'}</span>
                         <strong>{bookedDate}</strong>
-                        <em>{`USD ${variableNightPrice || price}`}</em>
+                        <div className="seller-host-price-breakdown">
+                          <p>
+                            <span>{isAr ? 'سعر الليلة' : 'Night'}</span>
+                            <b>{`USD ${stayNightPrice}`}</b>
+                          </p>
+                          {stayCleaningFee > 0 && (
+                            <p>
+                              <span>{isAr ? 'تنظيف' : 'Cleaning'}</span>
+                              <b>{`USD ${stayCleaningFee}`}</b>
+                            </p>
+                          )}
+                          {stayTaxFee > 0 && (
+                            <p>
+                              <span>{isAr ? 'ضريبة' : 'Tax'}</span>
+                              <b>{`USD ${stayTaxFee}`}</b>
+                            </p>
+                          )}
+                          <em>{isAr ? `الإجمالي للضيف USD ${stayBookingTotal}` : `Guest total USD ${stayBookingTotal}`}</em>
+                        </div>
                       </div>
                     </section>
                   </div>

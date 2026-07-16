@@ -246,6 +246,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                       {moneyText(listing.division === 'STAYS' && listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor, listing.division === 'STAYS' ? 'USD' : listing.currency, lang)}
                     </strong>
                   </div>
+                  {listing.division === 'STAYS' && <StayFeeDisclosure listing={listing} lang={lang} />}
                   <div className="search-result-actions">
                     <button
                       type="button"
@@ -283,6 +284,42 @@ function listingImage(listing: PlatformListing) {
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   if (typeof mediaUrl === 'string') return mediaUrl
   return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+}
+
+function StayFeeDisclosure({ listing, lang }: { listing: PlatformListing; lang: Lang }) {
+  const cleaningFee = metadataMinor(listing.metadata, 'cleaningFeeMinor')
+  const taxFee = metadataMinor(listing.metadata, 'taxFeeMinor')
+  const basePrice = listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor
+  const total = basePrice + cleaningFee + taxFee
+  const hasExtraFees = cleaningFee > 0 || taxFee > 0
+
+  if (!hasExtraFees) return null
+
+  return (
+    <div className="search-result-fee-disclosure">
+      {cleaningFee > 0 && (
+        <span>
+          <small>{lang === 'ar' ? 'تنظيف' : 'Cleaning'}</small>
+          <b>{moneyText(cleaningFee, 'USD', lang)}</b>
+        </span>
+      )}
+      {taxFee > 0 && (
+        <span>
+          <small>{lang === 'ar' ? 'ضريبة' : 'Tax'}</small>
+          <b>{moneyText(taxFee, 'USD', lang)}</b>
+        </span>
+      )}
+      <strong>{lang === 'ar' ? `الإجمالي قبل الحجز ${moneyText(total, 'USD', lang)}` : `Before booking ${moneyText(total, 'USD', lang)}`}</strong>
+    </div>
+  )
+}
+
+function metadataMinor(metadata: PlatformListing['metadata'], key: string) {
+  if (!metadata || typeof metadata !== 'object') return 0
+  const value = (metadata as Record<string, unknown>)[key]
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value)
+  if (typeof value === 'string') return Math.max(0, Number(value.replace(/[^\d.]/g, '')) || 0)
+  return 0
 }
 
 function searchSummary(value: UnifiedSearchValue, lang: Lang) {

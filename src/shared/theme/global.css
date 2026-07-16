@@ -2268,6 +2268,25 @@ a {
   font-weight: 950;
 }
 
+.seller-host-price-breakdown {
+  display: grid;
+  gap: 8px;
+}
+
+.seller-host-price-breakdown p {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  padding-bottom: 6px;
+}
+
+.seller-host-price-breakdown b {
+  color: #f7f8ff;
+  font-weight: 950;
+}
+
 .seller-host-reservation-card button {
   background: #526cff;
   border: 1px solid #8ea0ff;
@@ -5772,6 +5791,34 @@ a {
 
 .search-result-meta strong {
   color: #fff;
+}
+
+.search-result-fee-disclosure {
+  background: rgba(32, 210, 155, 0.08);
+  border: 1px solid rgba(32, 210, 155, 0.24);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.search-result-fee-disclosure span,
+.search-result-fee-disclosure strong {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.search-result-fee-disclosure small {
+  color: #9ba0ad;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.search-result-fee-disclosure b,
+.search-result-fee-disclosure strong {
+  color: #20d29b;
+  font-weight: 950;
 }
 
 .search-result-actions {
