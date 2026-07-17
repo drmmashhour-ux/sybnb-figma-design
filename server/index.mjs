@@ -34,10 +34,19 @@ const DEFAULT_CORS_ORIGIN = [
   'http://127.0.0.1:5180',
   'http://localhost:5180',
 ].join(',')
-const CORS_ORIGINS = (process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean)
+// Capacitor native-app origins (mobile/capacitor-wrapper). The iOS/Android webview loads the packaged
+// SYBNB app from these fixed origins — iOS uses capacitor://localhost, Android uses https://localhost
+// (server.androidScheme: 'https'). They are invariant across deployments, so they are ALWAYS allowed —
+// merged in even when a production CORS_ORIGIN env overrides the default list — otherwise the mobile
+// app's API calls would be CORS-blocked in production. A browser page cannot forge these as its origin.
+const CAPACITOR_APP_ORIGINS = ['capacitor://localhost', 'https://localhost']
+const CORS_ORIGINS = [
+  ...new Set(
+    [...(process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN).split(','), ...CAPACITOR_APP_ORIGINS]
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  ),
+]
 
 // High-risk-endpoint rate limits (security audit F-08). Central table keyed by [method, pathname
 // pattern] rather than scattering limiter calls across 12 route-handler files, so the whole policy
