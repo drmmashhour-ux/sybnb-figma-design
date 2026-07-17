@@ -1,0 +1,772 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+
+  @@map("account_status")
+}
+
+enum RoleName {
+  GUEST
+  HOST
+  SELLER
+  DRIVER
+  ADMIN
+  SUPPORT
+
+  @@map("role_name")
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  PAUSED
+  EXPIRED
+
+  @@map("listing_status")
+}
+
+enum IdDocumentStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+
+  @@map("id_document_status")
+}
+
+enum AvailabilityStatus {
+  BLOCKED
+  AVAILABLE
+
+  @@map("availability_status")
+}
+
+enum ListingDivision {
+  STAYS
+  RENTALS
+  BUY
+  CARS
+  MARKETPLACE
+  NEW_CONSTRUCTION
+
+  @@map("listing_division")
+}
+
+enum BookingStatus {
+  DRAFT
+  REQUESTED
+  PAYMENT_PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  DISPUTED
+
+  @@map("booking_status")
+}
+
+enum PaymentStatus {
+  PENDING_PROOF
+  PENDING_ADMIN_REVIEW
+  APPROVED
+  REJECTED
+  REFUNDED
+
+  @@map("payment_status")
+}
+
+enum WalletEntryType {
+  CREDIT
+  DEBIT
+  HOLD
+  RELEASE
+  REFUND
+
+  @@map("wallet_entry_type")
+}
+
+enum GiftStatus {
+  CREATED
+  SENT
+  CLAIM_PENDING
+  CLAIMED
+  LOCKED
+  EXPIRED
+  ADMIN_BLOCKED
+
+  @@map("gift_status")
+}
+
+enum RideStatus {
+  DRAFT
+  REQUESTED
+  MATCHING
+  DRIVER_ASSIGNED
+  DRIVER_ARRIVING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@map("ride_status")
+}
+
+enum MessageSenderRole {
+  GUEST
+  HOST
+  ADMIN
+  SUPPORT
+
+  @@map("message_sender_role")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String?       @unique
+  phoneHash    String?       @unique @map("phone_hash")
+  passwordHash String?       @map("password_hash")
+  displayName  String        @map("display_name")
+  locale       String        @default("ar-SY")
+  status       AccountStatus @default(ACTIVE)
+  idDocumentRef String?      @map("id_document_ref")
+  idDocumentSubmittedAt DateTime? @map("id_document_submitted_at")
+  idDocumentMimeType String? @map("id_document_mime_type")
+  idDocumentStatus IdDocumentStatus? @map("id_document_status")
+  idDocumentReviewedById String? @map("id_document_reviewed_by_id")
+  idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
+  // Bumped on logout and on password reset; embedded as a claim in every session token and
+  // checked on every request (server/lib/auth-context.mjs). A stateless HMAC-signed token has no
+  // other way to be revoked before its 7-day expiry -- this is the whole mechanism (security audit
+  // finding F-02).
+  sessionVersion Int         @default(0) @map("session_version")
+  // Shareable referral code, generated once at account creation (server/lib/referrals.mjs). Every
+  // user has one, whether or not they ever refer anyone -- generated lazily would need a
+  // read-then-write race guard for no benefit, since it's nearly free to always have one.
+  referralCode String        @unique @map("referral_code")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  roles             UserRole[]
+  sellerProfile     SellerProfile?
+  driverProfile     DriverProfile?
+  listings          Listing[]         @relation("ListingOwner")
+  bookings          Booking[]         @relation("BookingGuest")
+  wallets           Wallet[]
+  sentGifts         WalletGift[]      @relation("GiftSender")
+  claimedGifts      WalletGift[]      @relation("GiftRecipient")
+  rideRequests      RideRequest[]     @relation("RideRider")
+  driverRideMatches RideRequest[]     @relation("RideDriver")
+  auditLogs         AdminAuditLog[]   @relation("AuditActor")
+  listingReviews    ListingReview[]   @relation("ReviewGuest")
+  sentMessages      Message[]         @relation("MessageSender")
+  paymentProofs     PaymentProof[]    @relation("PaymentPayer")
+  listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+  accommodations    Accommodation[]   @relation("AccommodationOwner")
+  hostInsights      HostInsight[]     @relation("HostInsightOwner")
+  referralsMade     Referral[]        @relation("ReferralReferrer")
+  referredAs        Referral?         @relation("ReferralReferee")
+  // SR safety/trust layers (014/015)
+  sosEventsRaised         SosEvent[]       @relation("SosRaisedBy")
+  sosEventsResolved       SosEvent[]       @relation("SosResolvedBy")
+  driverDocuments         DriverDocument[] @relation("DriverDocumentOwner")
+  driverDocumentsReviewed DriverDocument[] @relation("DriverDocumentReviewer")
+  rideMessagesSent        RideMessage[]    @relation("RideMessageSender")
+  rideRatingsGiven        RideRating[]     @relation("RideRatingRater")
+  rideRatingsReceived     RideRating[]     @relation("RideRatingRated")
+
+  @@map("users")
+}
+
+enum ReferralStatus {
+  PENDING
+  REWARDED
+
+  @@map("referral_status")
+}
+
+// Double-sided referral program (riders/hosts/drivers bring new users, both sides get rewarded --
+// same "give X, get Y" shape as Lyft/Uber's referral programs). The referee's signup bonus is
+// credited immediately at registration (server/routes/auth.mjs); the referrer's reward is only
+// credited once the referee completes their first *paid* STR booking (server/lib/referrals.mjs),
+// not merely on signup -- otherwise this would be trivially farmable with throwaway accounts that
+// never generate any real revenue.
+model Referral {
+  id                  String         @id @default(uuid())
+  referrerUserId      String         @map("referrer_user_id")
+  refereeUserId       String         @unique @map("referee_user_id")
+  status              ReferralStatus @default(PENDING)
+  qualifyingBookingId String?        @map("qualifying_booking_id")
+  rewardedAt          DateTime?      @map("rewarded_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  referrer User @relation("ReferralReferrer", fields: [referrerUserId], references: [id])
+  referee  User @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerUserId, status])
+  @@map("referrals")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  role      RoleName
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@index([role])
+  @@map("user_roles")
+}
+
+model SellerProfile {
+  id             String        @id @default(uuid())
+  userId         String        @unique @map("user_id")
+  legalName      String        @map("legal_name")
+  sellerType     String        @map("seller_type")
+  documentStatus ListingStatus @default(DRAFT) @map("document_status")
+  planCode       String?       @map("plan_code")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("seller_profiles")
+}
+
+model DriverProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  licenseHash     String?  @map("license_hash")
+  vehicleMake     String?  @map("vehicle_make")
+  vehicleModel    String?  @map("vehicle_model")
+  vehiclePlate    String?  @map("vehicle_plate")
+  active          Boolean  @default(false)
+  lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
+  // SR money model (016): where the driver's SR earnings are paid out (Sham Cash).
+  payoutMethod     String? @map("payout_method")
+  payoutAccountRef String? @map("payout_account_ref")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("driver_profiles")
+}
+
+model Location {
+  id          String   @id @default(uuid())
+  country    String   @default("SY")
+  governorate String
+  city        String
+  area        String?
+  street      String?
+  addressLine String?  @map("address_line")
+  geo         Unsupported("geometry(Point,4326)")?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  listings       Listing[]
+  pickupRides    RideRequest[] @relation("RidePickup")
+  dropoffRides   RideRequest[] @relation("RideDropoff")
+
+  @@index([governorate, city])
+  @@map("locations")
+}
+
+model Listing {
+  id          String          @id @default(uuid())
+  ownerId     String          @map("owner_id")
+  locationId  String?         @map("location_id")
+  accommodationId String?     @map("accommodation_id")
+  division    ListingDivision
+  titleAr     String          @map("title_ar")
+  titleEn     String?         @map("title_en")
+  description String?
+  status      ListingStatus   @default(DRAFT)
+  priceMinor  Int             @map("price_minor")
+  currency    String          @default("SYP")
+  instantBookEnabled Boolean  @default(false) @map("instant_book_enabled")
+  expiresAt   DateTime?       @map("expires_at")
+  metadata    Json            @default("{}")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  owner          User                  @relation("ListingOwner", fields: [ownerId], references: [id])
+  location       Location?             @relation(fields: [locationId], references: [id])
+  accommodation  Accommodation?        @relation(fields: [accommodationId], references: [id])
+  media          ListingMedia[]
+  bookings       Booking[]
+  availability   ListingAvailability[]
+  reviews        ListingReview[]
+  inquiryThreads MessageThread[]
+  hostInsights   HostInsight[]
+
+  @@index([division, status])
+  @@index([ownerId])
+  @@index([accommodationId])
+  @@map("listings")
+}
+
+// Groups multiple STAYS room-type Listings under one physical property (a hotel-like host's
+// Studio/Suite/Double-Queen etc.), so shared location/documents/photos aren't re-collected per
+// room type. Each child Listing keeps its own independent price, availability, and bookings.
+model Accommodation {
+  id          String        @id @default(uuid())
+  ownerId     String        @map("owner_id")
+  titleAr     String        @map("title_ar")
+  titleEn     String?       @map("title_en")
+  description String?
+  governorate String
+  city        String
+  area        String?
+  address     String?
+  status      ListingStatus @default(DRAFT)
+  metadata    Json          @default("{}")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  owner    User                 @relation("AccommodationOwner", fields: [ownerId], references: [id])
+  listings Listing[]
+  media    AccommodationMedia[]
+
+  @@index([ownerId])
+  @@map("accommodations")
+}
+
+model AccommodationMedia {
+  id              String   @id @default(uuid())
+  accommodationId String   @map("accommodation_id")
+  url             String
+  kind            String
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  accommodation Accommodation @relation(fields: [accommodationId], references: [id], onDelete: Cascade)
+
+  @@index([accommodationId])
+  @@map("accommodation_media")
+}
+
+// AI-generated pricing/availability insight for a host, e.g. "you have N open nights next month
+// with no discount set." Generation is a manual, host-triggered action (real per-call AI cost),
+// not opportunistic — see server/lib/host-insights.mjs.
+model HostInsight {
+  id           String    @id @default(uuid())
+  hostId       String    @map("host_id")
+  listingId    String?   @map("listing_id")
+  kind         String    @default("PRICING_GAP")
+  facts        Json      @default("{}")
+  messageAr    String    @map("message_ar")
+  messageEn    String?   @map("message_en")
+  aiProvider   String?   @map("ai_provider")
+  aiModel      String?   @map("ai_model")
+  readAt       DateTime? @map("read_at")
+  emailSentAt  DateTime? @map("email_sent_at")
+  emailError   String?   @map("email_error")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  host    User     @relation("HostInsightOwner", fields: [hostId], references: [id])
+  listing Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([hostId, createdAt])
+  @@index([listingId])
+  @@map("host_insights")
+}
+
+// Real, server-verified email one-time codes for pre-registration guest identity checks (replaces
+// the old client-only phone-code simulation in GuestAccountPage). code_hash is a fast HMAC, not a
+// slow KDF — matching the 6-digit/short-TTL/attempt-limited nature of an OTP, not a password.
+model EmailVerificationCode {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String    @map("code_hash")
+  purpose    String    @default("guest-signup")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([email, purpose])
+  @@map("email_verification_codes")
+}
+
+model ListingAvailability {
+  id                 String              @id @default(uuid())
+  listingId          String              @map("listing_id")
+  date               DateTime            @db.Date
+  status             AvailabilityStatus  @default(BLOCKED)
+  priceOverrideMinor Int?                @map("price_override_minor")
+  note               String?
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, date])
+  @@index([listingId, date])
+  @@map("listing_availability")
+}
+
+model ListingMedia {
+  id        String   @id @default(uuid())
+  listingId String   @map("listing_id")
+  url       String
+  kind      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@map("listing_media")
+}
+
+model Booking {
+  id          String        @id @default(uuid())
+  listingId   String        @map("listing_id")
+  guestId     String        @map("guest_id")
+  status      BookingStatus @default(REQUESTED)
+  checkIn     DateTime?     @map("check_in")
+  checkOut    DateTime?     @map("check_out")
+  amountMinor Int           @map("amount_minor")
+  currency    String        @default("SYP")
+  metadata    Json          @default("{}")
+  guestCheckedInAt  DateTime? @map("guest_checked_in_at")
+  guestCheckedOutAt DateTime? @map("guest_checked_out_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  listing  Listing       @relation(fields: [listingId], references: [id])
+  guest    User          @relation("BookingGuest", fields: [guestId], references: [id])
+  payments PaymentProof[]
+  review   ListingReview?
+  messageThread MessageThread?
+
+  @@index([guestId, status])
+  @@index([listingId, status])
+  @@map("bookings")
+}
+
+model PaymentProof {
+  id              String        @id @default(uuid())
+  bookingId       String?       @map("booking_id")
+  userId          String        @map("user_id")
+  provider        String
+  status          PaymentStatus @default(PENDING_PROOF)
+  amountMinor     Int           @map("amount_minor")
+  currency        String        @default("SYP")
+  proofAssetUrl   String?       @map("proof_asset_url")
+  providerRef     String?       @map("provider_ref")
+  adminNote       String?       @map("admin_note")
+  reviewedById    String?       @map("reviewed_by_id")
+  reviewedAt      DateTime?     @map("reviewed_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  booking Booking? @relation(fields: [bookingId], references: [id])
+  payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@map("payment_proofs")
+}
+
+model ListingReview {
+  id              String    @id @default(uuid())
+  listingId       String    @map("listing_id")
+  bookingId       String    @unique @map("booking_id")
+  guestId         String    @map("guest_id")
+  rating          Int
+  comment         String?
+  hiddenAt        DateTime? @map("hidden_at")
+  hiddenByAdminId String?   @map("hidden_by_admin_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  guest   User    @relation("ReviewGuest", fields: [guestId], references: [id])
+
+  @@index([listingId, hiddenAt])
+  @@map("listing_reviews")
+}
+
+model MessageThread {
+  id        String   @id @default(uuid())
+  bookingId String?  @unique @map("booking_id")
+  listingId String?  @map("listing_id")
+  guestId   String?  @map("guest_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  listing  Listing?  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  guest    User?     @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([listingId, guestId])
+  @@map("message_threads")
+}
+
+model Message {
+  id           String            @id @default(uuid())
+  threadId     String            @map("thread_id")
+  senderUserId String            @map("sender_user_id")
+  senderRole   MessageSenderRole @map("sender_role")
+  body         String
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender User          @relation("MessageSender", fields: [senderUserId], references: [id])
+
+  @@index([threadId, createdAt])
+  @@map("messages")
+}
+
+model Wallet {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  currency          String   @default("SYP")
+  cachedBalanceMinor Int     @default(0) @map("cached_balance_minor")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries WalletEntry[]
+
+  @@unique([userId, currency])
+  @@map("wallets")
+}
+
+model WalletEntry {
+  id              String          @id @default(uuid())
+  walletId        String          @map("wallet_id")
+  type            WalletEntryType
+  amountMinor     Int             @map("amount_minor")
+  currency        String          @default("SYP")
+  referenceType   String          @map("reference_type")
+  referenceId     String          @map("reference_id")
+  idempotencyKey  String          @unique @map("idempotency_key")
+  note            String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@index([walletId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("wallet_entries")
+}
+
+model WalletGift {
+  id                     String     @id @default(uuid())
+  senderUserId            String     @map("sender_user_id")
+  recipientUserId         String?    @map("recipient_user_id")
+  recipientPhoneHash      String     @map("recipient_phone_hash")
+  amountMinor             Int        @map("amount_minor")
+  currency                String     @default("SYP")
+  message                 String?
+  status                  GiftStatus @default(CREATED)
+  claimAttemptCount       Int        @default(0) @map("claim_attempt_count")
+  lockedUntil             DateTime?  @map("locked_until")
+  expiresAt               DateTime   @map("expires_at")
+  createdAt               DateTime   @default(now()) @map("created_at")
+  updatedAt               DateTime   @updatedAt @map("updated_at")
+
+  sender    User  @relation("GiftSender", fields: [senderUserId], references: [id])
+  recipient User? @relation("GiftRecipient", fields: [recipientUserId], references: [id])
+
+  @@index([recipientPhoneHash, status])
+  @@index([senderUserId, createdAt])
+  @@map("wallet_gifts")
+}
+
+model OtpAttemptLock {
+  id             String   @id @default(uuid())
+  purpose        String
+  subjectHash    String   @map("subject_hash")
+  attemptCount   Int      @default(0) @map("attempt_count")
+  lockedUntil    DateTime? @map("locked_until")
+  lastAttemptAt  DateTime? @map("last_attempt_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([purpose, subjectHash])
+  @@map("otp_attempt_locks")
+}
+
+model RideRequest {
+  id              String     @id @default(uuid())
+  riderId          String     @map("rider_id")
+  driverId         String?    @map("driver_id")
+  pickupLocationId String?    @map("pickup_location_id")
+  dropoffLocationId String?   @map("dropoff_location_id")
+  status          RideStatus @default(REQUESTED)
+  requestedAt     DateTime   @default(now()) @map("requested_at")
+  fareMinor       Int?       @map("fare_minor")
+  currency        String     @default("SYP")
+  pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
+  dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
+  metadata        Json       @default("{}")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  // SR safety layer (014): live driver location during a trip + trip-share token.
+  lastLocationGeo     Unsupported("geometry(Point,4326)")? @map("last_location_geo")
+  lastLocationAt      DateTime? @map("last_location_at")
+  shareToken          String?   @unique @map("share_token")
+  shareTokenCreatedAt DateTime? @map("share_token_created_at")
+
+  // SR pickup PIN (017): rider-visible 4-digit code the driver enters to confirm the correct rider.
+  pickupPin        String?   @map("pickup_pin")
+  pickupVerifiedAt DateTime? @map("pickup_verified_at")
+  pinAttempts      Int       @default(0) @map("pin_attempts")
+
+  rider          User      @relation("RideRider", fields: [riderId], references: [id])
+  driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
+  pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
+  dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
+
+  // SR safety/trust layers (014/015): SOS events, masked ride messaging, two-way ratings.
+  sosEvents SosEvent[]
+  messages  RideMessage[]
+  ratings   RideRating[]
+
+  @@index([status, requestedAt])
+  @@index([driverId, status])
+  @@map("ride_requests")
+}
+
+model AdminAuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?  @map("actor_user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  before      Json?
+  after       Json?
+  ipHash      String?  @map("ip_hash")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("admin_audit_logs")
+}
+
+// ============ SR safety layer (014) ============
+enum SosRole {
+  RIDER
+  DRIVER
+
+  @@map("sos_role")
+}
+
+enum SosStatus {
+  OPEN
+  RESOLVED
+
+  @@map("sos_status")
+}
+
+model SosEvent {
+  id             String    @id @default(uuid())
+  rideId         String    @map("ride_id")
+  raisedByUserId String    @map("raised_by_user_id")
+  raisedByRole   SosRole   @map("raised_by_role")
+  lat            Float?
+  lng            Float?
+  note           String?
+  status         SosStatus @default(OPEN)
+  resolvedById   String?   @map("resolved_by_id")
+  resolvedAt     DateTime? @map("resolved_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  ride       RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  raisedBy   User        @relation("SosRaisedBy", fields: [raisedByUserId], references: [id])
+  resolvedBy User?       @relation("SosResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([status, createdAt])
+  @@index([rideId])
+  @@map("sos_events")
+}
+
+// ============ SR trust layer (015) ============
+enum DriverDocumentType {
+  LICENSE
+  VEHICLE_REGISTRATION
+  INSURANCE
+
+  @@map("driver_document_type")
+}
+
+enum RideParticipantRole {
+  RIDER
+  DRIVER
+
+  @@map("ride_participant_role")
+}
+
+model DriverDocument {
+  id           String             @id @default(uuid())
+  driverUserId String             @map("driver_user_id")
+  type         DriverDocumentType
+  assetUrl     String             @map("asset_url")
+  mimeType     String?            @map("mime_type")
+  status       IdDocumentStatus   @default(PENDING_REVIEW)
+  reviewedById String?            @map("reviewed_by_id")
+  reviewedAt   DateTime?          @map("reviewed_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  driver   User  @relation("DriverDocumentOwner", fields: [driverUserId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("DriverDocumentReviewer", fields: [reviewedById], references: [id])
+
+  @@unique([driverUserId, type])
+  @@index([status])
+  @@map("driver_documents")
+}
+
+model RideMessage {
+  id           String              @id @default(uuid())
+  rideId       String              @map("ride_id")
+  senderUserId String              @map("sender_user_id")
+  senderRole   RideParticipantRole @map("sender_role")
+  body         String
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  ride   RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  sender User        @relation("RideMessageSender", fields: [senderUserId], references: [id])
+
+  @@index([rideId, createdAt])
+  @@map("ride_messages")
+}
+
+model RideRating {
+  id          String              @id @default(uuid())
+  rideId      String              @map("ride_id")
+  raterUserId String              @map("rater_user_id")
+  ratedUserId String              @map("rated_user_id")
+  raterRole   RideParticipantRole @map("rater_role")
+  stars       Int
+  safetyFlag  Boolean             @default(false) @map("safety_flag")
+  comment     String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  ride  RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rater User        @relation("RideRatingRater", fields: [raterUserId], references: [id])
+  rated User        @relation("RideRatingRated", fields: [ratedUserId], references: [id])
+
+  @@unique([rideId, raterUserId])
+  @@index([ratedUserId, safetyFlag])
+  @@index([raterUserId, safetyFlag])
+  @@map("ride_ratings")
+}
