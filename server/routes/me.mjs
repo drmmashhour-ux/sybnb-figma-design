@@ -5,7 +5,138 @@ import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 
+// A booking still owing something to the counterparty, or a ride still in flight, blocks account closure.
+const ACTIVE_BOOKING_STATUSES = ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED']
+const INFLIGHT_RIDE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+
 export async function handleMe(req, res, url, context) {
+  // ---- In-app account deletion (store requirement): anonymize PII + kill sessions, RETAIN ledger/audit. ----
+  if (url.pathname === '/api/me' && req.method === 'DELETE') {
+    requireAuth(context)
+    const userId = context.user.id
+    const oldEmail = context.user.email
+    const oldIdRef = context.user.idDocumentRef
+
+    // Guardrail 1: no money left in any wallet.
+    const wallets = await db().wallet.findMany({ where: { userId } })
+    if (wallets.some((w) => w.cachedBalanceMinor !== 0)) {
+      const error = new Error('Withdraw or spend your balance before closing.')
+      error.statusCode = 409
+      error.code = 'WALLET_NOT_EMPTY'
+      error.expose = true
+      throw error
+    }
+
+    // Guardrail 2: no unfinished bookings or in-flight rides (as rider or driver).
+    const [activeBookings, inflightRides] = await Promise.all([
+      db().booking.count({ where: { guestId: userId, status: { in: ACTIVE_BOOKING_STATUSES } } }),
+      db().rideRequest.count({ where: { OR: [{ riderId: userId }, { driverId: userId }], status: { in: INFLIGHT_RIDE_STATUSES } } }),
+    ])
+    if (activeBookings + inflightRides > 0) {
+      const error = new Error('Resolve your active bookings and rides before closing your account.')
+      error.statusCode = 409
+      error.code = 'ACCOUNT_HAS_ACTIVE_OBLIGATIONS'
+      error.expose = true
+      throw error
+    }
+
+    // Anonymize-and-retain, atomically. PII on the row is scrubbed and sensitive documents removed, but
+    // wallet ledger entries, completed bookings/rides, and admin_audit_logs are KEPT — they reference this
+    // now-anonymized user id, which is exactly what the stores permit (and law/finance require).
+    await db().$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          displayName: 'Deleted user',
+          email: null,
+          phoneHash: null,
+          passwordHash: null,
+          payoutMethod: null,
+          idDocumentRef: null,
+          idDocumentMimeType: null,
+          idDocumentStatus: null,
+          idDocumentSubmittedAt: null,
+          idDocumentReviewedById: null,
+          idDocumentReviewedAt: null,
+          status: 'CLOSED',
+          deletedAt: new Date(),
+          // Bumping sessionVersion invalidates every outstanding token immediately (auth-context F-02).
+          sessionVersion: { increment: 1 },
+        },
+      })
+      // Remove sensitive verification/identity data (not financial, not audit).
+      await tx.driverDocument.deleteMany({ where: { driverUserId: userId } })
+      await tx.driverProfile.updateMany({
+        where: { userId },
+        data: { licenseHash: null, vehicleMake: null, vehicleModel: null, vehiclePlate: null, active: false, payoutMethod: null, payoutAccountRef: null },
+      })
+      if (oldEmail) await tx.emailVerificationCode.deleteMany({ where: { email: oldEmail } })
+      // Personal relationship data — the user's own block list.
+      await tx.userBlock.deleteMany({ where: { OR: [{ blockerUserId: userId }, { blockedUserId: userId }] } })
+      // Retained-but-audited: record the closure itself (this row is intentionally NOT deleted).
+      await tx.adminAuditLog.create({
+        data: { actorUserId: userId, action: 'ACCOUNT_SELF_DELETED', entityType: 'users', entityId: userId, before: { status: 'ACTIVE' }, after: { status: 'CLOSED' } },
+      })
+    })
+
+    // Best-effort removal of the stored ID-document file (the DB reference is already cleared above).
+    if (oldIdRef) await deleteIdDocument(oldIdRef).catch(() => {})
+
+    return json(res, 200, { ok: true, account: { status: 'CLOSED', deleted: true } })
+  }
+
+  // ---- User blocks (UGC safety): a blocked pair can't be SR-matched or message each other. ----
+  if (url.pathname === '/api/me/blocks') {
+    requireAuth(context)
+    if (req.method === 'GET') {
+      const blocks = await db().userBlock.findMany({ where: { blockerUserId: context.user.id }, orderBy: { createdAt: 'desc' } })
+      return json(res, 200, { ok: true, blocks })
+    }
+    if (req.method === 'POST') {
+      const body = await readJson(req)
+      const blockedUserId = typeof body.userId === 'string' ? body.userId.trim() : ''
+      if (!blockedUserId) {
+        const error = new Error('userId is required.')
+        error.statusCode = 400
+        error.code = 'BLOCK_TARGET_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      if (blockedUserId === context.user.id) {
+        const error = new Error('You cannot block yourself.')
+        error.statusCode = 400
+        error.code = 'CANNOT_BLOCK_SELF'
+        error.expose = true
+        throw error
+      }
+      const target = await db().user.findUnique({ where: { id: blockedUserId }, select: { id: true } })
+      if (!target) {
+        const error = new Error('That user was not found.')
+        error.statusCode = 404
+        error.code = 'USER_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      // Idempotent: re-blocking an already-blocked user is a no-op, not a duplicate-key error.
+      const block = await db().userBlock.upsert({
+        where: { blockerUserId_blockedUserId: { blockerUserId: context.user.id, blockedUserId } },
+        create: { blockerUserId: context.user.id, blockedUserId },
+        update: {},
+      })
+      return json(res, 201, { ok: true, block })
+    }
+    return methodNotAllowed(res, ['GET', 'POST'])
+  }
+
+  const blockDeleteMatch = url.pathname.match(/^\/api\/me\/blocks\/([^/]+)$/)
+  if (blockDeleteMatch) {
+    if (req.method !== 'DELETE') return methodNotAllowed(res, ['DELETE'])
+    requireAuth(context)
+    await db().userBlock.deleteMany({ where: { blockerUserId: context.user.id, blockedUserId: blockDeleteMatch[1] } })
+    return json(res, 200, { ok: true, unblocked: blockDeleteMatch[1] })
+  }
+
+
   if (url.pathname === '/api/me/id-document') {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context)

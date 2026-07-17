@@ -2,6 +2,9 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isBookingViewable } from './bookings.mjs'
+import { assertNotBlockedPair } from '../lib/user-blocks.mjs'
+
+const MESSAGE_BLOCK_OPTS = { code: 'MESSAGE_USER_BLOCK', message: 'You cannot message this user because of a block.', statusCode: 403 }
 
 const MESSAGING_ELIGIBLE_BOOKING_STATUSES = ['CONFIRMED', 'COMPLETED', 'DISPUTED']
 
@@ -184,6 +187,9 @@ export async function handleMessages(req, res, url, context) {
       throw error
     }
 
+    // UGC block (024): the guest and the listing owner can't message each other once either has blocked the other.
+    await assertNotBlockedPair(db(), context.user.id, isOwner ? guestId : listing.ownerId, MESSAGE_BLOCK_OPTS)
+
     const message = await db().message.create({
       data: {
         threadId: thread.id,
@@ -257,6 +263,10 @@ export async function handleMessages(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    // UGC block (024): the guest and the host can't message each other on a booking once blocked.
+    const counterparty = context.user.id === booking.guestId ? booking.listing?.ownerId : booking.guestId
+    await assertNotBlockedPair(db(), context.user.id, counterparty, MESSAGE_BLOCK_OPTS)
 
     const thread = await ensureThread(booking.id)
     const message = await db().message.create({

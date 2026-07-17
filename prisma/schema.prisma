@@ -11,6 +11,7 @@ enum AccountStatus {
   ACTIVE
   SUSPENDED
   DELETED
+  CLOSED
 
   @@map("account_status")
 }
@@ -156,6 +157,12 @@ model User {
   // user has one, whether or not they ever refer anyone -- generated lazily would need a
   // read-then-write race guard for no benefit, since it's nearly free to always have one.
   referralCode String        @unique @map("referral_code")
+  // Store-readiness (024): in-app account deletion anonymizes the row and stamps deletedAt / status=CLOSED
+  // rather than hard-deleting it, so wallet-ledger + audit references survive against an anonymized subject.
+  deletedAt    DateTime?     @map("deleted_at")
+  // Reviewer demo accounts (024): App Store / Play reviewers log into these pre-verified accounts. Flagged
+  // so they can be recognized (and excluded from real metrics); they carry no admin role.
+  isDemo       Boolean       @default(false) @map("is_demo")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
@@ -1153,4 +1160,65 @@ model SeatBooking {
   @@index([serviceTripId])
   @@index([riderUserId])
   @@map("seat_bookings")
+}
+
+// ============================================================================
+// Store-readiness UGC safety (024) — user reports + user blocks. Required by
+// Apple 1.2 / Google UGC policy: users must be able to report content and block
+// other users. Subject/user references are plain scalar ids (no User relation)
+// so this addition doesn't touch User's relation block.
+// ============================================================================
+
+enum ReportSubjectType {
+  LISTING
+  REVIEW
+  SELLER
+  USER
+  RIDE
+  BOOKING
+
+  @@map("report_subject_type")
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  ACTIONED
+  DISMISSED
+
+  @@map("report_status")
+}
+
+// A user-filed report against a piece of user-generated content or another user. Admin-triaged.
+model Report {
+  id             String            @id @default(uuid())
+  reporterUserId String            @map("reporter_user_id")
+  subjectType    ReportSubjectType @map("subject_type")
+  subjectId      String            @map("subject_id")
+  reason         String
+  note           String?
+  status         ReportStatus      @default(OPEN)
+  resolutionNote String?           @map("resolution_note")
+  resolvedById   String?           @map("resolved_by_id")
+  resolvedAt     DateTime?         @map("resolved_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([subjectType, subjectId])
+  @@index([reporterUserId])
+  @@map("reports")
+}
+
+// A directional block: blockerUserId will never be SR-matched with, nor able to message, blockedUserId
+// (enforcement checks both directions). Unique on the ordered pair.
+model UserBlock {
+  id            String   @id @default(uuid())
+  blockerUserId String   @map("blocker_user_id")
+  blockedUserId String   @map("blocked_user_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([blockerUserId, blockedUserId])
+  @@index([blockedUserId])
+  @@map("user_blocks")
 }

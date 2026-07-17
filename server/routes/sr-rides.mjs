@@ -7,6 +7,7 @@ import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { assertRiderCanAfford, chargeRiderCancellationFee, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
 import { riderCancelOutcome } from '../lib/sr-cancellation.mjs'
+import { assertNotBlockedPair } from '../lib/user-blocks.mjs'
 
 const DRIVER_ACTIVE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const SR_TRACKABLE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
@@ -113,6 +114,8 @@ async function loadRideForMessaging(rideId, context, client = db()) {
     error.expose = true
     throw error
   }
+  // UGC block (024): a blocked rider/driver pair can't message on the ride either.
+  await assertNotBlockedPair(client, ride.riderId, ride.driverId, { code: 'MESSAGE_USER_BLOCK', message: 'You cannot message this user because of a block.', statusCode: 403 })
   return { ride, role }
 }
 
@@ -257,6 +260,7 @@ export async function handleSrRides(req, res, url, context) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${driver.id}))`
       await ensureDriverHasNoActiveRide(driver.id, tx)
       await assertNoSafetyBlock(existing.riderId, driver.id, tx) // SAFETY (015): no re-match of a flagged pair
+      await assertNotBlockedPair(tx, existing.riderId, driver.id, { code: 'RIDE_USER_BLOCK', message: 'This rider and driver cannot be matched because of a block.' }) // UGC block (024)
       // BALANCE GATE + HOLD (016): a driver may only be assigned to a ride the rider can still pay for.
       await assertRiderCanAfford(tx, {
         riderId: existing.riderId, currency: existing.currency, fareMinor: existing.fareMinor,
@@ -322,6 +326,7 @@ export async function handleSrRides(req, res, url, context) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${context.user.id}))`
       await ensureDriverHasNoActiveRide(context.user.id, tx)
       await assertNoSafetyBlock(existing.riderId, context.user.id, tx) // SAFETY (015): no re-match of a flagged pair
+      await assertNotBlockedPair(tx, existing.riderId, context.user.id, { code: 'RIDE_USER_BLOCK', message: 'This rider and driver cannot be matched because of a block.' }) // UGC block (024)
       // CANCELLATION (019): a driver who already cancelled THIS ride cannot re-claim it after re-dispatch.
       const priorCancel = await tx.driverCancellation.findFirst({ where: { rideId: existing.id, driverId: context.user.id } })
       if (priorCancel) {
