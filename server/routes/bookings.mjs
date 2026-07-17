@@ -1,8 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import {
-  CANCELLATION_ADMIN_FEE_CURRENCY,
-  CANCELLATION_ADMIN_FEE_MINOR,
   CANCELLATION_PROTECTION_RATE,
   bookingFinanceSplit,
   originalAdminShareRecipient,
@@ -11,6 +9,7 @@ import {
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
+import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
 
 // Must match src/shared/booking/cancellationPolicy.ts's STANDARD_FREE_CANCELLATION_DAYS_BEFORE_CHECKIN
 // -- that frontend module only computes the *displayed* cutoff date; this is what was actually
@@ -59,6 +58,11 @@ export async function handleBookings(req, res, url, context) {
     // guest actually clicked cancel, not whatever instant the transaction happens to run at.
     const freeCancellationWindow = isWithinFreeCancellationWindow(existing.checkIn)
 
+    // The flat late-cancel fee actually withheld from the refund, in the booking currency. Captured from
+    // inside the transaction so the audit log below records what was really charged (0 when waived or when
+    // the refund was too small to cover the fee).
+    let cancellationFeeCharged = 0
+
     const booking = await db().$transaction(async (tx) => {
       // SECURITY (S4): atomically claim the cancel on the expected status BEFORE doing refund work. Without
       // this, a concurrent host-confirm (which read REQUESTED outside its own transaction) could commit
@@ -85,6 +89,13 @@ export async function handleBookings(req, res, url, context) {
         const guestRefundAmountMinor = protectedByAddOn
           ? Math.max(0, approvedPayment.amountMinor - split.cancellationProtectionFeeMinor)
           : approvedPayment.amountMinor
+        // Flat late-cancel fee, denominated in the BOOKING currency (fixing the old hardcoded-USD debit
+        // that drove a SYP guest's empty USD wallet negative). It is WITHHELD from the refund, never billed
+        // to a separate wallet, and capped at the refund so the guest can never end up negative.
+        const flatFee = feeWaived ? 0 : strLateCancelFeeMinor(existing.currency, DEFAULT_COUNTRY)
+        const feeMinor = Math.min(flatFee, guestRefundAmountMinor)
+        const netGuestRefundMinor = guestRefundAmountMinor - feeMinor
+        cancellationFeeCharged = feeMinor
         // Reverse against whoever the wallet entries show actually received the original
         // commission share, not PaymentProof.reviewedById (which can be null or simply not the
         // credited account) — see originalAdminShareRecipient() for why.
@@ -106,12 +117,12 @@ export async function handleBookings(req, res, url, context) {
         await recordWalletEntry(tx, {
           userId: existing.guestId,
           type: 'REFUND',
-          amountMinor: guestRefundAmountMinor,
+          amountMinor: netGuestRefundMinor,
           currency: existing.currency,
           referenceType: 'booking_refund',
           referenceId: existing.id,
           keyParts: ['booking-guest-cancel-refund', existing.id, approvedPayment.id],
-          note: 'Guest refund after guest cancelled a protected booking.',
+          note: 'Guest refund after guest cancelled the booking (net of any late-cancel fee).',
         })
 
         // adminShareMinor never included the protection fee (it's excluded from the split base and
@@ -129,27 +140,19 @@ export async function handleBookings(req, res, url, context) {
           note: 'Admin/SYBNB share reversed because the guest-cancelled booking was refunded.',
         })
 
-        if (!feeWaived) {
-          await recordWalletEntry(tx, {
-            userId: existing.guestId,
-            type: 'DEBIT',
-            amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_guest_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-fee-guest', existing.id, approvedPayment.id],
-          note: 'Guest cancellation admin fee for cancelling within 3 days of check-in without cancellation protection.',
-          })
-
+        // The fee is WITHHELD from the guest's refund above (not a separate guest DEBIT), so all that
+        // remains is to credit the admin the same amount in the booking currency. No guest DEBIT means no
+        // wallet can be driven negative. feeMinor is 0 when waived or when the refund couldn't cover it.
+        if (feeMinor > 0) {
           await recordWalletEntry(tx, {
             userId: adminRecipientId,
             type: 'CREDIT',
-            amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_guest_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-fee-admin', existing.id, approvedPayment.id],
-          note: 'Admin received guest cancellation fee for paid booking without cancellation protection.',
+            amountMinor: feeMinor,
+            currency: existing.currency,
+            referenceType: 'booking_guest_cancel_fee',
+            referenceId: existing.id,
+            keyParts: ['booking-guest-cancel-fee-admin', existing.id, approvedPayment.id],
+            note: 'Admin received the late-cancel fee, withheld from the guest refund (no protection).',
           })
         }
       }
@@ -182,9 +185,10 @@ export async function handleBookings(req, res, url, context) {
           ...booking,
           cancellationNote: body.note || body.reason || undefined,
           cancellationFee: {
-            amountMinor: (booking.metadata?.cancellationProtectionPurchased === true || freeCancellationWindow) ? 0 : CANCELLATION_ADMIN_FEE_MINOR,
-            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            amountMinor: cancellationFeeCharged,
+            currency: existing.currency,
             chargedTo: 'GUEST',
+            withheldFromRefund: true,
             waivedByProtection: booking.metadata?.cancellationProtectionPurchased === true,
             waivedByFreeCancellationWindow: freeCancellationWindow,
           },

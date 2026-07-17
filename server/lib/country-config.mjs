@@ -26,6 +26,10 @@ export const COUNTRY_CONFIGS = {
       maxFeeMinor: SR_CANCELLATION_CONFIG.maxFeeMinor,
     },
     disputeWindowHours: 48, // a customer may open a dispute within 48h of a completed ride/booking
+    strLateCancelFee: {
+      feeMinor: 50000, // flat STR late-cancel fee in the country's own currency (SYP) — CONFIRM pre-launch
+      feeMinorUsd: 10, // flat fee when the booking was paid in USD
+    },
     consumerProtection: {
       priceBeforeCommit: true,
       cancellationGrace: true,
@@ -41,4 +45,13 @@ export function getCountryConfig(code = DEFAULT_COUNTRY) {
 
 export function disputeWindowHours(code = DEFAULT_COUNTRY) {
   return getCountryConfig(code)?.disputeWindowHours ?? 48
+}
+
+// Flat STR late-cancel fee in the booking's own currency, sourced from country-config so it is one source
+// of truth and can be tuned per country. USD-paid bookings use feeMinorUsd; everything else uses the
+// local-currency feeMinor. Returns 0 for a country with no fee configured.
+export function strLateCancelFeeMinor(currency, code = DEFAULT_COUNTRY) {
+  const fee = getCountryConfig(code)?.strLateCancelFee
+  if (!fee) return 0
+  return currency === 'USD' ? fee.feeMinorUsd ?? 0 : fee.feeMinor ?? 0
 }
