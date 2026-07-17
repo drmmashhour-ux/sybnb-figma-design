@@ -4,6 +4,7 @@ import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, 
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
+import { refundGiftToSender } from '../lib/gift-ledger.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { readDriverDocument } from '../lib/driver-document-storage.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
@@ -1030,6 +1031,12 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       data: { status: decision === 'APPROVED' ? 'SENT' : 'ADMIN_BLOCKED' },
     })
     if (updated.count === 0) throw reviewStateError('GIFT_NOT_REVIEWABLE')
+    // A rejected gift (ADMIN_BLOCKED) is a non-claimed terminal state: refund the sender the amount that
+    // was reserved from their wallet at send time. Idempotent on the gift id. Approve needs no ledger
+    // action — the money was already debited at send and stays reserved until the recipient claims it.
+    if (decision !== 'APPROVED') {
+      await refundGiftToSender(tx, existing)
+    }
     return tx.walletGift.findUnique({ where: { id: entityId } })
   }
 

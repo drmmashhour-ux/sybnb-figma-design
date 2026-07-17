@@ -3,6 +3,8 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { roundUsdUpToStep } from '../lib/currency.mjs'
+import { riderAvailableBalanceMinor } from '../lib/sr-payments.mjs'
+import { debitGiftFromSender, refundGiftToSender, expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 
 // SR cashless top-up (016): sane per-top-up ceiling (whole currency units).
 const WALLET_TOPUP_MAX_MINOR = 100_000_000
@@ -65,6 +67,10 @@ export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
+    // Opportunistic expire-and-refund sweep, mirroring me.mjs's completeExpiredBookings: a gift this
+    // caller sent that lapsed its expiresAt without being claimed is flipped to EXPIRED and refunded
+    // here, so their reserved money returns the next time they look at their own wallet.
+    await expireAndRefundSenderGifts(db(), context.user.id)
     // A guest can hold more than one currency's wallet (SYP is the default, USD is opened
     // lazily the first time a USD gift/payment is received — see recordWalletEntry's upsert).
     // Previously this only ever queried the SYP wallet, so a real USD balance/gift history was
@@ -95,16 +101,45 @@ export async function handleWallet(req, res, url, context) {
     // neither side needs to make change, regardless of what a client actually submitted.
     const amountMinor = currency === 'USD' ? roundUsdUpToStep(rawAmountMinor) : rawAmountMinor
 
-    const gift = await db().walletGift.create({
-      data: {
-        senderUserId: context.user.id,
-        recipientPhoneHash: hashPhone(body.recipientPhone),
-        amountMinor,
-        currency,
-        message: body.message || undefined,
-        status: amountMinor >= 100000 ? 'CLAIM_PENDING' : 'SENT',
-        expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
-      },
+    // A gift is a transfer, not a mint: a sender cannot gift to their own phone (would trivially shuffle
+    // money to dodge per-account checks, and is nonsensical). recipientPhoneHash uses the same HMAC as
+    // the account's own phoneHash, so equal hashes mean the same number.
+    const recipientPhoneHash = hashPhone(body.recipientPhone)
+    if (context.user.phoneHash && recipientPhoneHash === context.user.phoneHash) {
+      const error = new Error('You cannot send a gift to your own account.')
+      error.statusCode = 400
+      error.code = 'GIFT_SELF_NOT_ALLOWED'
+      error.expose = true
+      throw error
+    }
+
+    // MONEY CONSERVATION: reserve (DEBIT) the amount from the sender at send time, gated on their
+    // *available* balance (cached minus anything already reserved for an in-flight SR ride — reused via
+    // riderAvailableBalanceMinor), so the same money can't be both held for a ride and gifted away. The
+    // recipient is credited on claim; the sender is refunded on any non-claimed terminal state. Create +
+    // debit run in one transaction so a gift row can never exist without its matching sender DEBIT.
+    const gift = await db().$transaction(async (tx) => {
+      const available = await riderAvailableBalanceMinor(tx, { riderId: context.user.id, currency, excludeRideId: null })
+      if (available < amountMinor) {
+        const error = new Error('Your wallet balance is not enough to send this gift.')
+        error.statusCode = 402
+        error.code = 'INSUFFICIENT_CREDIT'
+        error.expose = true
+        throw error
+      }
+      const created = await tx.walletGift.create({
+        data: {
+          senderUserId: context.user.id,
+          recipientPhoneHash,
+          amountMinor,
+          currency,
+          message: body.message || undefined,
+          status: amountMinor >= 100000 ? 'CLAIM_PENDING' : 'SENT',
+          expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
+        },
+      })
+      await debitGiftFromSender(tx, created)
+      return created
     })
     return json(res, 201, { ok: true, gift })
   }
@@ -167,7 +202,12 @@ export async function handleWallet(req, res, url, context) {
     // the frontend even has a dedicated "expired" error state, but nothing server-side ever
     // checked it: a gift could be claimed indefinitely past its displayed expiration date.
     if (gift.expiresAt < new Date()) {
-      await db().walletGift.updateMany({ where: { id: gift.id, status: 'SENT' }, data: { status: 'EXPIRED' } })
+      // Refund the sender on the same status-claim that expires the gift (idempotent on the gift id, so a
+      // concurrent GET-wallet sweep can't also refund). Money returns to whoever sent it.
+      await db().$transaction(async (tx) => {
+        const expired = await tx.walletGift.updateMany({ where: { id: gift.id, status: 'SENT' }, data: { status: 'EXPIRED' } })
+        if (expired.count === 1) await refundGiftToSender(tx, gift)
+      })
       throw giftClaimError('This gift has expired.', 'GIFT_EXPIRED')
     }
     if (gift.recipientPhoneHash !== phoneHash) {
