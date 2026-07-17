@@ -20,6 +20,14 @@ import { computeInsightSignal, generateHostInsights } from '../lib/host-insights
 const HOST_SAFE_GUEST_SELECT = { id: true, displayName: true }
 const HOST_SAFE_PAYMENT_SELECT = { id: true, status: true, amountMinor: true, currency: true, createdAt: true }
 
+// A host sees their OWN gross earning per booking, never the platform's commission cut. buildPayoutRow
+// (finance-ledger) carries adminCommissionMinor for internal/admin reconciliation; strip it before the
+// row ever reaches a host-facing earnings payload.
+function hostSafePayoutRow(row) {
+  const { adminCommissionMinor, ...safeRow } = row
+  return safeRow
+}
+
 export async function handleHost(req, res, url, context) {
   if (url.pathname === '/api/host/earnings') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
@@ -50,7 +58,7 @@ export async function handleHost(req, res, url, context) {
       ).map((entry) => entry.referenceId),
     )
 
-    const rows = bookings.map((booking) => buildPayoutRow(booking, releasedBookingIds))
+    const rows = bookings.map((booking) => hostSafePayoutRow(buildPayoutRow(booking, releasedBookingIds)))
 
     const totals = rows.reduce(
       (acc, row) => {

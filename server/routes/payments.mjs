@@ -115,7 +115,7 @@ export async function creditWalletTopupSession(session) {
   })
 }
 
-async function finalizeStripeSession(session) {
+export async function finalizeStripeSession(session) {
   // A wallet top-up is credited exclusively by creditWalletTopupSession() from the webhook — never here.
   if (session.metadata?.kind === 'wallet_topup') return null
   const bookingId = session.metadata?.bookingId
@@ -143,11 +143,36 @@ async function finalizeStripeSession(session) {
       },
     })
 
-    return approvePaymentProof(tx, {
+    const actorUserId = await firstAdminId(tx)
+    const approved = await approvePaymentProof(tx, {
       proofId: created.id,
-      actorUserId: await firstAdminId(tx),
+      actorUserId,
       note: 'Auto-approved: Stripe confirmed the card charge was captured.',
     })
+
+    await tx.adminAuditLog.create({
+      data: {
+        actorUserId: actorUserId || null,
+        action: 'STRIPE_PAYMENT_AUTO_APPROVED',
+        entityType: 'payment_proofs',
+        entityId: approved.id,
+        before: {
+          status: created.status,
+          provider: created.provider,
+          providerRef: created.providerRef,
+          bookingId: created.bookingId,
+        },
+        after: {
+          status: approved.status,
+          provider: approved.provider,
+          providerRef: approved.providerRef,
+          bookingId: approved.bookingId,
+          stripeSessionId: session.id,
+        },
+      },
+    })
+
+    return approved
   })
 }
 
@@ -155,7 +180,6 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
-    requireStripe()
 
     const body = await readJson(req)
     const bookingId = String(body.bookingId || '')
@@ -186,7 +210,10 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // ID-verification gate runs BEFORE the Stripe-config check so an unverified guest gets a clear
+    // 403 ID_VERIFICATION_REQUIRED rather than a 503 about Stripe not being configured.
     requireIdDocumentUploaded(context.user)
+    requireStripe()
 
     const totalMinor = expectedTotalMinor(booking)
     const { currency, unitAmount } = stripeChargeAmount(totalMinor)
@@ -461,7 +488,9 @@ export async function handlePayments(req, res, url, context) {
     }
     if (booking) requireIdDocumentUploaded(context.user)
 
-    const amountMinor = Number(body.amountMinor || booking?.amountMinor || 0)
+    // Default to the FULL amount due (stay + fees), matching the S11 floor below and the Stripe path —
+    // a guest who submits a proof without naming an amount is paying the whole booking, not the bare stay.
+    const amountMinor = Number(body.amountMinor || (booking ? expectedTotalMinor(booking) : 0))
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       const error = new Error('Payment proof amount must be greater than zero.')
       error.statusCode = 400

@@ -73,7 +73,9 @@ describe('PATCH /api/bookings/:id/cancel — cancellation fee depends on timing 
       data: {
         listingId: listing.id,
         guestId,
-        status: 'REQUESTED',
+        // PAYMENT_PENDING so approvePaymentProof's S3 status-claim (which requires PAYMENT_PENDING and
+        // transitions to CONFIRMED exactly once) runs the real payment path instead of rejecting.
+        status: 'PAYMENT_PENDING',
         checkIn,
         checkOut: new Date(checkIn.getTime() + 2 * 24 * 60 * 60 * 1000),
         amountMinor: 100_00,

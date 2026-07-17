@@ -145,8 +145,13 @@ describe('SR TRUST layer', () => {
     const rider = await registerUser(app, 'GUEST', 'rate-rider')
     const driver = await registerUser(app, 'DRIVER', 'rate-driver')
     await makeRoadReady(driver.user.id)
+    // The early "can't rate an active ride" check claims with a SEPARATE driver, so the main `driver`
+    // stays free — Protocol Rule 2 (one active ride per driver) would otherwise block it from claiming
+    // the completed ride below.
+    const earlyDriver = await registerUser(app, 'DRIVER', 'rate-early-driver')
+    await makeRoadReady(earlyDriver.user.id)
     const activeRide = await requestRide(app, rider.token, 'rate-active')
-    await request(app).patch(`/api/sr/rides/${activeRide.id}/claim`).set('Authorization', `Bearer ${driver.token}`)
+    await request(app).patch(`/api/sr/rides/${activeRide.id}/claim`).set('Authorization', `Bearer ${earlyDriver.token}`)
     const early = await request(app).post(`/api/sr/rides/${activeRide.id}/rate`).set('Authorization', `Bearer ${rider.token}`).send({ stars: 5 })
     expect(early.status).toBe(400)
     expect(early.body.error.code).toBe('RIDE_NOT_COMPLETED')

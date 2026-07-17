@@ -225,7 +225,14 @@ export async function handleAuth(req, res, url, context) {
             email: validEmail,
             phoneHash,
             passwordHash,
-            displayName: displayName || [firstName, lastName].filter(Boolean).join(' ') || validEmail || 'SYBNB User',
+            // PII: never default a display name to the FULL email address — it would then surface in
+            // on-platform message threads and host inquiry payloads (see the SR/STR PII guards). Fall
+            // back to the email's local part (before the @), which carries no contact address.
+            displayName:
+              displayName ||
+              [firstName, lastName].filter(Boolean).join(' ') ||
+              (validEmail ? validEmail.split('@')[0] : '') ||
+              'SYBNB User',
             referralCode,
             roles: {
               create: { role },

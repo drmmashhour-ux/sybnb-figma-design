@@ -143,6 +143,10 @@ model User {
   idDocumentStatus IdDocumentStatus? @map("id_document_status")
   idDocumentReviewedById String? @map("id_document_reviewed_by_id")
   idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
+  // How this user is paid out (host stay payouts / seller payouts). Free-form JSON, e.g.
+  // { type: 'sham_cash', phone, receiverName }. Surfaced ONLY to admin payout reminders
+  // (see routes/admin.mjs /api/admin/payouts) — never to guests or hosts of other accounts.
+  payoutMethod Json?      @map("payout_method")
   // Bumped on logout and on password reset; embedded as a claim in every session token and
   // checked on every request (server/lib/auth-context.mjs). A stateless HMAC-signed token has no
   // other way to be revoked before its 7-day expiry -- this is the whole mechanism (security audit
