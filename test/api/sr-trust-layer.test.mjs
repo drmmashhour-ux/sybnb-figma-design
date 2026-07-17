@@ -4,6 +4,7 @@ import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken } from '../../server/lib/security.mjs'
 import {
   cleanupTestUsers,
+  fundWallet,
   testApp,
   trackTestUser,
   uniqueTestEmail,
@@ -17,6 +18,8 @@ async function registerUser(app, role, label) {
   if (role === 'DRIVER' || role === 'HOST') await verifyEmailForTest(app, email, 'staff-login')
   const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
+  // SR cashless (016): fund guests so the ride balance gate lets their ride requests through.
+  if (role === 'GUEST') await fundWallet(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
 
@@ -47,7 +50,9 @@ async function completeRideBetween(app, rider, driver, label) {
   await makeRoadReady(driver.user.id)
   const ride = await requestRide(app, rider.token, label)
   await request(app).patch(`/api/sr/rides/${ride.id}/claim`).set('Authorization', `Bearer ${driver.token}`)
-  for (const status of ['DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']) {
+  await request(app).patch(`/api/driver/rides/${ride.id}/status`).set('Authorization', `Bearer ${driver.token}`).send({ status: 'DRIVER_ARRIVING' })
+  await db().rideRequest.update({ where: { id: ride.id }, data: { pickupVerifiedAt: new Date() } }) // PIN gate (017)
+  for (const status of ['IN_PROGRESS', 'COMPLETED']) {
     await request(app).patch(`/api/driver/rides/${ride.id}/status`).set('Authorization', `Bearer ${driver.token}`).send({ status })
   }
   return ride
@@ -126,7 +131,9 @@ describe('SR TRUST layer', () => {
     const stranger = await registerUser(app, 'GUEST', 'msg-stranger')
     const strangerRead = await request(app).get(`/api/sr/rides/${ride.id}/messages`).set('Authorization', `Bearer ${stranger.token}`)
     expect(strangerRead.status).toBe(403)
-    for (const status of ['DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']) {
+    await request(app).patch(`/api/driver/rides/${ride.id}/status`).set('Authorization', `Bearer ${driver.token}`).send({ status: 'DRIVER_ARRIVING' })
+    await db().rideRequest.update({ where: { id: ride.id }, data: { pickupVerifiedAt: new Date() } }) // PIN gate (017)
+    for (const status of ['IN_PROGRESS', 'COMPLETED']) {
       await request(app).patch(`/api/driver/rides/${ride.id}/status`).set('Authorization', `Bearer ${driver.token}`).send({ status })
     }
     const afterComplete = await request(app).post(`/api/sr/rides/${ride.id}/messages`).set('Authorization', `Bearer ${rider.token}`).send({ body: 'too late' })

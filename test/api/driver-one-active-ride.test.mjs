@@ -1,6 +1,6 @@
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
+import { approveDriverForRides, cleanupTestUsers, fundWallet, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
@@ -12,6 +12,9 @@ async function registerUser(app, role, label) {
     password: 'correct-horse-battery',
   })
   trackTestUser(res.body.user.id)
+  // SR gates (015/016): a claiming driver must be road-ready; a rider must be funded past the balance gate.
+  if (role === 'DRIVER') await approveDriverForRides(res.body.user.id)
+  if (role === 'GUEST') await fundWallet(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
 

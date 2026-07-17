@@ -2,7 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
+import { approveDriverForRides, cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
 
 // Tips: after a COMPLETED ride, the rider tips from wallet credit; the driver receives 100% (no
 // platform commission on tips). One tip per ride.
@@ -27,8 +27,7 @@ async function fundRider(userId, amountMinor, currency = 'SYP') {
 
 async function makeRoadReadyDriver(app, label) {
   const driver = await registerUser(app, 'DRIVER', label)
-  await db().user.update({ where: { id: driver.user.id }, data: { idDocumentStatus: 'APPROVED' } })
-  // If the trust layer (requireRoadReadyDriver) is integrated, also approve license + vehicle here.
+  await approveDriverForRides(driver.user.id)
   return driver
 }
 
@@ -36,7 +35,10 @@ async function completeRide(app, rider, driver, label, fareCurrency = 'SYP') {
   const ride = await request(app).post('/api/sr/rides').set('Authorization', `Bearer ${rider.token}`).send({ pickup: `A ${label}`, dropoff: `B ${label}`, category: 'SR Economy' })
   const rideId = ride.body.ride.id
   await request(app).patch(`/api/sr/rides/${rideId}/claim`).set('Authorization', `Bearer ${driver.token}`)
-  for (const status of ['DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']) {
+  await request(app).patch(`/api/driver/rides/${rideId}/status`).set('Authorization', `Bearer ${driver.token}`).send({ status: 'DRIVER_ARRIVING' })
+  // PIN gate (017): mark verified in the DB before IN_PROGRESS (this test is about tips, not the PIN).
+  await db().rideRequest.update({ where: { id: rideId }, data: { pickupVerifiedAt: new Date() } })
+  for (const status of ['IN_PROGRESS', 'COMPLETED']) {
     await request(app).patch(`/api/driver/rides/${rideId}/status`).set('Authorization', `Bearer ${driver.token}`).send({ status })
   }
   return ride.body.ride

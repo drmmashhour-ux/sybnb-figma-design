@@ -2,7 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
+import { approveDriverForRides, cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
 
 // Pickup PIN: one code per ride, rider-only visible, driver enters it to confirm the correct rider;
 // the trip cannot start (IN_PROGRESS) until it matches. Assumes the SR money layer's balance gate — so
@@ -24,7 +24,7 @@ async function fundRider(userId, amountMinor = 1_000_000, currency = 'SYP') {
 
 async function makeDriver(app, label) {
   const driver = await registerUser(app, 'DRIVER', label)
-  await db().user.update({ where: { id: driver.user.id }, data: { idDocumentStatus: 'APPROVED' } })
+  await approveDriverForRides(driver.user.id)
   return driver
 }
 

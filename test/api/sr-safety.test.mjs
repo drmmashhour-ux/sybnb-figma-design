@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import {
   cleanupTestUsers,
+  fundWallet,
   testApp,
   trackTestUser,
   uniqueTestEmail,
@@ -22,9 +23,24 @@ async function registerUser(app, role, label) {
   return { email, token: res.body.token, user: res.body.user }
 }
 
+// A funded rider — required now that the ride balance gate (016) rejects 0-credit riders.
+async function registerRider(app, label) {
+  const rider = await registerUser(app, 'GUEST', label)
+  await fundWallet(rider.user.id)
+  return rider
+}
+
+// A road-ready driver: ID + license + vehicle registration approved (trust layer 015).
 async function registerVerifiedDriver(app, label) {
   const driver = await registerUser(app, 'DRIVER', label)
   await db().user.update({ where: { id: driver.user.id }, data: { idDocumentStatus: 'APPROVED' } })
+  for (const type of ['LICENSE', 'VEHICLE_REGISTRATION']) {
+    await db().driverDocument.upsert({
+      where: { driverUserId_type: { driverUserId: driver.user.id, type } },
+      create: { driverUserId: driver.user.id, type, assetUrl: `${type}.pdf`, status: 'APPROVED' },
+      update: { status: 'APPROVED' },
+    })
+  }
   return driver
 }
 
@@ -43,20 +59,33 @@ async function claim(app, driverToken, rideId) {
   return res.body.ride
 }
 
+// PIN gate (017): the trip can't start until the driver enters the rider's 4-digit code.
+async function verifyPin(app, riderToken, driverToken, rideId) {
+  const view = await request(app).get(`/api/sr/rides/${rideId}`).set('Authorization', `Bearer ${riderToken}`)
+  const pin = view.body.ride.pickupPin
+  const res = await request(app).post(`/api/sr/rides/${rideId}/verify-pin`).set('Authorization', `Bearer ${driverToken}`).send({ pin })
+  expect(res.status).toBe(200)
+}
+
 async function setStatus(app, driverToken, rideId, status) {
   return request(app).patch(`/api/driver/rides/${rideId}/status`).set('Authorization', `Bearer ${driverToken}`).send({ status })
 }
 
+// Fresh funded rider + fresh road-ready driver + a requested ride — fully isolated per test, so no shared
+// driver hits the one-active-ride guard and no shared rider's reserved balance accumulates.
+async function setupRide(app, label) {
+  const rider = await registerRider(app, `${label}-rider`)
+  const driver = await registerVerifiedDriver(app, `${label}-driver`)
+  const ride = await requestRide(app, rider.token, label)
+  return { rider, driver, ride }
+}
+
 describe('SR SAFETY layer: SOS, live location, trip share', () => {
   let app
-  let rider
-  let driver
   let adminBearer
 
   beforeAll(async () => {
     app = testApp()
-    rider = await registerUser(app, 'GUEST', 'safety-rider')
-    driver = await registerVerifiedDriver(app, 'safety-driver')
     const admin = await db().user.create({
       data: {
         email: uniqueTestEmail('safety-admin'),
@@ -75,7 +104,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('the rider can raise SOS on their ride, and it surfaces to admins as OPEN', async () => {
-    const ride = await requestRide(app, rider.token, 'sos-1')
+    const { rider, ride } = await setupRide(app, 'sos-1')
     const res = await request(app)
       .post(`/api/sr/rides/${ride.id}/sos`)
       .set('Authorization', `Bearer ${rider.token}`)
@@ -89,7 +118,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('the assigned driver can also raise SOS (raisedByRole DRIVER)', async () => {
-    const ride = await requestRide(app, rider.token, 'sos-2')
+    const { driver, ride } = await setupRide(app, 'sos-2')
     await claim(app, driver.token, ride.id)
     const res = await request(app).post(`/api/sr/rides/${ride.id}/sos`).set('Authorization', `Bearer ${driver.token}`).send({})
     expect(res.status).toBe(201)
@@ -97,7 +126,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('a non-party CANNOT raise SOS (403)', async () => {
-    const ride = await requestRide(app, rider.token, 'sos-3')
+    const { ride } = await setupRide(app, 'sos-3')
     const stranger = await registerUser(app, 'GUEST', 'sos-stranger')
     const res = await request(app).post(`/api/sr/rides/${ride.id}/sos`).set('Authorization', `Bearer ${stranger.token}`).send({})
     expect(res.status).toBe(403)
@@ -105,7 +134,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('admin can resolve an OPEN SOS (TOCTOU-safe)', async () => {
-    const ride = await requestRide(app, rider.token, 'sos-4')
+    const { rider, ride } = await setupRide(app, 'sos-4')
     const raised = await request(app).post(`/api/sr/rides/${ride.id}/sos`).set('Authorization', `Bearer ${rider.token}`).send({})
     const id = raised.body.sosEvent.id
     const resolved = await request(app).patch(`/api/admin/sos/${id}/resolve`).set('Authorization', `Bearer ${adminBearer}`).send({ note: 'Called rider, safe' })
@@ -117,12 +146,13 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('SOS list requires ADMIN/SUPPORT (a rider is 403)', async () => {
+    const { rider } = await setupRide(app, 'sos-5')
     const res = await request(app).get('/api/admin/sos').set('Authorization', `Bearer ${rider.token}`)
     expect(res.status).toBe(403)
   })
 
   it('the assigned, verified driver can post location; the rider can read it back', async () => {
-    const ride = await requestRide(app, rider.token, 'loc-1')
+    const { rider, driver, ride } = await setupRide(app, 'loc-1')
     await claim(app, driver.token, ride.id)
     const post = await request(app).post(`/api/sr/rides/${ride.id}/location`).set('Authorization', `Bearer ${driver.token}`).send(DAMASCUS)
     expect(post.status).toBe(200)
@@ -133,7 +163,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('a non-party CANNOT read the driver location (403)', async () => {
-    const ride = await requestRide(app, rider.token, 'loc-2')
+    const { driver, ride } = await setupRide(app, 'loc-2')
     await claim(app, driver.token, ride.id)
     await request(app).post(`/api/sr/rides/${ride.id}/location`).set('Authorization', `Bearer ${driver.token}`).send(DAMASCUS)
     const stranger = await registerUser(app, 'GUEST', 'loc-stranger')
@@ -142,7 +172,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('a driver NOT assigned to the ride cannot post location (404)', async () => {
-    const ride = await requestRide(app, rider.token, 'loc-3')
+    const { driver, ride } = await setupRide(app, 'loc-3')
     await claim(app, driver.token, ride.id)
     const otherDriver = await registerVerifiedDriver(app, 'loc-other-driver')
     const res = await request(app).post(`/api/sr/rides/${ride.id}/location`).set('Authorization', `Bearer ${otherDriver.token}`).send(DAMASCUS)
@@ -150,16 +180,17 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('a rider (non-driver) cannot post location (403 role gate)', async () => {
-    const ride = await requestRide(app, rider.token, 'loc-4')
+    const { rider, driver, ride } = await setupRide(app, 'loc-4')
     await claim(app, driver.token, ride.id)
     const res = await request(app).post(`/api/sr/rides/${ride.id}/location`).set('Authorization', `Bearer ${rider.token}`).send(DAMASCUS)
     expect(res.status).toBe(403)
   })
 
   it('location is rejected once the ride is no longer active (409)', async () => {
-    const ride = await requestRide(app, rider.token, 'loc-5')
+    const { rider, driver, ride } = await setupRide(app, 'loc-5')
     await claim(app, driver.token, ride.id)
     await setStatus(app, driver.token, ride.id, 'DRIVER_ARRIVING')
+    await verifyPin(app, rider.token, driver.token, ride.id) // PIN gate before IN_PROGRESS
     await setStatus(app, driver.token, ride.id, 'IN_PROGRESS')
     await setStatus(app, driver.token, ride.id, 'COMPLETED')
     const res = await request(app).post(`/api/sr/rides/${ride.id}/location`).set('Authorization', `Bearer ${driver.token}`).send(DAMASCUS)
@@ -168,7 +199,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('rejects a SQL-injection-shaped coordinate with 400 before touching SQL', async () => {
-    const ride = await requestRide(app, rider.token, 'loc-inj')
+    const { driver, ride } = await setupRide(app, 'loc-inj')
     await claim(app, driver.token, ride.id)
     const res = await request(app)
       .post(`/api/sr/rides/${ride.id}/location`)
@@ -179,14 +210,14 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('rejects out-of-Syria coordinates (400)', async () => {
-    const ride = await requestRide(app, rider.token, 'loc-oob')
+    const { driver, ride } = await setupRide(app, 'loc-oob')
     await claim(app, driver.token, ride.id)
     const res = await request(app).post(`/api/sr/rides/${ride.id}/location`).set('Authorization', `Bearer ${driver.token}`).send({ lat: 48.8, lng: 2.3 })
     expect(res.status).toBe(400)
   })
 
   it('rider mints a share token; the public watcher sees coarse status + location + ETA and NO PII', async () => {
-    const ride = await requestRide(app, rider.token, 'share-1')
+    const { rider, driver, ride } = await setupRide(app, 'share-1')
     await claim(app, driver.token, ride.id)
     await request(app).post(`/api/sr/rides/${ride.id}/location`).set('Authorization', `Bearer ${driver.token}`).send(DAMASCUS)
     const share = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
@@ -201,7 +232,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   })
 
   it('a non-rider cannot mint a share token (403)', async () => {
-    const ride = await requestRide(app, rider.token, 'share-2')
+    const { driver, ride } = await setupRide(app, 'share-2')
     await claim(app, driver.token, ride.id)
     const res = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${driver.token}`)
     expect(res.status).toBe(403)

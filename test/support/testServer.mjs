@@ -1,6 +1,32 @@
 import request from 'supertest'
 import { server } from '../../server/index.mjs'
 import { db } from '../../server/lib/prisma.mjs'
+import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
+
+// SR cashless (016): the ride balance gate rejects a 0-credit rider. Test riders that will request/complete
+// a ride must be funded first. Generous default covers many rides + holds + the completion charge.
+export async function fundWallet(userId, amountMinor = 1_000_000_000, currency = 'SYP') {
+  await db().$transaction(async (tx) => {
+    await recordWalletEntry(tx, {
+      userId, type: 'CREDIT', amountMinor, currency,
+      referenceType: 'wallet_topup', referenceId: `test-fund-${userId}-${currency}`,
+      keyParts: ['test-fund', userId, currency], note: 'test funding',
+    })
+  })
+}
+
+// SR trust (015): claiming/working a ride now requires requireRoadReadyDriver — ID + license + vehicle
+// registration all APPROVED. Test drivers that will claim a ride must be made road-ready first.
+export async function approveDriverForRides(userId) {
+  await db().user.update({ where: { id: userId }, data: { idDocumentStatus: 'APPROVED' } })
+  for (const type of ['LICENSE', 'VEHICLE_REGISTRATION']) {
+    await db().driverDocument.upsert({
+      where: { driverUserId_type: { driverUserId: userId, type } },
+      create: { driverUserId: userId, type, assetUrl: `${type}.pdf`, status: 'APPROVED' },
+      update: { status: 'APPROVED' },
+    })
+  }
+}
 
 // The server module exports the raw http.Server without auto-listening when imported (see
 // server/index.mjs's isMainModule guard) — Supertest binds it to an ephemeral port itself, so

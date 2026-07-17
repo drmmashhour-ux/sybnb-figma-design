@@ -10,6 +10,7 @@ import {
   uniqueTestEmail,
   uniqueTestReferralCode,
   verifyEmailForTest,
+  approveDriverForRides,
 } from '../support/testServer.mjs'
 
 async function registerUser(app, role, label) {
@@ -25,7 +26,7 @@ async function registerUser(app, role, label) {
 // idDocumentStatus null, so approve directly — same fixture shortcut other suites use.
 async function registerVerifiedDriver(app, label) {
   const driver = await registerUser(app, 'DRIVER', label)
-  await db().user.update({ where: { id: driver.user.id }, data: { idDocumentStatus: 'APPROVED' } })
+  await approveDriverForRides(driver.user.id)
   return driver
 }
 
@@ -72,6 +73,8 @@ async function requestRide(app, riderToken, label) {
 async function driveToCompletion(app, driverToken, rideId) {
   await request(app).patch(`/api/sr/rides/${rideId}/claim`).set('Authorization', `Bearer ${driverToken}`)
   await request(app).patch(`/api/driver/rides/${rideId}/status`).set('Authorization', `Bearer ${driverToken}`).send({ status: 'DRIVER_ARRIVING' })
+  // PIN gate (017): tests not about the PIN mark it verified in the DB before the trip can start.
+  await db().rideRequest.update({ where: { id: rideId }, data: { pickupVerifiedAt: new Date() } })
   await request(app).patch(`/api/driver/rides/${rideId}/status`).set('Authorization', `Bearer ${driverToken}`).send({ status: 'IN_PROGRESS' })
   return request(app).patch(`/api/driver/rides/${rideId}/status`).set('Authorization', `Bearer ${driverToken}`).send({ status: 'COMPLETED' })
 }
