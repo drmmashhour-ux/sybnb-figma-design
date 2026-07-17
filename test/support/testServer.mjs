@@ -116,6 +116,7 @@ export async function cleanupTestUsers() {
   await db().rideMessage.deleteMany({ where: { senderUserId: { in: ids } } }).catch(() => {})
   await db().sosEvent.deleteMany({ where: { OR: [{ raisedByUserId: { in: ids } }, { resolvedById: { in: ids } }] } }).catch(() => {})
   await db().driverCancellation.deleteMany({ where: { driverId: { in: ids } } }).catch(() => {})
+  await db().driverVehicle.deleteMany({ where: { driverId: { in: ids } } }).catch(() => {})
   await db().driverDocument.deleteMany({ where: { OR: [{ driverUserId: { in: ids } }, { reviewedById: { in: ids } }] } }).catch(() => {})
   await db().rideRequest.deleteMany({ where: { OR: [{ riderId: { in: ids } }, { driverId: { in: ids } }] } }).catch(() => {})
   // Seller reputation (Block 3): reviews reference seller+buyer without cascade, sales reference

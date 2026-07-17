@@ -1,10 +1,11 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth, requireRoadReadyDriver } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { assertNoUnknownFields } from '../lib/validate.mjs'
+import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { deleteDriverDocument, readDriverDocument, saveDriverDocument } from '../lib/driver-document-storage.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { chargeCompletedRide, srRideFinanceSplit } from '../lib/sr-payments.mjs'
+import { assertVehicleEligible } from '../lib/fleet.mjs'
 
 const DRIVER_DOCUMENT_TYPES = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE']
 // SECURITY (015): the private assetUrl/storage key is NEVER returned in JSON — bytes stream only via /file.
@@ -265,6 +266,43 @@ export async function handleDriver(req, res, url, context) {
   }
 
   // ---- SR MONEY (016): the driver's own rating summary ----
+  // ---- FLEET (020): a driver registers/lists their vehicle records (age-gated by tier) ----
+  if (url.pathname === '/api/driver/vehicles') {
+    if (req.method === 'POST') {
+      requireAuth(context, ['DRIVER'])
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['make', 'model', 'year', 'plate', 'color', 'category'], 'vehicle body')
+      const make = assertBoundedString(body.make, { fieldName: 'make', maxLength: 60 })
+      const model = assertBoundedString(body.model, { fieldName: 'model', maxLength: 60 })
+      const plate = assertBoundedString(body.plate, { fieldName: 'plate', maxLength: 20 })
+      const color = body.color ? assertBoundedString(body.color, { fieldName: 'color', maxLength: 30 }) : null
+      const category = String(body.category || '')
+      const year = Number(body.year)
+      if (!make || !model || !plate) {
+        const error = new Error('Vehicle make, model, and plate are required.')
+        error.statusCode = 400
+        error.code = 'VEHICLE_INPUT_INVALID'
+        error.expose = true
+        throw error
+      }
+      // Uber-style age gate (server-side): rejects a car too old for its tier BEFORE it can be reviewed.
+      assertVehicleEligible({ category, year })
+      const vehicle = await db().driverVehicle.create({
+        data: { driverId: context.user.id, make, model, year, plate, color, category, status: 'PENDING_REVIEW' },
+      })
+      return json(res, 201, { ok: true, vehicle })
+    }
+    if (req.method === 'GET') {
+      requireAuth(context, ['DRIVER'])
+      const vehicles = await db().driverVehicle.findMany({
+        where: { driverId: context.user.id },
+        orderBy: { createdAt: 'desc' },
+      })
+      return json(res, 200, { ok: true, vehicles })
+    }
+    return methodNotAllowed(res, ['POST', 'GET'])
+  }
+
   if (url.pathname === '/api/driver/rating') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['DRIVER'])

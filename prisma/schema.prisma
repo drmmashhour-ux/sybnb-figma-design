@@ -191,6 +191,7 @@ model User {
   sellerReviewsReceived   SellerReview[]   @relation("SellerReviewSeller")
   sellerReviewsWritten    SellerReview[]   @relation("SellerReviewBuyer")
   driverCancellations     DriverCancellation[] @relation("DriverCancellationDriver")
+  driverVehicles          DriverVehicle[]      @relation("DriverVehicleOwner")
 
   @@map("users")
 }
@@ -844,4 +845,29 @@ model DriverCancellation {
   @@index([driverId])
   @@index([rideId])
   @@map("driver_cancellations")
+}
+
+// SR fleet (020): a driver's registered vehicle record. Carries the model year, which the age gate
+// enforces per ride tier (standard/Economy ≤ 10 years, premium tiers newer — see server/lib/fleet.mjs).
+// Admin-reviewed before it can be used. A driver may register more than one vehicle.
+model DriverVehicle {
+  id           String           @id @default(uuid())
+  driverId     String           @map("driver_id")
+  make         String
+  model        String
+  year         Int
+  plate        String
+  color        String?
+  category     String // 'SR Economy' | 'SR Comfort' | 'SR SUV'
+  status       IdDocumentStatus @default(PENDING_REVIEW)
+  reviewedById String?          @map("reviewed_by_id")
+  reviewedAt   DateTime?        @map("reviewed_at")
+  reviewNote   String?          @map("review_note")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  driver User @relation("DriverVehicleOwner", fields: [driverId], references: [id])
+
+  @@index([driverId, status])
+  @@map("driver_vehicles")
 }

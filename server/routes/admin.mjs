@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
+import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { readDriverDocument } from '../lib/driver-document-storage.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
@@ -580,6 +581,154 @@ export async function handleAdmin(req, res, url, context) {
       },
     })
     return json(res, 200, { ok: true, sos })
+  }
+
+  // ---- FLEET (020): driver directory — paginated, filterable, for operating a large fleet ----
+  if (url.pathname === '/api/admin/drivers') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const params = url.searchParams
+    const page = Math.max(1, Number.parseInt(params.get('page') || '1', 10) || 1)
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(params.get('pageSize') || '25', 10) || 25))
+    const statusFilter = params.get('status') // ACTIVE | SUSPENDED | DELETED
+    const verifiedFilter = params.get('verified') // 'true' | 'false'
+    const search = (params.get('search') || '').trim()
+
+    const where = {
+      roles: { some: { role: 'DRIVER' } },
+      ...(['ACTIVE', 'SUSPENDED', 'DELETED'].includes(statusFilter) ? { status: statusFilter } : {}),
+      ...(verifiedFilter === 'true' ? { idDocumentStatus: 'APPROVED' } : {}),
+      ...(verifiedFilter === 'false' ? { NOT: { idDocumentStatus: 'APPROVED' } } : {}),
+      ...(search ? { OR: [{ displayName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] } : {}),
+    }
+
+    const [total, drivers] = await Promise.all([
+      db().user.count({ where }),
+      db().user.findMany({
+        where,
+        select: { id: true, displayName: true, email: true, status: true, idDocumentStatus: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ])
+    return json(res, 200, { ok: true, drivers, page, pageSize, total, pages: Math.ceil(total / pageSize) })
+  }
+
+  // ---- FLEET (020): suspend / reinstate / remove a driver account (the fleet kill switch) ----
+  const driverStatusMatch = url.pathname.match(/^\/api\/admin\/drivers\/([^/]+)\/status$/)
+  if (driverStatusMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const nextStatus = String(body.status || '').toUpperCase()
+    if (!['ACTIVE', 'SUSPENDED', 'DELETED'].includes(nextStatus)) {
+      const error = new Error('status must be ACTIVE, SUSPENDED, or DELETED.')
+      error.statusCode = 400
+      error.code = 'ACCOUNT_STATUS_INVALID'
+      error.expose = true
+      throw error
+    }
+    const reason = body.reason ? assertBoundedString(body.reason, { fieldName: 'reason', maxLength: 500 }) : null
+    const driver = await db().user.findFirst({ where: { id: driverStatusMatch[1], roles: { some: { role: 'DRIVER' } } } })
+    if (!driver) {
+      const error = new Error('Driver not found.')
+      error.statusCode = 404
+      error.code = 'DRIVER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const updated = await db().$transaction(async (tx) => {
+      // Bumping sessionVersion on suspend/remove instantly invalidates the driver's existing tokens, so a
+      // suspended driver is logged out on their next request — not just blocked at next login.
+      const bumpSession = nextStatus !== 'ACTIVE'
+      const u = await tx.user.update({
+        where: { id: driver.id },
+        data: { status: nextStatus, ...(bumpSession ? { sessionVersion: { increment: 1 } } : {}) },
+        select: { id: true, status: true },
+      })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: `DRIVER_STATUS_${nextStatus}`,
+          entityType: 'users',
+          entityId: driver.id,
+          before: { status: driver.status },
+          after: { status: nextStatus, reason },
+        },
+      })
+      return u
+    })
+    return json(res, 200, { ok: true, driver: updated })
+  }
+
+  // ---- FLEET (020): full driver record — profile, vehicles, verification, and computed standing ----
+  const driverRecordMatch = url.pathname.match(/^\/api\/admin\/drivers\/([^/]+)$/)
+  if (driverRecordMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const driverId = driverRecordMatch[1]
+    const driver = await db().user.findFirst({
+      where: { id: driverId, roles: { some: { role: 'DRIVER' } } },
+      select: {
+        id: true, displayName: true, email: true, status: true, idDocumentStatus: true, createdAt: true,
+        driverProfile: { select: { payoutMethod: true, payoutAccountRef: true } },
+        driverVehicles: { orderBy: { createdAt: 'desc' } },
+        driverDocuments: { select: { id: true, type: true, status: true, reviewedAt: true } },
+      },
+    })
+    if (!driver) {
+      const error = new Error('Driver not found.')
+      error.statusCode = 404
+      error.code = 'DRIVER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const [ratingAgg, completedRides, driverCancellations] = await Promise.all([
+      db().rideRating.aggregate({ where: { ratedUserId: driverId, raterRole: 'RIDER' }, _avg: { stars: true }, _count: { _all: true } }),
+      db().rideRequest.count({ where: { driverId, status: 'COMPLETED' } }),
+      db().driverCancellation.count({ where: { driverId } }),
+    ])
+    const standing = computeDriverStanding({
+      ratingAvg: ratingAgg._avg.stars,
+      ratingCount: ratingAgg._count._all,
+      completedRides,
+      driverCancellations,
+    })
+    return json(res, 200, { ok: true, driver, standing })
+  }
+
+  // ---- FLEET (020): admin approves / rejects a vehicle (age gate re-checked on approval) ----
+  const vehicleReviewMatch = url.pathname.match(/^\/api\/admin\/vehicles\/([^/]+)$/)
+  if (vehicleReviewMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const body = await readJson(req)
+    const decision = String(body.decision || body.action || '').toUpperCase()
+    if (!['APPROVED', 'REJECTED'].includes(decision)) {
+      const error = new Error('decision must be APPROVED or REJECTED.')
+      error.statusCode = 400
+      error.code = 'VEHICLE_DECISION_INVALID'
+      error.expose = true
+      throw error
+    }
+    const note = body.note ? assertBoundedString(body.note, { fieldName: 'note', maxLength: 500 }) : null
+    const vehicle = await db().driverVehicle.findUnique({ where: { id: vehicleReviewMatch[1] } })
+    if (!vehicle) {
+      const error = new Error('Vehicle not found.')
+      error.statusCode = 404
+      error.code = 'VEHICLE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // Re-run the age gate at approval time — a car that has aged past its tier's limit since submission
+    // (or a tier changed underneath it) can never be approved into the fleet.
+    if (decision === 'APPROVED') assertVehicleEligible(vehicle)
+    const updated = await db().driverVehicle.update({
+      where: { id: vehicle.id },
+      data: { status: decision, reviewedById: context.user.id, reviewedAt: new Date(), reviewNote: note },
+    })
+    return json(res, 200, { ok: true, vehicle: updated })
   }
 
   // ---- SR CANCELLATION (019): a driver's cancellation record, for accountability review ----
