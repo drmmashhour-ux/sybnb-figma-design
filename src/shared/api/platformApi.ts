@@ -1,4 +1,12 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3051'
+// API host resolution, baked at build time:
+//  - VITE_API_BASE_URL set to a real URL  → use it (API split onto its own domain).
+//  - unset/empty in a PRODUCTION build     → same-origin: '' makes every call a relative /api/... path,
+//    so the Vercel same-origin deployment (frontend + api/index.mjs on one domain) works with no CORS.
+//  - unset/empty in DEV                     → local API on 127.0.0.1:3051.
+// (Previously the fallback was always localhost, so a production build with VITE_API_BASE_URL="" — the
+// documented same-origin setting — would have wrongly called 127.0.0.1.)
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://127.0.0.1:3051')
 
 type ApiUser = {
   id: string

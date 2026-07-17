@@ -5,6 +5,7 @@ dist/
 .env.*
 !.env.example
 !.env.test.example
+!.env.production.example
 server/uploads/
 test-results/
 playwright-report/

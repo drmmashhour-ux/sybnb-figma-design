@@ -22,6 +22,7 @@
     "smoke:routes": "node scripts/smoke-routes-v6.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "db:test:push": "node scripts/db-test-push.mjs",
     "db:audit-test-role": "node scripts/audit-test-role-privileges.mjs"
