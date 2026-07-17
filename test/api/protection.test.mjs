@@ -1,6 +1,7 @@
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
+import { approvePaymentProof } from '../../server/lib/finance-ledger.mjs'
 import { createSessionToken } from '../../server/lib/security.mjs'
 import {
   approveDriverForRides,
@@ -181,6 +182,84 @@ describe('Consumer protection: country config + dispute/refund', () => {
       const dispute = (await request(app).post('/api/disputes').set('Authorization', `Bearer ${rider.token}`).send({ rideId: ride.id, reason: 'x' })).body.dispute
       const res = await request(app).patch(`/api/admin/disputes/${dispute.id}`).set('Authorization', `Bearer ${rider.token}`).send({ decision: 'REFUND' })
       expect(res.status).toBe(403)
+    })
+  })
+
+  // Regression for the CRITICAL cross-mechanism double-refund fix (disputes.mjs): a dispute REFUND on an
+  // STR booking must atomically move the booking to CANCELLED, so the booking's OWN guest-cancel refund
+  // path (keyed differently, and thus not blocked by the subject-keyed dispute-refund idempotency guard)
+  // can no longer pay the guest a second time. Before the fix, dispute-refund left the booking CONFIRMED
+  // and a subsequent cancel issued a second `booking_refund` credit.
+  describe('STR booking: dispute refund is not double-paid by a later guest cancel', () => {
+    async function setUpConfirmedPaidBooking(adminId, label) {
+      const hostEmail = uniqueTestEmail(`${label}-host`)
+      await verifyEmailForTest(app, hostEmail, 'staff-login')
+      const hostRes = await request(app).post('/api/auth/register').send({ role: 'HOST', email: hostEmail, password: 'correct-horse-battery' })
+      trackTestUser(hostRes.body.user.id)
+
+      const guestEmail = uniqueTestEmail(`${label}-guest`)
+      await verifyEmailForTest(app, guestEmail)
+      const guestRes = await request(app).post('/api/auth/register').send({ role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
+      trackTestUser(guestRes.body.user.id)
+
+      const listing = await db().listing.create({
+        // instantBookEnabled so approvePaymentProof transitions the booking straight to CONFIRMED
+        // (otherwise it lands in REQUESTED, which is not disputable).
+        data: { ownerId: hostRes.body.user.id, division: 'STAYS', titleAr: 'اختبار النزاع', priceMinor: 100_00, currency: 'USD', status: 'APPROVED', instantBookEnabled: true },
+      })
+      const checkIn = new Date()
+      checkIn.setUTCDate(checkIn.getUTCDate() + 30) // well before the free-cancellation cutoff → a plain cancel would fully refund
+      const booking = await db().booking.create({
+        data: {
+          listingId: listing.id,
+          guestId: guestRes.body.user.id,
+          status: 'PAYMENT_PENDING', // approvePaymentProof claims PAYMENT_PENDING → CONFIRMED exactly once
+          checkIn,
+          checkOut: new Date(checkIn.getTime() + 2 * 24 * 60 * 60 * 1000),
+          amountMinor: 100_00,
+          currency: 'USD',
+        },
+      })
+      const proof = await db().paymentProof.create({
+        data: { bookingId: booking.id, userId: guestRes.body.user.id, provider: 'sham_cash', status: 'PENDING_ADMIN_REVIEW', amountMinor: 100_00, currency: 'USD' },
+      })
+      await db().$transaction((tx) => approvePaymentProof(tx, { proofId: proof.id, actorUserId: adminId }))
+      return { bookingId: booking.id, guestId: guestRes.body.user.id, guestToken: guestRes.body.token }
+    }
+
+    it('dispute-refunding a CONFIRMED booking cancels it, and a later cancel refunds nothing (no double refund)', async () => {
+      const admin = await db().user.create({
+        data: { email: uniqueTestEmail('booking-dispute-admin'), displayName: 'Booking Dispute Admin', referralCode: uniqueTestReferralCode(), roles: { create: { role: 'ADMIN' } } },
+        include: { roles: true },
+      })
+      trackTestUser(admin.id)
+      const adminToken = createSessionToken(admin)
+
+      const { bookingId, guestId, guestToken } = await setUpConfirmedPaidBooking(admin.id, 'bk-dispute')
+
+      // Guest opens a dispute on the confirmed booking; admin refunds it.
+      const dispute = (await request(app).post('/api/disputes').set('Authorization', `Bearer ${guestToken}`).send({ bookingId, reason: 'host misrepresented the stay' })).body.dispute
+      expect(dispute.subjectType).toBe('STR_BOOKING')
+      const resolve = await request(app).patch(`/api/admin/disputes/${dispute.id}`).set('Authorization', `Bearer ${adminToken}`).send({ decision: 'REFUND', note: 'valid complaint' })
+      expect(resolve.status).toBe(200)
+      expect(resolve.body.dispute.status).toBe('RESOLVED_REFUNDED')
+
+      // The booking is now CANCELLED, and the guest was credited exactly once, keyed on the booking.
+      expect((await db().booking.findUnique({ where: { id: bookingId } })).status).toBe('CANCELLED')
+      const disputeRefunds = await db().walletEntry.findMany({ where: { referenceType: 'dispute_refund', referenceId: bookingId } })
+      expect(disputeRefunds).toHaveLength(1)
+      const balanceAfterRefund = (await db().wallet.findUnique({ where: { userId_currency: { userId: guestId, currency: 'USD' } } }))?.cachedBalanceMinor || 0
+
+      // A subsequent guest cancel must NOT issue a second refund: the booking is no longer cancellable.
+      const cancel = await request(app).patch(`/api/bookings/${bookingId}/cancel`).set('Authorization', `Bearer ${guestToken}`).send({})
+      expect(cancel.status).toBe(400)
+      expect(cancel.body.error.code).toBe('BOOKING_NOT_CANCELLABLE')
+
+      // No booking_refund credit was ever created, and the balance is unchanged since the single dispute refund.
+      const bookingRefunds = await db().walletEntry.findMany({ where: { referenceType: 'booking_refund', referenceId: bookingId } })
+      expect(bookingRefunds).toHaveLength(0)
+      const balanceAfterCancel = (await db().wallet.findUnique({ where: { userId_currency: { userId: guestId, currency: 'USD' } } }))?.cachedBalanceMinor || 0
+      expect(balanceAfterCancel).toBe(balanceAfterRefund)
     })
   })
 })

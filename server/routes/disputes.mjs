@@ -102,6 +102,23 @@ export async function handleDisputes(req, res, url, context) {
         err.expose = true
         throw err
       }
+      // CRITICAL cross-mechanism guard: a STR booking has its OWN refund paths (guest self-cancel,
+      // admin proof-reject) keyed differently. Atomically move the booking to CANCELLED here so those
+      // paths (which claim on CONFIRMED/COMPLETED) match zero rows and cannot refund the same booking a
+      // second time. A booking that is no longer CONFIRMED/COMPLETED can't be refunded via a dispute.
+      if (dispute.bookingId) {
+        const claim = await tx.booking.updateMany({
+          where: { id: dispute.bookingId, status: { in: ['CONFIRMED', 'COMPLETED'] } },
+          data: { status: 'CANCELLED' },
+        })
+        if (claim.count !== 1) {
+          const err = new Error('This booking can no longer be refunded — its state changed.')
+          err.statusCode = 409
+          err.code = 'BOOKING_REFUND_CONFLICT'
+          err.expose = true
+          throw err
+        }
+      }
       await recordWalletEntry(tx, {
         userId: subject.customerId,
         type: 'CREDIT',

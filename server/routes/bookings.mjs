@@ -325,7 +325,28 @@ export async function handleBookings(req, res, url, context) {
       throw error
     }
 
-    return json(res, 200, { ok: true, booking })
+    // SECURITY (S7, mirrors payments.mjs safeProof): this endpoint is viewable by the listing owner (host),
+    // so the guest's payment proofs must be projected down for a non-privileged host viewer. The host may
+    // confirm a payment exists and its status/amount/currency/date, but must NOT read the guest's uploaded
+    // transfer screenshot (proofAssetUrl), the provider reference, or internal admin fields.
+    const isPrivileged =
+      context.roles.includes('ADMIN') ||
+      context.roles.includes('SUPPORT') ||
+      booking.guestId === context.user.id
+    const safeBooking = isPrivileged
+      ? booking
+      : {
+          ...booking,
+          payments: (booking.payments || []).map((p) => ({
+            ...p,
+            proofAssetUrl: undefined,
+            adminNote: undefined,
+            reviewedById: undefined,
+            providerRef: undefined,
+          })),
+        }
+
+    return json(res, 200, { ok: true, booking: safeBooking })
   }
 
   if (url.pathname !== '/api/bookings') return false

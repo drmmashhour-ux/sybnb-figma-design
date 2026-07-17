@@ -49,6 +49,9 @@ const RATE_LIMIT_RULES = [
   { name: 'AUTH_REGISTER', method: 'POST', pattern: /^\/api\/auth\/register$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
   { name: 'AUTH_EMAIL_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/email-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
   { name: 'AUTH_EMAIL_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/email-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false },
+  // Phone/SMS OTP: same per-IP caps as email — bounds SMS cost/bombing on send and brute-force on verify.
+  { name: 'AUTH_PHONE_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/phone-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
+  { name: 'AUTH_PHONE_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/phone-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false },
   { name: 'PUBLIC_SEARCH', method: 'GET', pattern: /^\/api\/listings$/, max: 60, windowMs: 60 * 1000, byUser: false },
   { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true },
