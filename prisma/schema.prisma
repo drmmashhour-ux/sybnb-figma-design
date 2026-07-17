@@ -927,3 +927,230 @@ model Dispute {
   @@index([openedByUserId])
   @@map("disputes")
 }
+
+// ============================================================================
+// SR Intercity service module (023) — DORMANT SCHEMA ONLY. Tables for garages,
+// routes, variable route tariffs, operators, formable service trips and seat
+// bookings, so the SR v2 Intercity module lands additively later (never a
+// migration against live bookings). No endpoints, no wiring — behavior comes in
+// the v2 build. Cross-module refs (rider/driver/creator user ids, vehicle id)
+// are kept as PLAIN SCALAR ids on purpose so this dormant add-on does not touch
+// User's / DriverVehicle's relation blocks; real relations arrive with v2.
+// ============================================================================
+
+enum OperatorType {
+  BUS_COMPANY
+  TAXI_FLEET
+
+  @@map("operator_type")
+}
+
+enum ServiceTripStatus {
+  FORMING
+  READY
+  DEPARTED
+  COMPLETED
+  CANCELLED
+
+  @@map("service_trip_status")
+}
+
+enum SeatBookingStatus {
+  RESERVED
+  PAID
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+
+  @@map("seat_booking_status")
+}
+
+enum DepartureMode {
+  FILL_AND_GO
+  SCHEDULED
+
+  @@map("departure_mode")
+}
+
+enum TariffScope {
+  ROUTE
+  OPERATOR
+  GLOBAL
+
+  @@map("tariff_scope")
+}
+
+enum TariffReason {
+  HOLIDAY
+  HIGH_SEASON
+  EVENT
+  FUEL
+  MANUAL
+
+  @@map("tariff_reason")
+}
+
+enum TariffKind {
+  MULTIPLIER
+  ABSOLUTE
+
+  @@map("tariff_kind")
+}
+
+// A physical intercity pickup/drop point (bus station, taxi garage) in a city.
+model Garage {
+  id        String   @id @default(uuid())
+  country   String
+  city      String
+  name      String
+  lat       Float?
+  lng       Float?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Two distinct relations to Route (origin + destination) — named on both sides so Prisma can tell
+  // them apart. Each named relation MUST appear exactly twice (once here, once on Route).
+  originRoutes Route[] @relation("RouteOrigin")
+  destRoutes   Route[] @relation("RouteDest")
+
+  @@index([country, city])
+  @@map("garages")
+}
+
+// A directed intercity route between two garages.
+model Route {
+  id             String   @id @default(uuid())
+  originGarageId String   @map("origin_garage_id")
+  destGarageId   String   @map("dest_garage_id")
+  distanceKm     Int?     @map("distance_km")
+  estMinutes     Int?     @map("est_minutes")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  originGarage      Garage             @relation("RouteOrigin", fields: [originGarageId], references: [id])
+  destGarage        Garage             @relation("RouteDest", fields: [destGarageId], references: [id])
+  tariffs           RouteTariff[]
+  trips             ServiceTrip[]
+  tariffAdjustments TariffAdjustment[]
+
+  @@index([originGarageId])
+  @@index([destGarageId])
+  @@map("routes")
+}
+
+// Base per-tier price for a route: per-seat and whole-vehicle (private hire) amounts.
+model RouteTariff {
+  id               String   @id @default(uuid())
+  routeId          String   @map("route_id")
+  tier             String
+  perSeatMinor     Int      @map("per_seat_minor")
+  wholeVehicleMinor Int     @map("whole_vehicle_minor")
+  currency         String   @default("USD")
+  locked           Boolean  @default(false)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, tier])
+  @@map("route_tariffs")
+}
+
+// Dated holiday/season/event price overrides. `value` is a basis-points multiplier when kind =
+// MULTIPLIER (10000 = 1.0x), or a minor amount when kind = ABSOLUTE.
+model TariffAdjustment {
+  id              String       @id @default(uuid())
+  scope           TariffScope
+  routeId         String?      @map("route_id")
+  operatorId      String?      @map("operator_id")
+  tier            String?
+  effectiveFrom   DateTime     @map("effective_from")
+  effectiveTo     DateTime     @map("effective_to")
+  reason          TariffReason
+  kind            TariffKind
+  value           Int
+  priority        Int          @default(0)
+  createdByUserId String       @map("created_by_user_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  route    Route?    @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  operator Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+
+  @@index([routeId])
+  @@index([operatorId])
+  @@index([effectiveFrom, effectiveTo])
+  @@map("tariff_adjustments")
+}
+
+// A bus company or taxi fleet that runs service trips.
+model Operator {
+  id           String       @id @default(uuid())
+  name         String
+  type         OperatorType
+  country      String
+  contactPhone String?      @map("contact_phone")
+  status       String       @default("PENDING")
+  verified     Boolean      @default(false)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  trips             ServiceTrip[]
+  tariffAdjustments TariffAdjustment[]
+
+  @@index([country, status])
+  @@map("operators")
+}
+
+// A forming/scheduled trip on a route: fills seats (FILL_AND_GO) or departs on a schedule (SCHEDULED).
+// driverUserId / vehicleId / operatorId are scalar refs for now (see module header).
+model ServiceTrip {
+  id                String            @id @default(uuid())
+  routeId           String            @map("route_id")
+  tier              String
+  operatorId        String?           @map("operator_id")
+  driverUserId      String?           @map("driver_user_id")
+  vehicleId         String?           @map("vehicle_id")
+  capacity          Int
+  seatsAvailable    Int               @map("seats_available")
+  seatMap           Json?             @map("seat_map")
+  status            ServiceTripStatus @default(FORMING)
+  departureMode     DepartureMode     @map("departure_mode")
+  scheduledDepartAt DateTime?         @map("scheduled_depart_at")
+  departedAt        DateTime?         @map("departed_at")
+  perSeatMinor      Int               @map("per_seat_minor")
+  currency          String            @default("USD")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  route        Route         @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  operator     Operator?     @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  seatBookings SeatBooking[]
+
+  @@index([routeId, status])
+  @@index([operatorId])
+  @@map("service_trips")
+}
+
+// A rider's seat(s) on a service trip. ticketCode is globally unique (the boarding ticket).
+model SeatBooking {
+  id            String            @id @default(uuid())
+  serviceTripId String            @map("service_trip_id")
+  riderUserId   String            @map("rider_user_id")
+  seatCount     Int               @default(1) @map("seat_count")
+  seatLabels    String[]          @map("seat_labels")
+  amountMinor   Int               @map("amount_minor")
+  currency      String            @default("USD")
+  ticketCode    String            @unique @map("ticket_code")
+  status        SeatBookingStatus @default(RESERVED)
+  boardedAt     DateTime?         @map("boarded_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  serviceTrip ServiceTrip @relation(fields: [serviceTripId], references: [id], onDelete: Cascade)
+
+  @@index([serviceTripId])
+  @@index([riderUserId])
+  @@map("seat_bookings")
+}
