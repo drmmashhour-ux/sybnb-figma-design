@@ -192,6 +192,7 @@ model User {
   sellerReviewsWritten    SellerReview[]   @relation("SellerReviewBuyer")
   driverCancellations     DriverCancellation[] @relation("DriverCancellationDriver")
   driverVehicles          DriverVehicle[]      @relation("DriverVehicleOwner")
+  disputesOpened          Dispute[]            @relation("DisputeOpener")
 
   @@map("users")
 }
@@ -410,6 +411,22 @@ model EmailVerificationCode {
   @@map("email_verification_codes")
 }
 
+// SMS/phone one-time codes (022) — same OTP security model as EmailVerificationCode, delivered by SMS.
+// Sign-up / sign-in accepts a recently-verified email OR phone, so users can verify by whichever channel.
+model PhoneVerificationCode {
+  id         String    @id @default(uuid())
+  phone      String
+  codeHash   String    @map("code_hash")
+  purpose    String    @default("guest-signup")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([phone, purpose])
+  @@map("phone_verification_codes")
+}
+
 model ListingAvailability {
   id                 String              @id @default(uuid())
   listingId          String              @map("listing_id")
@@ -461,6 +478,7 @@ model Booking {
   payments PaymentProof[]
   review   ListingReview?
   messageThread MessageThread?
+  disputes Dispute[]
 
   @@index([guestId, status])
   @@index([listingId, status])
@@ -697,6 +715,7 @@ model RideRequest {
   messages  RideMessage[]
   ratings   RideRating[]
   driverCancellations DriverCancellation[]
+  disputes  Dispute[]
 
   @@index([status, requestedAt])
   @@index([driverId, status])
@@ -870,4 +889,41 @@ model DriverVehicle {
 
   @@index([driverId, status])
   @@map("driver_vehicles")
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED_REFUNDED
+  RESOLVED_REJECTED
+
+  @@map("dispute_status")
+}
+
+// Consumer-protection dispute/refund (021): a customer opens a dispute on a completed SR ride or STR
+// booking within the country's dispute window; an admin adjudicates and either refunds (idempotent
+// wallet credit, capped at the amount paid) or rejects with a logged reason. The ride/booking link is
+// SetNull so the dispute record survives for audit even if the underlying row is later removed.
+model Dispute {
+  id             String        @id @default(uuid())
+  subjectType    String        @map("subject_type") // 'SR_RIDE' | 'STR_BOOKING'
+  rideId         String?       @map("ride_id")
+  bookingId      String?       @map("booking_id")
+  openedByUserId String        @map("opened_by_user_id")
+  reason         String
+  status         DisputeStatus @default(OPEN)
+  refundMinor    Int?          @map("refund_minor")
+  currency       String?
+  resolutionNote String?       @map("resolution_note")
+  resolvedById   String?       @map("resolved_by_id")
+  resolvedAt     DateTime?     @map("resolved_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  ride     RideRequest? @relation(fields: [rideId], references: [id], onDelete: SetNull)
+  booking  Booking?     @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  openedBy User         @relation("DisputeOpener", fields: [openedByUserId], references: [id])
+
+  @@index([status])
+  @@index([openedByUserId])
+  @@map("disputes")
 }

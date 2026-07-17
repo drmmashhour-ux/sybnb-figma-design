@@ -3,6 +3,7 @@ import { createSessionToken, hashPassword, hashPhone, verifyPassword } from '../
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPassword, assertValidPhone } from '../lib/validate.mjs'
 import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerificationCode } from '../lib/email-verification.mjs'
+import { consumePhoneVerificationCode, hasRecentlyVerifiedPhone, sendPhoneVerificationCode } from '../lib/phone-verification.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { attachReferralOnRegister, generateUniqueReferralCode } from '../lib/referrals.mjs'
 
@@ -68,6 +69,50 @@ export async function handleAuth(req, res, url, context) {
     const code = assertBoundedString(body.code, { fieldName: 'code', maxLength: 12, required: true })
     const purpose = resolveEmailCodePurpose(body.purpose)
     const result = await consumeEmailVerificationCode(validEmail, code, purpose)
+    if (!result.ok) {
+      const error = new Error('The verification code is invalid or expired.')
+      error.statusCode = 400
+      error.code = result.reason
+      error.expose = true
+      throw error
+    }
+    return json(res, 200, { ok: true })
+  }
+
+  // Real phone/SMS OTP — the alternative to the email code for guests and staff. Pre-signup, so these
+  // two endpoints take no auth token (same as the email-code pair above).
+  if (url.pathname === '/api/auth/phone-code/send') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['phone', 'purpose'], 'phone-code send body')
+    const validPhone = assertValidPhone(body.phone)
+    if (!validPhone) {
+      const error = new Error('A valid phone number is required.')
+      error.statusCode = 400
+      error.code = 'PHONE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const purpose = resolveEmailCodePurpose(body.purpose)
+    const result = await sendPhoneVerificationCode(validPhone, purpose)
+    return json(res, 200, result)
+  }
+
+  if (url.pathname === '/api/auth/phone-code/verify') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['phone', 'code', 'purpose'], 'phone-code verify body')
+    const validPhone = assertValidPhone(body.phone)
+    if (!validPhone) {
+      const error = new Error('A valid phone number is required.')
+      error.statusCode = 400
+      error.code = 'PHONE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const code = assertBoundedString(body.code, { fieldName: 'code', maxLength: 12, required: true })
+    const purpose = resolveEmailCodePurpose(body.purpose)
+    const result = await consumePhoneVerificationCode(validPhone, code, purpose)
     if (!result.ok) {
       const error = new Error('The verification code is invalid or expired.')
       error.statusCode = 400
@@ -176,16 +221,18 @@ export async function handleAuth(req, res, url, context) {
     // checked anything server-side. Checked after basic input-shape validation so a malformed
     // request always gets a validation error first, not a business-rule rejection.
     if (role === 'GUEST') {
-      if (!validEmail) {
-        const error = new Error('email is required for guest registration.')
+      if (!validEmail && !validPhone) {
+        const error = new Error('An email or phone number is required for guest registration.')
         error.statusCode = 400
         error.code = 'EMAIL_REQUIRED'
         error.expose = true
         throw error
       }
-      const verified = await hasRecentlyVerifiedEmail(validEmail, 'guest-signup')
-      if (!verified) {
-        const error = new Error('Verify your email before opening an account.')
+      // Ownership proven by a recently-verified email OR phone — whichever the guest used.
+      const emailVerified = validEmail ? await hasRecentlyVerifiedEmail(validEmail, 'guest-signup') : false
+      const phoneVerified = validPhone ? await hasRecentlyVerifiedPhone(validPhone, 'guest-signup') : false
+      if (!emailVerified && !phoneVerified) {
+        const error = new Error('Verify your email or phone before opening an account.')
         error.statusCode = 403
         error.code = 'EMAIL_NOT_VERIFIED'
         error.expose = true
@@ -199,16 +246,17 @@ export async function handleAuth(req, res, url, context) {
     // (src/engines/security/verificationCodeEngine.ts). Admin cannot self-register at all
     // (PUBLIC_REGISTER_ROLES above), so it never reaches this branch.
     if (STAFF_ROLES_REQUIRING_OTP.has(role)) {
-      if (!validEmail) {
-        const error = new Error('email is required for this account type.')
+      if (!validEmail && !validPhone) {
+        const error = new Error('An email or phone number is required for this account type.')
         error.statusCode = 400
         error.code = 'EMAIL_REQUIRED'
         error.expose = true
         throw error
       }
-      const verified = await hasRecentlyVerifiedEmail(validEmail, 'staff-login')
-      if (!verified) {
-        const error = new Error('Verify your email with the access code before opening this account.')
+      const emailVerified = validEmail ? await hasRecentlyVerifiedEmail(validEmail, 'staff-login') : false
+      const phoneVerified = validPhone ? await hasRecentlyVerifiedPhone(validPhone, 'staff-login') : false
+      if (!emailVerified && !phoneVerified) {
+        const error = new Error('Verify your email or phone with the access code before opening this account.')
         error.statusCode = 403
         error.code = 'EMAIL_NOT_VERIFIED'
         error.expose = true
@@ -327,16 +375,18 @@ export async function handleAuth(req, res, url, context) {
     // verified at all (StaffAccessPage.tsx / verificationCodeEngine.ts).
     const needsStaffOtp = user.roles.some((entry) => STAFF_ROLES_REQUIRING_OTP.has(entry.role))
     if (needsStaffOtp) {
-      if (!validEmail) {
-        const error = new Error('Sign in with email and the access code for this account type.')
+      if (!validEmail && !validPhone) {
+        const error = new Error('Sign in with the access code sent to your email or phone for this account type.')
         error.statusCode = 400
         error.code = 'STAFF_EMAIL_REQUIRED'
         error.expose = true
         throw error
       }
-      const verified = await hasRecentlyVerifiedEmail(validEmail, 'staff-login')
-      if (!verified) {
-        const error = new Error('Verify your email with the access code before signing in.')
+      // A recently-verified email OR phone code satisfies the staff sign-in gate.
+      const emailVerified = validEmail ? await hasRecentlyVerifiedEmail(validEmail, 'staff-login') : false
+      const phoneVerified = validPhone ? await hasRecentlyVerifiedPhone(validPhone, 'staff-login') : false
+      if (!emailVerified && !phoneVerified) {
+        const error = new Error('Verify your email or phone with the access code before signing in.')
         error.statusCode = 403
         error.code = 'STAFF_OTP_REQUIRED'
         error.expose = true

@@ -76,6 +76,16 @@ export async function verifyEmailForTest(app, email, purpose = 'guest-signup') {
   }
 }
 
+// Phone/SMS OTP (022): drives the real send+verify endpoints using the dev-only devCode, mirroring
+// verifyEmailForTest. purpose 'guest-signup' or 'staff-login'.
+export async function verifyPhoneForTest(app, phone, purpose = 'guest-signup') {
+  const sendRes = await request(app).post('/api/auth/phone-code/send').send({ phone, purpose })
+  const code = sendRes.body.devCode
+  if (!code) throw new Error('Test phone-code send did not return a devCode — is NODE_ENV=production set?')
+  const verifyRes = await request(app).post('/api/auth/phone-code/verify').send({ phone, code, purpose })
+  if (!verifyRes.body.ok) throw new Error(`Test phone-code verify failed: ${JSON.stringify(verifyRes.body)}`)
+}
+
 export function uniqueTestPhone() {
   counter += 1
   // +963 9XX XXXXXX shaped, deterministically derived from the run id + counter so it stays
@@ -111,6 +121,8 @@ export async function cleanupTestUsers() {
   if (!ids.length) return
 
   await db().paymentProof.deleteMany({ where: { userId: { in: ids } } }).catch(() => {})
+  // Consumer-protection disputes (021) reference the opener without cascade — clear before user deletes.
+  await db().dispute.deleteMany({ where: { openedByUserId: { in: ids } } }).catch(() => {})
   // SR safety/trust models reference users without cascade — clear them before the ride/user deletes.
   await db().rideRating.deleteMany({ where: { OR: [{ raterUserId: { in: ids } }, { ratedUserId: { in: ids } }] } }).catch(() => {})
   await db().rideMessage.deleteMany({ where: { senderUserId: { in: ids } } }).catch(() => {})
