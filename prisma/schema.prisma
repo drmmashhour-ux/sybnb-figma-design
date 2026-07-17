@@ -168,6 +168,9 @@ model User {
   driverRideMatches RideRequest[]     @relation("RideDriver")
   auditLogs         AdminAuditLog[]   @relation("AuditActor")
   listingReviews    ListingReview[]   @relation("ReviewGuest")
+  sellerReviewsReceived SellerReview[] @relation("SellerReviewsReceived")
+  sellerReviewsAuthored SellerReview[] @relation("SellerReviewsAuthored")
+  listingOwnershipDocuments ListingOwnershipDocument[] @relation("ListingOwnershipDocuments")
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
@@ -297,6 +300,8 @@ model Listing {
   bookings       Booking[]
   availability   ListingAvailability[]
   reviews        ListingReview[]
+  sellerReviews  SellerReview[]       @relation("SellerReviewListing")
+  ownershipDocuments ListingOwnershipDocument[]
   inquiryThreads MessageThread[]
   hostInsights   HostInsight[]
 
@@ -488,6 +493,51 @@ model ListingReview {
 
   @@index([listingId, hiddenAt])
   @@map("listing_reviews")
+}
+
+model SellerReview {
+  id              String    @id @default(uuid())
+  sellerId        String    @map("seller_id")
+  buyerId         String    @map("buyer_id")
+  listingId       String?   @map("listing_id")
+  rating          Int
+  comment         String?
+  hiddenAt        DateTime? @map("hidden_at")
+  hiddenByAdminId String?   @map("hidden_by_admin_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  seller  User     @relation("SellerReviewsReceived", fields: [sellerId], references: [id], onDelete: Cascade)
+  buyer   User     @relation("SellerReviewsAuthored", fields: [buyerId], references: [id], onDelete: Cascade)
+  listing Listing? @relation("SellerReviewListing", fields: [listingId], references: [id], onDelete: SetNull)
+
+  @@unique([sellerId, buyerId])
+  @@index([sellerId, hiddenAt])
+  @@index([buyerId])
+  @@map("seller_reviews")
+}
+
+model ListingOwnershipDocument {
+  id                String        @id @default(uuid())
+  listingId         String        @map("listing_id")
+  ownerId           String        @map("owner_id")
+  kind              String
+  plateNumber       String?       @map("plate_number")
+  assetUrl          String        @map("asset_url")
+  mimeType          String?       @map("mime_type")
+  status            ListingStatus @default(PENDING_REVIEW)
+  adminNote         String?       @map("admin_note")
+  reviewedByAdminId String?       @map("reviewed_by_admin_id")
+  reviewedAt        DateTime?     @map("reviewed_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  owner   User    @relation("ListingOwnershipDocuments", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, status])
+  @@index([ownerId, status])
+  @@map("listing_ownership_documents")
 }
 
 model MessageThread {
