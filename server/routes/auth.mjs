@@ -16,7 +16,9 @@ const PUBLIC_REGISTER_ROLES = new Set(['GUEST', 'HOST', 'SELLER', 'DRIVER'])
 // checked at all, so it provided zero real protection. 'password-reset' gates the new
 // forgot-password endpoint below.
 const ALLOWED_EMAIL_CODE_PURPOSES = new Set(['guest-signup', 'staff-login', 'password-reset'])
-const STAFF_ROLES_REQUIRING_OTP = new Set(['ADMIN', 'HOST', 'DRIVER'])
+// SELLER is a marketplace operator (cars / property / goods) with money on the line, so it passes the
+// same real email-OTP gate as HOST/DRIVER at sign-up and sign-in — not the lighter guest flow.
+const STAFF_ROLES_REQUIRING_OTP = new Set(['ADMIN', 'HOST', 'DRIVER', 'SELLER'])
 
 function resolveEmailCodePurpose(value) {
   return ALLOWED_EMAIL_CODE_PURPOSES.has(value) ? value : 'guest-signup'

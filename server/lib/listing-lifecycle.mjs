@@ -8,6 +8,11 @@ export const PLAN_DURATION_DAYS = {
   premium: 60,
 }
 
+// The divisions that require a paid, admin-approved seller plan (as opposed to the commission/
+// contact-based STAYS/RENTALS/BUY). Single source of truth, imported by both the listing create
+// route (gate) and the admin approval route (which starts the paid clock).
+export const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
+
 export function listingExpiryDate(planCode) {
   const days = PLAN_DURATION_DAYS[planCode] ?? PLAN_DURATION_DAYS.plus
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000)

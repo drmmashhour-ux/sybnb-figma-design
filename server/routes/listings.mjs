@@ -3,7 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
-import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
+import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes, PHOTO_REQUIRED_DIVISIONS } from '../lib/listing-attributes.mjs'
 import {
@@ -16,10 +16,10 @@ import {
   saveListingMedia,
 } from '../lib/listing-media-storage.mjs'
 
-// STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
-// Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
-// paid-plan divisions gated behind an admin-approved SellerProfile.
-const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
+// STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how Centris
+// pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the paid-plan
+// divisions gated behind an admin-approved SellerProfile — PAID_PLAN_DIVISIONS is now shared from
+// listing-lifecycle (also used by the admin approval route that starts the paid expiry clock).
 
 // Listing ids are UUID columns in Postgres — a non-UUID id (e.g. the frontend's
 // 'fallback-*' sample-listing ids) makes Prisma throw P2023 instead of returning null,
@@ -201,7 +201,6 @@ export async function handleListings(req, res, url, context) {
       const body = await readJson(req)
       const division = normalizeListingDivision(body.division || 'STAYS')
 
-      let expiresAt
       if (PAID_PLAN_DIVISIONS.has(division)) {
         const sellerProfile = await db().sellerProfile.findUnique({ where: { userId: context.user.id } })
         if (!sellerProfile || sellerProfile.documentStatus !== 'APPROVED') {
@@ -211,7 +210,9 @@ export async function handleListings(req, res, url, context) {
           error.expose = true
           throw error
         }
-        expiresAt = listingExpiryDate(sellerProfile.planCode)
+        // NOTE: the paid-plan expiry clock starts at ADMIN APPROVAL (server/routes/admin.mjs), not here —
+        // so a seller never burns paid days while a draft sits in the review queue. expiresAt stays null
+        // until the listing is approved and goes live.
       }
 
       const priceMinor = Number(body.priceMinor || 0)
@@ -240,7 +241,6 @@ export async function handleListings(req, res, url, context) {
           priceMinor,
           currency: body.currency || 'SYP',
           instantBookEnabled: Boolean(body.instantBookEnabled),
-          expiresAt,
           metadata: body.metadata || {},
         },
       })

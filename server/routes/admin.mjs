@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
+import { listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { readDriverDocument } from '../lib/driver-document-storage.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
@@ -787,11 +788,20 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (model === 'listing') {
     const existing = await tx.listing.findUnique({ where: { id: entityId } })
     if (!existing || existing.status !== 'PENDING_REVIEW') throw reviewStateError('LISTING_NOT_REVIEWABLE')
+
+    // The paid-plan expiry clock starts HERE, at approval — not at draft-create — so a seller never
+    // loses paid days waiting in the review queue. Computed from the owner's current plan at the moment
+    // the listing actually goes live.
+    const listingUpdate = { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED' }
+    if (decision === 'APPROVED' && PAID_PLAN_DIVISIONS.has(existing.division)) {
+      const sellerProfile = await tx.sellerProfile.findUnique({ where: { userId: existing.ownerId } })
+      listingUpdate.expiresAt = listingExpiryDate(sellerProfile?.planCode)
+    }
     // Re-check status in the WHERE clause so two concurrent decisions on the same listing can't
     // both apply (same TOCTOU class as the payment-proof and SR-ride races fixed earlier).
     const updated = await tx.listing.updateMany({
       where: { id: entityId, status: 'PENDING_REVIEW' },
-      data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED' },
+      data: listingUpdate,
     })
     if (updated.count === 0) throw reviewStateError('LISTING_NOT_REVIEWABLE')
     return tx.listing.findUnique({ where: { id: entityId } })

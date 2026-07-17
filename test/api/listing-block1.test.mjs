@@ -6,16 +6,18 @@ import {
   testApp,
   trackTestUser,
   uniqueTestEmail,
+  verifyEmailForTest,
 } from '../support/testServer.mjs'
 
 // A 1x1 transparent PNG — the smallest possible "real photo" for the upload round-trip.
 const PNG_1x1 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 
-// SELLER is a public self-register role that does NOT require the staff email OTP
-// (STAFF_ROLES_REQUIRING_OTP = ADMIN/HOST/DRIVER only), so a seller registers in one call.
+// SELLER now passes the same real 'staff-login' email OTP as HOST/DRIVER (Block 2), so verify the
+// email code before registering.
 async function registerSeller(app, label) {
   const email = uniqueTestEmail(label)
+  await verifyEmailForTest(app, email, 'staff-login')
   const res = await request(app)
     .post('/api/auth/register')
     .send({ role: 'SELLER', email, password: 'correct-horse-battery' })
