@@ -582,6 +582,24 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, sos })
   }
 
+  // ---- SR CANCELLATION (019): a driver's cancellation record, for accountability review ----
+  const driverCancellationsMatch = url.pathname.match(/^\/api\/admin\/drivers\/([^/]+)\/cancellations$/)
+  if (driverCancellationsMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const driverId = driverCancellationsMatch[1]
+    const [count, recent] = await Promise.all([
+      db().driverCancellation.count({ where: { driverId } }),
+      db().driverCancellation.findMany({
+        where: { driverId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: { id: true, rideId: true, reason: true, createdAt: true },
+      }),
+    ])
+    return json(res, 200, { ok: true, driverId, count, recent })
+  }
+
   const sosResolveMatch = url.pathname.match(/^\/api\/admin\/sos\/([^/]+)\/resolve$/)
   if (sosResolveMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

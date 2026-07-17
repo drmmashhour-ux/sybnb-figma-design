@@ -5,7 +5,8 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRide, assertSyriaCoords, haversineKm } from '../lib/sr-geocoding.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
-import { assertRiderCanAfford, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
+import { assertRiderCanAfford, chargeRiderCancellationFee, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
+import { riderCancelOutcome } from '../lib/sr-cancellation.mjs'
 
 const DRIVER_ACTIVE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const SR_TRACKABLE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
@@ -266,7 +267,7 @@ export async function handleSrRides(req, res, url, context) {
       // of silently overwriting their assignment.
       const updated = await tx.rideRequest.updateMany({
         where: { id: assignMatch[1], status: existing.status },
-        data: { driverId: driver.id, status: 'DRIVER_ASSIGNED' },
+        data: { driverId: driver.id, status: 'DRIVER_ASSIGNED', driverMatchedAt: new Date() },
       })
       if (updated.count > 0) {
         await placeRideHold(tx, { id: existing.id, riderId: existing.riderId, fareMinor: existing.fareMinor, currency: existing.currency })
@@ -321,6 +322,15 @@ export async function handleSrRides(req, res, url, context) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${context.user.id}))`
       await ensureDriverHasNoActiveRide(context.user.id, tx)
       await assertNoSafetyBlock(existing.riderId, context.user.id, tx) // SAFETY (015): no re-match of a flagged pair
+      // CANCELLATION (019): a driver who already cancelled THIS ride cannot re-claim it after re-dispatch.
+      const priorCancel = await tx.driverCancellation.findFirst({ where: { rideId: existing.id, driverId: context.user.id } })
+      if (priorCancel) {
+        const error = new Error('You cancelled this ride and cannot pick it up again.')
+        error.statusCode = 409
+        error.code = 'DRIVER_CANNOT_RECLAIM'
+        error.expose = true
+        throw error
+      }
       // BALANCE GATE + HOLD (016): re-verify the rider can pay, and reserve the fare, atomically with the claim.
       await assertRiderCanAfford(tx, {
         riderId: existing.riderId, currency: existing.currency, fareMinor: existing.fareMinor,
@@ -328,7 +338,8 @@ export async function handleSrRides(req, res, url, context) {
       })
       const updated = await tx.rideRequest.updateMany({
         where: { id: claimMatch[1], driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
-        data: { driverId: context.user.id, status: 'DRIVER_ASSIGNED' },
+        // driverMatchedAt anchors the rider's free-cancel grace window (019).
+        data: { driverId: context.user.id, status: 'DRIVER_ASSIGNED', driverMatchedAt: new Date() },
       })
       if (updated.count > 0) {
         await placeRideHold(tx, { id: existing.id, riderId: existing.riderId, fareMinor: existing.fareMinor, currency: existing.currency })
@@ -364,6 +375,61 @@ export async function handleSrRides(req, res, url, context) {
   }
 
   // ---- SR SAFETY (014): SOS ----
+  // ---- CANCELLATION (019): rider cancels their own ride (Uber-style grace window + late fee) ----
+  const cancelMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/cancel$/)
+  if (cancelMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    const existing = await db().rideRequest.findUnique({ where: { id: cancelMatch[1] } })
+    if (!existing || existing.riderId !== context.user.id) {
+      const error = new Error('Ride not found for this account.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const body = await readJson(req).catch(() => ({}))
+    const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) || null : null
+
+    const outcome = riderCancelOutcome(existing, new Date())
+    if (!outcome.allowed) {
+      const error = new Error(outcome.message)
+      error.statusCode = outcome.statusCode
+      error.code = outcome.code
+      error.expose = true
+      throw error
+    }
+
+    const result = await db().$transaction(async (tx) => {
+      // Claim the cancel on the current status so a concurrent driver transition can't race it.
+      const claim = await tx.rideRequest.updateMany({
+        where: { id: existing.id, status: existing.status },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancelledByRole: 'RIDER',
+          cancelReason: reason,
+          cancellationFeeMinor: outcome.free ? 0 : outcome.feeMinor,
+        },
+      })
+      if (claim.count === 0) return { conflict: true }
+      if (!outcome.free && outcome.feeMinor > 0) {
+        await chargeRiderCancellationFee(tx, existing, outcome.feeMinor)
+      }
+      return { conflict: false }
+    })
+    if (result.conflict) {
+      const error = new Error('This ride changed before the cancel could apply. Reload and try again.')
+      error.statusCode = 409
+      error.code = 'RIDE_CANCEL_CONFLICT'
+      error.expose = true
+      throw error
+    }
+
+    const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+    return json(res, 200, { ok: true, ride, cancellationFeeMinor: outcome.free ? 0 : outcome.feeMinor })
+  }
+
   const sosMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/sos$/)
   if (sosMatch) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])

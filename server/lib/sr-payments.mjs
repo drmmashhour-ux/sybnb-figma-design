@@ -243,3 +243,50 @@ export async function tipCompletedRide(tx, ride, tipMinor) {
 
   return { tipped: true, tipMinor: amount }
 }
+
+// SR cancellation fee (019): a rider who cancels after the grace window (driver already committed, trip
+// not started) pays a fee that goes 100% to the assigned driver as show-up compensation — no platform
+// commission on a cancellation. Idempotency-keyed on the ride id so a retried cancel never double-charges.
+// Re-checks the rider's cached balance inside the transaction so the fee can never overdraw the wallet.
+export async function chargeRiderCancellationFee(tx, ride, feeMinor) {
+  const amount = Math.max(0, Math.round(feeMinor || 0))
+  if (!ride || !ride.driverId || amount <= 0) return { charged: false, reason: 'no_fee' }
+
+  const key = idempotencyKey(['sr-cancel-fee', ride.id])
+  const already = await tx.walletEntry.findUnique({ where: { idempotencyKey: key } })
+  if (already) return { charged: false, reason: 'already_charged' }
+
+  const wallet = await tx.wallet.findUnique({
+    where: { userId_currency: { userId: ride.riderId, currency: ride.currency } },
+  })
+  if ((wallet?.cachedBalanceMinor || 0) < amount) {
+    const error = new Error('Your SYBNB wallet balance is not enough to cover the cancellation fee.')
+    error.statusCode = 402
+    error.code = 'INSUFFICIENT_CREDIT'
+    error.expose = true
+    throw error
+  }
+
+  await recordWalletEntry(tx, {
+    userId: ride.riderId,
+    type: 'DEBIT',
+    amountMinor: amount,
+    currency: ride.currency,
+    referenceType: 'sr_cancellation_fee',
+    referenceId: ride.id,
+    keyParts: ['sr-cancel-fee', ride.id],
+    note: 'SR rider late-cancellation fee charged to rider wallet.',
+  })
+  await recordWalletEntry(tx, {
+    userId: ride.driverId,
+    type: 'CREDIT',
+    amountMinor: amount, // 100% to the driver — show-up compensation, no platform commission on a cancel.
+    currency: ride.currency,
+    referenceType: 'sr_cancellation_payout',
+    referenceId: ride.id,
+    keyParts: ['sr-cancel-payout', ride.id],
+    note: 'SR driver compensation (100% of the rider cancellation fee).',
+  })
+
+  return { charged: true, feeMinor: amount }
+}

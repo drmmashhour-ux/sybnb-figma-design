@@ -103,6 +103,32 @@ export async function handleDriver(req, res, url, context) {
 
     assertDriverRideTransition(existing.status, nextStatus)
 
+    // CANCELLATION (019): a DRIVER cancel never charges the rider. Instead of killing the ride, it is
+    // re-dispatched to the pool (same ride id, so the rider keeps their request) and the cancellation is
+    // recorded for accountability. The cancelling driver is blocked from re-claiming it (see claim guard).
+    if (nextStatus === 'CANCELLED') {
+      const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) || null : null
+      const result = await db().$transaction(async (tx) => {
+        const claim = await tx.rideRequest.updateMany({
+          where: { id: existing.id, status: existing.status, driverId: context.user.id },
+          // Back to the pool: clear the driver, the grace anchor, and the PIN verification for the next driver.
+          data: { status: 'REQUESTED', driverId: null, driverMatchedAt: null, pickupVerifiedAt: null },
+        })
+        if (claim.count === 0) return { conflict: true }
+        await tx.driverCancellation.create({ data: { rideId: existing.id, driverId: context.user.id, reason } })
+        return { conflict: false }
+      })
+      if (result.conflict) {
+        const error = new Error('Ride status changed before this update could apply. Reload and try again.')
+        error.statusCode = 409
+        error.code = 'DRIVER_RIDE_STATUS_CONFLICT'
+        error.expose = true
+        throw error
+      }
+      const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+      return json(res, 200, { ok: true, ride, redispatched: true })
+    }
+
     // PICKUP PIN (017): the trip can't start until the driver has confirmed the rider's 4-digit code.
     if (nextStatus === 'IN_PROGRESS' && !existing.pickupVerifiedAt) {
       const error = new Error('Enter the rider’s 4-digit pickup code before starting the trip.')

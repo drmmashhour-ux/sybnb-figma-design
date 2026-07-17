@@ -190,6 +190,7 @@ model User {
   sellerPurchases         SellerSale[]     @relation("SellerSaleBuyer")
   sellerReviewsReceived   SellerReview[]   @relation("SellerReviewSeller")
   sellerReviewsWritten    SellerReview[]   @relation("SellerReviewBuyer")
+  driverCancellations     DriverCancellation[] @relation("DriverCancellationDriver")
 
   @@map("users")
 }
@@ -677,6 +678,14 @@ model RideRequest {
   pickupVerifiedAt DateTime? @map("pickup_verified_at")
   pinAttempts      Int       @default(0) @map("pin_attempts")
 
+  // SR cancellation layer (019): when a driver was matched (grace-window anchor for rider cancels) and
+  // the cancellation outcome (who cancelled, why, and any fee charged).
+  driverMatchedAt      DateTime? @map("driver_matched_at")
+  cancelledAt          DateTime? @map("cancelled_at")
+  cancelledByRole      String?   @map("cancelled_by_role")
+  cancelReason         String?   @map("cancel_reason")
+  cancellationFeeMinor Int?      @map("cancellation_fee_minor")
+
   rider          User      @relation("RideRider", fields: [riderId], references: [id])
   driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
   pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
@@ -686,6 +695,7 @@ model RideRequest {
   sosEvents SosEvent[]
   messages  RideMessage[]
   ratings   RideRating[]
+  driverCancellations DriverCancellation[]
 
   @@index([status, requestedAt])
   @@index([driverId, status])
@@ -817,4 +827,21 @@ model RideRating {
   @@index([ratedUserId, safetyFlag])
   @@index([raterUserId, safetyFlag])
   @@map("ride_ratings")
+}
+
+// SR cancellation accountability (019): one row per driver-initiated cancellation. Feeds the driver's
+// cancellation count (admin visibility) and blocks the cancelling driver from re-claiming that same ride.
+model DriverCancellation {
+  id        String   @id @default(uuid())
+  rideId    String   @map("ride_id")
+  driverId  String   @map("driver_id")
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ride   RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  driver User        @relation("DriverCancellationDriver", fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@index([rideId])
+  @@map("driver_cancellations")
 }
