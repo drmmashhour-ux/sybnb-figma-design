@@ -13,6 +13,13 @@ import { expireOldListings } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
 
+// SECURITY (S7/S10): the ONLY guest + payment-proof fields a host is allowed to receive.
+// A host must never see the guest's email, nor a proof's uploaded transfer screenshot (proofAssetUrl),
+// internal admin note, reviewer id, or provider ref. Host-side logic only ever reads a payment's
+// id/status/amountMinor, so this projection is complete.
+const HOST_SAFE_GUEST_SELECT = { id: true, displayName: true }
+const HOST_SAFE_PAYMENT_SELECT = { id: true, status: true, amountMinor: true, currency: true, createdAt: true }
+
 export async function handleHost(req, res, url, context) {
   if (url.pathname === '/api/host/earnings') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
@@ -25,7 +32,7 @@ export async function handleHost(req, res, url, context) {
         listing: { ownerId: context.user.id },
         status: { in: ['CONFIRMED', 'COMPLETED', 'DISPUTED'] },
       },
-      include: { listing: true, payments: true },
+      include: { listing: true, payments: { select: HOST_SAFE_PAYMENT_SELECT } },
       orderBy: { checkOut: 'asc' },
       take: 200,
     })
@@ -43,7 +50,7 @@ export async function handleHost(req, res, url, context) {
       ).map((entry) => entry.referenceId),
     )
 
-    const rows = bookings.map((booking) => hostSafePayoutRow(buildPayoutRow(booking, releasedBookingIds)))
+    const rows = bookings.map((booking) => buildPayoutRow(booking, releasedBookingIds))
 
     const totals = rows.reduce(
       (acc, row) => {
@@ -86,14 +93,24 @@ export async function handleHost(req, res, url, context) {
             },
           },
           include: {
+            // SECURITY (S10): never expose the guest's email to the host — contact stays on-platform.
             guest: {
               select: {
                 id: true,
                 displayName: true,
-                email: true,
               },
             },
-            payments: true,
+            // SECURITY (S7): project payment proofs — the host may see only status/amount, NEVER the
+            // guest's uploaded transfer screenshot (proofAssetUrl), internal admin notes, reviewer id, or ref.
+            payments: {
+              select: {
+                id: true,
+                status: true,
+                amountMinor: true,
+                currency: true,
+                createdAt: true,
+              },
+            },
           },
           orderBy: { createdAt: 'desc' },
           take: 25,
@@ -207,7 +224,7 @@ export async function handleHost(req, res, url, context) {
         id: requestMatch[1],
         listing: { ownerId: context.user.id },
       },
-      include: { listing: true, payments: true },
+      include: { listing: true, payments: { select: HOST_SAFE_PAYMENT_SELECT } },
     })
 
     if (!existing) {
@@ -238,6 +255,21 @@ export async function handleHost(req, res, url, context) {
     }
 
     const booking = await db().$transaction(async (tx) => {
+      // SECURITY (S4): claim the transition atomically on the status we validated above. Without this, a
+      // concurrent guest-cancel (which refunds) could commit and then this host-confirm would overwrite it
+      // to CONFIRMED — leaving a refunded booking that later pays the host. A stale writer now loses.
+      const claim = await tx.booking.updateMany({
+        where: { id: existing.id, status: existing.status },
+        data: { status },
+      })
+      if (claim.count !== 1) {
+        const error = new Error('This booking was already updated and can no longer be changed by the host.')
+        error.statusCode = 409
+        error.code = 'HOST_BOOKING_CONFLICT'
+        error.expose = true
+        throw error
+      }
+
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
       const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
 
@@ -317,10 +349,9 @@ export async function handleHost(req, res, url, context) {
             select: {
               id: true,
               displayName: true,
-              email: true,
             },
           },
-          payments: true,
+          payments: { select: HOST_SAFE_PAYMENT_SELECT },
           listing: true,
         },
       })
@@ -392,8 +423,8 @@ export async function handleHost(req, res, url, context) {
       where: { id: existing.id },
       data: action === 'CHECK_IN' ? { guestCheckedInAt: now } : { guestCheckedOutAt: now },
       include: {
-        guest: { select: { id: true, displayName: true, email: true } },
-        payments: true,
+        guest: { select: HOST_SAFE_GUEST_SELECT },
+        payments: { select: HOST_SAFE_PAYMENT_SELECT },
         listing: true,
       },
     })
@@ -498,10 +529,33 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
-    const listing = await db().listing.update({
-      where: { id: existing.id },
+    // SECURITY (S1 — verify-before-live): this route is PAUSE/RESUME only. A host may pause a live
+    // listing or resume a paused one, and nothing else. Publishing (PENDING_REVIEW/REJECTED/EXPIRED ->
+    // APPROVED) is ADMIN-only — a host must never be able to self-approve a listing onto the platform.
+    const allowedTransition =
+      (status === 'PAUSED' && existing.status === 'APPROVED') ||
+      (status === 'APPROVED' && existing.status === 'PAUSED')
+    if (!allowedTransition) {
+      const error = new Error('A host can only pause an approved listing or resume a paused one. Publishing a listing requires admin review.')
+      error.statusCode = 409
+      error.code = 'HOST_LISTING_STATUS_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+
+    // Claim the transition atomically on the expected current status so a concurrent change can't be clobbered.
+    const claim = await db().listing.updateMany({
+      where: { id: existing.id, status: existing.status },
       data: { status },
     })
+    if (claim.count !== 1) {
+      const error = new Error('Listing status changed, please retry.')
+      error.statusCode = 409
+      error.code = 'HOST_LISTING_STATUS_CONFLICT'
+      error.expose = true
+      throw error
+    }
+    const listing = await db().listing.findUnique({ where: { id: existing.id } })
 
     await db().adminAuditLog.create({
       data: {
@@ -645,9 +699,4 @@ function normalizeHostListingStatus(value) {
   error.code = 'INVALID_HOST_LISTING_STATUS'
   error.expose = true
   throw error
-}
-
-function hostSafePayoutRow(row) {
-  const { adminCommissionMinor, ...safeRow } = row
-  return safeRow
 }

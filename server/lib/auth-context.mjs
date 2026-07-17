@@ -53,3 +53,40 @@ export function requireAuth(context, roles = []) {
     throw error
   }
 }
+
+// SECURITY (SR verified-only): a DRIVER may only see the ride pool, claim, or work a ride once their ID
+// document has been ADMIN-approved. DRIVER is a public self-register role, so role alone is not enough —
+// without this gate an unverified/ID-rejected stranger could be matched to real riders.
+export function requireVerifiedDriver(context) {
+  requireAuth(context, ['DRIVER'])
+  if (context.user.idDocumentStatus !== 'APPROVED') {
+    const error = new Error('Your driver account must be verified by SYBNB before you can go online or accept rides.')
+    error.statusCode = 403
+    error.code = 'DRIVER_NOT_VERIFIED'
+    error.expose = true
+    throw error
+  }
+}
+
+// SECURITY (SR road-ready, 015): claiming or working a ride requires the full vetting stack, not just an
+// ID. Layered on top of requireVerifiedDriver so the two stay composable — a driver may only be matched to
+// a real rider once their ID *and* license *and* vehicle registration are all APPROVED.
+export async function requireRoadReadyDriver(context) {
+  requireVerifiedDriver(context)
+  const approved = await db().driverDocument.findMany({
+    where: {
+      driverUserId: context.user.id,
+      status: 'APPROVED',
+      type: { in: ['LICENSE', 'VEHICLE_REGISTRATION'] },
+    },
+    select: { type: true },
+  })
+  const approvedTypes = new Set(approved.map((doc) => doc.type))
+  if (!approvedTypes.has('LICENSE') || !approvedTypes.has('VEHICLE_REGISTRATION')) {
+    const error = new Error('Your license and vehicle registration must be approved by SYBNB before you can accept rides.')
+    error.statusCode = 403
+    error.code = 'DRIVER_NOT_ROAD_READY'
+    error.expose = true
+    throw error
+  }
+}

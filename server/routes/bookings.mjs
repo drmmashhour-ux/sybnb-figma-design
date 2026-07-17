@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import {
   CANCELLATION_ADMIN_FEE_CURRENCY,
   CANCELLATION_ADMIN_FEE_MINOR,
+  CANCELLATION_PROTECTION_RATE,
   bookingFinanceSplit,
   originalAdminShareRecipient,
   recordWalletEntry,
@@ -59,6 +60,22 @@ export async function handleBookings(req, res, url, context) {
     const freeCancellationWindow = isWithinFreeCancellationWindow(existing.checkIn)
 
     const booking = await db().$transaction(async (tx) => {
+      // SECURITY (S4): atomically claim the cancel on the expected status BEFORE doing refund work. Without
+      // this, a concurrent host-confirm (which read REQUESTED outside its own transaction) could commit
+      // after the refund, leaving a refunded booking marked CONFIRMED and later paying the host for a stay
+      // the guest was already refunded on. A stale-status writer now matches zero rows and loses the race.
+      const claim = await tx.booking.updateMany({
+        where: { id: existing.id, status: { in: ['REQUESTED', 'CONFIRMED'] } },
+        data: { status: 'CANCELLED' },
+      })
+      if (claim.count !== 1) {
+        const error = new Error('This booking was already updated and can no longer be cancelled.')
+        error.statusCode = 409
+        error.code = 'BOOKING_CANCEL_CONFLICT'
+        error.expose = true
+        throw error
+      }
+
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
       const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
 
@@ -207,15 +224,26 @@ export async function handleBookings(req, res, url, context) {
       throw error
     }
 
-    const booking = await db().booking.update({
-      where: { id: existing.id },
+    // SECURITY (S4): claim the dispute atomically on the expected status so a concurrent host-cancel /
+    // admin action can't be silently clobbered back to DISPUTED, and a stale request loses the race.
+    const claim = await db().booking.updateMany({
+      where: { id: existing.id, status: { in: ['CONFIRMED', 'COMPLETED'] } },
       data: { status: 'DISPUTED' },
+    })
+    if (claim.count !== 1) {
+      const error = new Error('This booking can no longer be disputed.')
+      error.statusCode = 409
+      error.code = 'BOOKING_DISPUTE_CONFLICT'
+      error.expose = true
+      throw error
+    }
+    const booking = await db().booking.findUnique({
+      where: { id: existing.id },
       include: {
         guest: {
           select: {
             id: true,
             displayName: true,
-            email: true,
           },
         },
         listing: {
@@ -256,13 +284,12 @@ export async function handleBookings(req, res, url, context) {
     const booking = await db().booking.findUnique({
       where: { id: bookingMatch[1] },
       include: {
+        // SECURITY (S10/S18): booking detail is viewable by the listing owner (host) too, so it must NOT
+        // carry the guest's email or ID-document reference. Contact stays on-platform; ID docs are admin-only.
         guest: {
           select: {
             id: true,
             displayName: true,
-            email: true,
-            idDocumentRef: true,
-            idDocumentSubmittedAt: true,
           },
         },
         listing: {
@@ -331,6 +358,16 @@ export async function handleBookings(req, res, url, context) {
     throw error
   }
 
+  // SELF-REVIEW guard (root): a host cannot book their own listing — which would let them drive it to
+  // COMPLETED and post a 5-star self-review to inflate their own rating.
+  if (listing.ownerId === context.user.id) {
+    const error = new Error('You cannot book your own listing.')
+    error.statusCode = 400
+    error.code = 'CANNOT_BOOK_OWN_LISTING'
+    error.expose = true
+    throw error
+  }
+
   const isShortStay = listing.division === 'STAYS'
 
   // The overlap check and the create used to be two separate, unguarded round-trips: two guests
@@ -382,6 +419,15 @@ export async function handleBookings(req, res, url, context) {
     const amountMinor = wantsUsd ? sypMinorToRoundedUsdMinor(quote.totalMinor) : quote.totalMinor
     const currency = wantsUsd ? 'USD' : listing.currency
 
+    // SECURITY (S2): cancellation-protection is a SERVER-computed 3% premium on the stay. The guest only
+    // chooses WHETHER to buy it (a boolean) — they can NEVER set the fee amount from the request body.
+    // booking.amountMinor stays the clean stay total (fees + protection are added at charge time by
+    // expectedTotalMinor and reconciled by bookingFinanceSplit). Storing the server-computed fee here
+    // closes two exploits: (a) free protection via a token fee, and (b) a huge forged fee that carves out
+    // the host's payout base (finance-ledger subtracts cancellationProtectionFeeMinor from the split base).
+    const protectionPurchased = body.cancellationProtectionPurchased === true || body.cancellationProtection === true
+    const protectionFeeMinor = protectionPurchased ? Math.round(amountMinor * CANCELLATION_PROTECTION_RATE) : 0
+
     return tx.booking.create({
       data: {
         listingId: listing.id,
@@ -391,7 +437,13 @@ export async function handleBookings(req, res, url, context) {
         checkOut,
         amountMinor,
         currency,
-        metadata: buildBookingMetadata(body, listing),
+        metadata: protectionPurchased
+          ? {
+              cancellationProtectionPurchased: true,
+              cancellationProtectionFeeMinor: protectionFeeMinor,
+              cancellationProtectionVersion: 'SYBNB_GUEST_CANCELLATION_PROTECTION_V1',
+            }
+          : {},
       },
     })
   })
@@ -408,16 +460,6 @@ export function isBookingViewable(booking, context) {
   )
 }
 
-function buildBookingMetadata(body, listing) {
-  const protection = body.cancellationProtectionPurchased === true || body.cancellationProtection === true
-  if (!protection) return {}
-  const submittedFeeMinor = Number(body.cancellationProtectionFeeMinor || 0)
-  const fallbackFeeMinor = Math.round(Number(listing.priceMinor || 0) * 0.03)
-  return {
-    cancellationProtectionPurchased: true,
-    cancellationProtectionFeeMinor: Number.isFinite(submittedFeeMinor) && submittedFeeMinor > 0
-      ? Math.round(submittedFeeMinor)
-      : fallbackFeeMinor,
-    cancellationProtectionVersion: 'SYBNB_GUEST_CANCELLATION_PROTECTION_V1',
-  }
-}
+// NOTE (S2): cancellation-protection metadata is now built inline at booking creation from a SERVER-computed
+// fee (never the request body). The former buildBookingMetadata() helper, which trusted
+// body.cancellationProtectionFeeMinor, has been removed to eliminate the fee-forgery path.

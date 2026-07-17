@@ -1,4 +1,5 @@
 import { sypMinorToRoundedUsdMinor } from './currency.mjs'
+import { computeFareMultiplier } from './sr-pricing.mjs'
 
 // Approximate reference coordinates for well-known Damascus-area places. There is no live
 // geocoding provider configured for this prototype (no Google/Mapbox key), so free-text
@@ -94,12 +95,29 @@ function isValidCoords(value) {
   )
 }
 
+// SECURITY (SR-FARE): a rider's device-GPS override is trusted for the BILLED distance only when it is
+// consistent with the gazetteer coordinates of the *named* pickup/dropoff (within tolerance). Otherwise a
+// rider could name two far-apart places (a long real trip the driver must actually make) yet POST two
+// near-identical coordinates to collapse the billed distance to the 1km floor and pay the minimum. When the
+// override disagrees with the named location, the fare is computed from the named location, not the override.
+const COORD_ANCHOR_TOLERANCE_KM = 5
+
+function billingCoords(override, text) {
+  const named = resolvePlaceText(text)
+  if (isValidCoords(override)) {
+    if (!named) return override // no named anchor to check against (e.g. a pin drop) — accept device GPS
+    if (haversineKm(override, named) <= COORD_ANCHOR_TOLERANCE_KM) return override
+    return named // override is far from the stated location — don't trust it for the fare
+  }
+  return named
+}
+
 // pickupCoordsOverride comes from the rider's device GPS (navigator.geolocation), which is more
-// accurate than gazetteer text-matching and should win whenever it's available.
+// accurate than gazetteer text-matching and should win whenever it's consistent with the named location.
 export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoordsOverride, dropoffCoordsOverride, currency }) {
   const rates = CATEGORY_RATES[category] || CATEGORY_RATES['SR Economy']
-  const pickupCoords = isValidCoords(pickupCoordsOverride) ? pickupCoordsOverride : resolvePlaceText(pickup)
-  const dropoffCoords = isValidCoords(dropoffCoordsOverride) ? dropoffCoordsOverride : resolvePlaceText(dropoff)
+  const pickupCoords = billingCoords(pickupCoordsOverride, pickup)
+  const dropoffCoords = billingCoords(dropoffCoordsOverride, dropoff)
 
   let distanceKm = DEFAULT_DISTANCE_KM
   let estimated = true
@@ -108,7 +126,11 @@ export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoor
     estimated = false
   }
 
-  const rawFareMinor = rates.baseMinor + rates.perKmMinor * distanceKm + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
+  const baseFareMinor = rates.baseMinor + rates.perKmMinor * distanceKm + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
+  // SR dynamic pricing (016): apply night / traffic / holiday / high-season multipliers to the raw fare.
+  // The rider is shown the breakdown (pricing.factors) BEFORE committing — transparent surge.
+  const surge = computeFareMultiplier(new Date())
+  const rawFareMinor = baseFareMinor * surge.multiplier
   const fareSypMinor = Math.round(rawFareMinor / 500) * 500
 
   // The rate table above is SYP-denominated. A rider who chooses to pay in USD gets that SYP
@@ -124,5 +146,23 @@ export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoor
     estimated,
     pickupCoords,
     dropoffCoords,
+    pricing: { multiplier: surge.multiplier, factors: surge.factors, capped: surge.capped },
   }
 }
+
+// SECURITY (SR-SAFETY, 014): reuse the exact Syria-bounds gate used for fare coords so a live-location or
+// SOS write can never persist wild/out-of-country GPS. Coerces to Number, so any non-numeric input (e.g. a
+// SQL fragment) becomes NaN and is rejected with an exposed 400 before it can reach a $executeRaw bind param.
+export function assertSyriaCoords(lat, lng, { fieldName = 'location' } = {}) {
+  const coords = { lat: Number(lat), lng: Number(lng) }
+  if (!isValidCoords(coords)) {
+    const error = new Error(`${fieldName} must be valid coordinates inside Syria.`)
+    error.statusCode = 400
+    error.code = 'VALIDATION_INVALID_COORDS'
+    error.expose = true
+    throw error
+  }
+  return coords
+}
+
+export { isValidCoords, SYRIA_BOUNDS }

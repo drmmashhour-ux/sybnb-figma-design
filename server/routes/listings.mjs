@@ -68,7 +68,9 @@ export async function handleListings(req, res, url, context) {
     if (req.method === 'GET') {
       await expireOldListings()
       const params = url.searchParams
-      const division = params.get('division') || undefined
+      // Validate the division enum before it reaches Prisma, else an invalid ?division= raises a raw 500.
+      const divisionParam = params.get('division')
+      const division = divisionParam ? normalizeListingDivision(divisionParam) : undefined
       // Listings created through the wizard never populate the `location` relation — governorate/
       // city/area/bedrooms/bathrooms/propertyType/amenities all live in `metadata` instead, so those
       // filters are applied in-memory below rather than as a Prisma `where` clause.
@@ -210,8 +212,9 @@ export async function handleListings(req, res, url, context) {
         error.expose = true
         throw error
       }
-      if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
-        const error = new Error('Listing price must be greater than zero.')
+      // PRICE-INT: must be a positive integer within Postgres int4 range, else Prisma throws a raw 500.
+      if (!Number.isInteger(priceMinor) || priceMinor <= 0 || priceMinor > 2147483647) {
+        const error = new Error('Listing price must be a whole number greater than zero.')
         error.statusCode = 400
         error.code = 'LISTING_PRICE_INVALID'
         error.expose = true
@@ -277,7 +280,9 @@ export async function handleListings(req, res, url, context) {
     const to = toRaw || new Date(from.getTime() + 1000 * 60 * 60 * 24 * 90)
 
     const [listing, blockedRows, priceRows, activeBookings] = await Promise.all([
-      db().listing.findFirst({ where: { id: listingId }, select: { priceMinor: true } }),
+      // SECURITY (S8 — IDOR): only APPROVED listings expose availability publicly. Without the status
+      // filter, anyone could pass any listing id and read another host's occupancy + private pricing.
+      db().listing.findFirst({ where: { id: listingId, status: 'APPROVED' }, select: { priceMinor: true } }),
       db().listingAvailability.findMany({
         where: { listingId, status: 'BLOCKED', date: { gte: from, lte: to } },
         select: { date: true },
@@ -298,6 +303,14 @@ export async function handleListings(req, res, url, context) {
         select: { checkIn: true, checkOut: true },
       }),
     ])
+
+    if (!listing) {
+      const error = new Error('Listing is not available.')
+      error.statusCode = 404
+      error.code = 'LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
 
     const blockedDates = blockedRows.map((row) => isoDate(row.date))
     const priceOverrides = priceRows.map((row) => ({ date: isoDate(row.date), priceMinor: row.priceOverrideMinor }))

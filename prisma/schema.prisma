@@ -143,7 +143,6 @@ model User {
   idDocumentStatus IdDocumentStatus? @map("id_document_status")
   idDocumentReviewedById String? @map("id_document_reviewed_by_id")
   idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
-  payoutMethod Json?       @map("payout_method")
   // Bumped on logout and on password reset; embedded as a claim in every session token and
   // checked on every request (server/lib/auth-context.mjs). A stateless HMAC-signed token has no
   // other way to be revoked before its 7-day expiry -- this is the whole mechanism (security audit
@@ -168,9 +167,6 @@ model User {
   driverRideMatches RideRequest[]     @relation("RideDriver")
   auditLogs         AdminAuditLog[]   @relation("AuditActor")
   listingReviews    ListingReview[]   @relation("ReviewGuest")
-  sellerReviewsReceived SellerReview[] @relation("SellerReviewsReceived")
-  sellerReviewsAuthored SellerReview[] @relation("SellerReviewsAuthored")
-  listingOwnershipDocuments ListingOwnershipDocument[] @relation("ListingOwnershipDocuments")
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
@@ -178,6 +174,14 @@ model User {
   hostInsights      HostInsight[]     @relation("HostInsightOwner")
   referralsMade     Referral[]        @relation("ReferralReferrer")
   referredAs        Referral?         @relation("ReferralReferee")
+  // SR safety/trust layers (014/015)
+  sosEventsRaised         SosEvent[]       @relation("SosRaisedBy")
+  sosEventsResolved       SosEvent[]       @relation("SosResolvedBy")
+  driverDocuments         DriverDocument[] @relation("DriverDocumentOwner")
+  driverDocumentsReviewed DriverDocument[] @relation("DriverDocumentReviewer")
+  rideMessagesSent        RideMessage[]    @relation("RideMessageSender")
+  rideRatingsGiven        RideRating[]     @relation("RideRatingRater")
+  rideRatingsReceived     RideRating[]     @relation("RideRatingRated")
 
   @@map("users")
 }
@@ -248,6 +252,9 @@ model DriverProfile {
   vehiclePlate    String?  @map("vehicle_plate")
   active          Boolean  @default(false)
   lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
+  // SR money model (016): where the driver's SR earnings are paid out (Sham Cash).
+  payoutMethod     String? @map("payout_method")
+  payoutAccountRef String? @map("payout_account_ref")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -300,8 +307,6 @@ model Listing {
   bookings       Booking[]
   availability   ListingAvailability[]
   reviews        ListingReview[]
-  sellerReviews  SellerReview[]       @relation("SellerReviewListing")
-  ownershipDocuments ListingOwnershipDocument[]
   inquiryThreads MessageThread[]
   hostInsights   HostInsight[]
 
@@ -495,51 +500,6 @@ model ListingReview {
   @@map("listing_reviews")
 }
 
-model SellerReview {
-  id              String    @id @default(uuid())
-  sellerId        String    @map("seller_id")
-  buyerId         String    @map("buyer_id")
-  listingId       String?   @map("listing_id")
-  rating          Int
-  comment         String?
-  hiddenAt        DateTime? @map("hidden_at")
-  hiddenByAdminId String?   @map("hidden_by_admin_id")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  seller  User     @relation("SellerReviewsReceived", fields: [sellerId], references: [id], onDelete: Cascade)
-  buyer   User     @relation("SellerReviewsAuthored", fields: [buyerId], references: [id], onDelete: Cascade)
-  listing Listing? @relation("SellerReviewListing", fields: [listingId], references: [id], onDelete: SetNull)
-
-  @@unique([sellerId, buyerId])
-  @@index([sellerId, hiddenAt])
-  @@index([buyerId])
-  @@map("seller_reviews")
-}
-
-model ListingOwnershipDocument {
-  id                String        @id @default(uuid())
-  listingId         String        @map("listing_id")
-  ownerId           String        @map("owner_id")
-  kind              String
-  plateNumber       String?       @map("plate_number")
-  assetUrl          String        @map("asset_url")
-  mimeType          String?       @map("mime_type")
-  status            ListingStatus @default(PENDING_REVIEW)
-  adminNote         String?       @map("admin_note")
-  reviewedByAdminId String?       @map("reviewed_by_admin_id")
-  reviewedAt        DateTime?     @map("reviewed_at")
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
-
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  owner   User    @relation("ListingOwnershipDocuments", fields: [ownerId], references: [id], onDelete: Cascade)
-
-  @@index([listingId, status])
-  @@index([ownerId, status])
-  @@map("listing_ownership_documents")
-}
-
 model MessageThread {
   id        String   @id @default(uuid())
   bookingId String?  @unique @map("booking_id")
@@ -658,10 +618,26 @@ model RideRequest {
   metadata        Json       @default("{}")
   updatedAt       DateTime   @updatedAt @map("updated_at")
 
+  // SR safety layer (014): live driver location during a trip + trip-share token.
+  lastLocationGeo     Unsupported("geometry(Point,4326)")? @map("last_location_geo")
+  lastLocationAt      DateTime? @map("last_location_at")
+  shareToken          String?   @unique @map("share_token")
+  shareTokenCreatedAt DateTime? @map("share_token_created_at")
+
+  // SR pickup PIN (017): rider-visible 4-digit code the driver enters to confirm the correct rider.
+  pickupPin        String?   @map("pickup_pin")
+  pickupVerifiedAt DateTime? @map("pickup_verified_at")
+  pinAttempts      Int       @default(0) @map("pin_attempts")
+
   rider          User      @relation("RideRider", fields: [riderId], references: [id])
   driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
   pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
   dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
+
+  // SR safety/trust layers (014/015): SOS events, masked ride messaging, two-way ratings.
+  sosEvents SosEvent[]
+  messages  RideMessage[]
+  ratings   RideRating[]
 
   @@index([status, requestedAt])
   @@index([driverId, status])
@@ -684,4 +660,113 @@ model AdminAuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([actorUserId, createdAt])
   @@map("admin_audit_logs")
+}
+
+// ============ SR safety layer (014) ============
+enum SosRole {
+  RIDER
+  DRIVER
+
+  @@map("sos_role")
+}
+
+enum SosStatus {
+  OPEN
+  RESOLVED
+
+  @@map("sos_status")
+}
+
+model SosEvent {
+  id             String    @id @default(uuid())
+  rideId         String    @map("ride_id")
+  raisedByUserId String    @map("raised_by_user_id")
+  raisedByRole   SosRole   @map("raised_by_role")
+  lat            Float?
+  lng            Float?
+  note           String?
+  status         SosStatus @default(OPEN)
+  resolvedById   String?   @map("resolved_by_id")
+  resolvedAt     DateTime? @map("resolved_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  ride       RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  raisedBy   User        @relation("SosRaisedBy", fields: [raisedByUserId], references: [id])
+  resolvedBy User?       @relation("SosResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([status, createdAt])
+  @@index([rideId])
+  @@map("sos_events")
+}
+
+// ============ SR trust layer (015) ============
+enum DriverDocumentType {
+  LICENSE
+  VEHICLE_REGISTRATION
+  INSURANCE
+
+  @@map("driver_document_type")
+}
+
+enum RideParticipantRole {
+  RIDER
+  DRIVER
+
+  @@map("ride_participant_role")
+}
+
+model DriverDocument {
+  id           String             @id @default(uuid())
+  driverUserId String             @map("driver_user_id")
+  type         DriverDocumentType
+  assetUrl     String             @map("asset_url")
+  mimeType     String?            @map("mime_type")
+  status       IdDocumentStatus   @default(PENDING_REVIEW)
+  reviewedById String?            @map("reviewed_by_id")
+  reviewedAt   DateTime?          @map("reviewed_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  driver   User  @relation("DriverDocumentOwner", fields: [driverUserId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("DriverDocumentReviewer", fields: [reviewedById], references: [id])
+
+  @@unique([driverUserId, type])
+  @@index([status])
+  @@map("driver_documents")
+}
+
+model RideMessage {
+  id           String              @id @default(uuid())
+  rideId       String              @map("ride_id")
+  senderUserId String              @map("sender_user_id")
+  senderRole   RideParticipantRole @map("sender_role")
+  body         String
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  ride   RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  sender User        @relation("RideMessageSender", fields: [senderUserId], references: [id])
+
+  @@index([rideId, createdAt])
+  @@map("ride_messages")
+}
+
+model RideRating {
+  id          String              @id @default(uuid())
+  rideId      String              @map("ride_id")
+  raterUserId String              @map("rater_user_id")
+  ratedUserId String              @map("rated_user_id")
+  raterRole   RideParticipantRole @map("rater_role")
+  stars       Int
+  safetyFlag  Boolean             @default(false) @map("safety_flag")
+  comment     String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  ride  RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rater User        @relation("RideRatingRater", fields: [raterUserId], references: [id])
+  rated User        @relation("RideRatingRated", fields: [ratedUserId], references: [id])
+
+  @@unique([rideId, raterUserId])
+  @@index([ratedUserId, safetyFlag])
+  @@index([raterUserId, safetyFlag])
+  @@map("ride_ratings")
 }

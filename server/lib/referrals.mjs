@@ -4,8 +4,10 @@ import { recordWalletEntry } from './finance-ledger.mjs'
 // Double-sided referral program: "give X, get Y", same shape Lyft/Uber popularized. Amounts are a
 // business decision, not an engineering one -- flagged here as plain, easy-to-find constants
 // (same pattern as CANCELLATION_ADMIN_FEE_MINOR) so they can be tuned without touching any logic.
-export const REFEREE_SIGNUP_BONUS_MINOR = 500 // $5.00, credited immediately at signup
-export const REFERRER_REWARD_MINOR = 1000 // $10.00, credited once the referee's first paid STR booking is approved
+// S-REF: amounts are whole currency units (see currency.mjs), so $5 = 5 and $10 = 10 — NOT 500/1000,
+// which would credit $500 / $1000 of real spendable wallet balance per referral.
+export const REFEREE_SIGNUP_BONUS_MINOR = 5 // $5, credited immediately at signup
+export const REFERRER_REWARD_MINOR = 10 // $10, credited once the referee's first paid STR booking is approved
 export const REFERRAL_REWARD_CURRENCY = 'USD'
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // no 0/O/1/I -- avoids misreads when shared by voice/WhatsApp
@@ -72,10 +74,12 @@ export async function rewardReferralIfQualifying(tx, { guestUserId, qualifyingRe
   const referral = await tx.referral.findUnique({ where: { refereeUserId: guestUserId } })
   if (!referral || referral.status !== 'PENDING') return null
 
+  // MKT-3: only a payment that produced REAL platform revenue qualifies. A $0 platform-sale proof must not
+  // count, or a referrer could be paid $10 for a referee who generated zero revenue (referral farming).
   const approvedPaymentCount = await tx.paymentProof.count({
-    where: { userId: guestUserId, status: 'APPROVED' },
+    where: { userId: guestUserId, status: 'APPROVED', amountMinor: { gt: 0 } },
   })
-  if (approvedPaymentCount !== 1) return null // not this guest's first approved payment
+  if (approvedPaymentCount !== 1) return null // not this guest's first revenue-producing approved payment
 
   const claimResult = await tx.referral.updateMany({
     where: { id: referral.id, status: 'PENDING' },

@@ -1,7 +1,7 @@
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
@@ -72,7 +72,52 @@ async function firstAdminId(tx) {
   return admin?.userId
 }
 
-export async function finalizeStripeSession(session) {
+// SR cashless card top-up (016): the 2.35% card fee is ADDED ON TOP, computed server-side (never client).
+export const CARD_TOPUP_FEE_RATE = 0.0235
+const WALLET_TOPUP_MAX_MINOR = 100_000_000
+
+// Amount charged to the card in Stripe's smallest unit (cents). base $100 → round(100*100*1.0235) = 10235.
+export function cardTopupChargeCents(baseMinor) {
+  return Math.round(baseMinor * 100 * (1 + CARD_TOPUP_FEE_RATE))
+}
+// Platform fee recorded in the whole-unit ledger: round(base*0.0235). base 100 → 2. The sub-unit remainder
+// (e.g. $0.35) collects into the platform's Stripe balance; below ledger precision, never owed to the rider.
+export function cardTopupFeeMinor(baseMinor) {
+  return Math.round(baseMinor * CARD_TOPUP_FEE_RATE)
+}
+
+// Credits a paid wallet_topup Checkout session: BASE to the rider, fee to platform. Idempotent on the
+// session id. Called ONLY from the signature-verified webhook — never the browser redirect.
+export async function creditWalletTopupSession(session) {
+  if (session.metadata?.kind !== 'wallet_topup' || session.payment_status !== 'paid') return null
+  const userId = session.metadata.userId
+  const baseMinor = Number(session.metadata.baseMinor || 0)
+  const currency = session.metadata.currency || 'USD'
+  if (!userId || !Number.isInteger(baseMinor) || baseMinor <= 0) return null
+  const feeMinor = cardTopupFeeMinor(baseMinor)
+  return db().$transaction(async (tx) => {
+    const credit = await recordWalletEntry(tx, {
+      userId, type: 'CREDIT', amountMinor: baseMinor, currency,
+      referenceType: 'wallet_topup', referenceId: session.id, keyParts: ['wallet-topup-stripe', session.id],
+      note: 'Card wallet top-up: base credit added after Stripe confirmed the charge was captured.',
+    })
+    if (feeMinor > 0) {
+      const platformUserId = await firstAdminId(tx)
+      if (platformUserId) {
+        await recordWalletEntry(tx, {
+          userId: platformUserId, type: 'CREDIT', amountMinor: feeMinor, currency,
+          referenceType: 'card_processing_fee', referenceId: session.id, keyParts: ['wallet-topup-stripe-fee', session.id],
+          note: 'SYBNB/platform collected the 2.35% card-processing fee on a wallet top-up.',
+        })
+      }
+    }
+    return credit
+  })
+}
+
+async function finalizeStripeSession(session) {
+  // A wallet top-up is credited exclusively by creditWalletTopupSession() from the webhook — never here.
+  if (session.metadata?.kind === 'wallet_topup') return null
   const bookingId = session.metadata?.bookingId
   if (!bookingId || session.payment_status !== 'paid') return null
 
@@ -98,36 +143,11 @@ export async function finalizeStripeSession(session) {
       },
     })
 
-    const actorUserId = await firstAdminId(tx)
-    const approved = await approvePaymentProof(tx, {
+    return approvePaymentProof(tx, {
       proofId: created.id,
-      actorUserId,
+      actorUserId: await firstAdminId(tx),
       note: 'Auto-approved: Stripe confirmed the card charge was captured.',
     })
-
-    await tx.adminAuditLog.create({
-      data: {
-        actorUserId: actorUserId || null,
-        action: 'STRIPE_PAYMENT_AUTO_APPROVED',
-        entityType: 'payment_proofs',
-        entityId: approved.id,
-        before: {
-          status: created.status,
-          provider: created.provider,
-          providerRef: created.providerRef,
-          bookingId: created.bookingId,
-        },
-        after: {
-          status: approved.status,
-          provider: approved.provider,
-          providerRef: approved.providerRef,
-          bookingId: approved.bookingId,
-          stripeSessionId: session.id,
-        },
-      },
-    })
-
-    return approved
   })
 }
 
@@ -135,6 +155,7 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
+    requireStripe()
 
     const body = await readJson(req)
     const bookingId = String(body.bookingId || '')
@@ -166,13 +187,12 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
     requireIdDocumentUploaded(context.user)
-    const stripeClient = requireStripe()
 
     const totalMinor = expectedTotalMinor(booking)
     const { currency, unitAmount } = stripeChargeAmount(totalMinor)
     const listingTitle = booking.listing?.titleEn || booking.listing?.titleAr || 'SYBNB stay'
 
-    const session = await stripeClient.checkout.sessions.create({
+    const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: [
@@ -267,10 +287,69 @@ export async function handlePayments(req, res, url, context) {
     }
 
     if (event.type === 'checkout.session.completed') {
-      await finalizeStripeSession(event.data.object)
+      const completed = event.data.object
+      if (completed.metadata?.kind === 'wallet_topup') {
+        await creditWalletTopupSession(completed) // SR cashless (016): credit rider wallet only on verified paid
+      } else {
+        await finalizeStripeSession(completed)
+      }
     }
 
     return json(res, 200, { ok: true, received: true })
+  }
+
+  // SR cashless card top-up (016): rider picks a BASE credit amount; charged base + 2.35% via Stripe;
+  // the wallet is credited the BASE only on the verified webhook (creditWalletTopupSession).
+  if (url.pathname === '/api/wallet/topup/stripe-checkout') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    requireStripe()
+    const body = await readJson(req)
+    const origin = String(body.origin || '').replace(/\/$/, '')
+    const baseMinor = Number(body.baseMinor ?? body.amountMinor)
+    if (!origin) {
+      const error = new Error('origin is required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_SESSION_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    if (!Number.isInteger(baseMinor) || baseMinor <= 0) {
+      const error = new Error('Top-up amount must be a whole number greater than zero.')
+      error.statusCode = 400
+      error.code = 'TOPUP_AMOUNT_INVALID'
+      error.expose = true
+      throw error
+    }
+    if (baseMinor > WALLET_TOPUP_MAX_MINOR) {
+      const error = new Error('Top-up amount exceeds the maximum allowed per transaction.')
+      error.statusCode = 400
+      error.code = 'TOPUP_AMOUNT_TOO_HIGH'
+      error.expose = true
+      throw error
+    }
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          unit_amount: cardTopupChargeCents(baseMinor),
+          product_data: { name: `SYBNB wallet credit ($${baseMinor})` },
+        },
+        quantity: 1,
+      }],
+      metadata: {
+        kind: 'wallet_topup',
+        userId: context.user.id,
+        baseMinor: String(baseMinor),
+        feeMinor: String(cardTopupFeeMinor(baseMinor)),
+        currency: 'USD',
+      },
+      success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}#/wallet`,
+      cancel_url: `${origin}/#/wallet`,
+    })
+    return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
   }
 
   if (url.pathname === '/api/payments/stripe/status') {
@@ -287,17 +366,21 @@ export async function handlePayments(req, res, url, context) {
     requireAuth(context)
 
     const body = await readJson(req)
-    const amountMinor = Number(body.amountMinor || 0)
-    // platform-sale is the only plan with no upfront fee — SYBNB manages the sale and takes a
-    // commission on close instead, so a review request can carry a zero amount for that plan only.
-    const isZeroFeePlan = String(body.planCode || '').trim() === 'platform-sale'
-    if (!Number.isFinite(amountMinor) || amountMinor < 0 || (amountMinor === 0 && !isZeroFeePlan)) {
-      const error = new Error('Plan payment amount must be greater than zero.')
+
+    // SECURITY (S6): the plan fee is a SERVER-SIDE price keyed by planCode — NEVER taken from the request.
+    // Otherwise a user could POST amountMinor:1 and, once an admin approves the proof, unlock a paid plan
+    // for one unit. Amounts are whole currency units (see currency.mjs), so the published plans (plus $19,
+    // premium $49) are 19 / 49; platform-sale has no upfront fee (commission on close instead).
+    const SELLER_PLAN_PRICE_MINOR = { plus: 19, premium: 49, 'platform-sale': 0 }
+    const planCode = body.planCode ? String(body.planCode).trim() : undefined
+    if (!planCode || !Object.prototype.hasOwnProperty.call(SELLER_PLAN_PRICE_MINOR, planCode)) {
+      const error = new Error('A valid plan must be selected.')
       error.statusCode = 400
-      error.code = 'PAYMENT_AMOUNT_INVALID'
+      error.code = 'PLAN_CODE_INVALID'
       error.expose = true
       throw error
     }
+    const amountMinor = SELLER_PLAN_PRICE_MINOR[planCode]
 
     const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
     if (!providerRef) {
@@ -321,7 +404,6 @@ export async function handlePayments(req, res, url, context) {
 
     const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
-    const planCode = body.planCode ? String(body.planCode).trim() : undefined
 
     const [proof] = await db().$transaction([
       db().paymentProof.create({
@@ -330,7 +412,7 @@ export async function handlePayments(req, res, url, context) {
           provider: 'seller_plan',
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
-          currency: body.currency || 'USD',
+          currency: 'USD', // MKT-4: plan prices are a USD server table; never take the currency from the client
           proofAssetUrl: body.proofAssetUrl || undefined,
           providerRef,
         },
@@ -356,6 +438,7 @@ export async function handlePayments(req, res, url, context) {
             id: body.bookingId,
             guestId: context.user.id,
           },
+          include: { listing: true },
         })
       : null
 
@@ -363,6 +446,16 @@ export async function handlePayments(req, res, url, context) {
       const error = new Error('This booking is not available for payment proof upload.')
       error.statusCode = 403
       error.code = 'PAYMENT_BOOKING_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+    // SECURITY (S3b): a proof may only be submitted for a booking still awaiting payment. Without this,
+    // a guest could submit a second proof on an already-CONFIRMED/COMPLETED booking and, once approved,
+    // trigger a duplicate host payout + commission credit.
+    if (booking && booking.status !== 'PAYMENT_PENDING') {
+      const error = new Error('This booking is not awaiting payment.')
+      error.statusCode = 409
+      error.code = 'BOOKING_NOT_AWAITING_PAYMENT'
       error.expose = true
       throw error
     }
@@ -377,8 +470,11 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    if (booking && amountMinor < booking.amountMinor) {
-      const error = new Error('Payment proof amount is lower than the booking amount.')
+    // SECURITY (S11): the floor is the FULL expected total (stay + cleaning + tax + protection), the same
+    // amount the Stripe path charges — not the bare stay. Otherwise a wallet guest could underpay the
+    // platform fees that a card guest pays for an identical stay.
+    if (booking && amountMinor < expectedTotalMinor(booking)) {
+      const error = new Error('Payment proof amount is lower than the amount due for this booking.')
       error.statusCode = 400
       error.code = 'PAYMENT_AMOUNT_TOO_LOW'
       error.expose = true
@@ -438,7 +534,6 @@ export async function handlePayments(req, res, url, context) {
               select: {
                 id: true,
                 displayName: true,
-                email: true,
               },
             },
             listing: {
@@ -481,7 +576,19 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    return json(res, 200, { ok: true, proof })
+    // SECURITY (S7): the listing owner (host) may confirm a proof exists and its status/amount, but must
+    // NOT see the guest's uploaded transfer screenshot or internal admin fields. Only the uploader/guest
+    // and admins/support receive the full proof.
+    const isPrivileged =
+      context.roles.includes('ADMIN') ||
+      context.roles.includes('SUPPORT') ||
+      proof.userId === context.user.id ||
+      guestId === context.user.id
+    const safeProof = isPrivileged
+      ? proof
+      : { ...proof, proofAssetUrl: undefined, adminNote: undefined, reviewedById: undefined, providerRef: undefined }
+
+    return json(res, 200, { ok: true, proof: safeProof })
   }
 
   return false

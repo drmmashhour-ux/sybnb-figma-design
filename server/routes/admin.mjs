@@ -3,17 +3,10 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
+import { readDriverDocument } from '../lib/driver-document-storage.mjs'
+import { idempotencyKey } from '../lib/security.mjs'
+import { assertBoundedString } from '../lib/validate.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-
-function payoutNotEligibleError() {
-  const error = new Error(
-    `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
-  )
-  error.statusCode = 400
-  error.code = 'PAYOUT_NOT_ELIGIBLE'
-  error.expose = true
-  return error
-}
 
 export async function handleAdmin(req, res, url, context) {
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
@@ -76,7 +69,7 @@ export async function handleAdmin(req, res, url, context) {
       const completedBookings = await db().booking.findMany({
         where: { status: 'COMPLETED' },
         include: {
-          listing: { include: { owner: { select: { id: true, displayName: true, payoutMethod: true } } } },
+          listing: { include: { owner: { select: { id: true, displayName: true } } } },
           payments: true,
         },
         orderBy: { checkOut: 'asc' },
@@ -106,7 +99,6 @@ export async function handleAdmin(req, res, url, context) {
             listingTitle: booking.listing?.titleAr,
             hostId: booking.listing?.ownerId,
             hostName: booking.listing?.owner?.displayName,
-            hostPayoutMethod: booking.listing?.owner?.payoutMethod || null,
             checkOut: booking.checkOut,
             eligibleAt: payoutEligibleAt(booking.checkOut),
             eligibleNow: isPayoutEligible(booking),
@@ -139,29 +131,28 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
 
+    if (!isPayoutEligible(booking)) {
+      const error = new Error(
+        `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
+      )
+      error.statusCode = 400
+      error.code = 'PAYOUT_NOT_ELIGIBLE'
+      error.expose = true
+      throw error
+    }
+
+    const approvedPayment = booking.payments.find((payment) => payment.status === 'APPROVED')
+    const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor)
+
     const entry = await db().$transaction(async (tx) => {
-      const guarded = await tx.booking.updateMany({
-        where: { id: booking.id, status: 'COMPLETED' },
-        data: { updatedAt: new Date() },
-      })
-      if (guarded.count !== 1) throw payoutNotEligibleError()
-
-      const freshBooking = await tx.booking.findUnique({
-        where: { id: booking.id },
-        include: { listing: true, payments: true },
-      })
-      if (!freshBooking || !isPayoutEligible(freshBooking)) throw payoutNotEligibleError()
-
-      const approvedPayment = freshBooking.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(freshBooking, approvedPayment?.amountMinor || freshBooking.amountMinor)
       const released = await recordWalletEntry(tx, {
-        userId: freshBooking.listing.ownerId,
+        userId: booking.listing.ownerId,
         type: 'RELEASE',
         amountMinor: split.hostGrossMinor,
-        currency: freshBooking.currency,
+        currency: booking.currency,
         referenceType: 'booking_payout',
-        referenceId: freshBooking.id,
-        keyParts: ['booking-host-release', freshBooking.id, approvedPayment?.id],
+        referenceId: booking.id,
+        keyParts: ['booking-host-release', booking.id, approvedPayment?.id],
         note: `Host payout released by admin after the ${PAYOUT_HOLD_DAYS}-day hold following stay completion.`,
       })
 
@@ -170,8 +161,8 @@ export async function handleAdmin(req, res, url, context) {
           actorUserId: context.user.id,
           action: 'ADMIN_PAYOUT_RELEASED',
           entityType: 'bookings',
-          entityId: freshBooking.id,
-          before: freshBooking,
+          entityId: booking.id,
+          before: booking,
           after: { walletEntry: released },
         },
       })
@@ -555,6 +546,166 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, ...result })
   }
 
+  // ---- SR SAFETY (014): SOS triage ----
+  if (url.pathname === '/api/admin/sos') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const sos = await db().sosEvent.findMany({
+      where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' }, take: 100,
+      include: {
+        raisedBy: { select: { id: true, displayName: true } },
+        ride: {
+          select: {
+            id: true, status: true, riderId: true, driverId: true,
+            rider: { select: { id: true, displayName: true, email: true } },
+            driver: { select: { id: true, displayName: true, email: true } },
+          },
+        },
+      },
+    })
+    return json(res, 200, { ok: true, sos })
+  }
+
+  const sosResolveMatch = url.pathname.match(/^\/api\/admin\/sos\/([^/]+)\/resolve$/)
+  if (sosResolveMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const note = assertBoundedString(body.note, { fieldName: 'note', maxLength: 500 })
+    const existing = await db().sosEvent.findUnique({ where: { id: sosResolveMatch[1] } })
+    if (!existing) {
+      const error = new Error('SOS event not found.')
+      error.statusCode = 404
+      error.code = 'SOS_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const updated = await db().sosEvent.updateMany({
+      where: { id: existing.id, status: 'OPEN' },
+      data: { status: 'RESOLVED', resolvedById: context.user.id, resolvedAt: new Date() },
+    })
+    if (updated.count === 0) {
+      const error = new Error('This SOS event is no longer open.')
+      error.statusCode = 409
+      error.code = 'SOS_NOT_OPEN'
+      error.expose = true
+      throw error
+    }
+    const sosEvent = await db().sosEvent.findUnique({ where: { id: existing.id } })
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'SR_SOS_RESOLVED', entityType: 'sos_events', entityId: sosEvent.id, before: existing, after: note ? { ...sosEvent, resolutionNote: note } : sosEvent },
+    })
+    return json(res, 200, { ok: true, sosEvent })
+  }
+
+  // ---- SR TRUST (015): driver document review ----
+  const adminDriverDocFileMatch = url.pathname.match(/^\/api\/admin\/driver-documents\/([^/]+)\/file$/)
+  if (adminDriverDocFileMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const document = await db().driverDocument.findUnique({ where: { id: adminDriverDocFileMatch[1] }, select: { assetUrl: true, mimeType: true } })
+    if (!document) {
+      const error = new Error('Driver document not found.')
+      error.statusCode = 404
+      error.code = 'DRIVER_DOCUMENT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const buffer = await readDriverDocument(document.assetUrl)
+    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    res.end(buffer)
+    return true
+  }
+
+  const driverDocReviewMatch = url.pathname.match(/^\/api\/admin\/driver-documents\/([^/]+)$/)
+  if (driverDocReviewMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const decision = normalizeDecision(body.decision || body.action)
+    const documentId = driverDocReviewMatch[1]
+    const result = await db().$transaction(async (tx) => {
+      const before = await tx.driverDocument.findUnique({ where: { id: documentId }, select: { id: true, driverUserId: true, type: true, status: true } })
+      if (!before || before.status !== 'PENDING_REVIEW') throw reviewStateError('DRIVER_DOCUMENT_NOT_REVIEWABLE')
+      const updated = await tx.driverDocument.updateMany({
+        where: { id: documentId, status: 'PENDING_REVIEW' },
+        data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED', reviewedById: context.user.id, reviewedAt: new Date() },
+      })
+      if (updated.count === 0) throw reviewStateError('DRIVER_DOCUMENT_NOT_REVIEWABLE')
+      const after = await tx.driverDocument.findUnique({ where: { id: documentId }, select: { id: true, driverUserId: true, type: true, status: true, reviewedById: true, reviewedAt: true } })
+      await tx.adminAuditLog.create({ data: { actorUserId: context.user.id, action: `DRIVER_DOCUMENT_${decision}`, entityType: 'driver_documents', entityId: documentId, before, after } })
+      return after
+    })
+    return json(res, 200, { ok: true, document: result })
+  }
+
+  // ---- SR MONEY (016): driver Sham-Cash payout ----
+  const srPayoutReleaseMatch = url.pathname.match(/^\/api\/admin\/sr-payouts\/([^/]+)\/release$/)
+  if (srPayoutReleaseMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const driverId = srPayoutReleaseMatch[1]
+    const body = await readJson(req)
+    const currency = body.currency === 'USD' ? 'USD' : 'SYP'
+    const payoutRef = String(body.payoutRef || body.shamCashRef || '').trim()
+    if (!payoutRef) {
+      const error = new Error('A payoutRef (e.g. the Sham Cash transaction reference) is required so payouts are idempotent.')
+      error.statusCode = 400
+      error.code = 'SR_PAYOUT_REF_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const driver = await db().user.findFirst({ where: { id: driverId, roles: { some: { role: 'DRIVER' } } }, include: { driverProfile: true } })
+    if (!driver) {
+      const error = new Error('Driver not found.')
+      error.statusCode = 404
+      error.code = 'DRIVER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (!driver.driverProfile?.payoutMethod || !driver.driverProfile?.payoutAccountRef) {
+      const error = new Error('This driver has no payout method on file. Add a Sham Cash payout method before releasing a payout.')
+      error.statusCode = 400
+      error.code = 'PAYOUT_METHOD_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const entry = await db().$transaction(async (tx) => {
+      const key = idempotencyKey(['sr-driver-payout', driverId, payoutRef])
+      const existingPayout = await tx.walletEntry.findUnique({ where: { idempotencyKey: key } })
+      if (existingPayout) return existingPayout
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${driverId}))`
+      const wallet = await tx.wallet.findUnique({ where: { userId_currency: { userId: driverId, currency } } })
+      const accruedMinor = wallet?.cachedBalanceMinor || 0
+      const requestedMinor = body.amountMinor != null ? Math.max(0, Math.round(Number(body.amountMinor) || 0)) : accruedMinor
+      if (requestedMinor <= 0) {
+        const error = new Error('This driver has no accrued SR earnings to pay out.')
+        error.statusCode = 400
+        error.code = 'SR_PAYOUT_NOTHING_TO_PAY'
+        error.expose = true
+        throw error
+      }
+      if (requestedMinor > accruedMinor) {
+        const error = new Error('Payout exceeds the driver’s accrued SR earnings.')
+        error.statusCode = 400
+        error.code = 'SR_PAYOUT_EXCEEDS_ACCRUED'
+        error.expose = true
+        throw error
+      }
+      const released = await recordWalletEntry(tx, {
+        userId: driverId, type: 'DEBIT', amountMinor: requestedMinor, currency,
+        referenceType: 'sr_driver_payout', referenceId: driverId,
+        keyParts: ['sr-driver-payout', driverId, payoutRef],
+        note: `SR driver earnings paid out via Sham Cash (${driver.driverProfile.payoutMethod}:${driver.driverProfile.payoutAccountRef}); ref ${payoutRef}.`,
+      })
+      await tx.adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'ADMIN_SR_PAYOUT_RELEASED', entityType: 'users', entityId: driverId, before: { accruedMinor, currency, payoutRef }, after: { walletEntry: released } },
+      })
+      return released
+    })
+    return json(res, 200, { ok: true, walletEntry: entry })
+  }
+
   return false
 }
 
@@ -763,6 +914,26 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
         keyParts: ['booking-admin-reject-admin-share-reversal', existing.id, approvedPayment.id],
         note: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
       })
+
+      // SECURITY (S5): if the host payout was already RELEASED (money moved to the host, only possible on a
+      // COMPLETED booking that was later disputed), an adverse ruling must claw it back. Otherwise the guest
+      // is refunded in full while the host keeps the released payout and the platform absorbs the loss.
+      // Only debit when a RELEASE actually exists; the DEBIT is idempotency-keyed so it can't double-apply.
+      const releasedPayout = await tx.walletEntry.findFirst({
+        where: { referenceType: 'booking_payout', referenceId: existing.id, type: 'RELEASE' },
+      })
+      if (releasedPayout) {
+        await recordWalletEntry(tx, {
+          userId: existing.listing.ownerId,
+          type: 'DEBIT',
+          amountMinor: split.hostGrossMinor,
+          currency: existing.currency,
+          referenceType: 'booking_payout_clawback',
+          referenceId: existing.id,
+          keyParts: ['booking-host-payout-clawback', existing.id, approvedPayment.id],
+          note: 'Host payout clawed back after the admin ruled against the host in a dispute.',
+        })
+      }
     }
   }
 

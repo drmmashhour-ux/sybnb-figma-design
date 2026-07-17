@@ -4,7 +4,64 @@ import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { roundUsdUpToStep } from '../lib/currency.mjs'
 
+// SR cashless top-up (016): sane per-top-up ceiling (whole currency units).
+const WALLET_TOPUP_MAX_MINOR = 100_000_000
+const WALLET_TOPUP_CURRENCIES = new Set(['SYP', 'USD'])
+
 export async function handleWallet(req, res, url, context) {
+  // SR cashless top-up (016): Sham Cash refill. 1:1, no fee — credited by approvePaymentProof on admin
+  // approval. The pending proof auto-appears in the admin review queue (provider contains SHAM →
+  // reconciliation guard applies). Card top-up lives in payments.mjs (/api/wallet/topup/stripe-checkout).
+  if (url.pathname === '/api/wallet/topup/sham-cash') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const amountMinor = Number(body.amountMinor)
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      const error = new Error('Top-up amount must be a whole number greater than zero.')
+      error.statusCode = 400
+      error.code = 'TOPUP_AMOUNT_INVALID'
+      error.expose = true
+      throw error
+    }
+    if (amountMinor > WALLET_TOPUP_MAX_MINOR) {
+      const error = new Error('Top-up amount exceeds the maximum allowed per transaction.')
+      error.statusCode = 400
+      error.code = 'TOPUP_AMOUNT_TOO_HIGH'
+      error.expose = true
+      throw error
+    }
+    const currency = WALLET_TOPUP_CURRENCIES.has(body.currency) ? body.currency : 'SYP'
+    const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
+    if (!providerRef) {
+      const error = new Error('Sham Cash transaction reference is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_REFERENCE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const duplicate = await db().paymentProof.findFirst({ where: { provider: 'wallet_topup_sham_cash', providerRef } })
+    if (duplicate) {
+      const error = new Error('This Sham Cash transaction reference was already submitted.')
+      error.statusCode = 409
+      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+      error.expose = true
+      throw error
+    }
+    const proof = await db().paymentProof.create({
+      data: {
+        userId: context.user.id,
+        provider: 'wallet_topup_sham_cash',
+        status: 'PENDING_ADMIN_REVIEW',
+        amountMinor,
+        currency,
+        proofAssetUrl: body.proofAssetUrl || undefined,
+        providerRef,
+      },
+    })
+    return json(res, 201, { ok: true, proof })
+  }
+
   if (url.pathname === '/api/wallet') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)

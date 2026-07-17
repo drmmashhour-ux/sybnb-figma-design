@@ -127,6 +127,6 @@ describe('PATCH /api/bookings/:id/cancel — cancellation fee depends on timing 
       where: { referenceType: 'booking_guest_cancel_fee', referenceId: bookingId, type: 'DEBIT' },
     })
     expect(feeEntry).not.toBeNull()
-    expect(feeEntry.amountMinor).toBe(1000)
+    expect(feeEntry.amountMinor).toBe(10) // S12: $10 fee = 10 whole units (amounts are whole units, not cents)
   })
 })

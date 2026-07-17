@@ -85,6 +85,11 @@ export async function cleanupTestUsers() {
   if (!ids.length) return
 
   await db().paymentProof.deleteMany({ where: { userId: { in: ids } } }).catch(() => {})
+  // SR safety/trust models reference users without cascade — clear them before the ride/user deletes.
+  await db().rideRating.deleteMany({ where: { OR: [{ raterUserId: { in: ids } }, { ratedUserId: { in: ids } }] } }).catch(() => {})
+  await db().rideMessage.deleteMany({ where: { senderUserId: { in: ids } } }).catch(() => {})
+  await db().sosEvent.deleteMany({ where: { OR: [{ raisedByUserId: { in: ids } }, { resolvedById: { in: ids } }] } }).catch(() => {})
+  await db().driverDocument.deleteMany({ where: { OR: [{ driverUserId: { in: ids } }, { reviewedById: { in: ids } }] } }).catch(() => {})
   await db().rideRequest.deleteMany({ where: { OR: [{ riderId: { in: ids } }, { driverId: { in: ids } }] } }).catch(() => {})
   await db().booking.deleteMany({ where: { guestId: { in: ids } } }).catch(() => {})
   await db().listing.deleteMany({ where: { ownerId: { in: ids } } }).catch(() => {})

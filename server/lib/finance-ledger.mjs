@@ -2,7 +2,8 @@ import { idempotencyKey } from './security.mjs'
 import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
 import { rewardReferralIfQualifying } from './referrals.mjs'
 
-export const CANCELLATION_ADMIN_FEE_MINOR = 1000
+// S12: amounts are whole currency units (see currency.mjs), so the documented $10 fee is 10, not 1000.
+export const CANCELLATION_ADMIN_FEE_MINOR = 10
 export const CANCELLATION_ADMIN_FEE_CURRENCY = 'USD'
 export const CANCELLATION_PROTECTION_RATE = 0.03
 export const STR_ADMIN_COMMISSION_RATE = 0.1
@@ -170,10 +171,22 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // Instant Book listings skip the manual host-confirmation step: payment approval
     // is enough to confirm the stay outright, same as Airbnb's Instant Book.
     const nextStatus = existing.booking?.listing?.instantBookEnabled ? 'CONFIRMED' : 'REQUESTED'
-    await tx.booking.update({
-      where: { id: proof.bookingId },
+
+    // SECURITY (S3): claim the booking ONLY if it is still PAYMENT_PENDING. Otherwise a SECOND payment
+    // proof (the bookingId is not unique) approved on an already-CONFIRMED/COMPLETED booking would re-run
+    // the split below — paying the host twice, double-crediting commission, and dragging a completed
+    // booking backwards. The atomic where-guard makes the transition AND the split strictly one-time.
+    const bookingClaim = await tx.booking.updateMany({
+      where: { id: proof.bookingId, status: 'PAYMENT_PENDING' },
       data: { status: nextStatus },
     })
+    if (bookingClaim.count !== 1) {
+      const error = new Error('This booking has already been paid and cannot be paid again.')
+      error.statusCode = 409
+      error.code = 'BOOKING_ALREADY_PAID'
+      error.expose = true
+      throw error
+    }
 
     const split = bookingFinanceSplit(existing.booking, proof.amountMinor)
     await recordWalletEntry(tx, {
@@ -250,6 +263,20 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // outcome as one who converts as a paying guest -- see the booking branch above for the full
     // farming-prevention rationale, identical here.
     await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.id })
+  } else if (proof.provider === 'wallet_topup_sham_cash') {
+    // SR cashless (016): an admin-approved Sham Cash top-up credits the rider's OWN wallet 1:1, no fee.
+    // The updateMany status-claim above guarantees exactly-once; recordWalletEntry's idempotencyKey makes
+    // even a retried approval a no-op, so a double-click can never double-credit.
+    await recordWalletEntry(tx, {
+      userId: proof.userId,
+      type: 'CREDIT',
+      amountMinor: proof.amountMinor,
+      currency: proof.currency,
+      referenceType: 'wallet_topup',
+      referenceId: proof.id,
+      keyParts: ['wallet-topup', proof.id],
+      note: 'Sham Cash wallet top-up credited 1:1 after admin approval.',
+    })
   }
 
   return proof

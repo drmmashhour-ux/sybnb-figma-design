@@ -30,12 +30,22 @@ export async function handleReviews(req, res, url, context) {
 
   const booking = await db().booking.findFirst({
     where: { id: bookingId, guestId: context.user.id },
+    include: { listing: { select: { ownerId: true } } },
   })
 
   if (!booking) {
     const error = new Error('Booking not found for this guest account.')
     error.statusCode = 404
     error.code = 'BOOKING_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+
+  // SELF-REVIEW guard (defense in depth): the reviewer must not be the listing owner.
+  if (booking.listing?.ownerId === context.user.id) {
+    const error = new Error('You cannot review your own listing.')
+    error.statusCode = 403
+    error.code = 'CANNOT_REVIEW_OWN_LISTING'
     error.expose = true
     throw error
   }

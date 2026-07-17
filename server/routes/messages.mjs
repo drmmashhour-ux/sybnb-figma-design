@@ -205,7 +205,8 @@ export async function handleMessages(req, res, url, context) {
       where: { listing: { ownerId: context.user.id } },
       include: {
         listing: { select: { id: true, titleAr: true, titleEn: true, division: true, priceMinor: true, currency: true } },
-        guest: { select: { id: true, displayName: true, email: true } },
+        // SECURITY (S10): host sees only the guest's id + display name, never their email.
+        guest: { select: { id: true, displayName: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
       orderBy: { updatedAt: 'desc' },
