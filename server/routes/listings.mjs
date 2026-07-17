@@ -5,6 +5,16 @@ import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
+import { assertListingAttributes, PHOTO_REQUIRED_DIVISIONS } from '../lib/listing-attributes.mjs'
+import {
+  MAX_LISTING_PHOTOS,
+  deleteListingMedia,
+  isValidListingMediaKey,
+  mediaServeUrl,
+  mimeForKey,
+  readListingMedia,
+  saveListingMedia,
+} from '../lib/listing-media-storage.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
@@ -339,6 +349,129 @@ export async function handleListings(req, res, url, context) {
     return json(res, 200, { ok: true, reviews, average, count })
   }
 
+  // ---- LISTING MEDIA (Block 1): real photo bytes, owner-managed, authz-gated serving ----
+  // Serve a stored photo. Public once the listing is APPROVED; owner/admin only while it is a draft
+  // (so a competitor can't scrape a seller's unpublished photos by guessing the listing id).
+  const mediaFileMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/media\/file\/([^/]+)$/)
+  if (mediaFileMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const [, listingId, storageKey] = mediaFileMatch
+    assertListingUuid(listingId)
+    if (!isValidListingMediaKey(storageKey)) {
+      const error = new Error('Photo not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_MEDIA_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // Bind the key to this listing: a row must exist whose url is exactly this listing's serve path
+    // for this key. Prevents reading a key that belongs to a different listing.
+    const media = await db().listingMedia.findFirst({
+      where: { listingId, url: mediaServeUrl(listingId, storageKey) },
+      select: { id: true },
+    })
+    const listing = await db().listing.findUnique({ where: { id: listingId }, select: { status: true, ownerId: true } })
+    if (!media || !listing) {
+      const error = new Error('Photo not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_MEDIA_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const isPublic = listing.status === 'APPROVED'
+    if (!isPublic) {
+      requireAuth(context)
+      const isOwner = listing.ownerId === context.user.id
+      const isStaff = context.roles.includes('ADMIN') || context.roles.includes('SUPPORT')
+      if (!isOwner && !isStaff) {
+        const error = new Error('This photo is not available for this account.')
+        error.statusCode = 403
+        error.code = 'LISTING_MEDIA_FORBIDDEN'
+        error.expose = true
+        throw error
+      }
+    }
+    const buffer = await readListingMedia(storageKey)
+    res.writeHead(200, {
+      'content-type': mimeForKey(storageKey),
+      'cache-control': isPublic ? 'public, max-age=3600' : 'private, no-store',
+    })
+    res.end(buffer)
+    return true
+  }
+
+  const mediaCollectionMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/media$/)
+  if (mediaCollectionMatch) {
+    const listingId = mediaCollectionMatch[1]
+    assertListingUuid(listingId)
+
+    if (req.method === 'POST') {
+      requireAuth(context, ['SELLER', 'HOST'])
+      const listing = await db().listing.findFirst({ where: { id: listingId }, select: { ownerId: true } })
+      if (!listing || listing.ownerId !== context.user.id) {
+        const error = new Error('Listing not found for this account.')
+        error.statusCode = 404
+        error.code = 'LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      const count = await db().listingMedia.count({ where: { listingId } })
+      if (count >= MAX_LISTING_PHOTOS) {
+        const error = new Error(`A listing can have at most ${MAX_LISTING_PHOTOS} photos.`)
+        error.statusCode = 400
+        error.code = 'LISTING_MEDIA_LIMIT'
+        error.expose = true
+        throw error
+      }
+      const body = await readJson(req)
+      const { storageKey } = await saveListingMedia(body.fileBase64, body.mimeType)
+      const media = await db().listingMedia.create({
+        data: { listingId, url: mediaServeUrl(listingId, storageKey), kind: 'photo', sortOrder: count },
+      })
+      return json(res, 201, { ok: true, media })
+    }
+
+    if (req.method === 'GET') {
+      // Owner-facing media list (the wizard shows a seller their own draft photos).
+      requireAuth(context, ['SELLER', 'HOST'])
+      const listing = await db().listing.findFirst({ where: { id: listingId }, select: { ownerId: true } })
+      if (!listing || listing.ownerId !== context.user.id) {
+        const error = new Error('Listing not found for this account.')
+        error.statusCode = 404
+        error.code = 'LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      const media = await db().listingMedia.findMany({ where: { listingId }, orderBy: { sortOrder: 'asc' } })
+      return json(res, 200, { ok: true, media })
+    }
+
+    return methodNotAllowed(res, ['POST', 'GET'])
+  }
+
+  const mediaItemMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/media\/([^/]+)$/)
+  if (mediaItemMatch) {
+    const [, listingId, mediaId] = mediaItemMatch
+    assertListingUuid(listingId)
+    if (req.method !== 'DELETE') return methodNotAllowed(res, ['DELETE'])
+    requireAuth(context, ['SELLER', 'HOST'])
+    assertListingUuid(mediaId)
+    const media = await db().listingMedia.findUnique({
+      where: { id: mediaId },
+      include: { listing: { select: { ownerId: true } } },
+    })
+    if (!media || media.listingId !== listingId || media.listing.ownerId !== context.user.id) {
+      const error = new Error('Photo not found for this account.')
+      error.statusCode = 404
+      error.code = 'LISTING_MEDIA_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    await db().listingMedia.delete({ where: { id: mediaId } })
+    await deleteListingMedia(String(media.url || '').split('/').pop())
+    return json(res, 200, { ok: true, deleted: true })
+  }
+
   const submitMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/submit$/)
   if (submitMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
@@ -360,6 +493,35 @@ export async function handleListings(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    // ---- Block 1 SUBMIT GUARDS: a listing cannot go live until it is real and complete ----
+    // (a) Paid divisions: re-verify the seller's plan is STILL admin-approved at submit time, not just
+    //     when the draft was created — a plan can lapse or be revoked in between. (Closes the
+    //     "submit-time paid plan recheck" gap.)
+    if (PAID_PLAN_DIVISIONS.has(existing.division)) {
+      const sellerProfile = await db().sellerProfile.findUnique({ where: { userId: context.user.id } })
+      if (!sellerProfile || sellerProfile.documentStatus !== 'APPROVED') {
+        const error = new Error('A paid, admin-approved seller plan is required before publishing this listing.')
+        error.statusCode = 403
+        error.code = 'SELLER_PLAN_REQUIRED'
+        error.expose = true
+        throw error
+      }
+    }
+    // (b) At least one real photo for the catalog-style divisions (cars, marketplace, real estate).
+    if (PHOTO_REQUIRED_DIVISIONS.has(existing.division)) {
+      const photoCount = await db().listingMedia.count({ where: { listingId: existing.id, kind: 'photo' } })
+      if (photoCount < 1) {
+        const error = new Error('Add at least one real photo before submitting this listing for review.')
+        error.statusCode = 400
+        error.code = 'LISTING_PHOTOS_REQUIRED'
+        error.expose = true
+        throw error
+      }
+    }
+    // (c) All required structured attributes for the division must be present and well-formed.
+    assertListingAttributes(existing.division, existing.metadata)
+
     const listing = await db().listing.update({
       where: { id: existing.id },
       data: { status: 'PENDING_REVIEW' },
@@ -368,6 +530,18 @@ export async function handleListings(req, res, url, context) {
   }
 
   return false
+}
+
+// Reject a non-UUID id up front as a clean 404 instead of letting Prisma throw a raw P2023 (→ 500)
+// when a media/serve path carries a malformed listing or media id.
+function assertListingUuid(value) {
+  if (!UUID_RE.test(value || '')) {
+    const error = new Error('Listing not found.')
+    error.statusCode = 404
+    error.code = 'LISTING_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
 }
 
 function parsePositiveInt(value) {

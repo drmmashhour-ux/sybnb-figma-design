@@ -67,6 +67,10 @@ export function handleRouteError(res, error) {
     error: {
       code: error.code || 'INTERNAL_ERROR',
       message: error.expose === true ? error.message : 'Unexpected V6 API error.',
+      // Structured, machine-readable detail (e.g. the exact missing attribute labels) rides the same
+      // exposure gate as the message: only surfaced when the throwing code deliberately opted in with
+      // error.expose === true, so it can never leak internal shape by accident.
+      ...(error.expose === true && error.details ? { details: error.details } : {}),
     },
   })
 }
