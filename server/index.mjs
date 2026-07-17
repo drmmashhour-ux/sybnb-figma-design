@@ -18,6 +18,7 @@ import { handleMe } from './routes/me.mjs'
 import { handleMessages } from './routes/messages.mjs'
 import { handlePayments } from './routes/payments.mjs'
 import { handleReviews } from './routes/reviews.mjs'
+import { handleSellers } from './routes/sellers.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleWallet } from './routes/wallet.mjs'
 
@@ -136,6 +137,7 @@ async function dispatch(req, res, url, context) {
     handleAdmin,
     handleSrRides,
     handleReviews,
+    handleSellers,
     handleMessages,
   ]) {
     const handled = await handler(req, res, url, context)

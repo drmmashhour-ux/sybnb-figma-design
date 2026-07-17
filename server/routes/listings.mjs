@@ -278,7 +278,10 @@ export async function handleListings(req, res, url, context) {
       error.expose = true
       throw error
     }
-    return json(res, 200, { ok: true, listing })
+    // Verification badge: the listing owner's identity document has been admin-approved. Surfaced on
+    // the public detail so a buyer can see "verified seller" before contacting them.
+    const sellerVerified = listing.owner?.idDocumentStatus === 'APPROVED'
+    return json(res, 200, { ok: true, listing, sellerVerified })
   }
 
   const availabilityMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/availability$/)

@@ -117,6 +117,10 @@ export async function cleanupTestUsers() {
   await db().sosEvent.deleteMany({ where: { OR: [{ raisedByUserId: { in: ids } }, { resolvedById: { in: ids } }] } }).catch(() => {})
   await db().driverDocument.deleteMany({ where: { OR: [{ driverUserId: { in: ids } }, { reviewedById: { in: ids } }] } }).catch(() => {})
   await db().rideRequest.deleteMany({ where: { OR: [{ riderId: { in: ids } }, { driverId: { in: ids } }] } }).catch(() => {})
+  // Seller reputation (Block 3): reviews reference seller+buyer without cascade, sales reference
+  // seller+buyer+listing — clear reviews, then sales, before the listing/user deletes below.
+  await db().sellerReview.deleteMany({ where: { OR: [{ sellerId: { in: ids } }, { buyerId: { in: ids } }] } }).catch(() => {})
+  await db().sellerSale.deleteMany({ where: { OR: [{ sellerId: { in: ids } }, { buyerId: { in: ids } }] } }).catch(() => {})
   await db().booking.deleteMany({ where: { guestId: { in: ids } } }).catch(() => {})
   await db().listing.deleteMany({ where: { ownerId: { in: ids } } }).catch(() => {})
 

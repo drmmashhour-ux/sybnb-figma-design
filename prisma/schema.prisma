@@ -186,6 +186,10 @@ model User {
   rideMessagesSent        RideMessage[]    @relation("RideMessageSender")
   rideRatingsGiven        RideRating[]     @relation("RideRatingRater")
   rideRatingsReceived     RideRating[]     @relation("RideRatingRated")
+  sellerSalesMade         SellerSale[]     @relation("SellerSaleSeller")
+  sellerPurchases         SellerSale[]     @relation("SellerSaleBuyer")
+  sellerReviewsReceived   SellerReview[]   @relation("SellerReviewSeller")
+  sellerReviewsWritten    SellerReview[]   @relation("SellerReviewBuyer")
 
   @@map("users")
 }
@@ -313,6 +317,7 @@ model Listing {
   reviews        ListingReview[]
   inquiryThreads MessageThread[]
   hostInsights   HostInsight[]
+  sales          SellerSale[]
 
   @@index([division, status])
   @@index([ownerId])
@@ -502,6 +507,45 @@ model ListingReview {
 
   @@index([listingId, hiddenAt])
   @@map("listing_reviews")
+}
+
+// Marketplace seller reputation (Block 3). Unlike STAYS (reviewed off a completed Booking), cars/
+// property/goods are contact-based, so a review is gated on the SELLER first confirming a real sale
+// to a specific buyer. SellerSale is that confirmation; SellerReview is the buyer's one rating of it.
+model SellerSale {
+  id        String   @id @default(uuid())
+  listingId String   @map("listing_id")
+  sellerId  String   @map("seller_id")
+  buyerId   String   @map("buyer_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  listing Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  seller  User          @relation("SellerSaleSeller", fields: [sellerId], references: [id])
+  buyer   User          @relation("SellerSaleBuyer", fields: [buyerId], references: [id])
+  review  SellerReview?
+
+  // One confirmed sale per (listing, buyer) — a seller can't stack multiple review-grants on one buyer.
+  @@unique([listingId, buyerId])
+  @@index([sellerId])
+  @@map("seller_sales")
+}
+
+model SellerReview {
+  id        String    @id @default(uuid())
+  saleId    String    @unique @map("sale_id")
+  sellerId  String    @map("seller_id")
+  buyerId   String    @map("buyer_id")
+  rating    Int
+  comment   String?
+  hiddenAt  DateTime? @map("hidden_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  sale   SellerSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  seller User       @relation("SellerReviewSeller", fields: [sellerId], references: [id])
+  buyer  User       @relation("SellerReviewBuyer", fields: [buyerId], references: [id])
+
+  @@index([sellerId, hiddenAt])
+  @@map("seller_reviews")
 }
 
 model MessageThread {
