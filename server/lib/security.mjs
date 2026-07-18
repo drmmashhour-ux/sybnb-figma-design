@@ -1,7 +1,12 @@
 import { createHash, createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
 
 const PASSWORD_PREFIX = 'scrypt:v1'
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
+// Persistent login (90 days): a signed-in session survives for 90 days so re-opening the app keeps the
+// user logged in. The revocation kill-switch is unchanged and independent of this TTL — logout and
+// password-reset bump user.sessionVersion, and any token minted before the bump is rejected on the next
+// request (auth-context.mjs) even though its `exp` hasn't passed. So a longer TTL does not weaken the
+// ability to invalidate sessions immediately.
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 90
 
 function requiredSecret(name) {
   const value = process.env[name]

@@ -561,6 +561,36 @@ export const GUEST_SESSION_KEY = 'sybnb.v6.guestSession'
 export const GUEST_SESSION_TOKEN_KEY = 'sybnb-v6-guest-token'
 export const STAFF_SESSION_KEY = 'sybnb.v6.staffSession'
 export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
+
+// Persistent login: the auth SESSION (guest/staff/seller token) is kept in localStorage so it survives an
+// app/tab restart — on web across browser restarts, and on mobile because the Capacitor webview persists
+// localStorage across app launches. Opening the app therefore means "already signed in" (backed by the
+// 90-day server token TTL). Ephemeral UI state (return paths, search, fallback caches) intentionally stays
+// in sessionStorage. Guarded for SSR/private-mode so a blocked storage never throws.
+export const authStorage = {
+  getItem(key: string): string | null {
+    try {
+      return typeof window !== 'undefined' ? window.localStorage.getItem(key) : null
+    } catch {
+      return null
+    }
+  },
+  setItem(key: string, value: string): void {
+    try {
+      if (typeof window !== 'undefined') window.localStorage.setItem(key, value)
+    } catch {
+      /* storage unavailable (private mode / quota) — session just won't persist */
+    }
+  },
+  removeItem(key: string): void {
+    try {
+      if (typeof window !== 'undefined') window.localStorage.removeItem(key)
+    } catch {
+      /* ignore */
+    }
+  },
+}
+
 export type HostDashboardMode = 'host' | 'seller'
 
 export async function fetchPrototypeHealth() {
@@ -698,7 +728,7 @@ export async function createSellerAccountSession(input: {
     sellerRole: input.sellerRole,
     planCode: input.planCode,
   }
-  sessionStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(storedSession))
+  authStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(storedSession))
   return storedSession
 }
 
@@ -731,8 +761,8 @@ export async function createGuestAccountSession(input: {
     session = await login(input.email, input.password)
   }
 
-  sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
-  sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
   // App.tsx's needsGuestAccountGate check re-renders on this event. Without it, gated routes
   // whose returnPath equals the current path (e.g. /ride, /ride-preview, /dashboard) never
   // re-render after signup: the caller's `window.location.hash = returnPath` is a same-value
@@ -804,7 +834,7 @@ export async function submitGuestIdDocument(file: File) {
 
 export function getStoredGuestSession(): PlatformAuthSession | null {
   try {
-    const raw = sessionStorage.getItem(GUEST_SESSION_KEY)
+    const raw = authStorage.getItem(GUEST_SESSION_KEY)
     if (!raw) return null
     const session = JSON.parse(raw) as PlatformAuthSession
     if (!session?.token || !session?.user) return null
@@ -818,22 +848,22 @@ export function getStoredGuestSession(): PlatformAuthSession | null {
 // so the token being discarded here can't be replayed even if someone else has a copy of it. The
 // local session is cleared regardless of whether this call succeeds -- a network failure here
 // must never block the user from leaving their session, it just means server-side revocation
-// happens a little late (or not at all, until the token's own 7-day expiry) for that one call.
+// happens a little late (or not at all, until the token's own 90-day expiry) for that one call.
 function requestServerLogout(token: string | null) {
   if (!token) return
   void apiRequest<{ ok: true }>('/api/auth/logout', { method: 'POST', token }).catch(() => {})
 }
 
 export function clearGuestSession() {
-  requestServerLogout(sessionStorage.getItem(GUEST_SESSION_TOKEN_KEY))
-  sessionStorage.removeItem(GUEST_SESSION_KEY)
-  sessionStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
+  requestServerLogout(authStorage.getItem(GUEST_SESSION_TOKEN_KEY))
+  authStorage.removeItem(GUEST_SESSION_KEY)
+  authStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
   window.dispatchEvent(new Event('sybnb-session-changed'))
 }
 
 export function getStoredStaffSession(requiredRole?: 'ADMIN' | 'HOST' | 'SELLER' | 'DRIVER'): PlatformAuthSession | null {
   try {
-    const raw = sessionStorage.getItem(STAFF_SESSION_KEY)
+    const raw = authStorage.getItem(STAFF_SESSION_KEY)
     if (!raw) return null
     const session = JSON.parse(raw) as PlatformAuthSession
     if (!session?.token || !session?.user) return null
@@ -878,20 +908,20 @@ export async function createStaffAccountSession(
   } else {
     session = await login(email, password)
   }
-  sessionStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
-  sessionStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
+  authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
   return session
 }
 
 export function clearStoredStaffSession() {
-  requestServerLogout(sessionStorage.getItem(STAFF_SESSION_TOKEN_KEY))
-  sessionStorage.removeItem(STAFF_SESSION_KEY)
-  sessionStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
+  requestServerLogout(authStorage.getItem(STAFF_SESSION_TOKEN_KEY))
+  authStorage.removeItem(STAFF_SESSION_KEY)
+  authStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
 }
 
 export function getStoredSellerSession(): PlatformAuthSession | null {
   try {
-    const raw = sessionStorage.getItem(SELLER_SESSION_KEY)
+    const raw = authStorage.getItem(SELLER_SESSION_KEY)
     if (!raw) return null
     const session = JSON.parse(raw) as PlatformAuthSession
     if (!session?.token || !session?.user) return null
@@ -1943,8 +1973,8 @@ async function ensurePrototypeGuestSession() {
     method: 'POST',
     body: { source: 'guest-checkout' },
   })
-  sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
-  sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
   window.dispatchEvent(new Event('sybnb-session-changed'))
   return session
 }

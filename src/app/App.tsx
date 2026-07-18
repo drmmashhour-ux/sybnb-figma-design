@@ -197,7 +197,9 @@ function getStaffRequiredRole(path: string): 'ADMIN' | 'HOST' | 'DRIVER' | null 
 function hasRequiredStaffSession(requiredRole: 'ADMIN' | 'HOST' | 'DRIVER' | null) {
   if (!requiredRole) return true
   try {
-    const raw = sessionStorage.getItem('sybnb.v6.staffSession')
+    // Persistent login: the staff session is stored in localStorage (see platformApi authStorage) so it
+    // survives an app restart — read it from the same place, not sessionStorage.
+    const raw = localStorage.getItem('sybnb.v6.staffSession')
     if (!raw) return false
     const session = JSON.parse(raw) as { token?: string; user?: { roles?: string[] } }
     const roles = session.user?.roles || []
