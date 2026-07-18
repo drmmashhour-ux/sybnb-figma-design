@@ -1733,6 +1733,23 @@ export async function fetchDriverVehicles() {
   return response.vehicles
 }
 
+export type PlatformDriverDocument = {
+  id: string
+  type: 'LICENSE' | 'VEHICLE_REGISTRATION' | 'INSURANCE'
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+  createdAt: string
+}
+
+// Driver documents (licence / vehicle registration / insurance) with review status — used to reflect the
+// driver's road-ready readiness on the dashboard.
+export async function fetchDriverDocuments() {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; documents: PlatformDriverDocument[] }>('/api/driver/documents', {
+    token: session.token,
+  })
+  return response.documents
+}
+
 // ---- STR guest cancellation (bookings.mjs) ----
 // Returns the CANCELLED booking. The fee/refund breakdown is audit-logged server-side, not returned here,
 // so the UI derives the outcome from the booking policy (free window / protection / flat fee).

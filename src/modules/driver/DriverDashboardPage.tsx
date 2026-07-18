@@ -3,11 +3,15 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   claimPrototypeSrRide,
+  fetchDriverDocuments,
+  fetchDriverVehicles,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
   updatePrototypeDriverRideStatus,
   verifyDriverPickupPin,
+  type PlatformDriverDocument,
   type PlatformDriverOverview,
+  type PlatformDriverVehicle,
   type PlatformRideRequest,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
@@ -68,6 +72,15 @@ const copy = {
     idPendingReview: 'قيد المراجعة',
     idRejected: 'مرفوضة',
     idNotSubmitted: 'لم تُرفع بعد',
+    roadReadyTitle: 'الجاهزية لاستقبال الرحلات',
+    roadReadyYes: 'جاهز — يمكنك استقبال الرحلات.',
+    roadReadyNo: 'غير جاهز — أكمل العناصر أدناه لاستقبال الرحلات.',
+    reqLicense: 'رخصة القيادة',
+    reqRegistration: 'دفتر المركبة',
+    reqVehicle: 'مركبة معتمدة',
+    manageVehicles: 'إدارة المركبات',
+    checkYes: '✓',
+    checkNo: '✗',
     todayEarnings: 'أرباح اليوم',
     todayRidesCount: 'رحلة مكتملة اليوم',
     reportIssue: 'إبلاغ عن مشكلة',
@@ -124,6 +137,15 @@ const copy = {
     idPendingReview: 'Pending review',
     idRejected: 'Rejected',
     idNotSubmitted: 'Not submitted yet',
+    roadReadyTitle: 'Ready to receive rides',
+    roadReadyYes: 'Road-ready — you can receive rides.',
+    roadReadyNo: 'Not road-ready — complete the items below to receive rides.',
+    reqLicense: 'Driver license',
+    reqRegistration: 'Vehicle registration',
+    reqVehicle: 'Approved vehicle',
+    manageVehicles: 'Manage vehicles',
+    checkYes: '✓',
+    checkNo: '✗',
     todayEarnings: 'Today earnings',
     todayRidesCount: 'completed rides today',
     reportIssue: 'Report issue',
@@ -135,6 +157,8 @@ export function DriverDashboardPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [overview, setOverview] = useState<PlatformDriverOverview | null>(null)
+  const [documents, setDocuments] = useState<PlatformDriverDocument[]>([])
+  const [vehicles, setVehicles] = useState<PlatformDriverVehicle[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const [activeRideId, setActiveRideId] = useState('')
@@ -191,6 +215,9 @@ export function DriverDashboardPage({ lang }: Props) {
     try {
       setOverview(await fetchPrototypeDriverOverview())
       setStatus('ready')
+      // Road-ready readiness inputs (best-effort — don't fail the dashboard if these error).
+      void fetchDriverDocuments().then(setDocuments).catch(() => setDocuments([]))
+      void fetchDriverVehicles().then(setVehicles).catch(() => setVehicles([]))
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
@@ -296,7 +323,26 @@ export function DriverDashboardPage({ lang }: Props) {
       <section style={styles.driverIntelligence}>
         <article style={styles.docsPanel}>
           <h2>{t.docsStatus}</h2>
-          <Info label={t.verifiedIdentity} value={idDocumentStatusText(overview?.driver.idDocumentStatus, t)} dir={isAr ? 'rtl' : 'ltr'} />
+          {(() => {
+            const idOk = overview?.driver.idDocumentStatus === 'APPROVED'
+            const licenseOk = documents.some((d) => d.type === 'LICENSE' && d.status === 'APPROVED')
+            const registrationOk = documents.some((d) => d.type === 'VEHICLE_REGISTRATION' && d.status === 'APPROVED')
+            const vehicleOk = vehicles.some((v) => v.status === 'APPROVED')
+            const roadReady = idOk && licenseOk && registrationOk && vehicleOk
+            const mark = (ok: boolean) => (ok ? t.checkYes : t.checkNo)
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={roadReady ? styles.roadReadyOk : styles.roadReadyNo}>
+                  {roadReady ? t.roadReadyYes : t.roadReadyNo}
+                </div>
+                <Info label={t.verifiedIdentity} value={`${mark(idOk)} ${idDocumentStatusText(overview?.driver.idDocumentStatus, t)}`} dir={isAr ? 'rtl' : 'ltr'} />
+                <Info label={t.reqLicense} value={mark(licenseOk)} />
+                <Info label={t.reqRegistration} value={mark(registrationOk)} />
+                <Info label={t.reqVehicle} value={mark(vehicleOk)} />
+                <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/driver/vehicles')}>{t.manageVehicles}</button>
+              </div>
+            )
+          })()}
         </article>
         <article style={styles.docsPanel}>
           <h2>{t.todayEarnings}</h2>
@@ -486,6 +532,8 @@ const styles: Record<string, CSSProperties> = {
   pinLabel: { fontSize: 13, color: '#cfe0ff', fontWeight: 700 },
   pinInput: { minHeight: 44, width: 130, letterSpacing: 4, textAlign: 'center', fontSize: 18, fontWeight: 900, border: '1px solid #35507d', borderRadius: 8, background: '#0d1826', color: '#fff' },
   pinError: { fontSize: 13, color: '#ffd1d1' },
+  roadReadyOk: { fontSize: 13, fontWeight: 800, color: '#22d28f', padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(34,210,143,.35)', background: 'rgba(34,210,143,.1)' },
+  roadReadyNo: { fontSize: 13, fontWeight: 800, color: '#ffd166', padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(255,209,102,.35)', background: 'rgba(255,209,102,.08)' },
   panel: { border: '1px solid #263651', borderRadius: 8, background: '#101722', color: '#9aa6ba', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
 }
