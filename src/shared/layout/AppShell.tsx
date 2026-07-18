@@ -64,6 +64,19 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
               <button className="menu-action" onClick={() => navigate('/stays')}>
                 {isAr ? 'الإقامات' : 'Stays'}
               </button>
+              {/* Store-compliance reachability fix: /wallet and /settings (delete account, blocked
+                  accounts) existed and were fully wired, but nothing in primary navigation linked to
+                  them after the account dashboard route was retired — see docs/release notes. */}
+              <button className="menu-action" onClick={() => navigate('/wallet')}>
+                {isAr ? 'المحفظة' : 'Wallet'}
+              </button>
+              <button
+                className="menu-action"
+                onClick={() => navigate('/settings')}
+                aria-label={isAr ? 'الإعدادات' : 'Settings'}
+              >
+                {isAr ? 'الإعدادات ⚙' : 'Settings ⚙'}
+              </button>
               <button className="primary-action" onClick={() => navigate('/stays')}>
                 {isAr ? 'احجز الآن' : 'Book now'}
               </button>
