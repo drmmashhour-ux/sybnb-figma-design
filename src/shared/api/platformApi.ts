@@ -574,6 +574,7 @@ export const LAST_SUBMITTED_LISTING_KEY = 'sybnb.v6.lastSubmittedListing'
 export const SELLER_SESSION_KEY = 'sybnb.v6.sellerSession'
 export const GUEST_SESSION_KEY = 'sybnb.v6.guestSession'
 export const GUEST_SESSION_TOKEN_KEY = 'sybnb-v6-guest-token'
+export const GUEST_DEVICE_ID_KEY = 'sybnb.v6.guestDeviceId'
 export const STAFF_SESSION_KEY = 'sybnb.v6.staffSession'
 export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
 
@@ -2270,13 +2271,31 @@ async function ensurePrototypeHostSession() {
   throw new Error('Host staff session required')
 }
 
+// Each browser/device gets its own random id, generated once and persisted locally. The backend
+// uses it to create (or reuse) a real, isolated guest account per device — this used to be a
+// single hardcoded shared account for every anonymous visitor platform-wide (one wallet, one ride
+// history, one everything), which broke payment isolation and any real accountability. This id is
+// not a verified identity (clearing local storage loses it, same as any device-scoped anonymous
+// session), but it is a real, distinct database user, not a shared one.
+function getOrCreateGuestDeviceId(): string {
+  const existing = authStorage.getItem(GUEST_DEVICE_ID_KEY)
+  if (existing) return existing
+  const generated =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+  authStorage.setItem(GUEST_DEVICE_ID_KEY, generated)
+  return generated
+}
+
 async function ensurePrototypeGuestSession() {
   const guestSession = getStoredGuestSession()
   if (guestSession) return guestSession
 
+  const deviceId = getOrCreateGuestDeviceId()
   const session = await apiRequest<AuthResponse>('/api/auth/checkout-guest', {
     method: 'POST',
-    body: { source: 'guest-checkout' },
+    body: { source: 'guest-checkout', deviceId },
   })
   authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
   authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)

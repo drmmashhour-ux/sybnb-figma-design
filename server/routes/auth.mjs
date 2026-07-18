@@ -157,9 +157,25 @@ export async function handleAuth(req, res, url, context) {
   if (url.pathname === '/api/auth/checkout-guest') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
-    assertNoUnknownFields(body, ['source'], 'checkout guest body')
+    assertNoUnknownFields(body, ['source', 'deviceId'], 'checkout guest body')
 
-    const email = 'checkout-guest@sybnb.local'
+    // SECURITY (frictionless-guest identity): this endpoint previously resolved to one single,
+    // hardcoded account (checkout-guest@sybnb.local) shared by every anonymous visitor across the
+    // whole platform -- every guest ride/booking/wallet/ID document/dispute/etc. was attributed to
+    // that one row, so any two strangers using the frictionless path shared one wallet balance and
+    // one identity. Fixed: the client generates a random device id once (persisted locally) and
+    // sends it here; each distinct device id gets its OWN real, isolated user row, created silently
+    // on first use -- still zero visible "create account" screen, but no longer a shared identity.
+    // A malformed/missing device id is rejected rather than falling back to a shared account.
+    const deviceId = assertBoundedString(body.deviceId, { fieldName: 'deviceId', maxLength: 100, required: true })
+    if (!/^[a-zA-Z0-9-]{8,100}$/.test(deviceId)) {
+      const error = new Error('deviceId must be an opaque alphanumeric/hyphen identifier')
+      error.code = 'DEVICE_ID_INVALID'
+      error.statusCode = 400
+      error.expose = true
+      throw error
+    }
+    const email = `guest-${deviceId.toLowerCase()}@device.sybnb.local`
     let user = await db().user.findUnique({ where: { email }, include: { roles: true } })
 
     if (!user) {
@@ -168,7 +184,7 @@ export async function handleAuth(req, res, url, context) {
         return tx.user.create({
           data: {
             email,
-            displayName: 'SYBNB Checkout Guest',
+            displayName: 'SYBNB Guest',
             referralCode,
             roles: { create: { role: 'GUEST' } },
             wallets: { create: { currency: 'SYP' } },
