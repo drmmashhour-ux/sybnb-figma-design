@@ -1665,6 +1665,85 @@ export async function fetchDriverVehicles() {
   return response.vehicles
 }
 
+// ---- STR guest cancellation (bookings.mjs) ----
+// Returns the CANCELLED booking. The fee/refund breakdown is audit-logged server-side, not returned here,
+// so the UI derives the outcome from the booking policy (free window / protection / flat fee).
+export async function cancelBooking(bookingId: string, note?: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; booking: PlatformBooking }>(`/api/bookings/${bookingId}/cancel`, {
+    method: 'PATCH',
+    token: session.token,
+    body: note ? { note } : {},
+  })
+  return response.booking
+}
+
+// ---- Consumer-protection disputes (disputes.mjs) ----
+export type PlatformDispute = {
+  id: string
+  subjectType: 'SR_RIDE' | 'STR_BOOKING'
+  rideId: string | null
+  bookingId: string | null
+  openedByUserId: string
+  reason: string
+  status: 'OPEN' | 'RESOLVED_REFUNDED' | 'RESOLVED_REJECTED'
+  refundMinor: number | null
+  currency: string | null
+  resolutionNote: string | null
+  resolvedAt: string | null
+  createdAt: string
+  openedBy?: { id: string; displayName: string }
+}
+
+// Customer opens a dispute on a completed ride OR booking they own (exactly one subject id).
+export async function openDispute(input: { rideId?: string; bookingId?: string; reason: string }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; dispute: PlatformDispute }>('/api/disputes', {
+    method: 'POST',
+    token: session.token,
+    body: { rideId: input.rideId, bookingId: input.bookingId, reason: input.reason },
+  })
+  return response.dispute
+}
+
+export async function fetchMyDisputes() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; disputes: PlatformDispute[] }>('/api/disputes', {
+    token: session.token,
+  })
+  return response.disputes
+}
+
+export async function fetchAdminDisputes() {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; disputes: PlatformDispute[] }>('/api/admin/disputes', { token }),
+  )
+  return response.disputes
+}
+
+export async function resolveDispute(id: string, input: { decision: 'REFUND' | 'REJECT'; note?: string; refundMinor?: number }) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; dispute: PlatformDispute }>(`/api/admin/disputes/${id}`, {
+      method: 'PATCH',
+      token,
+      body: { decision: input.decision, note: input.note, refundMinor: input.refundMinor },
+    }),
+  )
+  return response.dispute
+}
+
+// Per-country config (public) — used to show the exact flat cancellation fee in the confirm dialog.
+export type PlatformCountryConfig = {
+  code: string
+  currency: string
+  strLateCancelFee?: { feeMinor: number; feeMinorUsd: number }
+  disputeWindowHours?: number
+}
+export async function fetchCountryConfig(code = 'SY') {
+  const response = await apiRequest<{ ok: true; country: PlatformCountryConfig }>(`/api/config/country/${code}`)
+  return response.country
+}
+
 export async function createPrototypeBooking(input: {
   listingId: string
   amountMinor: number

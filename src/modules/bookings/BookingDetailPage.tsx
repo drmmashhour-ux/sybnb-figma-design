@@ -18,6 +18,7 @@ import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { guestFeeSummary } from './guestFeeSummary'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
+import { BookingCancelDispute } from './BookingCancelDispute'
 
 type Props = {
   bookingId: string
@@ -447,6 +448,8 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
               </button>
             )}
           </section>
+
+          <BookingCancelDispute booking={booking} lang={lang} onChanged={() => void loadBooking()} />
 
           {booking.review && (
             <section style={styles.actions}>

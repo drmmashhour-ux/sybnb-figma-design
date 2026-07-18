@@ -10,6 +10,7 @@ import {
   type PlatformSrQuote,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
+import { OpenDisputeForm } from '../disputes/OpenDisputeForm'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
@@ -364,6 +365,12 @@ export function SrRidePage({ lang }: Props) {
           {message && (
             <div style={{ ...styles.message, ...(status === 'error' ? styles.error : {}) }}>
               {message}
+            </div>
+          )}
+
+          {ride?.status === 'COMPLETED' && ride.id && (
+            <div style={{ marginTop: 12 }}>
+              <OpenDisputeForm lang={lang} rideId={ride.id} />
             </div>
           )}
         </article>
