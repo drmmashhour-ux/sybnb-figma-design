@@ -59,7 +59,6 @@ const copy = {
     connected: 'متصل',
     disconnected: 'غير متصل',
     available: 'متاح',
-    aiSuggested: 'مقترح AI',
     accept: 'قبول',
     pendingEmpty: 'لا توجد طلبات رحلات بانتظار سائق الآن.',
     pendingLoading: 'جار البحث عن طلبات قريبة...',
@@ -124,7 +123,6 @@ const copy = {
     connected: 'Connected',
     disconnected: 'Offline',
     available: 'Available',
-    aiSuggested: 'AI suggested',
     accept: 'Accept',
     pendingEmpty: 'No ride requests waiting for a driver right now.',
     pendingLoading: 'Looking for nearby requests...',
@@ -302,9 +300,8 @@ export function DriverDashboardPage({ lang }: Props) {
             {pendingRides.length === 0 ? (
               <p style={{ color: '#9aa6ba' }}>{pendingStatus === 'loading' ? t.pendingLoading : t.pendingEmpty}</p>
             ) : (
-              pendingRides.map((pendingRide, index) => (
-                <article key={pendingRide.id} style={index === 0 ? styles.suggestedOffer : styles.offerCard}>
-                  {index === 0 && <small>{t.aiSuggested}</small>}
+              pendingRides.map((pendingRide) => (
+                <article key={pendingRide.id} style={styles.offerCard}>
                   <span>{String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
                   <i dir="ltr">
@@ -512,7 +509,6 @@ const styles: Record<string, CSSProperties> = {
   dispatchHero: { border: '1px solid rgba(82,108,255,.9)', borderRadius: 14, background: '#101119', padding: 28, display: 'grid', gap: 24 },
   offerGrid: { display: 'grid', gap: 18, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
-  suggestedOffer: { border: '2px solid #d5a915', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },
