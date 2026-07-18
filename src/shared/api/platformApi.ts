@@ -639,6 +639,53 @@ export async function createAndSubmitPrototypeListing(input: CreateListingInput)
   return submitted.listing
 }
 
+// Facebook-style marketplace quick-list: create a free MARKETPLACE (goods) listing, attach the photo
+// (required for goods), and submit it for review — all in one call. Uses the seller/host session.
+export async function createAndSubmitMarketplaceListing(input: {
+  titleAr: string
+  titleEn?: string
+  description?: string
+  priceMinor: number
+  currency: string
+  category: string
+  condition: string
+  city: string
+  lat?: number
+  lng?: number
+  photoBase64: string
+  photoMimeType: string
+}) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const created = await apiRequest<{ ok: true; listing: PlatformListing }>('/api/listings', {
+    method: 'POST',
+    token: session.token,
+    body: {
+      division: 'MARKETPLACE',
+      titleAr: input.titleAr,
+      titleEn: input.titleEn,
+      description: input.description,
+      priceMinor: input.priceMinor,
+      currency: input.currency,
+      metadata: {
+        category: input.category,
+        condition: input.condition,
+        city: input.city,
+        ...(input.lat !== undefined && input.lng !== undefined ? { lat: input.lat, lng: input.lng } : {}),
+      },
+    },
+  })
+  await apiRequest<{ ok: true }>(`/api/listings/${created.listing.id}/media`, {
+    method: 'POST',
+    token: session.token,
+    body: { fileBase64: input.photoBase64, mimeType: input.photoMimeType },
+  })
+  const submitted = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${created.listing.id}/submit`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  return submitted.listing
+}
+
 export type PlatformAccommodation = {
   id: string
   ownerId: string
@@ -999,6 +1046,8 @@ export type ListingSearchFilters = {
   propertyType?: string
   roomType?: string
   bedType?: string
+  category?: string
+  condition?: string
   minPrice?: number
   maxPrice?: number
   bedrooms?: number
@@ -1017,6 +1066,8 @@ export async function fetchApprovedListings(division = 'STAYS', filters: Listing
   if (filters.propertyType) params.set('propertyType', filters.propertyType)
   if (filters.roomType) params.set('roomType', filters.roomType)
   if (filters.bedType) params.set('bedType', filters.bedType)
+  if (filters.category) params.set('category', filters.category)
+  if (filters.condition) params.set('condition', filters.condition)
   if (filters.minPrice !== undefined) params.set('minPrice', String(filters.minPrice))
   if (filters.maxPrice !== undefined) params.set('maxPrice', String(filters.maxPrice))
   if (filters.bedrooms !== undefined) params.set('bedrooms', String(filters.bedrooms))

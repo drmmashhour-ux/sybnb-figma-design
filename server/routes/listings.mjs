@@ -90,6 +90,9 @@ export async function handleListings(req, res, url, context) {
       const propertyType = params.get('propertyType') || undefined
       const roomType = params.get('roomType') || undefined
       const bedType = params.get('bedType') || undefined
+      // Marketplace (goods) filters — category + condition live in metadata like the property filters.
+      const category = params.get('category') ? String(params.get('category')).toUpperCase() : undefined
+      const condition = params.get('condition') ? String(params.get('condition')).toUpperCase() : undefined
       const minPrice = parsePositiveInt(params.get('minPrice'))
       const maxPrice = parsePositiveInt(params.get('maxPrice'))
       const minBedrooms = parsePositiveInt(params.get('bedrooms'))
@@ -126,6 +129,9 @@ export async function handleListings(req, res, url, context) {
         if (governorate && meta.governorate !== governorate) return false
         if (city && meta.city !== city) return false
         if (area && meta.area !== area) return false
+        // Marketplace goods filters (case-insensitive against the metadata values the sell flow writes).
+        if (category && String(meta.category || '').toUpperCase() !== category) return false
+        if (condition && String(meta.condition || '').toUpperCase() !== condition) return false
         // The wizard writes propertyType twice under two different vocabularies (a capitalized
         // English label from the basic step, and a lowercase id from the visual filter chips) —
         // match either, case-insensitively, against the search page's lowercase chip id.

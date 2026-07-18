@@ -1,3 +1,5 @@
+import { isValidMarketplaceCategory } from './marketplace-categories.mjs'
+
 // Required structured attributes per division. A listing can be DRAFTed with partial data (the wizard
 // saves as you go), but it cannot be SUBMITTED for review — i.e. cannot go live — until the buyer-
 // facing facts a real marketplace needs are all present and sane. This is the "truth over appearance"
@@ -79,7 +81,8 @@ function carRules() {
 
 function marketplaceRules() {
   return [
-    { key: 'category', label: 'category', valid: (m) => isFilledString(pick(m, 'category')) },
+    // Category must be one of the marketplace category tree's top-level ids (Facebook-style catalog).
+    { key: 'category', label: 'category', valid: (m) => isValidMarketplaceCategory(pick(m, 'category')) },
     {
       key: 'condition',
       label: 'condition',

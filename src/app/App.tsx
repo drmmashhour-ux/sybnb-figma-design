@@ -20,6 +20,8 @@ const DisputesPage = lazyNamed(() => import('../modules/disputes/DisputesPage'),
 const AdminDisputesPage = lazyNamed(() => import('../modules/disputes/AdminDisputesPage'), 'AdminDisputesPage')
 const SettingsPage = lazyNamed(() => import('../modules/account/SettingsPage'), 'SettingsPage')
 const AdminReportsPage = lazyNamed(() => import('../modules/safety/AdminReportsPage'), 'AdminReportsPage')
+const MarketplaceBrowsePage = lazyNamed(() => import('../modules/marketplace/MarketplaceBrowsePage'), 'MarketplaceBrowsePage')
+const MarketplaceSellPage = lazyNamed(() => import('../modules/marketplace/MarketplaceSellPage'), 'MarketplaceSellPage')
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
@@ -160,8 +162,10 @@ export function App() {
           <RentalsPage lang={lang} mode="buy" />
         ) : path === '/cars' ? (
           <SearchPreviewPage lang={lang} initialDivision="cars" entry="general" />
+        ) : path === '/marketplace/sell' ? (
+          <MarketplaceSellPage lang={lang} />
         ) : path === '/marketplace' ? (
-          <SearchPreviewPage lang={lang} initialDivision="marketplace" entry="general" />
+          <MarketplaceBrowsePage lang={lang} />
         ) : path === '/new-construction' ? (
           <SearchPreviewPage lang={lang} initialDivision="newConstruction" entry="general" />
         ) : paymentReceiptMatch ? (

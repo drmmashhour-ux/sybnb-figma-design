@@ -11,7 +11,9 @@ export const PLAN_DURATION_DAYS = {
 // The divisions that require a paid, admin-approved seller plan (as opposed to the commission/
 // contact-based STAYS/RENTALS/BUY). Single source of truth, imported by both the listing create
 // route (gate) and the admin approval route (which starts the paid clock).
-export const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
+// Facebook-style marketplace Phase 1: MARKETPLACE (goods) is now FREE for individual listing — removed
+// from the paid-plan gate. CARS and NEW_CONSTRUCTION stay behind an admin-approved paid seller plan.
+export const PAID_PLAN_DIVISIONS = new Set(['CARS', 'NEW_CONSTRUCTION'])
 
 export function listingExpiryDate(planCode) {
   const days = PLAN_DURATION_DAYS[planCode] ?? PLAN_DURATION_DAYS.plus
