@@ -12,7 +12,7 @@ import { testApp } from '../support/testServer.mjs'
 // Globalization: the per-country config layer is seeded with an Arab-region + global starter set. These
 // prove every seeded country is well-formed, the lookup/default/unknown contract holds, the public
 // endpoint exposes a seeded country and 404s an unknown one, and the derived helpers read config.
-const SR_TIERS = ['SR Economy', 'SR Comfort', 'SR SUV']
+const SR_TIERS = ['SR Economy', 'SR Comfort', 'SR SUV', 'SR XXL']
 const REQUIRED_KEYS = [
   'code', 'name', 'currency', 'usdAccepted', 'languages', 'primaryLanguage', 'rtl',
   'paymentMethods', 'vatRatePct', 'vehicleAgeLimits', 'srCancellation', 'disputeWindowHours',

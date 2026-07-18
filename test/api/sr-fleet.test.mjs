@@ -68,6 +68,25 @@ describe('SR fleet: vehicle records + age gate + driver account control', () => 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('VEHICLE_CATEGORY_INVALID')
     })
+
+    it('registers an SR XXL vehicle within its age limit', async () => {
+      const driver = await registerDriver(app, 'veh-xxl-ok')
+      const res = await request(app)
+        .post('/api/driver/vehicles')
+        .set('Authorization', `Bearer ${driver.token}`)
+        .send(economyVehicle({ category: 'SR XXL', model: 'Sedona', year: NOW_YEAR - (VEHICLE_AGE_LIMITS['SR XXL'] - 1) }))
+      expect(res.status).toBe(201)
+      expect(res.body.vehicle.category).toBe('SR XXL')
+    })
+
+    it('rejects an SR XXL vehicle older than its age limit', async () => {
+      const driver = await registerDriver(app, 'veh-xxl-old')
+      const tooOld = economyVehicle({ category: 'SR XXL', model: 'Sedona', year: NOW_YEAR - (VEHICLE_AGE_LIMITS['SR XXL'] + 1) })
+      const res = await request(app).post('/api/driver/vehicles').set('Authorization', `Bearer ${driver.token}`).send(tooOld)
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VEHICLE_TOO_OLD')
+      expect(res.body.error.details.maxAge).toBe(VEHICLE_AGE_LIMITS['SR XXL'])
+    })
   })
 
   describe('admin vehicle review', () => {

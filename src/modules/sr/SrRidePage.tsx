@@ -87,13 +87,13 @@ const copy = {
 
 const ACTIVE_RIDE_ID_KEY = 'sybnb.v6.activeSrRideId'
 
-const categories = ['SR Economy', 'SR Comfort', 'SR SUV']
+const categories = ['SR Economy', 'SR Comfort', 'SR SUV', 'SR XXL']
 
 const rideCategoryByFilter: Record<string, string> = {
   economy: 'SR Economy',
   comfort: 'SR Comfort',
   premium: 'SR Comfort',
-  familyVan: 'SR SUV',
+  familyVan: 'SR XXL',
 }
 
 export function SrRidePage({ lang }: Props) {
@@ -119,7 +119,7 @@ export function SrRidePage({ lang }: Props) {
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareSypMinor = useMemo(() => {
-    const base = category === 'SR SUV' ? 58000 : category === 'SR Comfort' ? 46000 : 35000
+    const base = category === 'SR XXL' ? 78000 : category === 'SR SUV' ? 58000 : category === 'SR Comfort' ? 46000 : 35000
     return lowDataMode ? base : base + 2500
   }, [category, lowDataMode])
   const fallbackFareMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(fallbackFareSypMinor) : fallbackFareSypMinor

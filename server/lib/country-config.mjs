@@ -30,7 +30,7 @@ function srCancel({ minFeeMinor = 0, maxFeeMinor = UNTUNED_MAX_FEE_MINOR } = {})
 }
 
 // Gulf markets typically mandate newer rideshare fleets than the default 10/7/7 — CONFIRM per regulator.
-const GULF_VEHICLE_AGE_LIMITS = { 'SR Economy': 7, 'SR Comfort': 7, 'SR SUV': 7 }
+const GULF_VEHICLE_AGE_LIMITS = { 'SR Economy': 7, 'SR Comfort': 7, 'SR SUV': 7, 'SR XXL': 7 }
 
 export const COUNTRY_CONFIGS = {
   SY: {

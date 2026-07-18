@@ -73,6 +73,7 @@ const CATEGORY_RATES = {
   'SR Economy': { baseMinor: 8000, perKmMinor: 900 },
   'SR Comfort': { baseMinor: 12000, perKmMinor: 1300 },
   'SR SUV': { baseMinor: 18000, perKmMinor: 1800 },
+  'SR XXL': { baseMinor: 24000, perKmMinor: 2400 },
 }
 
 // Live-tracking surcharge for riders who opt out of low-data mode, mirroring the previous flat-fare model.

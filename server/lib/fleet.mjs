@@ -3,12 +3,13 @@
 // stricter for premium tiers, plus valid plate/registration and admin approval before a car can work.
 //
 // The founder rule: standard (Economy) trips require a car no older than 10 years; premium tiers newer.
-export const SR_VEHICLE_CATEGORIES = ['SR Economy', 'SR Comfort', 'SR SUV']
+export const SR_VEHICLE_CATEGORIES = ['SR Economy', 'SR Comfort', 'SR SUV', 'SR XXL']
 
 export const VEHICLE_AGE_LIMITS = {
   'SR Economy': 10, // standard trips — no older than 10 model years
   'SR Comfort': 7, // premium comfort — newer cars only
   'SR SUV': 7, // premium SUV — newer cars only
+  'SR XXL': 7, // larger-capacity vehicle for bigger groups/luggage — newer cars only
 }
 
 // A model year older than this is almost certainly a typo / not a real rideshare vehicle.

@@ -31,7 +31,7 @@ const copy = {
     statusRejected: 'مرفوضة',
     genericError: 'تعذر تسجيل المركبة، حاول مجددًا.',
     loadError: 'تعذر تحميل المركبات.',
-    ageHint: 'الحد الأقصى للعمر: اقتصادية 10 سنوات، مريحة/دفع رباعي 7 سنوات.',
+    ageHint: 'الحد الأقصى للعمر: اقتصادية 10 سنوات، مريحة/دفع رباعي/XXL 7 سنوات.',
   },
   en: {
     back: 'Back to driver dashboard',
@@ -54,11 +54,11 @@ const copy = {
     statusRejected: 'Rejected',
     genericError: 'Could not register the vehicle. Please try again.',
     loadError: 'Could not load your vehicles.',
-    ageHint: 'Max age: Economy 10 years, Comfort/SUV 7 years.',
+    ageHint: 'Max age: Economy 10 years, Comfort/SUV/XXL 7 years.',
   },
 }
 
-const CATEGORIES = ['SR Economy', 'SR Comfort', 'SR SUV'] as const
+const CATEGORIES = ['SR Economy', 'SR Comfort', 'SR SUV', 'SR XXL'] as const
 
 function statusText(status: PlatformDriverVehicle['status'], t: typeof copy.en) {
   if (status === 'APPROVED') return t.statusApproved
