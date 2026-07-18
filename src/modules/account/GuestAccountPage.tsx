@@ -4,8 +4,10 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   createGuestAccountSession,
   sendEmailVerificationCode,
+  sendPhoneVerificationCode,
   submitGuestIdDocument,
   verifyEmailVerificationCode,
+  verifyPhoneVerificationCode,
 } from '../../shared/api/platformApi'
 import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -63,6 +65,11 @@ const copy = {
     codeSentDev: 'بيئة التطوير: لا يُرسل بريد فعلي خارج بيئة الإنتاج، لذا الرمز معروض هنا مباشرة للاختبار فقط.',
     codeConfirmed: 'تم تأكيد البريد الإلكتروني.',
     codeInvalid: 'الرمز غير صحيح أو منتهي الصلاحية. اطلب رمزاً جديداً.',
+    verifyByEmail: 'التحقق بالبريد',
+    verifyByPhone: 'التحقق بالهاتف',
+    sendCodePhone: 'إرسال رمز SMS',
+    phoneCodeSent: 'تم إرسال رمز التحقق إلى هاتفك عبر SMS.',
+    phoneConfirmed: 'تم تأكيد رقم الهاتف.',
     ready: 'تم تجهيز حساب العميل. يمكنك الآن إرسال طلب الحجز.',
     rentalsReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الإيجار.',
     buyReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الشراء.',
@@ -114,6 +121,11 @@ const copy = {
     codeSentDev: 'Dev environment: no real email is sent outside production, so the code is shown here directly for testing only.',
     codeConfirmed: 'Email confirmed.',
     codeInvalid: 'That code is wrong or expired. Request a new one.',
+    verifyByEmail: 'Verify by email',
+    verifyByPhone: 'Verify by phone',
+    sendCodePhone: 'Send SMS code',
+    phoneCodeSent: 'Verification code sent to your phone via SMS.',
+    phoneConfirmed: 'Phone number confirmed.',
     ready: 'Guest account is ready. You can now send the booking request.',
     rentalsReady: 'Guest account is ready. You can now continue the rental request.',
     buyReady: 'Guest account is ready. You can now continue the purchase request.',
@@ -129,10 +141,12 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [mode, setMode] = useState<'signup' | 'signin'>('signup')
+  // Verify by email (default) OR phone/SMS — the identifier the OTP is sent to.
+  const [verifyMethod, setVerifyMethod] = useState<'email' | 'phone'>('email')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
+  const [phone, setPhone] = useState('+963')
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
   const [referralCode, setReferralCode] = useState('')
@@ -173,14 +187,16 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
     setCode('')
     setDevCode('')
     try {
-      const result = await sendEmailVerificationCode(email.trim())
+      const result = verifyMethod === 'phone'
+        ? await sendPhoneVerificationCode(phone.trim())
+        : await sendEmailVerificationCode(email.trim())
       setCodeSent(true)
       if (result.devCode) {
         setDevCode(result.devCode)
         setMessage(t.codeSentDev)
         setIsErrorMessage(false)
       } else {
-        setMessage(t.codeSentReal)
+        setMessage(verifyMethod === 'phone' ? t.phoneCodeSent : t.codeSentReal)
         setIsErrorMessage(false)
       }
     } catch (error) {
@@ -194,9 +210,10 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
   async function confirmCode() {
     setCodeBusy('confirming')
     try {
-      await verifyEmailVerificationCode(email.trim(), code.trim())
+      if (verifyMethod === 'phone') await verifyPhoneVerificationCode(phone.trim(), code.trim())
+      else await verifyEmailVerificationCode(email.trim(), code.trim())
       setCodeConfirmed(true)
-      setMessage(t.codeConfirmed)
+      setMessage(verifyMethod === 'phone' ? t.phoneConfirmed : t.codeConfirmed)
       setIsErrorMessage(false)
     } catch {
       setCodeConfirmed(false)
@@ -213,10 +230,11 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
       (firstName.trim().length < 2 ||
         lastName.trim().length < 2 ||
         password !== repeatPassword)
+    // The verified identifier depends on the chosen method (email or phone/SMS).
+    const identifierOk = verifyMethod === 'phone' ? phone.trim().length >= 8 : email.includes('@')
     if (
       signupMissing ||
-      !email.includes('@') ||
-      phone.trim().length < 8 ||
+      !identifierOk ||
       password.length < 8 ||
       !codeConfirmed
     ) {
@@ -230,8 +248,8 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
       await createGuestAccountSession({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
+        email: verifyMethod === 'email' ? email.trim() : email.trim() || undefined,
+        phone: verifyMethod === 'phone' ? phone.trim() : (phone.trim() && phone.trim() !== '+963' ? phone.trim() : undefined),
         password,
         referralCode: referralCode.trim() || undefined,
       })
@@ -307,13 +325,27 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
             />
           ) : null}
         </div>
+        <div style={styles.modeSwitch} role="tablist" aria-label={isAr ? 'طريقة التحقق' : 'Verification method'}>
+          <button
+            style={verifyMethod === 'email' ? styles.modeButtonActive : styles.modeButton}
+            onClick={() => { setVerifyMethod('email'); setCodeSent(false); setCodeConfirmed(false); setCode('') }}
+          >
+            {t.verifyByEmail}
+          </button>
+          <button
+            style={verifyMethod === 'phone' ? styles.modeButtonActive : styles.modeButton}
+            onClick={() => { setVerifyMethod('phone'); setCodeSent(false); setCodeConfirmed(false); setCode('') }}
+          >
+            {t.verifyByPhone}
+          </button>
+        </div>
         <div style={styles.codeRow}>
           <button
             style={styles.secondaryButton}
             onClick={() => void sendCode()}
-            disabled={!email.includes('@') || codeBusy !== 'idle'}
+            disabled={(verifyMethod === 'phone' ? phone.trim().length < 8 : !email.includes('@')) || codeBusy !== 'idle'}
           >
-            {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : t.sendCode}
+            {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : verifyMethod === 'phone' ? t.sendCodePhone : t.sendCode}
           </button>
           <input
             dir="ltr"

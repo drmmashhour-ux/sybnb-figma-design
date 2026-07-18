@@ -5,7 +5,9 @@ import {
   createStaffAccountSession,
   resetPasswordWithEmailCode,
   sendEmailVerificationCode,
+  sendPhoneVerificationCode,
   verifyEmailVerificationCode,
+  verifyPhoneVerificationCode,
 } from '../../shared/api/platformApi'
 
 type StaffRole = 'ADMIN' | 'HOST' | 'DRIVER'
@@ -58,6 +60,11 @@ const labels = {
     codeSentDev: 'تم إنشاء الرمز في بيئة الاختبار. إذا كان Resend مفعلاً سيصل البريد أيضاً.',
     codeConfirmed: 'تم تأكيد البريد.',
     codeInvalid: 'الرمز غير صحيح أو منتهي الصلاحية.',
+    verifyByEmail: 'التحقق بالبريد',
+    verifyByPhone: 'التحقق بالهاتف',
+    sendCodePhone: 'إرسال رمز SMS',
+    phoneCodeSent: 'تم إرسال رمز التحقق إلى هاتفك عبر SMS.',
+    phoneConfirmed: 'تم تأكيد رقم الهاتف.',
     demoCode: 'رمز الاختبار',
     openAdmin: 'دخول الإدارة',
     openPartner: 'فتح لوحة الشريك',
@@ -105,6 +112,11 @@ const labels = {
     codeSentDev: 'A test code was generated. If Resend is configured, the email is also sent.',
     codeConfirmed: 'Email confirmed.',
     codeInvalid: 'Incorrect or expired verification code.',
+    verifyByEmail: 'Verify by email',
+    verifyByPhone: 'Verify by phone',
+    sendCodePhone: 'Send SMS code',
+    phoneCodeSent: 'Verification code sent to your phone via SMS.',
+    phoneConfirmed: 'Phone number confirmed.',
     demoCode: 'Test code',
     openAdmin: 'Open admin',
     openPartner: 'Open partner dashboard',
@@ -127,6 +139,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const isAr = lang === 'ar'
   const canSignUp = role !== 'ADMIN'
   const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgotPassword'>('signIn')
+  // Verify by email (default) or phone/SMS. Forgot-password always uses email (password-reset code).
+  const [verifyMethod, setVerifyMethod] = useState<'email' | 'phone'>('email')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [email, setEmail] = useState('')
   const [emailRepeat, setEmailRepeat] = useState('')
@@ -147,6 +161,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const subtitle = role === 'ADMIN' ? t.adminSubtitle : role === 'DRIVER' ? t.driverSubtitle : t.partnerSubtitle
   const actionLabel = role === 'ADMIN' ? t.openAdmin : role === 'DRIVER' ? t.openDriver : t.openPartner
   const otpPurpose = mode === 'forgotPassword' ? 'password-reset' : 'staff-login'
+  // Phone verification is available for sign-in / sign-up (not the email-only password reset).
+  const usePhone = mode !== 'forgotPassword' && verifyMethod === 'phone'
 
   function resetCodeState() {
     setCodeSent(false)
@@ -169,20 +185,22 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   }
 
   async function sendCode() {
-    if (!email.trim()) return
+    if (usePhone ? phone.trim().length < 8 : !email.trim()) return
     setCodeBusy('sending')
     setCode('')
     setCodeConfirmed(false)
     setDevCode('')
     try {
-      const result = await sendEmailVerificationCode(email.trim(), otpPurpose)
+      const result = usePhone
+        ? await sendPhoneVerificationCode(phone.trim(), otpPurpose)
+        : await sendEmailVerificationCode(email.trim(), otpPurpose)
       setCodeSent(true)
       setIsErrorMessage(false)
       if (result.devCode) {
         setDevCode(result.devCode)
-        setMessage(result.emailSent ? t.codeSentReal : t.codeSentDev)
+        setMessage(t.codeSentDev)
       } else {
-        setMessage(t.codeSentReal)
+        setMessage(usePhone ? t.phoneCodeSent : t.codeSentReal)
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t.error)
@@ -195,9 +213,10 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   async function confirmCode() {
     setCodeBusy('confirming')
     try {
-      await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
+      if (usePhone) await verifyPhoneVerificationCode(phone.trim(), code.trim(), otpPurpose)
+      else await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
       setCodeConfirmed(true)
-      setMessage(t.codeConfirmed)
+      setMessage(usePhone ? t.phoneConfirmed : t.codeConfirmed)
       setIsErrorMessage(false)
     } catch {
       setCodeConfirmed(false)
@@ -212,17 +231,20 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     if (mode === 'forgotPassword') return
     const normalizedEmail = email.trim().toLowerCase()
     const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
-    if (mode === 'signUp' && normalizedEmail !== normalizedEmailRepeat) {
+    // Email-repeat match only applies when verifying by email.
+    if (mode === 'signUp' && !usePhone && normalizedEmail !== normalizedEmailRepeat) {
       setIsErrorMessage(true)
       setMessage(t.emailMismatch)
       return
     }
-    if (!email.trim() || !password.trim() || !codeConfirmed) {
+    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim())
+    if (!identifierOk || !password.trim() || !codeConfirmed) {
       setIsErrorMessage(true)
       setMessage(mode === 'signUp' ? t.signUpRequired : t.signInRequired)
       return
     }
     if (mode === 'signUp') {
+      // A phone is always required for partner signup; when verifying by phone it's the verified identifier.
       if (!phone.trim()) {
         setIsErrorMessage(true)
         setMessage(t.signUpRequired)
@@ -238,7 +260,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     setStatus('loading')
     try {
       await createStaffAccountSession(role, {
-        email: normalizedEmail,
+        // When verifying by phone, sign in/up by phone (email left empty); otherwise by email.
+        email: usePhone ? '' : normalizedEmail,
         password,
         phone: phone.trim(),
         mode,
@@ -352,10 +375,43 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             </label>
           )}
 
+          {mode !== 'forgotPassword' && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 4 }} role="tablist" aria-label={isAr ? 'طريقة التحقق' : 'Verification method'}>
+              <button
+                type="button"
+                style={verifyMethod === 'email' ? styles.methodActive : styles.methodInactive}
+                onClick={() => { setVerifyMethod('email'); setCodeSent(false); setCodeConfirmed(false); setCode('') }}
+              >
+                {t.verifyByEmail}
+              </button>
+              <button
+                type="button"
+                style={verifyMethod === 'phone' ? styles.methodActive : styles.methodInactive}
+                onClick={() => { setVerifyMethod('phone'); setCodeSent(false); setCodeConfirmed(false); setCode(''); if (!phone.trim()) setPhone('+963') }}
+              >
+                {t.verifyByPhone}
+              </button>
+            </div>
+          )}
+
+          {usePhone && (
+            <label style={styles.labelWide}>
+              {t.phone}
+              <input
+                style={styles.input}
+                value={phone}
+                inputMode="tel"
+                placeholder="+963..."
+                onChange={(event) => { setPhone(event.target.value); setCodeConfirmed(false) }}
+                dir="ltr"
+              />
+            </label>
+          )}
+
           <section style={styles.emailConfirmBox}>
             <div style={styles.confirmHeader}>
-              <strong>{t.confirmEmail}</strong>
-              {codeConfirmed && <span style={styles.confirmedPill}>{t.codeConfirmed}</span>}
+              <strong>{usePhone ? t.verifyByPhone : t.confirmEmail}</strong>
+              {codeConfirmed && <span style={styles.confirmedPill}>{usePhone ? t.phoneConfirmed : t.codeConfirmed}</span>}
             </div>
             <div style={styles.codeRow}>
               <input
@@ -368,8 +424,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 }}
                 dir="ltr"
               />
-              <button style={styles.codeButton} onClick={() => void sendCode()} disabled={!email.includes('@') || codeBusy !== 'idle'}>
-                {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : t.sendCode}
+              <button style={styles.codeButton} onClick={() => void sendCode()} disabled={(usePhone ? phone.trim().length < 8 : !email.includes('@')) || codeBusy !== 'idle'}>
+                {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : usePhone ? t.sendCodePhone : t.sendCode}
               </button>
               <button
                 style={styles.codeButton}
@@ -469,6 +525,8 @@ const styles: Record<string, CSSProperties> = {
   confirmedPill: { background: '#08251c', border: '1px solid #22d28f', borderRadius: 999, color: '#22d28f', padding: '6px 10px', fontSize: 12, fontWeight: 900 },
   codeRow: { display: 'grid', gridTemplateColumns: 'minmax(130px, 1fr) auto auto', gap: 8 },
   codeButton: { minHeight: 52, border: '1px solid #22d28f', borderRadius: 12, background: '#08251c', color: '#22d28f', fontWeight: 900, padding: '0 16px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  methodActive: { flex: 1, minHeight: 44, border: '1px solid rgba(82,104,255,.2)', borderRadius: 10, background: '#20212b', color: '#fff', fontWeight: 800, cursor: 'pointer' },
+  methodInactive: { flex: 1, minHeight: 44, border: '1px solid transparent', borderRadius: 10, background: 'transparent', color: '#8a90a2', fontWeight: 800, cursor: 'pointer' },
   note: { marginTop: 18, color: '#22d28f', fontWeight: 800 },
   noteMuted: { marginTop: 18, color: '#8f9bb3', fontWeight: 700 },
   error: { marginTop: 18, color: '#ff4d73', fontWeight: 800 },

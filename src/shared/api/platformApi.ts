@@ -753,19 +753,21 @@ export async function createSellerAccountSession(input: {
 export async function createGuestAccountSession(input: {
   firstName?: string
   lastName?: string
-  email: string
-  phone: string
+  email?: string
+  phone?: string
   password: string
   referralCode?: string
 }) {
   const displayName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || 'SYBNB Guest'
   const trimmedReferralCode = input.referralCode?.trim()
+  const email = input.email?.trim() || ''
+  const phone = input.phone?.trim() || ''
   const account = {
-    email: input.email,
+    email,
     password: input.password,
     displayName,
     role: 'GUEST',
-    phone: input.phone,
+    phone,
     ...(trimmedReferralCode ? { referralCode: trimmedReferralCode } : {}),
   }
 
@@ -773,7 +775,8 @@ export async function createGuestAccountSession(input: {
   try {
     session = await register(account)
   } catch {
-    session = await login(input.email, input.password)
+    // Already registered → sign in with whichever identifier the user verified (email or phone).
+    session = email ? await login(email, input.password) : await loginByPhone(phone, input.password)
   }
 
   authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
@@ -804,6 +807,22 @@ export async function verifyEmailVerificationCode(email: string, code: string, p
   return apiRequest<{ ok: true }>('/api/auth/email-code/verify', {
     method: 'POST',
     body: { email, code, purpose },
+  })
+}
+
+// Real phone/SMS OTP — the alternative to the email code (same purpose values). devCode is only
+// populated outside production (or until an SMS provider is configured); never treat it as delivery.
+export async function sendPhoneVerificationCode(phone: string, purpose: EmailCodePurpose = 'guest-signup') {
+  return apiRequest<{ ok: true; smsSent: boolean; smsError?: string; devCode?: string }>('/api/auth/phone-code/send', {
+    method: 'POST',
+    body: { phone, purpose },
+  })
+}
+
+export async function verifyPhoneVerificationCode(phone: string, code: string, purpose: EmailCodePurpose = 'guest-signup') {
+  return apiRequest<{ ok: true }>('/api/auth/phone-code/verify', {
+    method: 'POST',
+    body: { phone, code, purpose },
   })
 }
 
@@ -899,20 +918,18 @@ export async function createStaffAccountSession(
   },
 ) {
   const fallbackAccount = staffPrototypeAccount(role)
-  const email = input?.email?.trim()
+  const email = input?.email?.trim() || ''
   const password = input?.password?.trim()
-  const phone = input?.phone?.trim()
-  if (!email || !password) {
-    throw new Error('Email and password are required')
+  const phone = input?.phone?.trim() || ''
+  // Staff can sign in with a verified email OR phone (matching the backend). One identifier + password.
+  if ((!email && !phone) || !password) {
+    throw new Error('Email or phone, plus password, are required')
   }
 
   let session: AuthResponse
   if (input?.mode === 'signUp') {
     if (role === 'ADMIN') {
       throw new Error('Admin accounts are owner-created. Sign in with an existing admin account.')
-    }
-    if (!phone) {
-      throw new Error('Phone is required for partner signup')
     }
     session = await register({
       ...fallbackAccount,
@@ -921,7 +938,7 @@ export async function createStaffAccountSession(
       phone,
     })
   } else {
-    session = await login(email, password)
+    session = email ? await login(email, password) : await loginByPhone(phone, password)
   }
   authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
   authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
@@ -2272,6 +2289,14 @@ async function login(email: string, password: string) {
   return apiRequest<AuthResponse>('/api/auth/login', {
     method: 'POST',
     body: { email, password },
+  })
+}
+
+// Sign in with a phone number instead of email (backend accepts either). Used by the phone-verify flow.
+async function loginByPhone(phone: string, password: string) {
+  return apiRequest<AuthResponse>('/api/auth/login', {
+    method: 'POST',
+    body: { phone, password },
   })
 }
 
