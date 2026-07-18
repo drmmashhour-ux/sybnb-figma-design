@@ -95,11 +95,26 @@ export type PlatformRideRequest = {
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
+  // 4-digit pickup code — returned by the API to the RIDER only (the driver's copy is stripped server-side).
+  pickupPin?: string | null
   rider?: {
     id: string
     displayName: string
     email: string | null
   }
+}
+
+export type PlatformDriverVehicle = {
+  id: string
+  make: string
+  model: string
+  year: number
+  plate: string
+  color: string | null
+  category: string
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+  reviewNote?: string | null
+  createdAt: string
 }
 
 export type PlatformBooking = {
@@ -1610,6 +1625,44 @@ export async function updatePrototypeDriverRideStatus(
     },
   )
   return response.ride
+}
+
+// SR pickup PIN (017): the driver submits the 4-digit code the rider reads out; the server sets
+// pickupVerifiedAt on success, which unlocks starting the trip (IN_PROGRESS).
+export async function verifyDriverPickupPin(rideId: string, pin: string) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; verified: boolean }>(`/api/sr/rides/${rideId}/verify-pin`, {
+    method: 'POST',
+    token: session.token,
+    body: { pin },
+  })
+  return response.verified
+}
+
+// SR fleet (020): driver vehicle records, age-gated per tier server-side.
+export async function createDriverVehicle(input: {
+  make: string
+  model: string
+  year: number
+  plate: string
+  color?: string
+  category: string
+}) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; vehicle: PlatformDriverVehicle }>('/api/driver/vehicles', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.vehicle
+}
+
+export async function fetchDriverVehicles() {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; vehicles: PlatformDriverVehicle[] }>('/api/driver/vehicles', {
+    token: session.token,
+  })
+  return response.vehicles
 }
 
 export async function createPrototypeBooking(input: {

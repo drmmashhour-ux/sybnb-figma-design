@@ -38,6 +38,8 @@ const copy = {
     status: 'حالة الرحلة',
     rideId: 'رقم الرحلة',
     driver: 'السائق',
+    pickupCode: 'رمز الانطلاق',
+    pickupCodeHint: 'اقرأ هذا الرمز للسائق عند الوصول لبدء الرحلة.',
     location: 'الموقع',
     accuracy: 'دقة الموقع',
     saved: 'تم حفظ الرحلة',
@@ -68,6 +70,8 @@ const copy = {
     status: 'Ride status',
     rideId: 'Ride ID',
     driver: 'Driver',
+    pickupCode: 'Pickup code',
+    pickupCodeHint: 'Read this code to your driver at pickup to start the trip.',
     location: 'Location',
     accuracy: 'Accuracy',
     saved: 'Ride saved',
@@ -343,6 +347,13 @@ export function SrRidePage({ lang }: Props) {
           {ride?.driverId && (
             <div style={styles.message}>{t.driverAssigned}</div>
           )}
+          {ride?.pickupPin && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && (
+            <div style={styles.pickupCode}>
+              <span style={styles.pickupCodeLabel}>{t.pickupCode}</span>
+              <strong style={styles.pickupCodeValue}>{ride.pickupPin}</strong>
+              <span style={styles.pickupCodeHint} dir={isAr ? 'rtl' : 'ltr'}>{t.pickupCodeHint}</span>
+            </div>
+          )}
 
           <div style={styles.actions}>
             <button disabled={!ride || status === 'saving'} style={styles.secondaryButton} onClick={() => void refreshRide()}>
@@ -371,6 +382,10 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
 }
 
 const styles: Record<string, CSSProperties> = {
+  pickupCode: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '14px 16px', margin: '8px 0', borderRadius: 12, border: '1px solid #2f6fed55', background: 'rgba(47,111,237,.10)' },
+  pickupCodeLabel: { fontSize: 13, fontWeight: 700, color: '#2f6fed' },
+  pickupCodeValue: { fontSize: 34, letterSpacing: 10, fontWeight: 900, color: '#1b3a8a' },
+  pickupCodeHint: { fontSize: 12, color: '#555', textAlign: 'center' },
   page: { minHeight: '100vh', background: '#070b12', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 16, maxWidth: 1040, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #263651', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   hero: { border: '1px solid #1e2a3c', borderRadius: 8, padding: 18, background: '#101722' },

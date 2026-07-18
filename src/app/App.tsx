@@ -15,6 +15,7 @@ const BookingReviewPage = lazyNamed(() => import('../modules/bookings/BookingRev
 const CompetitorsPage = lazyNamed(() => import('../modules/competitors/CompetitorsPage'), 'CompetitorsPage')
 const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLivePage'), 'DivisionLivePage')
 const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDashboardPage'), 'DriverDashboardPage')
+const DriverVehiclesPage = lazyNamed(() => import('../modules/driver/DriverVehiclesPage'), 'DriverVehiclesPage')
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
@@ -107,6 +108,8 @@ export function App() {
           <HostInsightsPanel lang={lang} />
         ) : path === '/host/inquiries' ? (
           <HostInquiriesPage lang={lang} />
+        ) : path === '/driver/vehicles' ? (
+          <DriverVehiclesPage lang={lang} />
         ) : path === '/driver' ? (
           <DriverDashboardPage lang={lang} />
         ) : path === '/immocontact' ? (

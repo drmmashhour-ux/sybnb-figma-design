@@ -6,6 +6,7 @@ import {
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
   updatePrototypeDriverRideStatus,
+  verifyDriverPickupPin,
   type PlatformDriverOverview,
   type PlatformRideRequest,
 } from '../../shared/api/platformApi'
@@ -37,6 +38,11 @@ const copy = {
     start: 'بدء الرحلة',
     complete: 'إنهاء',
     cancel: 'إلغاء',
+    pickupCodeLabel: 'رمز الانطلاق من الراكب',
+    pickupCodePlaceholder: 'أدخل الرمز المكوّن من 4 أرقام',
+    verifyPickup: 'تأكيد الرمز وبدء الرحلة',
+    verifying: 'جار التحقق...',
+    myVehicles: 'مركباتي',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -88,6 +94,11 @@ const copy = {
     start: 'Start ride',
     complete: 'Complete',
     cancel: 'Cancel',
+    pickupCodeLabel: 'Rider pickup code',
+    pickupCodePlaceholder: 'Enter the 4-digit code',
+    verifyPickup: 'Confirm code & start trip',
+    verifying: 'Verifying…',
+    myVehicles: 'My vehicles',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -186,6 +197,20 @@ export function DriverDashboardPage({ lang }: Props) {
     }
   }
 
+  // Pickup PIN (017): verify the rider's 4-digit code, then start the trip (IN_PROGRESS). Returns the
+  // error message on failure so the card can show it inline (e.g. "code does not match").
+  async function verifyPickupAndStart(rideId: string, pin: string): Promise<string | null> {
+    setMessage('')
+    try {
+      await verifyDriverPickupPin(rideId, pin)
+      await updatePrototypeDriverRideStatus(rideId, 'IN_PROGRESS')
+      setOverview(await fetchPrototypeDriverOverview())
+      return null
+    } catch (error) {
+      return error instanceof Error && error.message ? error.message : t.error
+    }
+  }
+
   async function updateRide(rideId: string, nextStatus: 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') {
     setStatus('saving')
     setActiveRideId(rideId)
@@ -229,9 +254,14 @@ export function DriverDashboardPage({ lang }: Props) {
             </div>
           ))}
         </div>
-        <button style={styles.primaryButton} onClick={() => void loadOverview()}>
-          {status === 'loading' ? t.loading : t.refresh}
-        </button>
+        <div style={styles.actions}>
+          <button style={styles.primaryButton} onClick={() => void loadOverview()}>
+            {status === 'loading' ? t.loading : t.refresh}
+          </button>
+          <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/driver/vehicles')}>
+            {t.myVehicles}
+          </button>
+        </div>
       </section>
 
       {status === 'error' && <section style={styles.alert}>{message}</section>}
@@ -302,6 +332,7 @@ export function DriverDashboardPage({ lang }: Props) {
               labels={t}
               disabled={activeRideId === ride.id || status === 'saving'}
               onUpdate={(nextStatus) => void updateRide(ride.id, nextStatus)}
+              onVerifyPin={(pin) => verifyPickupAndStart(ride.id, pin)}
             />
           ))
         ) : (
@@ -318,13 +349,31 @@ function RideCard({
   labels,
   disabled,
   onUpdate,
+  onVerifyPin,
 }: {
   ride: PlatformRideRequest
   lang: Lang
   labels: typeof copy.en
   disabled: boolean
   onUpdate: (status: 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') => void
+  onVerifyPin: (pin: string) => Promise<string | null>
 }) {
+  const [pin, setPin] = useState('')
+  const [pinState, setPinState] = useState<'idle' | 'verifying'>('idle')
+  const [pinError, setPinError] = useState('')
+  // The pickup code is entered once the driver is at the rider (assigned / arriving) to start the trip.
+  const atPickup = ride.status === 'DRIVER_ASSIGNED' || ride.status === 'DRIVER_ARRIVING'
+
+  async function submitPin() {
+    if (pin.trim().length !== 4) return
+    setPinState('verifying')
+    setPinError('')
+    const err = await onVerifyPin(pin.trim())
+    setPinState('idle')
+    if (err) setPinError(err)
+    else setPin('')
+  }
+
   return (
     <article style={styles.card}>
       <strong>{String(ride.metadata.category || ride.id.slice(0, 8).toUpperCase())}</strong>
@@ -333,13 +382,33 @@ function RideCard({
       <Info label={labels.dropoff} value={String(ride.metadata.dropoff || '-')} />
       <Info label={labels.status} value={statusText(ride.status, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       <Info label={labels.fare} value={moneyText(ride.fareMinor || 0, ride.currency, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
+      {atPickup && (
+        <div style={styles.pinBox}>
+          <span style={styles.pinLabel}>{labels.pickupCodeLabel}</span>
+          <div style={styles.actions}>
+            <input
+              style={styles.pinInput}
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              placeholder={labels.pickupCodePlaceholder}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            />
+            <button
+              disabled={disabled || pinState === 'verifying' || pin.trim().length !== 4}
+              style={styles.primaryButton}
+              onClick={() => void submitPin()}
+            >
+              {pinState === 'verifying' ? labels.verifying : labels.verifyPickup}
+            </button>
+          </div>
+          {pinError && <span style={styles.pinError} role="alert">{pinError}</span>}
+        </div>
+      )}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
         <div style={styles.actions}>
           <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
             {labels.arriving}
-          </button>
-          <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('IN_PROGRESS')}>
-            {labels.start}
           </button>
           <button disabled={disabled} style={styles.primaryButton} onClick={() => onUpdate('COMPLETED')}>
             {labels.complete}
@@ -413,6 +482,10 @@ const styles: Record<string, CSSProperties> = {
   primaryButton: { minHeight: 44, border: 0, borderRadius: 8, background: '#19d7ff', color: '#051014', fontWeight: 950, padding: '0 12px' },
   secondaryButton: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#131e2e', color: '#fff', fontWeight: 900, padding: '0 12px' },
   dangerButton: { minHeight: 44, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 12px' },
+  pinBox: { display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 10, border: '1px solid #2a3a55', background: 'rgba(120,160,255,.08)' },
+  pinLabel: { fontSize: 13, color: '#cfe0ff', fontWeight: 700 },
+  pinInput: { minHeight: 44, width: 130, letterSpacing: 4, textAlign: 'center', fontSize: 18, fontWeight: 900, border: '1px solid #35507d', borderRadius: 8, background: '#0d1826', color: '#fff' },
+  pinError: { fontSize: 13, color: '#ffd1d1' },
   panel: { border: '1px solid #263651', borderRadius: 8, background: '#101722', color: '#9aa6ba', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
 }
