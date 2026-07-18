@@ -3,6 +3,10 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isBookingViewable } from './bookings.mjs'
 import { assertNotBlockedPair } from '../lib/user-blocks.mjs'
+import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
+import { readThreadDocument, saveThreadDocument } from '../lib/thread-document-storage.mjs'
+
+const THREAD_DOCUMENT_SELECT = { id: true, mimeType: true, originalFilename: true, createdAt: true, uploaderUserId: true }
 
 const MESSAGE_BLOCK_OPTS = { code: 'MESSAGE_USER_BLOCK', message: 'You cannot message this user because of a block.', statusCode: 403 }
 
@@ -139,7 +143,106 @@ export async function handleMessages(req, res, url, context) {
       take: 200,
     })
 
-    return json(res, 200, { ok: true, thread: { id: thread.id, listingId: listing.id, guestId, messages } })
+    const documents = await db().threadDocument.findMany({
+      where: { threadId: thread.id },
+      select: THREAD_DOCUMENT_SELECT,
+      orderBy: { createdAt: 'asc' },
+    })
+
+    return json(res, 200, { ok: true, thread: { id: thread.id, listingId: listing.id, guestId, messages, documents } })
+  }
+
+  const listingDocumentsMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/thread\/documents$/)
+  if (listingDocumentsMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+
+    const { listing, isOwner } = await loadListingForThread(listingDocumentsMatch[1], context)
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['fileBase64', 'mimeType', 'originalFilename', 'guestId'], 'thread document body')
+
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+    if (!fileBase64 || !mimeType) {
+      const error = new Error('A file and its mime type are required.')
+      error.statusCode = 400
+      error.code = 'THREAD_DOCUMENT_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const originalFilename = assertBoundedString(body.originalFilename, { fieldName: 'originalFilename', maxLength: 200, required: false })
+
+    const guestId = isOwner ? String(body.guestId || '') : context.user.id
+    if (isOwner && !guestId) {
+      const error = new Error('guestId is required for the listing owner.')
+      error.statusCode = 400
+      error.code = 'GUEST_ID_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
+    const thread = isOwner
+      ? await db().messageThread.findUnique({ where: { listingId_guestId: { listingId: listing.id, guestId } } })
+      : await ensureListingThread(listing.id, guestId)
+
+    if (!thread) {
+      const error = new Error('This inquiry thread does not exist yet.')
+      error.statusCode = 404
+      error.code = 'THREAD_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    await assertNotBlockedPair(db(), context.user.id, isOwner ? guestId : listing.ownerId, MESSAGE_BLOCK_OPTS)
+
+    const storageKey = await saveThreadDocument(fileBase64, mimeType)
+    const document = await db().threadDocument.create({
+      data: {
+        threadId: thread.id,
+        uploaderUserId: context.user.id,
+        assetUrl: storageKey,
+        mimeType,
+        originalFilename: originalFilename || null,
+      },
+      select: THREAD_DOCUMENT_SELECT,
+    })
+
+    return json(res, 201, { ok: true, document })
+  }
+
+  const listingDocumentFileMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/thread\/documents\/([^/]+)\/file$/)
+  if (listingDocumentFileMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+
+    const { listing, isOwner } = await loadListingForThread(listingDocumentFileMatch[1], context)
+    const document = await db().threadDocument.findUnique({
+      where: { id: listingDocumentFileMatch[2] },
+      include: { thread: true },
+    })
+
+    if (!document || document.thread.listingId !== listing.id) {
+      const error = new Error('Document not found.')
+      error.statusCode = 404
+      error.code = 'THREAD_DOCUMENT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const isStaff = context.roles.includes('ADMIN') || context.roles.includes('SUPPORT')
+    const isParticipant = isOwner || context.user.id === document.thread.guestId
+    if (!isStaff && !isParticipant) {
+      const error = new Error('You cannot access this document.')
+      error.statusCode = 403
+      error.code = 'THREAD_DOCUMENT_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+
+    const buffer = await readThreadDocument(document.assetUrl)
+    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    res.end(buffer)
+    return true
   }
 
   const listingSendMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/thread\/messages$/)
@@ -214,6 +317,7 @@ export async function handleMessages(req, res, url, context) {
         // SECURITY (S10): host sees only the guest's id + display name, never their email.
         guest: { select: { id: true, displayName: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        documents: { select: THREAD_DOCUMENT_SELECT, orderBy: { createdAt: 'asc' } },
       },
       orderBy: { updatedAt: 'desc' },
       take: 50,

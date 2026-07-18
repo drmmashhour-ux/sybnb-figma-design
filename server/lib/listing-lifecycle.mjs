@@ -20,6 +20,20 @@ export function listingExpiryDate(planCode) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000)
 }
 
+// RENTALS/BUY (025): commission-based, no paid plan, so they never had any freshness signal at
+// all -- a listing published months ago stayed live forever with no "still available?" nudge.
+// FREE_TIER_DIVISIONS get the same opportunistic expireOldListings() flip to EXPIRED as paid
+// divisions, but on a single fixed window (no plan tiers to key off), and the host can push the
+// clock forward themselves via PATCH /api/host/listings/:id/renew (see server/routes/host.mjs)
+// without needing another admin review, since renewal never changes status -- it only extends
+// expiresAt on a listing that is still APPROVED.
+export const FREE_TIER_EXPIRY_DAYS = 60
+export const FREE_TIER_DIVISIONS = new Set(['RENTALS', 'BUY'])
+
+export function freeListingExpiryDate() {
+  return new Date(Date.now() + FREE_TIER_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
+}
+
 // Same opportunistic-expiry pattern as completeExpiredBookings(): run on read instead of a cron,
 // so a lapsed paid-plan listing stops appearing in browse/host views without needing a scheduler.
 export async function expireOldListings(where = {}) {

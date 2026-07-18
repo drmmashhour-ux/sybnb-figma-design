@@ -237,3 +237,127 @@ describe('listing-inquiry-thread messaging', () => {
     expect(res.body.thread.messages).toEqual([])
   })
 })
+
+// Real per-thread document upload (025): Rentals/Buy renter/buyer request documents used to only
+// ever exist as a filename typed into the chat body -- the bytes were discarded client-side and
+// never stored anywhere. These tests drive the real upload/list/download endpoints.
+describe('listing-inquiry-thread documents', () => {
+  let app
+  let owner
+  let guest
+  let listing
+
+  // A well-known minimal valid 1x1 transparent PNG, base64-encoded.
+  const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+
+  beforeAll(async () => {
+    app = testApp()
+    owner = await registerUser(app, 'HOST', 'msg-doc-owner')
+    guest = await registerUser(app, 'GUEST', 'msg-doc-guest')
+    listing = await createListing(owner.user.id, { division: 'RENTALS' })
+  })
+
+  afterAll(async () => {
+    await cleanupTestUsers()
+  })
+
+  it('a guest can upload a real document to their own inquiry thread, without leaking the storage key', async () => {
+    const res = await request(app)
+      .post(`/api/listings/${listing.id}/thread/documents`)
+      .set('Authorization', `Bearer ${guest.token}`)
+      .send({ fileBase64: TINY_PNG_BASE64, mimeType: 'image/png', originalFilename: 'id-card.png' })
+
+    expect(res.status).toBe(201)
+    expect(res.body.document.mimeType).toBe('image/png')
+    expect(res.body.document.originalFilename).toBe('id-card.png')
+    expect(res.body.document.uploaderUserId).toBe(guest.user.id)
+    expect(res.body.document.assetUrl).toBeUndefined()
+  })
+
+  it('the uploaded document appears in the guest\'s own thread view', async () => {
+    const res = await request(app).get(`/api/listings/${listing.id}/thread`).set('Authorization', `Bearer ${guest.token}`)
+    expect(res.status).toBe(200)
+    expect(res.body.thread.documents.length).toBeGreaterThan(0)
+    expect(res.body.thread.documents[0].originalFilename).toBe('id-card.png')
+  })
+
+  it('the owner sees the same document when reading the thread with guestId, and in /api/host/inquiries', async () => {
+    const threadRes = await request(app)
+      .get(`/api/listings/${listing.id}/thread`)
+      .query({ guestId: guest.user.id })
+      .set('Authorization', `Bearer ${owner.token}`)
+    expect(threadRes.status).toBe(200)
+    expect(threadRes.body.thread.documents.length).toBeGreaterThan(0)
+
+    const inboxRes = await request(app).get('/api/host/inquiries').set('Authorization', `Bearer ${owner.token}`)
+    expect(inboxRes.status).toBe(200)
+    const thread = inboxRes.body.threads.find((entry) => entry.listingId === listing.id && entry.guestId === guest.user.id)
+    expect(thread).toBeTruthy()
+    expect(thread.documents.length).toBeGreaterThan(0)
+  })
+
+  it('both the uploading guest and the listing owner can download the real file bytes', async () => {
+    const uploadRes = await request(app)
+      .post(`/api/listings/${listing.id}/thread/documents`)
+      .set('Authorization', `Bearer ${guest.token}`)
+      .send({ fileBase64: TINY_PNG_BASE64, mimeType: 'image/png' })
+    const documentId = uploadRes.body.document.id
+
+    const guestFileRes = await request(app)
+      .get(`/api/listings/${listing.id}/thread/documents/${documentId}/file`)
+      .set('Authorization', `Bearer ${guest.token}`)
+    expect(guestFileRes.status).toBe(200)
+    expect(guestFileRes.headers['content-type']).toContain('image/png')
+
+    const ownerFileRes = await request(app)
+      .get(`/api/listings/${listing.id}/thread/documents/${documentId}/file`)
+      .set('Authorization', `Bearer ${owner.token}`)
+    expect(ownerFileRes.status).toBe(200)
+  })
+
+  it('an unrelated account cannot download the document (403)', async () => {
+    const uploadRes = await request(app)
+      .post(`/api/listings/${listing.id}/thread/documents`)
+      .set('Authorization', `Bearer ${guest.token}`)
+      .send({ fileBase64: TINY_PNG_BASE64, mimeType: 'image/png' })
+    const documentId = uploadRes.body.document.id
+
+    const outsider = await registerUser(app, 'GUEST', 'msg-doc-outsider')
+    const res = await request(app)
+      .get(`/api/listings/${listing.id}/thread/documents/${documentId}/file`)
+      .set('Authorization', `Bearer ${outsider.token}`)
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('THREAD_DOCUMENT_FORBIDDEN')
+  })
+
+  it('rejects an unsupported file type', async () => {
+    const res = await request(app)
+      .post(`/api/listings/${listing.id}/thread/documents`)
+      .set('Authorization', `Bearer ${guest.token}`)
+      .send({ fileBase64: TINY_PNG_BASE64, mimeType: 'application/zip' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('THREAD_DOCUMENT_TYPE_INVALID')
+  })
+
+  it('rejects a missing file', async () => {
+    const res = await request(app)
+      .post(`/api/listings/${listing.id}/thread/documents`)
+      .set('Authorization', `Bearer ${guest.token}`)
+      .send({ mimeType: 'image/png' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('THREAD_DOCUMENT_REQUIRED')
+  })
+
+  it('rejects an unknown field in the request body', async () => {
+    const res = await request(app)
+      .post(`/api/listings/${listing.id}/thread/documents`)
+      .set('Authorization', `Bearer ${guest.token}`)
+      .send({ fileBase64: TINY_PNG_BASE64, mimeType: 'image/png', extra: 'nope' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_UNKNOWN_FIELDS')
+  })
+})

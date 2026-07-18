@@ -1223,11 +1223,20 @@ export async function sendBookingMessage(bookingId: string, body: string, prefer
   return response.message
 }
 
+export type PlatformThreadDocument = {
+  id: string
+  mimeType: string
+  originalFilename: string | null
+  createdAt: string
+  uploaderUserId: string
+}
+
 export type PlatformListingInquiryThread = {
   id: string
   listingId: string
   guestId: string
   messages: PlatformMessage[]
+  documents: PlatformThreadDocument[]
 }
 
 export type PlatformHostInquiryThread = {
@@ -1238,6 +1247,7 @@ export type PlatformHostInquiryThread = {
   listing: { id: string; titleAr: string; titleEn: string | null; division: string; priceMinor: number; currency: string } | null
   guest: { id: string; displayName: string; email: string | null } | null
   messages: PlatformMessage[]
+  documents: PlatformThreadDocument[]
 }
 
 // Real, persistent "contact the owner" thread for RENTALS/BUY listings, reusing the same
@@ -1258,6 +1268,32 @@ export async function sendListingInquiryMessage(listingId: string, body: string)
     body: { body },
   })
   return response.message
+}
+
+// Real per-thread document upload (Rentals/Buy renter/buyer request documents) -- replaces the
+// previous behavior where only the filename was captured and pasted into a chat message.
+export async function sendListingInquiryDocument(listingId: string, file: File) {
+  const session = await ensurePrototypeGuestSession()
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{ ok: true; document: PlatformThreadDocument }>(`/api/listings/${listingId}/thread/documents`, {
+    method: 'POST',
+    token: session.token,
+    body: { fileBase64, mimeType: file.type, originalFilename: file.name },
+  })
+  return response.document
+}
+
+// <img src> can't send an Authorization header, and these documents are private to the thread's
+// two participants (plus staff), so the viewer fetches the bytes as an authenticated blob instead
+// of linking to the endpoint directly -- same pattern as fetchIdDocumentBlobUrl.
+export async function fetchThreadDocumentBlobUrl(listingId: string, documentId: string, mode?: HostDashboardMode) {
+  const session = mode ? await getHostDashboardSession(mode) : await ensurePrototypeGuestSession()
+  const response = await fetch(`${API_BASE_URL}/api/listings/${listingId}/thread/documents/${documentId}/file`, {
+    headers: { authorization: `Bearer ${session.token}` },
+  })
+  if (!response.ok) throw new Error(`Could not load document: ${response.status}`)
+  const blob = await response.blob()
+  return URL.createObjectURL(blob)
 }
 
 // Owner-side inbox: every real inquiry thread across the owner's own listings.
@@ -2197,6 +2233,18 @@ export async function updatePrototypeHostListingStatus(
       token: session.token,
       body: { status },
     },
+  )
+  return response.listing
+}
+
+// Rentals/Buy (025): self-service "still available?" renewal -- pushes expiresAt forward on a
+// still-live (APPROVED) listing without requiring another admin review. Other divisions renew
+// through their paid plan instead (see FREE_TIER_DIVISIONS on the server).
+export async function renewPrototypeHostListing(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(
+    `/api/host/listings/${listingId}/renew`,
+    { method: 'PATCH', token: session.token },
   )
   return response.listing
 }

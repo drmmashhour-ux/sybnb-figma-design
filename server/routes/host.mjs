@@ -9,7 +9,7 @@ import {
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
-import { expireOldListings } from '../lib/listing-lifecycle.mjs'
+import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
 
@@ -569,6 +569,72 @@ export async function handleHost(req, res, url, context) {
       data: {
         actorUserId: context.user.id,
         action: `HOST_LISTING_${status}`,
+        entityType: 'listings',
+        entityId: listing.id,
+        before: existing,
+        after: listing,
+      },
+    })
+
+    return json(res, 200, { ok: true, listing })
+  }
+
+  const renewMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/renew$/)
+  if (renewMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const existing = await db().listing.findFirst({
+      where: {
+        id: renewMatch[1],
+        ownerId: context.user.id,
+      },
+    })
+
+    if (!existing) {
+      const error = new Error('Listing not found for this host account.')
+      error.statusCode = 404
+      error.code = 'HOST_LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    if (!FREE_TIER_DIVISIONS.has(existing.division)) {
+      const error = new Error('Only Rentals/Buy listings can be self-renewed; other divisions renew through their paid plan.')
+      error.statusCode = 409
+      error.code = 'HOST_LISTING_NOT_RENEWABLE'
+      error.expose = true
+      throw error
+    }
+
+    // SECURITY (S1 — verify-before-live, same boundary as the status endpoint above): renewal
+    // never changes status, only pushes expiresAt forward on a listing that is still APPROVED —
+    // it can never be used to resurrect an EXPIRED listing without a fresh admin review.
+    if (existing.status !== 'APPROVED') {
+      const error = new Error('Only a currently live (APPROVED) listing can be renewed. An expired listing needs a fresh admin review.')
+      error.statusCode = 409
+      error.code = 'HOST_LISTING_NOT_LIVE'
+      error.expose = true
+      throw error
+    }
+
+    const nextExpiresAt = freeListingExpiryDate()
+    const claim = await db().listing.updateMany({
+      where: { id: existing.id, status: 'APPROVED' },
+      data: { expiresAt: nextExpiresAt },
+    })
+    if (claim.count !== 1) {
+      const error = new Error('Listing status changed, please retry.')
+      error.statusCode = 409
+      error.code = 'HOST_LISTING_STATUS_CONFLICT'
+      error.expose = true
+      throw error
+    }
+    const listing = await db().listing.findUnique({ where: { id: existing.id } })
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'HOST_LISTING_RENEWED',
         entityType: 'listings',
         entityId: listing.id,
         before: existing,

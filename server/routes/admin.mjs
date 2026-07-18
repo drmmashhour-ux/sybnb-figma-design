@@ -2,7 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
-import { listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
+import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
@@ -964,6 +964,11 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
     if (decision === 'APPROVED' && PAID_PLAN_DIVISIONS.has(existing.division)) {
       const sellerProfile = await tx.sellerProfile.findUnique({ where: { userId: existing.ownerId } })
       listingUpdate.expiresAt = listingExpiryDate(sellerProfile?.planCode)
+    }
+    // Rentals/Buy (025): commission-based, no paid plan, but still needs a real freshness signal
+    // instead of living forever with no "still available?" nudge -- see FREE_TIER_DIVISIONS.
+    if (decision === 'APPROVED' && FREE_TIER_DIVISIONS.has(existing.division)) {
+      listingUpdate.expiresAt = freeListingExpiryDate()
     }
     // Re-check status in the WHERE clause so two concurrent decisions on the same listing can't
     // both apply (same TOCTOU class as the payment-proof and SR-ride races fixed earlier).

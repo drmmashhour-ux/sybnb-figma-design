@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchHostInquiries,
+  fetchThreadDocumentBlobUrl,
   sendListingInquiryMessageAsOwner,
   type HostDashboardMode,
   type PlatformHostInquiryThread,
@@ -27,6 +28,10 @@ const copy = {
     send: 'إرسال',
     sending: 'جارٍ الإرسال...',
     noMessages: 'لا توجد رسائل في هذه المحادثة بعد.',
+    documentsTitle: 'المستندات المرفوعة',
+    noDocuments: 'لم يرفع العميل أي مستند بعد.',
+    view: 'عرض',
+    documentError: 'تعذر فتح المستند.',
   },
   en: {
     back: 'Back to host dashboard',
@@ -40,6 +45,10 @@ const copy = {
     send: 'Send',
     sending: 'Sending...',
     noMessages: 'No messages in this conversation yet.',
+    documentsTitle: 'Uploaded documents',
+    noDocuments: 'The client has not uploaded any document yet.',
+    view: 'View',
+    documentError: 'Could not open the document.',
   },
 }
 
@@ -71,6 +80,16 @@ export function HostInquiriesPage({ lang, mode = 'host' }: Props) {
   }
 
   const activeThread = threads.find((thread) => thread.id === activeThreadId)
+
+  async function viewDocument(documentId: string) {
+    if (!activeThread?.listingId) return
+    try {
+      const blobUrl = await fetchThreadDocumentBlobUrl(activeThread.listingId, documentId, mode)
+      window.open(blobUrl, '_blank', 'noopener,noreferrer')
+    } catch {
+      setMessage(t.documentError)
+    }
+  }
 
   async function sendReply() {
     if (!activeThread?.listingId || !activeThread.guestId || !replyInput.trim()) return
@@ -129,6 +148,20 @@ export function HostInquiriesPage({ lang, mode = 'host' }: Props) {
                   <strong>{activeThread.listing ? listingTitleText(activeThread.listing, lang) : '-'}</strong>
                   <span>{activeThread.guest?.displayName} · {activeThread.guest?.email}</span>
                 </div>
+                <div style={styles.documentsSection}>
+                  <strong>{t.documentsTitle}</strong>
+                  {activeThread.documents.length === 0 ? (
+                    <span style={styles.body}>{t.noDocuments}</span>
+                  ) : (
+                    <div style={styles.documentList}>
+                      {activeThread.documents.map((document) => (
+                        <button key={document.id} style={styles.documentPill} onClick={() => void viewDocument(document.id)}>
+                          {document.originalFilename || document.mimeType} · {t.view}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div style={styles.messages}>
                   {activeThread.messages.length === 0 && <p style={styles.body}>{t.noMessages}</p>}
                   {[...activeThread.messages].reverse().map((item) => (
@@ -172,6 +205,9 @@ const styles: Record<string, CSSProperties> = {
   threadPreview: { margin: 0, color: '#9aa6ba', fontSize: 13 },
   conversation: { border: '1px solid #242735', borderRadius: 8, background: '#101016', display: 'grid', gap: 14, padding: 18, minHeight: 320 },
   conversationHeader: { display: 'grid', gap: 4, borderBottom: '1px solid #242735', paddingBottom: 12 },
+  documentsSection: { display: 'grid', gap: 8, borderBottom: '1px solid #242735', paddingBottom: 12 },
+  documentList: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+  documentPill: { border: '1px solid #30384d', borderRadius: 999, background: '#171b29', color: '#fff', padding: '6px 12px', fontWeight: 850, fontSize: 13 },
   messages: { display: 'grid', gap: 10, maxHeight: 360, overflowY: 'auto' },
   bubbleGuest: { display: 'grid', gap: 4, justifySelf: 'start', maxWidth: '80%', background: '#171b29', borderRadius: 8, padding: 12 },
   bubbleHost: { display: 'grid', gap: 4, justifySelf: 'end', maxWidth: '80%', background: 'rgba(32,210,155,.12)', borderRadius: 8, padding: 12 },

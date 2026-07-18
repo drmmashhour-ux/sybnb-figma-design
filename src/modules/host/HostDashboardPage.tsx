@@ -6,6 +6,7 @@ import {
   fetchPrototypeHostOverview,
   markHostGuestCheckpoint,
   updatePrototypeHostInstantBook,
+  renewPrototypeHostListing,
   updatePrototypeHostListingStatus,
   type HostDashboardMode,
   type PlatformHostOverview,
@@ -66,6 +67,8 @@ const copy = {
     instantBookOn: '⚡ الحجز الفوري: مفعّل',
     instantBookOff: 'تفعيل الحجز الفوري',
     expiresOn: 'ينتهي الإعلان في',
+    renew: 'تجديد الإعلان',
+    renewed: 'تم تجديد الإعلان',
     confirm: 'تأكيد',
     cancel: 'إلغاء',
     saving: 'جار الحفظ',
@@ -177,6 +180,8 @@ const copy = {
     instantBookOn: '⚡ Instant Book: On',
     instantBookOff: 'Enable Instant Book',
     expiresOn: 'Listing expires on',
+    renew: 'Renew listing',
+    renewed: 'Listing renewed',
     confirm: 'Confirm',
     cancel: 'Cancel',
     saving: 'Saving',
@@ -417,6 +422,24 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     }
   }
 
+  async function renewListing(listingId: string) {
+    setStatus('saving')
+    setActiveListingId(listingId)
+    setMessage('')
+
+    try {
+      await renewPrototypeHostListing(listingId, mode)
+      setOverview(await fetchPrototypeHostOverview(mode))
+      setMessage(t.renewed)
+      setStatus('ready')
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setActiveListingId('')
+    }
+  }
+
   async function toggleInstantBook(listingId: string, enabled: boolean) {
     setStatus('saving')
     setActiveListingId(listingId)
@@ -587,6 +610,15 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                 <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
                   {t.view}
                 </button>
+                {(listing.division === 'RENTALS' || listing.division === 'BUY') && listing.status === 'APPROVED' && (
+                  <button
+                    disabled={activeListingId === listing.id}
+                    style={styles.secondaryButton}
+                    onClick={() => void renewListing(listing.id)}
+                  >
+                    {activeListingId === listing.id ? t.saving : t.renew}
+                  </button>
+                )}
                 {listing.status === 'PAUSED' ? (
                   <button
                     disabled={activeListingId === listing.id}

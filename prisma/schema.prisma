@@ -200,6 +200,7 @@ model User {
   driverCancellations     DriverCancellation[] @relation("DriverCancellationDriver")
   driverVehicles          DriverVehicle[]      @relation("DriverVehicleOwner")
   disputesOpened          Dispute[]            @relation("DisputeOpener")
+  threadDocumentsUploaded ThreadDocument[]     @relation("ThreadDocumentUploader")
 
   @@map("users")
 }
@@ -586,7 +587,8 @@ model MessageThread {
   booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   listing  Listing?  @relation(fields: [listingId], references: [id], onDelete: Cascade)
   guest    User?     @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
-  messages Message[]
+  messages  Message[]
+  documents ThreadDocument[]
 
   @@unique([listingId, guestId])
   @@map("message_threads")
@@ -605,6 +607,27 @@ model Message {
 
   @@index([threadId, createdAt])
   @@map("messages")
+}
+
+// Real per-thread document uploads (025) -- replaces the previous behavior where "uploading" a
+// rental/purchase-request document on the Rentals/Buy page only captured the filename and pasted
+// it into a chat message, never storing the actual file. Attached to a MessageThread (shared by
+// booking threads and listing-inquiry threads) so it works for any thread-based conversation, but
+// today only the listing-inquiry thread routes (server/routes/messages.mjs) write/read it.
+model ThreadDocument {
+  id               String   @id @default(uuid())
+  threadId         String   @map("thread_id")
+  uploaderUserId   String   @map("uploader_user_id")
+  assetUrl         String   @map("asset_url")
+  mimeType         String   @map("mime_type")
+  originalFilename String?  @map("original_filename")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  thread   MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  uploader User          @relation("ThreadDocumentUploader", fields: [uploaderUserId], references: [id])
+
+  @@index([threadId, createdAt])
+  @@map("thread_documents")
 }
 
 model Wallet {

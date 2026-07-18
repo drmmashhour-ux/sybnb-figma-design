@@ -4,7 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { fetchApprovedListings, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
@@ -255,7 +255,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const isAr = lang === 'ar'
   const [listings, setListings] = useState<PlatformListing[]>([])
   const [selectedId, setSelectedId] = useState('')
-  const [documents, setDocuments] = useState<string[]>([])
+  const [documentFiles, setDocumentFiles] = useState<File[]>([])
   const [acceptedAgreement, setAcceptedAgreement] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -378,13 +378,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   }
 
   function uploadDocuments(files: FileList | null) {
-    const names = Array.from(files || []).map((file) => file.name)
-    if (!names.length) return
-    setDocuments((current) => [...current, ...names])
+    const picked = Array.from(files || [])
+    if (!picked.length) return
+    setDocumentFiles((current) => [...current, ...picked])
   }
 
   async function sendRequest() {
-    if (!hasGuestAccount || !selectedListing || documents.length === 0 || !acceptedAgreement) {
+    if (!hasGuestAccount || !selectedListing || documentFiles.length === 0 || !acceptedAgreement) {
       setMessage(t.required)
       if (!hasGuestAccount) openAccount()
       return
@@ -394,17 +394,22 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setMessage('')
 
     const introBody = isAr
-      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المرفوعة: ${documents.join('، ')}`
-      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nUploaded documents: ${documents.join(', ')}`
+      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nعدد المستندات المرفوعة: ${documentFiles.length}`
+      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nDocuments attached: ${documentFiles.length}`
 
     try {
       await sendListingInquiryMessage(selectedListing.id, introBody)
+      // Real per-thread document upload (server/routes/messages.mjs `/thread/documents`) --
+      // replaces the previous behavior where only filenames were pasted into the chat message.
+      for (const file of documentFiles) {
+        await sendListingInquiryDocument(selectedListing.id, file)
+      }
 
       const request: RentalRequest = {
         id: `${isBuyMode ? 'BUY' : 'MR'}-${Date.now().toString(36).toUpperCase()}`,
         listingId: selectedListing.id,
         listingTitle: listingTitleText(selectedListing, lang),
-        documents,
+        documents: documentFiles.map((file) => file.name),
         createdAt: new Date().toISOString(),
         status: 'SENT_TO_IMMOCONTACT',
       }
@@ -622,8 +627,8 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 amountLabel={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)}
                 destinationCode={isBuyMode ? 'BUYER-CAPSULE' : 'RENTAL-CAPSULE'}
                 followCode={sentRequest?.id || 'WAITING'}
-                proofCount={documents.length}
-                status={sentRequest ? 'admin' : documents.length ? 'proof' : hasGuestAccount ? 'ready' : 'locked'}
+                proofCount={documentFiles.length}
+                status={sentRequest ? 'admin' : documentFiles.length ? 'proof' : hasGuestAccount ? 'ready' : 'locked'}
               />
             </>
           ) : <p style={styles.empty}>{t.noSelection}</p>}
@@ -650,10 +655,10 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                     onChange={(event) => uploadDocuments(event.target.files)}
                   />
                 </label>
-                {documents.length ? (
+                {documentFiles.length ? (
                   <div style={styles.docList}>
-                    <span>{documents.length} {t.docsReady}</span>
-                    {documents.slice(0, 6).map((name) => <small key={name}>{name}</small>)}
+                    <span>{documentFiles.length} {t.docsReady}</span>
+                    {documentFiles.slice(0, 6).map((file, index) => <small key={`${file.name}-${index}`}>{file.name}</small>)}
                   </div>
                 ) : null}
               </section>
