@@ -18,6 +18,8 @@ const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDash
 const DriverVehiclesPage = lazyNamed(() => import('../modules/driver/DriverVehiclesPage'), 'DriverVehiclesPage')
 const DisputesPage = lazyNamed(() => import('../modules/disputes/DisputesPage'), 'DisputesPage')
 const AdminDisputesPage = lazyNamed(() => import('../modules/disputes/AdminDisputesPage'), 'AdminDisputesPage')
+const SettingsPage = lazyNamed(() => import('../modules/account/SettingsPage'), 'SettingsPage')
+const AdminReportsPage = lazyNamed(() => import('../modules/safety/AdminReportsPage'), 'AdminReportsPage')
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
@@ -118,8 +120,12 @@ export function App() {
           <ImmocontactPage lang={lang} />
         ) : path === '/admin/disputes' ? (
           <AdminDisputesPage lang={lang} />
+        ) : path === '/admin/reports' ? (
+          <AdminReportsPage lang={lang} />
         ) : path === '/disputes' ? (
           <DisputesPage lang={lang} />
+        ) : path === '/settings' ? (
+          <SettingsPage lang={lang} />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
         ) : path === '/ai-brain' ? (

@@ -14,6 +14,8 @@ import {
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
+import { ReportForm } from '../safety/ReportForm'
+import { BlockButton } from '../safety/BlockButton'
 import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
@@ -696,6 +698,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 {status === 'saving' ? t.saving : actionLabel}
               </button>
             )}
+          </section>
+
+          <section style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', marginTop: 8 }}>
+            <ReportForm lang={lang} subjectType="LISTING" subjectId={listing.id} />
+            <BlockButton lang={lang} userId={listing.ownerId} />
           </section>
         </>
       )}

@@ -297,6 +297,7 @@ export function AdminReviewPage({ lang }: Props) {
           <button onClick={() => setActiveFilter('payments')}>{t.payments} <span>▭</span></button>
           <button onClick={() => (window.location.hash = '/finance')}>{isAr ? 'المالية' : 'Finance'} <span>▥</span></button>
           <button onClick={() => (window.location.hash = '/admin/disputes')}>{isAr ? 'النزاعات' : 'Disputes'} <span>⚖</span></button>
+          <button onClick={() => (window.location.hash = '/admin/reports')}>{isAr ? 'البلاغات' : 'Reports'} <span>⚑</span></button>
           <button onClick={() => setActiveFilter('audit')}>{isAr ? 'مساعد FAI' : 'FAI helper'} <span>◉</span></button>
           <button onClick={() => setActiveFilter('audit')}>{isAr ? 'التقارير' : 'Reports'} <span>▧</span></button>
           <button onClick={() => (window.location.hash = '/')}>{t.back} <span>↩</span></button>

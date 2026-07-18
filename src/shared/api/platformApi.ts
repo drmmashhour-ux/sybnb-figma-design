@@ -1744,6 +1744,94 @@ export async function fetchCountryConfig(code = 'SY') {
   return response.country
 }
 
+// ---- Store-compliance: account deletion, report content, block users (Phase 2 store-readiness) ----
+
+// DELETE /api/me — in-app account deletion. Throws with the backend code (WALLET_NOT_EMPTY /
+// ACCOUNT_HAS_ACTIVE_OBLIGATIONS) so the UI can show a clear message. On success the caller signs out.
+export async function deleteMyAccount() {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true; account: { status: string; deleted: boolean } }>('/api/me', {
+    method: 'DELETE',
+    token: session.token,
+  })
+  clearGuestSession()
+}
+
+export type PlatformUserBlock = {
+  id: string
+  blockerUserId: string
+  blockedUserId: string
+  createdAt: string
+}
+
+export async function blockUser(userId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; block: PlatformUserBlock }>('/api/me/blocks', {
+    method: 'POST',
+    token: session.token,
+    body: { userId },
+  })
+  return response.block
+}
+
+export async function fetchMyBlocks() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; blocks: PlatformUserBlock[] }>('/api/me/blocks', {
+    token: session.token,
+  })
+  return response.blocks
+}
+
+export async function unblockUser(userId: string) {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true; unblocked: string }>(`/api/me/blocks/${userId}`, {
+    method: 'DELETE',
+    token: session.token,
+  })
+}
+
+export type ReportSubjectType = 'LISTING' | 'REVIEW' | 'SELLER' | 'USER' | 'RIDE' | 'BOOKING'
+export type PlatformReport = {
+  id: string
+  reporterUserId: string
+  subjectType: ReportSubjectType
+  subjectId: string
+  reason: string
+  note: string | null
+  status: 'OPEN' | 'REVIEWED' | 'ACTIONED' | 'DISMISSED'
+  resolutionNote: string | null
+  resolvedAt: string | null
+  createdAt: string
+}
+
+export async function reportContent(input: { subjectType: ReportSubjectType; subjectId: string; reason: string; note?: string }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; report: PlatformReport }>('/api/reports', {
+    method: 'POST',
+    token: session.token,
+    body: { subjectType: input.subjectType, subjectId: input.subjectId, reason: input.reason, note: input.note },
+  })
+  return response.report
+}
+
+export async function fetchAdminReports() {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; reports: PlatformReport[] }>('/api/admin/reports', { token }),
+  )
+  return response.reports
+}
+
+export async function actionReport(id: string, input: { status: 'REVIEWED' | 'ACTIONED' | 'DISMISSED'; note?: string }) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; report: PlatformReport }>(`/api/admin/reports/${id}`, {
+      method: 'PATCH',
+      token,
+      body: { status: input.status, note: input.note },
+    }),
+  )
+  return response.report
+}
+
 export async function createPrototypeBooking(input: {
   listingId: string
   amountMinor: number
@@ -2221,8 +2309,9 @@ async function apiRequest<T>(
   const payload = (await response.json()) as unknown
   if (!response.ok || isApiErrorBody(payload)) {
     const message = isApiErrorBody(payload) ? payload.error?.message : undefined
-    const error = new Error(message || `SYBNB API request failed: ${response.status}`) as Error & { status?: number }
+    const error = new Error(message || `SYBNB API request failed: ${response.status}`) as Error & { status?: number; code?: string }
     error.status = response.status
+    error.code = isApiErrorBody(payload) ? payload.error?.code : undefined
     throw error
   }
 

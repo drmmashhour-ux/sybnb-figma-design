@@ -198,6 +198,7 @@ export function DashboardPage({ lang }: Props) {
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <section style={styles.accountTop}>
         <button style={styles.iconButton} onClick={() => void loadOverview()} aria-label={t.refresh}>♢</button>
+        <button style={styles.iconButton} onClick={() => (window.location.hash = '/settings')} aria-label={isAr ? 'الإعدادات' : 'Settings'}>⚙</button>
         <div style={styles.profile}>
           <span style={styles.avatar}>{avatarLetter}</span>
           <div>
