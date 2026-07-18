@@ -5,8 +5,10 @@ import { BrandLogo } from '../../shared/brand'
 import {
   addAccommodationRoomType,
   createAccommodation,
+  createAndSubmitCarListing,
   createAndSubmitPrototypeListing,
   submitAccommodation,
+  type CarVehicleAttributes,
 } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
@@ -328,6 +330,9 @@ export function SellerListingWizard({ lang }: Props) {
   const [latitude, setLatitude] = useState(draft.latitude || '33.5138')
   const [longitude, setLongitude] = useState(draft.longitude || '36.2765')
   const [mapPinConfirmed, setMapPinConfirmed] = useState(draft.mapPinConfirmed ?? false)
+  // CARS location fix (025/Carcad Phase D): the pin UI below is otherwise decorative -- this
+  // tracks whether a real device/manual coordinate has actually been captured for CARS.
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'locating' | 'done' | 'denied' | 'error'>('idle')
   const [price, setPrice] = useState(draft.price || '15')
   const [cleaningFee, setCleaningFee] = useState(draft.cleaningFee || '0')
   const [taxFee, setTaxFee] = useState(draft.taxFee || '0')
@@ -350,6 +355,27 @@ export function SellerListingWizard({ lang }: Props) {
   const [uploadedAdFiles, setUploadedAdFiles] = useState<string[]>([])
   const [uploadedDocumentFiles, setUploadedDocumentFiles] = useState<string[]>([])
   const [adFilesSent, setAdFilesSent] = useState(false)
+  // Real CARS vehicle attributes -- server/lib/listing-attributes.mjs's carRules() requires all
+  // seven of these before /submit will accept a car listing. Kept separate from `visualFilters`
+  // (the buyer-facing browse chips), which use a coarser vocabulary that can't serve as the
+  // authoritative source for these (see prefill-only wiring below).
+  const [carMake, setCarMake] = useState('')
+  const [carModel, setCarModel] = useState('')
+  const [carYear, setCarYear] = useState('')
+  const [carMileageKm, setCarMileageKm] = useState('')
+  const [carTransmission, setCarTransmission] = useState('automatic')
+  const [carFuelType, setCarFuelType] = useState('gas')
+  const [carCondition, setCarCondition] = useState('USED')
+  // Real photo File objects for CARS -- the wizard previously only tracked filenames (never
+  // uploaded bytes), which is why PHOTO_REQUIRED_DIVISIONS always rejected CARS submissions.
+  const [carPhotoFiles, setCarPhotoFiles] = useState<File[]>([])
+  // Online auctions (026): per-listing choice, fixed price OR auction. Config fields only matter
+  // when saleType === 'AUCTION'; createAndSubmitCarListing() only calls the auction-config endpoint
+  // when this is set, so a FIXED listing behaves exactly as before.
+  const [carSaleType, setCarSaleType] = useState<'FIXED' | 'AUCTION'>('FIXED')
+  const [carReservePriceMinor, setCarReservePriceMinor] = useState('')
+  const [carMinIncrementMinor, setCarMinIncrementMinor] = useState('500000')
+  const [carAuctionDurationHours, setCarAuctionDurationHours] = useState('72')
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
     draft.visualFilters || {
       propertyType: 'apartment',
@@ -364,7 +390,30 @@ export function SellerListingWizard({ lang }: Props) {
   // type in the same session reuses it instead of re-collecting location/documents/photos.
   const [accommodationId, setAccommodationId] = useState<string | null>(null)
   const [roomTypeStage, setRoomTypeStage] = useState<'idle' | 'prompt'>('idle')
+  // Dealer bulk-add (025/Carcad Phase C): simpler than the STAYS room-type loop above -- each car
+  // is fully independent, no shared parent entity like Accommodation, so "add another" just resets
+  // the car-specific fields and loops back to step 0.
+  const [carBulkStage, setCarBulkStage] = useState<'idle' | 'prompt'>('idle')
   const isMultiRoomFlow = division === 'STAYS' && !isAdvertisingFlow
+
+  // One-way prefill only, never overwrite: the carBrand chip's ~30-item closed vocabulary and
+  // the condition chip's new/used-only options are coarser than the real make/condition fields,
+  // so a chip pick only fills the structured field while it's still empty/default, and the user
+  // can always override it with the real input/select.
+  useEffect(() => {
+    const brand = visualFilters.carBrand
+    if (division === 'CARS' && typeof brand === 'string' && brand && !carMake) {
+      setCarMake(brand.charAt(0).toUpperCase() + brand.slice(1))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visualFilters.carBrand, division])
+
+  useEffect(() => {
+    const condition = visualFilters.condition
+    if (division === 'CARS' && condition === 'new') setCarCondition((current) => (current === 'USED' ? 'NEW' : current))
+    if (division === 'CARS' && condition === 'used') setCarCondition((current) => (current === 'NEW' ? 'USED' : current))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visualFilters.condition, division])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -503,6 +552,59 @@ export function SellerListingWizard({ lang }: Props) {
       )
       return
     }
+    // CARS-specific gates -- mirror server/lib/listing-attributes.mjs's carRules() exactly so a
+    // seller never reaches submit only to be rejected server-side.
+    if (!isAdvertisingFlow && division === 'CARS' && activeStep.id === 'basics') {
+      const yearNumber = toNumber(carYear)
+      const mileageNumber = toNumber(carMileageKm)
+      const currentYearLimit = new Date().getFullYear() + 1
+      if (!carMake.trim() || !carModel.trim()) {
+        setSubmitState('error')
+        setSubmitError(isAr ? 'أدخل الماركة والموديل.' : 'Enter the make and model.')
+        return
+      }
+      if (!Number.isFinite(yearNumber) || yearNumber < 1900 || yearNumber > currentYearLimit) {
+        setSubmitState('error')
+        setSubmitError(isAr ? `أدخل سنة صنع صحيحة (1900-${currentYearLimit}).` : `Enter a valid year (1900-${currentYearLimit}).`)
+        return
+      }
+      if (!Number.isFinite(mileageNumber) || mileageNumber < 0 || mileageNumber > 2_000_000) {
+        setSubmitState('error')
+        setSubmitError(isAr ? 'أدخل ممشى صحيح (0-2,000,000 كم).' : 'Enter a valid mileage (0-2,000,000 km).')
+        return
+      }
+      // Online auctions (026): client-side mirror of the AUCTION_DURATION_INVALID/AUCTION_INCREMENT_INVALID
+      // server checks in server/routes/auctions.mjs, so a dealer never reaches submit only to be rejected.
+      if (carSaleType === 'AUCTION') {
+        const incrementNumber = toNumber(carMinIncrementMinor)
+        const durationNumber = toNumber(carAuctionDurationHours)
+        if (!Number.isFinite(incrementNumber) || incrementNumber <= 0) {
+          setSubmitState('error')
+          setSubmitError(isAr ? 'أدخل أقل زيادة عرض صحيحة.' : 'Enter a valid minimum bid increment.')
+          return
+        }
+        if (!Number.isFinite(durationNumber) || durationNumber < 1 || durationNumber > 720) {
+          setSubmitState('error')
+          setSubmitError(isAr ? 'مدة المزاد يجب أن تكون بين ساعة و720 ساعة.' : 'Auction duration must be between 1 and 720 hours.')
+          return
+        }
+      }
+    }
+    // Real location capture (025/Carcad Phase D): previously nothing blocked advancing past this
+    // step for CARS, so the map pin was decorative and every car ended up with the same fake
+    // default coordinate. Mirrors the mapLocation rule added to carRules() server-side.
+    if (!isAdvertisingFlow && division === 'CARS' && activeStep.id === 'location') {
+      if (!mapPinConfirmed || !isValidSyriaCoord(latitude, longitude)) {
+        setSubmitState('error')
+        setSubmitError(isAr ? 'أكّد موقع السيارة على الخريطة قبل المتابعة.' : "Confirm the car's location on the map before continuing.")
+        return
+      }
+    }
+    if (!isAdvertisingFlow && division === 'CARS' && activeStep.id === 'media' && !carPhotoFiles.length) {
+      setSubmitState('error')
+      setSubmitError(isAr ? 'ارفع صورة واحدة حقيقية على الأقل للسيارة.' : 'Upload at least one real photo of the car.')
+      return
+    }
     setSubmitState('idle')
     setSubmitError('')
 
@@ -611,6 +713,53 @@ export function SellerListingWizard({ lang }: Props) {
           return
         }
 
+        if (division === 'CARS') {
+          const vehicle: CarVehicleAttributes = {
+            make: carMake.trim(),
+            model: carModel.trim(),
+            year: toNumber(carYear),
+            mileageKm: toNumber(carMileageKm),
+            transmission: carTransmission,
+            fuelType: carFuelType,
+            condition: carCondition as CarVehicleAttributes['condition'],
+          }
+          await createAndSubmitCarListing({
+            titleAr: title || 'إعلان SYBNB جديد',
+            titleEn: title,
+            description,
+            priceMinor: toMinor(price),
+            currency: listingCurrency,
+            vehicle,
+            photos: carPhotoFiles,
+            auction: carSaleType === 'AUCTION'
+              ? {
+                  reservePriceMinor: carReservePriceMinor.trim() ? toNumber(carReservePriceMinor) : undefined,
+                  minIncrementMinor: toNumber(carMinIncrementMinor),
+                  durationHours: toNumber(carAuctionDurationHours),
+                }
+              : undefined,
+            metadata: {
+              governorate,
+              city,
+              area,
+              address,
+              governorateLabel: selectedGovernorateLabel,
+              cityLabel: selectedCityLabel,
+              areaLabel: selectedAreaLabel,
+              listingPlan: selectedListingPlan.id,
+              listingPlanPriceUsd: selectedListingPlan.priceUsd,
+              listingPlanPaymentMethod,
+              listingPlanPaymentConfirmed,
+              uploadedDocumentFiles,
+              visualFilters,
+              mapLocation,
+            },
+          })
+          setSubmitState('idle')
+          setCarBulkStage('prompt')
+          return
+        }
+
         await createAndSubmitPrototypeListing({
           division,
           titleAr: title || 'إعلان SYBNB جديد',
@@ -700,6 +849,71 @@ export function SellerListingWizard({ lang }: Props) {
     }
   }
 
+  function startAnotherCar() {
+    setTitle('')
+    setDescription('')
+    setPrice('15')
+    setCarMake('')
+    setCarModel('')
+    setCarYear('')
+    setCarMileageKm('')
+    setCarTransmission('automatic')
+    setCarFuelType('gas')
+    setCarCondition('USED')
+    setCarPhotoFiles([])
+    setVisualFilters({})
+    setMapPinConfirmed(false)
+    setGeoStatus('idle')
+    setCarSaleType('FIXED')
+    setCarReservePriceMinor('')
+    setCarMinIncrementMinor('500000')
+    setCarAuctionDurationHours('72')
+    setCarBulkStage('idle')
+    setStepIndex(0)
+  }
+
+  function finishCarBulkAdd() {
+    clearDraft()
+    navigate('/sell/submitted')
+  }
+
+  // Real location capture for CARS (025/Carcad Phase D). Previously "Confirm map pin" just set
+  // mapPinConfirmed=true unconditionally over whatever was in the (defaulted-to-Damascus) lat/lng
+  // inputs -- this actually validates the coordinate before accepting it.
+  function confirmMapPin() {
+    if (!isValidSyriaCoord(latitude, longitude)) {
+      setSubmitState('error')
+      setSubmitError(isAr ? 'أدخل إحداثيات صحيحة داخل سوريا.' : 'Enter valid coordinates inside Syria.')
+      return
+    }
+    setMapPinConfirmed(true)
+  }
+
+  function useMyLocation() {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoStatus('error')
+      return
+    }
+    setGeoStatus('locating')
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = String(position.coords.latitude)
+        const lng = String(position.coords.longitude)
+        setLatitude(lat)
+        setLongitude(lng)
+        if (isValidSyriaCoord(lat, lng)) {
+          setMapPinConfirmed(true)
+          setGeoStatus('done')
+        } else {
+          setMapPinConfirmed(false)
+          setGeoStatus('error')
+        }
+      },
+      () => setGeoStatus('denied'),
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
+  }
+
   function addListingDocumentFiles(fileList: FileList | null) {
     const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
     if (!names.length) return
@@ -750,6 +964,46 @@ export function SellerListingWizard({ lang }: Props) {
             </button>
             <button className="seller-primary-button" disabled={submitState === 'submitting'} onClick={startAnotherRoomType}>
               {isAr ? 'نعم، أضف غرفة أخرى' : 'Yes, add another room type'}
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (carBulkStage === 'prompt') {
+    return (
+      <main className="seller-page seller-wizard-page" dir={isAr ? 'rtl' : 'ltr'}>
+        <section className="seller-account-head">
+          <BrandLogo logo="plus" size="nav" />
+        </section>
+
+        <section className="seller-wizard-shell">
+          <div className="seller-wizard-header">
+            <p className="eyebrow">{isAr ? 'تم إرسال السيارة' : 'Car submitted'}</p>
+            <h1>{isAr ? 'أضف سيارة أخرى؟' : 'Add another car?'}</h1>
+            <p>
+              {isAr
+                ? 'تم إرسال هذه السيارة للمراجعة. يمكنك إضافة سيارة جديدة الآن أو الانتهاء.'
+                : 'This car has been submitted for review. You can add another car now or finish here.'}
+            </p>
+          </div>
+          <div className="seller-wizard-body">
+            <div className="seller-wizard-section">
+              {submitState === 'error' && (
+                <div className="seller-inline-alert">
+                  <strong>{isAr ? 'تعذر الإرسال' : 'Submission failed'}</strong>
+                  <span>{submitError}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="seller-wizard-actions">
+            <button className="seller-secondary-button" disabled={submitState === 'submitting'} onClick={finishCarBulkAdd}>
+              {isAr ? 'لا، إنهاء' : 'No, finish'}
+            </button>
+            <button className="seller-primary-button" disabled={submitState === 'submitting'} onClick={startAnotherCar}>
+              {isAr ? 'نعم، أضف سيارة أخرى' : 'Yes, add another car'}
             </button>
           </div>
         </section>
@@ -816,13 +1070,85 @@ export function SellerListingWizard({ lang }: Props) {
                 />
               )}
               {!isAdvertisingFlow && division === 'CARS' && (
-                <VisualFilterPanel
-                  compact
-                  groups={sellerCarFilterGroups}
-                  lang={lang}
-                  selection={visualFilters}
-                  onChange={setVisualFilters}
-                />
+                <>
+                  <VisualFilterPanel
+                    compact
+                    groups={sellerCarFilterGroups}
+                    lang={lang}
+                    selection={visualFilters}
+                    onChange={setVisualFilters}
+                  />
+                  <div className="seller-form-grid">
+                    <label>
+                      <span>{isAr ? 'الماركة' : 'Make'}</span>
+                      <input dir="ltr" onChange={(event) => setCarMake(event.target.value)} placeholder="Toyota" value={carMake} />
+                    </label>
+                    <label>
+                      <span>{isAr ? 'الموديل' : 'Model'}</span>
+                      <input dir="ltr" onChange={(event) => setCarModel(event.target.value)} placeholder="Corolla" value={carModel} />
+                    </label>
+                    <label>
+                      <span>{isAr ? 'سنة الصنع' : 'Year'}</span>
+                      <input dir="ltr" inputMode="numeric" onChange={(event) => setCarYear(event.target.value)} placeholder="2019" value={carYear} />
+                    </label>
+                    <label>
+                      <span>{isAr ? 'الممشى (كم)' : 'Mileage (km)'}</span>
+                      <input dir="ltr" inputMode="numeric" onChange={(event) => setCarMileageKm(event.target.value)} placeholder="85000" value={carMileageKm} />
+                    </label>
+                    <label>
+                      <span>{isAr ? 'ناقل الحركة' : 'Transmission'}</span>
+                      <select onChange={(event) => setCarTransmission(event.target.value)} value={carTransmission}>
+                        <option value="automatic">{isAr ? 'أوتوماتيك' : 'Automatic'}</option>
+                        <option value="manual">{isAr ? 'عادي' : 'Manual'}</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{isAr ? 'الوقود' : 'Fuel type'}</span>
+                      <select onChange={(event) => setCarFuelType(event.target.value)} value={carFuelType}>
+                        <option value="gas">{isAr ? 'بنزين' : 'Gas'}</option>
+                        <option value="diesel">{isAr ? 'ديزل' : 'Diesel'}</option>
+                        <option value="hybrid">{isAr ? 'هايبرد' : 'Hybrid'}</option>
+                        <option value="electric">{isAr ? 'كهرباء' : 'Electric'}</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{isAr ? 'الحالة' : 'Condition'}</span>
+                      <select onChange={(event) => setCarCondition(event.target.value)} value={carCondition}>
+                        <option value="NEW">{isAr ? 'جديد' : 'New'}</option>
+                        <option value="USED">{isAr ? 'مستعمل' : 'Used'}</option>
+                        <option value="EXCELLENT">{isAr ? 'ممتاز' : 'Excellent'}</option>
+                        <option value="GOOD">{isAr ? 'جيد' : 'Good'}</option>
+                        <option value="FAIR">{isAr ? 'مقبول' : 'Fair'}</option>
+                        <option value="REFURBISHED">{isAr ? 'مجدّد' : 'Refurbished'}</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="seller-form-grid">
+                    <label>
+                      <span>{isAr ? 'طريقة البيع' : 'Sale type'}</span>
+                      <select onChange={(event) => setCarSaleType(event.target.value as 'FIXED' | 'AUCTION')} value={carSaleType}>
+                        <option value="FIXED">{isAr ? 'سعر ثابت' : 'Fixed price'}</option>
+                        <option value="AUCTION">{isAr ? 'مزاد' : 'Auction'}</option>
+                      </select>
+                    </label>
+                    {carSaleType === 'AUCTION' && (
+                      <>
+                        <label>
+                          <span>{isAr ? 'الحد الأدنى للسعر (اختياري)' : 'Reserve price (optional)'}</span>
+                          <input dir="ltr" inputMode="numeric" onChange={(event) => setCarReservePriceMinor(event.target.value)} placeholder={isAr ? 'اتركه فارغاً لعدم وجود حد أدنى' : 'Leave blank for no reserve'} value={carReservePriceMinor} />
+                        </label>
+                        <label>
+                          <span>{isAr ? 'أقل زيادة في العرض' : 'Minimum bid increment'}</span>
+                          <input dir="ltr" inputMode="numeric" onChange={(event) => setCarMinIncrementMinor(event.target.value)} value={carMinIncrementMinor} />
+                        </label>
+                        <label>
+                          <span>{isAr ? 'مدة المزاد (ساعات)' : 'Auction duration (hours)'}</span>
+                          <input dir="ltr" inputMode="numeric" onChange={(event) => setCarAuctionDurationHours(event.target.value)} value={carAuctionDurationHours} />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                </>
               )}
               {!isAdvertisingFlow && division !== 'CARS' && (
                 <VisualFilterPanel
@@ -866,6 +1192,12 @@ export function SellerListingWizard({ lang }: Props) {
                     onChange={setAdDuration}
                     title={isAr ? 'مدة الإعلان' : 'Ad duration'}
                   />
+                </div>
+              )}
+              {!isAdvertisingFlow && division === 'CARS' && submitState === 'error' && (
+                <div className="seller-inline-alert">
+                  <strong>{isAr ? 'بيانات السيارة مطلوبة' : 'Vehicle details required'}</strong>
+                  <span>{submitError}</span>
                 </div>
               )}
             </div>
@@ -946,7 +1278,7 @@ export function SellerListingWizard({ lang }: Props) {
                   <button
                     aria-label={isAr ? 'تأكيد دبوس الموقع' : 'Confirm map pin'}
                     className={`seller-map-pin ${mapPinConfirmed ? 'confirmed' : ''}`}
-                    onClick={() => setMapPinConfirmed(true)}
+                    onClick={division === 'CARS' ? confirmMapPin : () => setMapPinConfirmed(true)}
                     type="button"
                   >
                     <span />
@@ -969,11 +1301,35 @@ export function SellerListingWizard({ lang }: Props) {
                     <span>{isAr ? 'خط الطول' : 'Longitude'}</span>
                     <input dir="ltr" inputMode="decimal" onChange={(event) => setLongitude(event.target.value)} value={longitude} />
                   </label>
-                  <button className={mapPinConfirmed ? 'confirmed' : ''} onClick={() => setMapPinConfirmed(true)} type="button">
+                  {division === 'CARS' && (
+                    <button disabled={geoStatus === 'locating'} onClick={useMyLocation} type="button">
+                      {geoStatus === 'locating'
+                        ? isAr ? 'جارِ تحديد الموقع...' : 'Locating...'
+                        : isAr ? 'استخدام موقعي الحالي' : 'Use my current location'}
+                    </button>
+                  )}
+                  {division === 'CARS' && (geoStatus === 'denied' || geoStatus === 'error') && (
+                    <span className="seller-map-geo-hint">
+                      {isAr
+                        ? 'تعذر الوصول للموقع. أدخل الإحداثيات يدوياً ثم اضغط تأكيد.'
+                        : 'Could not access your location. Enter coordinates manually, then confirm.'}
+                    </span>
+                  )}
+                  <button
+                    className={mapPinConfirmed ? 'confirmed' : ''}
+                    onClick={division === 'CARS' ? confirmMapPin : () => setMapPinConfirmed(true)}
+                    type="button"
+                  >
                     {mapPinConfirmed ? (isAr ? 'تم حفظ الموقع' : 'Location saved') : isAr ? 'تأكيد الموقع على الخريطة' : 'Confirm location on map'}
                   </button>
                 </div>
               </div>
+              {!isAdvertisingFlow && division === 'CARS' && submitState === 'error' && (
+                <div className="seller-inline-alert">
+                  <strong>{isAr ? 'الموقع مطلوب' : 'Location required'}</strong>
+                  <span>{submitError}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -1378,7 +1734,50 @@ export function SellerListingWizard({ lang }: Props) {
                 </div>
               ) : (
                 <>
-                  {!isAdvertisingFlow && (
+                  {!isAdvertisingFlow && division === 'CARS' && (
+                    <div className="seller-form-grid">
+                      <label className="seller-wide-field">
+                        <span>{isAr ? 'صور السيارة الحقيقية (مطلوب صورة واحدة على الأقل)' : 'Real car photos (at least one required)'}</span>
+                        <input
+                          accept="image/jpeg,image/png,image/webp"
+                          multiple
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files || []).filter((file) => {
+                              const allowed = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+                              const withinSize = file.size <= 8 * 1024 * 1024
+                              return allowed && withinSize
+                            })
+                            if (files.length) setCarPhotoFiles((current) => [...current, ...files])
+                            event.target.value = ''
+                          }}
+                          type="file"
+                        />
+                      </label>
+                      {carPhotoFiles.length > 0 && (
+                        <div className="seller-upload-grid">
+                          {carPhotoFiles.map((file, index) => (
+                            <span key={`${file.name}-${index}`}>
+                              {file.name}
+                              <button
+                                aria-label={isAr ? 'إزالة الصورة' : 'Remove photo'}
+                                onClick={() => setCarPhotoFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                                type="button"
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {submitState === 'error' && (
+                        <div className="seller-inline-alert">
+                          <strong>{isAr ? 'الصور مطلوبة' : 'Photos required'}</strong>
+                          <span>{submitError}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!isAdvertisingFlow && division !== 'CARS' && (
                     <div className="seller-offer-proof-panel">
                       <strong>{isAr ? 'إثبات عروض الضيف' : 'Guest offer proof'}</strong>
                       <span>
@@ -1399,6 +1798,7 @@ export function SellerListingWizard({ lang }: Props) {
                       )}
                     </div>
                   )}
+                  {division !== 'CARS' && (
                   <div className="seller-upload-grid">
                     {allowedMediaSlots.map((item) => (
                     <button
@@ -1422,6 +1822,7 @@ export function SellerListingWizard({ lang }: Props) {
                     </button>
                     ))}
                   </div>
+                  )}
                   {!isAdvertisingFlow && missingRequiredOfferProofSlots.length > 0 && (
                     <div className="seller-inline-alert">
                       <strong>{isAr ? 'إثبات العروض مطلوب' : 'Offer proof required'}</strong>
@@ -1600,6 +2001,15 @@ function TouchChoiceGroup({
 
 function toNumber(value: string) {
   return Number(String(value).replace(/[^\d.]/g, '')) || 0
+}
+
+// Mirrors server/lib/sr-geocoding.mjs's SYRIA_BOUNDS -- duplicated here since src/ never imports
+// server/lib/*.mjs. Used to make the CARS map pin require a real, plausible coordinate instead of
+// unconditionally confirming whatever is in the (previously decorative) lat/lng inputs.
+function isValidSyriaCoord(latStr: string, lngStr: string) {
+  const lat = Number(latStr)
+  const lng = Number(lngStr)
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 32 && lat <= 37.5 && lng >= 35 && lng <= 43
 }
 
 function toMinor(value: string) {

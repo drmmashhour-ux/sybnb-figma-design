@@ -183,6 +183,7 @@ model User {
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
   accommodations    Accommodation[]   @relation("AccommodationOwner")
   hostInsights      HostInsight[]     @relation("HostInsightOwner")
+  auctionBids       Bid[]             @relation("AuctionBidder")
   referralsMade     Referral[]        @relation("ReferralReferrer")
   referredAs        Referral?         @relation("ReferralReferee")
   // SR safety/trust layers (014/015)
@@ -329,6 +330,7 @@ model Listing {
   inquiryThreads MessageThread[]
   hostInsights   HostInsight[]
   sales          SellerSale[]
+  auction        Auction?
 
   @@index([division, status])
   @@index([ownerId])
@@ -400,6 +402,84 @@ model HostInsight {
   @@index([hostId, createdAt])
   @@index([listingId])
   @@map("host_insights")
+}
+
+enum AuctionStatus {
+  OPEN
+  ENDED
+  CANCELLED
+
+  @@map("auction_status")
+}
+
+// Carcad (CARS division) online auctions (026). One row per CARS listing the dealer chose to sell
+// via auction instead of a fixed price -- listingId is unique + required: an auction always
+// belongs to exactly one listing, and a listing has at most one auction, ever (no re-auctioning;
+// a dealer who wants to re-run it creates a new listing). Additive to Listing the same way
+// HostInsight is: no existing Listing columns touched, just the one `auction Auction?` reverse
+// relation above.
+model Auction {
+  id                 String        @id @default(uuid())
+  listingId          String        @unique @map("listing_id")
+  status             AuctionStatus @default(OPEN)
+
+  startingPriceMinor Int           @map("starting_price_minor")
+  reservePriceMinor  Int?          @map("reserve_price_minor")
+  reserveMet         Boolean       @default(false) @map("reserve_met")
+  minIncrementMinor  Int           @map("min_increment_minor")
+
+  // Visible "price to beat" -- always startingPriceMinor (no bids yet) or one increment above the
+  // second-highest bidder's max (classic eBay proxy display). Recomputed on every bid.
+  currentPriceMinor  Int           @map("current_price_minor")
+  // Hidden leader state -- currentBidderId/currentMaxProxyMinor must NEVER be serialized into any
+  // API response a buyer/seller can read directly (currentMaxProxyMinor especially -- it's the one
+  // piece of data proxy bidding exists to hide). Only a derived "you are the highest bidder"
+  // boolean is ever exposed, and only to that bidder themselves.
+  currentBidderId      String?     @map("current_bidder_id")
+  currentMaxProxyMinor Int?        @map("current_max_proxy_minor")
+
+  startsAt   DateTime  @default(now()) @map("starts_at")
+  endsAt     DateTime  @map("ends_at")
+  // Anti-snipe: a bid placed inside the trailing window pushes endsAt forward by the extension
+  // amount, never backward. Stored per-auction (not a global constant) for future tunability.
+  antiSnipeWindowSeconds    Int    @default(120) @map("anti_snipe_window_seconds")
+  antiSnipeExtensionSeconds Int    @default(120) @map("anti_snipe_extension_seconds")
+
+  endedAt          DateTime? @map("ended_at")
+  winnerBidderId   String?   @map("winner_bidder_id")
+  winnerNotifiedAt DateTime? @map("winner_notified_at")
+  winnerEmailError String?   @map("winner_email_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  bids    Bid[]
+
+  @@index([status, endsAt])
+  @@map("auctions")
+}
+
+// Append-only bid history -- every bid is a new row, never mutated. visiblePriceAtMinor is a
+// snapshot of what Auction.currentPriceMinor became as a RESULT of this bid (for audit/history
+// display without exposing anyone's actual max). isWinningBid is a convenience denormalization for
+// cheap "highlight the leading bid" queries; the real source of truth for who's winning is always
+// Auction.currentBidderId, and both are updated together in the same bid transaction.
+model Bid {
+  id                  String   @id @default(uuid())
+  auctionId           String   @map("auction_id")
+  bidderId            String   @map("bidder_id")
+  maxProxyMinor       Int      @map("max_proxy_minor")
+  visiblePriceAtMinor Int      @map("visible_price_at_minor")
+  isWinningBid        Boolean  @default(false) @map("is_winning_bid")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  bidder  User    @relation("AuctionBidder", fields: [bidderId], references: [id])
+
+  @@index([auctionId, createdAt])
+  @@index([bidderId])
+  @@map("bids")
 }
 
 // Real, server-verified email one-time codes for pre-registration guest identity checks (replaces

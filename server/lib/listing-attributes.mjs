@@ -1,4 +1,5 @@
 import { isValidMarketplaceCategory } from './marketplace-categories.mjs'
+import { isValidCoords } from './sr-geocoding.mjs'
 
 // Required structured attributes per division. A listing can be DRAFTed with partial data (the wizard
 // saves as you go), but it cannot be SUBMITTED for review — i.e. cannot go live — until the buyer-
@@ -74,6 +75,17 @@ function carRules() {
       valid: (m) => {
         const v = str(pick(m, 'condition', 'vehicle')).toUpperCase()
         return v.length > 0 && CONDITION_VALUES.has(v)
+      },
+    },
+    // 025/Carcad Phase D: the wizard's map pin used to be decorative -- "confirm" just flipped a
+    // flag over whatever (often still-default) lat/lng was in the inputs, so this rule requires a
+    // real, in-bounds, explicitly confirmed coordinate before a CARS listing can go live.
+    {
+      key: 'mapLocation',
+      label: 'confirmed map location',
+      valid: (m) => {
+        const map = (m && typeof m === 'object' && m.mapLocation) || {}
+        return Boolean(map.pinConfirmed) && isValidCoords({ lat: Number(map.latitude), lng: Number(map.longitude) })
       },
     },
   ]

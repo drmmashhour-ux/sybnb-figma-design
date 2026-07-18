@@ -9,9 +9,13 @@ import {
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
-import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate } from '../lib/listing-lifecycle.mjs'
+import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
+import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
+import { deleteListingMedia } from '../lib/listing-media-storage.mjs'
+import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
+import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
 
 // SECURITY (S7/S10): the ONLY guest + payment-proof fields a host is allowed to receive.
 // A host must never see the guest's email, nor a proof's uploaded transfer screenshot (proofAssetUrl),
@@ -90,6 +94,7 @@ export async function handleHost(req, res, url, context) {
 
     await completeExpiredBookings({ listing: { ownerId: context.user.id } })
     await expireOldListings({ ownerId: context.user.id })
+    await expireOpenAuctions({ listing: { ownerId: context.user.id } })
 
     const listings = await db().listing.findMany({
       where: { ownerId: context.user.id },
@@ -129,6 +134,26 @@ export async function handleHost(req, res, url, context) {
       orderBy: { createdAt: 'desc' },
       take: 50,
     })
+
+    // Dealer pricing tool (025/Carcad Phase G): rate every one of the dealer's own CARS listings
+    // against the live APPROVED market, even a DRAFT/PENDING_REVIEW/PAUSED one that isn't live yet
+    // -- that's exactly what a pre-publish pricing tool needs. Reuses the listings this endpoint
+    // already fetched; no new endpoint or extra round-trip.
+    const carsListingIds = new Set(listings.filter((listing) => listing.division === 'CARS').map((listing) => listing.id))
+    if (carsListingIds.size) {
+      const pool = await loadCarsComparablePool()
+      for (const listing of listings) {
+        if (carsListingIds.has(listing.id)) listing.dealRating = computeDealRating(listing, pool)
+      }
+      // Auctions (026): the dealer's own dashboard card shows current price/bid count/time left
+      // inline (see HostDashboardPage.tsx) -- attach the same card-safe summary used on browse/detail.
+      const auctionSummaries = await loadAuctionSummaries([...carsListingIds])
+      if (auctionSummaries.size) {
+        for (const listing of listings) {
+          if (auctionSummaries.has(listing.id)) listing.auction = auctionSummaries.get(listing.id)
+        }
+      }
+    }
 
     const requests = listings.flatMap((listing) =>
       listing.bookings.map((booking) => ({
@@ -598,14 +623,6 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
-    if (!FREE_TIER_DIVISIONS.has(existing.division)) {
-      const error = new Error('Only Rentals/Buy listings can be self-renewed; other divisions renew through their paid plan.')
-      error.statusCode = 409
-      error.code = 'HOST_LISTING_NOT_RENEWABLE'
-      error.expose = true
-      throw error
-    }
-
     // SECURITY (S1 — verify-before-live, same boundary as the status endpoint above): renewal
     // never changes status, only pushes expiresAt forward on a listing that is still APPROVED —
     // it can never be used to resurrect an EXPIRED listing without a fresh admin review.
@@ -617,7 +634,43 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
-    const nextExpiresAt = freeListingExpiryDate()
+    let nextExpiresAt
+    if (PAID_PLAN_DIVISIONS.has(existing.division)) {
+      // CARS/NEW_CONSTRUCTION renewal is NOT the same free self-renew as RENTALS/BUY: their
+      // expiresAt is backed by a paid plan the dealer already paid for once (30/60 days).
+      // Self-renewing them the same way RENTALS/BUY do would let a listing stay live forever
+      // without ever paying again -- a revenue leak, not parity. This mirrors the wizard's own
+      // self-reported "I paid" confirmation step (this prototype has no real payment processor
+      // to check against), requiring the client to explicitly re-confirm payment before the
+      // expiry clock advances again.
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['planPaymentConfirmed'], 'listing renew body')
+      if (body.planPaymentConfirmed !== true) {
+        const error = new Error('Renewing a paid-plan listing requires confirming plan payment again.')
+        error.statusCode = 402
+        error.code = 'PLAN_PAYMENT_CONFIRMATION_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const sellerProfile = await db().sellerProfile.findUnique({ where: { userId: context.user.id } })
+      if (!sellerProfile || sellerProfile.documentStatus !== 'APPROVED') {
+        const error = new Error('A paid, admin-approved seller plan is required to renew this listing.')
+        error.statusCode = 403
+        error.code = 'SELLER_PLAN_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      nextExpiresAt = listingExpiryDate(sellerProfile.planCode)
+    } else if (FREE_TIER_DIVISIONS.has(existing.division)) {
+      nextExpiresAt = freeListingExpiryDate()
+    } else {
+      const error = new Error('This division cannot be renewed.')
+      error.statusCode = 409
+      error.code = 'HOST_LISTING_NOT_RENEWABLE'
+      error.expose = true
+      throw error
+    }
+
     const claim = await db().listing.updateMany({
       where: { id: existing.id, status: 'APPROVED' },
       data: { expiresAt: nextExpiresAt },
@@ -643,6 +696,110 @@ export async function handleHost(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, listing })
+  }
+
+  // Edit + delete (025/Carcad Phase C): this gap existed for every division, not just CARS --
+  // there was previously no way for a host to correct a draft's price/title or remove a stale one.
+  const editMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)$/)
+  if (editMatch) {
+    if (req.method === 'PATCH') {
+      requireAuth(context, ['HOST', 'SELLER'])
+      const existing = await db().listing.findFirst({ where: { id: editMatch[1], ownerId: context.user.id } })
+      if (!existing) {
+        const error = new Error('Listing not found for this host account.')
+        error.statusCode = 404
+        error.code = 'HOST_LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      // Editing mid-review would race with the admin's decision, so it's locked while PENDING_REVIEW.
+      if (existing.status === 'PENDING_REVIEW') {
+        const error = new Error('This listing is awaiting admin review and cannot be edited right now.')
+        error.statusCode = 409
+        error.code = 'HOST_LISTING_EDIT_LOCKED'
+        error.expose = true
+        throw error
+      }
+
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['titleAr', 'titleEn', 'description', 'priceMinor', 'metadata'], 'listing edit body')
+
+      const data = {}
+      if (body.titleAr !== undefined) data.titleAr = assertBoundedString(body.titleAr, { fieldName: 'titleAr', maxLength: 200, required: true })
+      if (body.titleEn !== undefined) data.titleEn = assertBoundedString(body.titleEn, { fieldName: 'titleEn', maxLength: 200 }) || null
+      if (body.description !== undefined) data.description = assertBoundedString(body.description, { fieldName: 'description', maxLength: 4000 }) || null
+      if (body.priceMinor !== undefined) {
+        const priceMinor = Number(body.priceMinor)
+        if (!Number.isInteger(priceMinor) || priceMinor <= 0 || priceMinor > 2147483647) {
+          const error = new Error('Listing price must be a whole number greater than zero.')
+          error.statusCode = 400
+          error.code = 'LISTING_PRICE_INVALID'
+          error.expose = true
+          throw error
+        }
+        data.priceMinor = priceMinor
+      }
+      if (body.metadata !== undefined) data.metadata = body.metadata
+
+      const listing = await db().listing.update({ where: { id: existing.id }, data })
+
+      await db().adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'HOST_LISTING_EDITED',
+          entityType: 'listings',
+          entityId: listing.id,
+          before: existing,
+          after: listing,
+        },
+      })
+
+      return json(res, 200, { ok: true, listing })
+    }
+
+    if (req.method === 'DELETE') {
+      requireAuth(context, ['HOST', 'SELLER'])
+      const existing = await db().listing.findFirst({ where: { id: editMatch[1], ownerId: context.user.id } })
+      if (!existing) {
+        const error = new Error('Listing not found for this host account.')
+        error.statusCode = 404
+        error.code = 'HOST_LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      // Never allow deleting a live or in-review listing directly -- force pause-then-delete,
+      // consistent with the self-service boundary already enforced on the status endpoint above.
+      if (!['DRAFT', 'REJECTED', 'PAUSED'].includes(existing.status)) {
+        const error = new Error('Only a draft, rejected, or paused listing can be deleted. Pause a live listing first.')
+        error.statusCode = 409
+        error.code = 'HOST_LISTING_DELETE_FORBIDDEN'
+        error.expose = true
+        throw error
+      }
+
+      // ListingMedia rows cascade-delete with the listing automatically (schema onDelete: Cascade),
+      // but the on-disk files need explicit cleanup first, before the DB rows referencing them are gone.
+      const media = await db().listingMedia.findMany({ where: { listingId: existing.id } })
+      for (const item of media) {
+        await deleteListingMedia(String(item.url || '').split('/').pop())
+      }
+      await db().listing.delete({ where: { id: existing.id } })
+
+      await db().adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'HOST_LISTING_DELETED',
+          entityType: 'listings',
+          entityId: existing.id,
+          before: existing,
+          after: null,
+        },
+      })
+
+      return json(res, 200, { ok: true, deleted: true })
+    }
+
+    return methodNotAllowed(res, ['PATCH', 'DELETE'])
   }
 
   const instantBookMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/instant-book$/)

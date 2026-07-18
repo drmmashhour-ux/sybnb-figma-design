@@ -3,6 +3,8 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   decidePrototypeHostRequest,
+  deleteHostListing,
+  editHostListing,
   fetchPrototypeHostOverview,
   markHostGuestCheckpoint,
   updatePrototypeHostInstantBook,
@@ -17,6 +19,7 @@ import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/Vi
 import { divisionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { HostAvailabilityCalendar } from './HostAvailabilityCalendar'
+import { CarPricingToolPanel } from '../cars/CarPricingToolPanel'
 
 type Props = {
   lang: Lang
@@ -64,11 +67,25 @@ const copy = {
     resume: 'إعادة نشر',
     manageCalendar: 'تقويم الحجوزات المتوفرة',
     hideCalendar: 'إخفاء التقويم',
+    pricingTool: 'أداة التسعير',
+    hidePricingTool: 'إخفاء أداة التسعير',
+    auctionCurrentPrice: 'السعر الحالي للمزاد',
+    auctionBidCount: 'عدد العروض',
+    auctionTimeLeft: 'ينتهي المزاد في',
+    auctionEnded: 'المزاد',
+    auctionEndedWinner: 'انتهى — تم بلوغ الحد الأدنى',
+    auctionEndedNoWinner: 'انتهى — لم يتم بلوغ الحد الأدنى',
     instantBookOn: '⚡ الحجز الفوري: مفعّل',
     instantBookOff: 'تفعيل الحجز الفوري',
     expiresOn: 'ينتهي الإعلان في',
     renew: 'تجديد الإعلان',
     renewed: 'تم تجديد الإعلان',
+    edit: 'تعديل',
+    saveEdit: 'حفظ',
+    cancelEdit: 'إلغاء',
+    editTitleLabel: 'العنوان',
+    editPriceLabel: 'السعر',
+    deleteListing: 'حذف',
     confirm: 'تأكيد',
     cancel: 'إلغاء',
     saving: 'جار الحفظ',
@@ -177,11 +194,25 @@ const copy = {
     resume: 'Resume',
     manageCalendar: 'Availability calendar',
     hideCalendar: 'Hide calendar',
+    pricingTool: 'Pricing tool',
+    hidePricingTool: 'Hide pricing tool',
+    auctionCurrentPrice: 'Current auction price',
+    auctionBidCount: 'Bids',
+    auctionTimeLeft: 'Auction ends',
+    auctionEnded: 'Auction',
+    auctionEndedWinner: 'Ended — reserve met',
+    auctionEndedNoWinner: 'Ended — reserve not met',
     instantBookOn: '⚡ Instant Book: On',
     instantBookOff: 'Enable Instant Book',
     expiresOn: 'Listing expires on',
     renew: 'Renew listing',
     renewed: 'Listing renewed',
+    edit: 'Edit',
+    saveEdit: 'Save',
+    cancelEdit: 'Cancel',
+    editTitleLabel: 'Title',
+    editPriceLabel: 'Price',
+    deleteListing: 'Delete',
     confirm: 'Confirm',
     cancel: 'Cancel',
     saving: 'Saving',
@@ -266,6 +297,10 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const [activeRequestId, setActiveRequestId] = useState('')
   const [activeListingId, setActiveListingId] = useState('')
   const [calendarListingId, setCalendarListingId] = useState('')
+  const [pricingToolListingId, setPricingToolListingId] = useState('')
+  const [editingListingId, setEditingListingId] = useState('')
+  const [editTitleAr, setEditTitleAr] = useState('')
+  const [editPriceMinor, setEditPriceMinor] = useState('')
   const [acceptedRequestTerms, setAcceptedRequestTerms] = useState<Record<string, boolean>>({})
   const [hostDocumentFiles, setHostDocumentFiles] = useState<string[]>([])
   const [hostDocumentsSent, setHostDocumentsSent] = useState(false)
@@ -422,15 +457,69 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     }
   }
 
-  async function renewListing(listingId: string) {
+  async function renewListing(listing: PlatformListing) {
+    const isPaidPlanDivision = listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION'
+    // Paid-plan divisions (CARS/NEW_CONSTRUCTION) renew a real paid window, unlike RENTALS/BUY's
+    // free self-renew -- re-confirm intent the same way the wizard's own "I paid" step does,
+    // rather than silently re-charging the expiry clock on a click.
+    if (isPaidPlanDivision) {
+      const confirmed = window.confirm(isAr ? 'سيتم تجديد الخطة المدفوعة لهذا الإعلان. هل تؤكد أنك دفعت خطة تجديد جديدة؟' : 'This will renew the paid plan for this listing. Confirm you have paid for a new renewal?')
+      if (!confirmed) return
+    }
+
+    setStatus('saving')
+    setActiveListingId(listing.id)
+    setMessage('')
+
+    try {
+      await renewPrototypeHostListing(listing.id, mode, isPaidPlanDivision ? true : undefined)
+      setOverview(await fetchPrototypeHostOverview(mode))
+      setMessage(t.renewed)
+      setStatus('ready')
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setActiveListingId('')
+    }
+  }
+
+  function startEditListing(listing: PlatformListing) {
+    setEditingListingId(listing.id)
+    setEditTitleAr(listing.titleAr)
+    setEditPriceMinor(String(listing.priceMinor))
+  }
+
+  async function saveEditListing(listingId: string) {
     setStatus('saving')
     setActiveListingId(listingId)
     setMessage('')
 
     try {
-      await renewPrototypeHostListing(listingId, mode)
+      const priceMinor = Number(editPriceMinor)
+      await editHostListing(listingId, { titleAr: editTitleAr, priceMinor }, mode)
       setOverview(await fetchPrototypeHostOverview(mode))
-      setMessage(t.renewed)
+      setEditingListingId('')
+      setStatus('ready')
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setActiveListingId('')
+    }
+  }
+
+  async function deleteListing(listingId: string) {
+    const confirmed = window.confirm(isAr ? 'هل تريد حذف هذا الإعلان نهائياً؟' : 'Delete this listing permanently?')
+    if (!confirmed) return
+
+    setStatus('saving')
+    setActiveListingId(listingId)
+    setMessage('')
+
+    try {
+      await deleteHostListing(listingId, mode)
+      setOverview(await fetchPrototypeHostOverview(mode))
       setStatus('ready')
     } catch (error) {
       setStatus('error')
@@ -595,30 +684,89 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         <Panel title={providerCopy.inventoryTitle} empty={t.empty}>
           {visibleListings.map((listing) => (
             <article key={listing.id} style={styles.card}>
-              <strong>{listingTitle(listing, lang)}</strong>
-              <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-              <Info label={t.status} value={statusText(listing.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-              <Info label={t.price} value={moneyText(listing.priceMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-              {listing.expiresAt && (
-                <Info
-                  label={t.expiresOn}
-                  value={new Date(listing.expiresAt).toLocaleDateString(isAr ? 'ar-SY' : 'en-US', { timeZone: 'UTC' })}
-                  dir={isAr ? 'rtl' : 'ltr'}
-                />
-              )}
-              <div style={styles.actions}>
-                <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-                  {t.view}
-                </button>
-                {(listing.division === 'RENTALS' || listing.division === 'BUY') && listing.status === 'APPROVED' && (
-                  <button
-                    disabled={activeListingId === listing.id}
-                    style={styles.secondaryButton}
-                    onClick={() => void renewListing(listing.id)}
-                  >
-                    {activeListingId === listing.id ? t.saving : t.renew}
-                  </button>
-                )}
+              {editingListingId === listing.id ? (
+                <div style={styles.editForm}>
+                  <label>
+                    <span>{t.editTitleLabel}</span>
+                    <input onChange={(event) => setEditTitleAr(event.target.value)} value={editTitleAr} />
+                  </label>
+                  <label>
+                    <span>{t.editPriceLabel}</span>
+                    <input dir="ltr" inputMode="numeric" onChange={(event) => setEditPriceMinor(event.target.value)} value={editPriceMinor} />
+                  </label>
+                  <div style={styles.actions}>
+                    <button disabled={activeListingId === listing.id} style={styles.primaryButton} onClick={() => void saveEditListing(listing.id)}>
+                      {activeListingId === listing.id ? t.saving : t.saveEdit}
+                    </button>
+                    <button style={styles.secondaryButton} onClick={() => setEditingListingId('')}>
+                      {t.cancelEdit}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <strong>{listingTitle(listing, lang)}</strong>
+                  <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+                  <Info label={t.status} value={statusText(listing.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+                  <Info label={t.price} value={moneyText(listing.priceMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+                  {listing.auction && listing.auction.status === 'OPEN' && (
+                    <>
+                      <Info label={t.auctionCurrentPrice} value={moneyText(listing.auction.currentPriceMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+                      <Info label={t.auctionBidCount} value={String(listing.auction.bidCount)} dir={isAr ? 'rtl' : 'ltr'} />
+                      <Info
+                        label={t.auctionTimeLeft}
+                        value={new Date(listing.auction.endsAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')}
+                        dir={isAr ? 'rtl' : 'ltr'}
+                      />
+                    </>
+                  )}
+                  {listing.auction && listing.auction.status === 'ENDED' && (
+                    <Info
+                      label={t.auctionEnded}
+                      value={listing.auction.reserveMet ? t.auctionEndedWinner : t.auctionEndedNoWinner}
+                      dir={isAr ? 'rtl' : 'ltr'}
+                    />
+                  )}
+                  {listing.expiresAt && (
+                    <Info
+                      label={t.expiresOn}
+                      value={new Date(listing.expiresAt).toLocaleDateString(isAr ? 'ar-SY' : 'en-US', { timeZone: 'UTC' })}
+                      dir={isAr ? 'rtl' : 'ltr'}
+                    />
+                  )}
+                  <div style={styles.actions}>
+                    <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
+                      {t.view}
+                    </button>
+                    {((listing.division === 'RENTALS' || listing.division === 'BUY') ||
+                      ((listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION'))) &&
+                      listing.status === 'APPROVED' && (
+                      <button
+                        disabled={activeListingId === listing.id}
+                        style={styles.secondaryButton}
+                        onClick={() => void renewListing(listing)}
+                      >
+                        {activeListingId === listing.id ? t.saving : t.renew}
+                      </button>
+                    )}
+                    {['DRAFT', 'REJECTED', 'APPROVED'].includes(listing.status) && (
+                      <button
+                        disabled={activeListingId === listing.id}
+                        style={styles.secondaryButton}
+                        onClick={() => startEditListing(listing)}
+                      >
+                        {t.edit}
+                      </button>
+                    )}
+                    {['DRAFT', 'REJECTED', 'PAUSED'].includes(listing.status) && (
+                      <button
+                        disabled={activeListingId === listing.id}
+                        style={styles.dangerButton}
+                        onClick={() => void deleteListing(listing.id)}
+                      >
+                        {t.deleteListing}
+                      </button>
+                    )}
                 {listing.status === 'PAUSED' ? (
                   <button
                     disabled={activeListingId === listing.id}
@@ -651,6 +799,14 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                     {activeListingId === listing.id ? t.saving : listing.instantBookEnabled ? t.instantBookOn : t.instantBookOff}
                   </button>
                 )}
+                {listing.division === 'CARS' && (
+                  <button
+                    style={styles.secondaryButton}
+                    onClick={() => setPricingToolListingId((current) => (current === listing.id ? '' : listing.id))}
+                  >
+                    {pricingToolListingId === listing.id ? t.hidePricingTool : t.pricingTool}
+                  </button>
+                )}
               </div>
               {calendarListingId === listing.id && (
                 <HostAvailabilityCalendar
@@ -660,6 +816,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                   currency={listing.currency}
                   mode={mode}
                 />
+              )}
+              {pricingToolListingId === listing.id && <CarPricingToolPanel lang={lang} listing={listing} />}
+                </>
               )}
             </article>
           ))}
@@ -1018,6 +1177,7 @@ const styles: Record<string, CSSProperties> = {
   actions: { display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr', alignItems: 'stretch' },
   termsBox: { gridColumn: '1 / -1', border: '1px solid rgba(229,184,11,.55)', borderRadius: 8, background: 'rgba(229,184,11,.08)', color: '#f7d45f', padding: 12, display: 'grid', gap: 10, gridTemplateColumns: '28px minmax(0, 1fr)', alignItems: 'start', lineHeight: 1.45 },
   dangerButton: { minHeight: 42, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 14px' },
+  editForm: { display: 'grid', gap: 10 },
   info: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#9aa6ba' },
   empty: { color: '#9aa6ba', margin: 0 },
 }

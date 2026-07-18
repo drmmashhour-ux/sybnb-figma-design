@@ -48,6 +48,24 @@ export type PlatformListing = {
   hasActiveOffer?: boolean
   offerNightsCount?: number
   cheapestOfferMinor?: number | null
+  // CarGurus-style Deal Rating (025/Carcad Phase E) -- CARS listings only, computed server-side
+  // against a pool of comparable APPROVED listings. Absent/undefined for every other division.
+  dealRating?: {
+    tier: 'GREAT_DEAL' | 'GOOD_DEAL' | 'FAIR_PRICE' | 'HIGH_PRICE' | null
+    comparableCount: number
+    medianPriceMinor: number | null
+    priceDeltaMinor?: number
+  } | null
+  // Online auctions (026) -- CARS listings only, a card-safe public summary. The full
+  // context-aware state (youAreHighestBidder, reservePriceMinor for the owner, winnerBidderId for
+  // the winner) is fetched separately via fetchAuctionState(), never bundled into search/detail.
+  auction?: {
+    status: 'OPEN' | 'ENDED' | 'CANCELLED'
+    currentPriceMinor: number
+    reserveMet: boolean
+    endsAt: string
+    bidCount: number
+  } | null
 }
 
 export type PlatformPaymentProof = {
@@ -687,6 +705,118 @@ export async function createAndSubmitMarketplaceListing(input: {
   return submitted.listing
 }
 
+export type CarVehicleAttributes = {
+  make: string
+  model: string
+  year: number
+  mileageKm: number
+  transmission: string
+  fuelType: string
+  condition: 'NEW' | 'USED' | 'EXCELLENT' | 'GOOD' | 'FAIR' | 'REFURBISHED'
+}
+
+// CARS listing creation -- previously the seller wizard never actually uploaded real photo
+// bytes (only filenames were kept in memory) and never populated the structured vehicle fields
+// server/lib/listing-attributes.mjs's carRules() requires, so submission always failed with
+// LISTING_PHOTOS_REQUIRED + LISTING_ATTRIBUTES_INCOMPLETE. This creates the draft, uploads each
+// real photo, then submits -- same three-call sequence as createAndSubmitMarketplaceListing,
+// just looping the photo upload over multiple files.
+export type CarAuctionConfig = {
+  reservePriceMinor?: number
+  minIncrementMinor: number
+  durationHours: number
+}
+
+export async function createAndSubmitCarListing(input: {
+  titleAr: string
+  titleEn?: string
+  description?: string
+  priceMinor: number
+  currency: string
+  vehicle: CarVehicleAttributes
+  metadata: Record<string, unknown>
+  photos: File[]
+  auction?: CarAuctionConfig
+}) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const created = await apiRequest<{ ok: true; listing: PlatformListing }>('/api/listings', {
+    method: 'POST',
+    token: session.token,
+    body: {
+      division: 'CARS',
+      titleAr: input.titleAr,
+      titleEn: input.titleEn,
+      description: input.description,
+      priceMinor: input.priceMinor,
+      currency: input.currency,
+      metadata: { ...input.metadata, vehicle: input.vehicle, saleType: input.auction ? 'AUCTION' : 'FIXED' },
+    },
+  })
+  for (const file of input.photos) {
+    const fileBase64 = await readFileAsBase64(file)
+    await apiRequest<{ ok: true }>(`/api/listings/${created.listing.id}/media`, {
+      method: 'POST',
+      token: session.token,
+      body: { fileBase64, mimeType: file.type },
+    })
+  }
+  if (input.auction) {
+    await apiRequest<{ ok: true }>(`/api/listings/${created.listing.id}/auction`, {
+      method: 'POST',
+      token: session.token,
+      body: input.auction,
+    })
+  }
+  const submitted = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${created.listing.id}/submit`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  sessionStorage.setItem(LAST_SUBMITTED_LISTING_KEY, JSON.stringify(submitted.listing))
+  return submitted.listing
+}
+
+// Online auctions (026): read the full context-aware auction state for a listing (includes
+// youAreHighestBidder / reservePriceMinor(owner) / winnerBidderId(owner or winner) depending on who
+// is asking) -- separate from the card-safe `PlatformListing.auction` summary bundled into
+// search/detail responses.
+export type PlatformAuctionState = {
+  id: string
+  listingId: string
+  status: 'OPEN' | 'ENDED' | 'CANCELLED'
+  startingPriceMinor: number
+  currentPriceMinor: number
+  reserveMet: boolean
+  minIncrementMinor: number
+  startsAt: string
+  endsAt: string
+  bidCount: number
+  youAreHighestBidder?: boolean
+  reservePriceMinor?: number | null
+  endedAt?: string
+  hasWinner?: boolean
+  youWon?: boolean
+}
+
+export async function fetchAuctionState(listingId: string) {
+  // Buyer-facing (ListingDetailPage's AuctionBidPanel) -- same session as inquiry/contact-seller,
+  // ensurePrototypeGuestSession() creates one on demand so an anonymous visitor can still view
+  // public auction state (server exposes context-aware fields only when the token identifies them
+  // as the leader/owner/winner; a fresh guest session yields the plain public shape either way).
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; auction: PlatformAuctionState }>(`/api/listings/${listingId}/auction`, {
+    token: session.token,
+  })
+  return response.auction
+}
+
+export async function placeAuctionBid(listingId: string, maxProxyMinor: number) {
+  const session = await ensurePrototypeGuestSession()
+  return apiRequest<{ ok: true; currentPriceMinor: number; youAreHighestBidder: boolean; reserveMet: boolean; endsAt: string }>(
+    `/api/listings/${listingId}/auction/bids`,
+    { method: 'POST', token: session.token, body: { maxProxyMinor } },
+  )
+}
+
 export type PlatformAccommodation = {
   id: string
   ownerId: string
@@ -1057,6 +1187,20 @@ export type ListingSearchFilters = {
   checkIn?: string
   checkOut?: string
   sort?: 'priceAsc' | 'priceDesc' | 'newest'
+  // CARS-only filters (Carcad Phase B) -- server/routes/listings.mjs reads these against
+  // metadata.vehicle.* (falling back to flat metadata.*).
+  make?: string
+  model?: string
+  minYear?: number
+  maxYear?: number
+  minMileageKm?: number
+  maxMileageKm?: number
+  transmission?: string
+  fuelType?: string
+  // Search radius (Carcad Phase F) -- all three must be provided together, server-validated.
+  centerLat?: number
+  centerLng?: number
+  radiusKm?: number
 }
 
 export async function fetchApprovedListings(division = 'STAYS', filters: ListingSearchFilters = {}) {
@@ -1077,6 +1221,17 @@ export async function fetchApprovedListings(division = 'STAYS', filters: Listing
   if (filters.checkIn) params.set('checkIn', filters.checkIn)
   if (filters.checkOut) params.set('checkOut', filters.checkOut)
   if (filters.sort) params.set('sort', filters.sort)
+  if (filters.make) params.set('make', filters.make)
+  if (filters.model) params.set('model', filters.model)
+  if (filters.minYear !== undefined) params.set('minYear', String(filters.minYear))
+  if (filters.maxYear !== undefined) params.set('maxYear', String(filters.maxYear))
+  if (filters.minMileageKm !== undefined) params.set('minMileageKm', String(filters.minMileageKm))
+  if (filters.maxMileageKm !== undefined) params.set('maxMileageKm', String(filters.maxMileageKm))
+  if (filters.transmission) params.set('transmission', filters.transmission)
+  if (filters.fuelType) params.set('fuelType', filters.fuelType)
+  if (filters.centerLat !== undefined) params.set('centerLat', String(filters.centerLat))
+  if (filters.centerLng !== undefined) params.set('centerLng', String(filters.centerLng))
+  if (filters.radiusKm !== undefined) params.set('radiusKm', String(filters.radiusKm))
   try {
     const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
     return response.listings
@@ -2240,13 +2395,39 @@ export async function updatePrototypeHostListingStatus(
 // Rentals/Buy (025): self-service "still available?" renewal -- pushes expiresAt forward on a
 // still-live (APPROVED) listing without requiring another admin review. Other divisions renew
 // through their paid plan instead (see FREE_TIER_DIVISIONS on the server).
-export async function renewPrototypeHostListing(listingId: string, mode: HostDashboardMode = 'host') {
+// CARS/NEW_CONSTRUCTION (paid-plan divisions) require re-confirming plan payment to renew --
+// RENTALS/BUY (free-tier, no paid plan) don't, so `planPaymentConfirmed` is omitted for them.
+export async function renewPrototypeHostListing(listingId: string, mode: HostDashboardMode = 'host', planPaymentConfirmed?: true) {
   const session = await getHostDashboardSession(mode)
   const response = await apiRequest<{ ok: true; listing: PlatformListing }>(
     `/api/host/listings/${listingId}/renew`,
-    { method: 'PATCH', token: session.token },
+    { method: 'PATCH', token: session.token, body: planPaymentConfirmed ? { planPaymentConfirmed } : undefined },
   )
   return response.listing
+}
+
+// Edit/delete (025/Carcad Phase C) -- previously no listing could be edited or deleted at all
+// after creation, for any division.
+export async function editHostListing(
+  listingId: string,
+  patch: { titleAr?: string; titleEn?: string; description?: string; priceMinor?: number; metadata?: Record<string, unknown> },
+  mode: HostDashboardMode = 'host',
+) {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/host/listings/${listingId}`, {
+    method: 'PATCH',
+    token: session.token,
+    body: patch,
+  })
+  return response.listing
+}
+
+export async function deleteHostListing(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  await apiRequest<{ ok: true; deleted: true }>(`/api/host/listings/${listingId}`, {
+    method: 'DELETE',
+    token: session.token,
+  })
 }
 
 export async function updatePrototypeHostInstantBook(

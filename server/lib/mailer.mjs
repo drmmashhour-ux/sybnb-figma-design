@@ -77,6 +77,23 @@ export async function sendHostInsightEmail(user, insight) {
   return deliver({ to: user.email, subject, text })
 }
 
+// Carcad (CARS division) online auctions (026) -- best-effort winner notification, same shape as
+// sendHostInsightEmail. The winner still needs to use the listing's existing "Contact seller" flow
+// to actually reach the dealer; this email is just how they find out they won in the first place.
+export async function sendAuctionWonEmail(user, auction, listing) {
+  const priceText = `${Number(auction.currentPriceMinor).toLocaleString('en-US')} ${listing.currency}`
+  const title = listing.titleEn || listing.titleAr
+  const subject = 'لقد فزت بالمزاد — SYBNB / You won the auction'
+  const text = [
+    `لقد فزت بمزاد "${title}" بسعر ${priceText}.`,
+    'افتح صفحة الإعلان في التطبيق واستخدم زر "تواصل مع البائع" لإتمام عملية الشراء.',
+    '',
+    `You won the auction for "${title}" at ${priceText}.`,
+    'Open the listing in the app and use the "Contact seller" button to complete the purchase.',
+  ].join('\n')
+  return deliver({ to: user.email, subject, text })
+}
+
 // Real email delivery for guest-signup verification codes. Chosen over SMS: no per-message
 // carrier cost and no international-SMS-gateway account needed for the Syria market this stage
 // targets. Throws EMAIL_NOT_CONFIGURED (503) when neither provider is set up -- the caller

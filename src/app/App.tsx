@@ -32,6 +32,7 @@ const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/Immoconta
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
 const LegalPlaceholderPage = lazyNamed(() => import('../modules/legal/LegalPlaceholderPage'), 'LegalPlaceholderPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
+const CarBrowsePage = lazyNamed(() => import('../modules/cars/CarBrowsePage'), 'CarBrowsePage')
 const OperationsCalendarPage = lazyNamed(() => import('../modules/operations/OperationsCalendarPage'), 'OperationsCalendarPage')
 const PaymentReceiptPage = lazyNamed(() => import('../modules/payments/PaymentReceiptPage'), 'PaymentReceiptPage')
 const PlatformStatusPage = lazyNamed(() => import('../modules/status/PlatformStatusPage'), 'PlatformStatusPage')
@@ -161,7 +162,7 @@ export function App() {
         ) : path === '/buy' ? (
           <RentalsPage lang={lang} mode="buy" />
         ) : path === '/cars' ? (
-          <SearchPreviewPage lang={lang} initialDivision="cars" entry="general" />
+          <CarBrowsePage lang={lang} />
         ) : path === '/marketplace/sell' ? (
           <MarketplaceSellPage lang={lang} />
         ) : path === '/marketplace' ? (

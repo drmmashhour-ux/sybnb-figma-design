@@ -19,6 +19,8 @@ import { BlockButton } from '../safety/BlockButton'
 import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
+import { DealRatingBadge } from '../cars/DealRatingBadge'
+import { AuctionBidPanel } from '../cars/AuctionBidPanel'
 
 type Props = {
   listingId: string
@@ -463,8 +465,17 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               />
               <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
               {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
+              {listing.division === 'CARS' && (
+                <span style={styles.dealRatingBadge}>
+                  <DealRatingBadge dealRating={listing.dealRating} lang={lang} />
+                </span>
+              )}
             </div>
           </section>
+
+          {listing.division === 'CARS' && listing.auction != null && (
+            <AuctionBidPanel lang={lang} listing={listing} onContactSeller={() => void requestListing()} />
+          )}
 
           <section style={styles.detailBody}>
             <div style={styles.titleBlock}>
@@ -843,6 +854,7 @@ const styles: Record<string, CSSProperties> = {
   media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
   mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
   mediaBadge: { position: 'absolute', insetInlineStart: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
+  dealRatingBadge: { position: 'absolute', insetInlineEnd: 14, bottom: 14 },
   instantBookBadge: { position: 'absolute', insetInlineStart: 14, top: 14, borderRadius: 999, background: 'rgba(213,169,21,.9)', color: '#1a1400', fontWeight: 950, border: '1px solid rgba(255,255,255,.25)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   detailBody: { border: '1px solid #263146', borderRadius: 8, background: '#10141f', padding: 18, display: 'grid', gap: 16, boxShadow: '0 18px 60px rgba(0,0,0,.24)' },
   titleBlock: { display: 'grid', gap: 8, justifyItems: 'center', textAlign: 'center' },

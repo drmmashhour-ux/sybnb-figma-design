@@ -9,6 +9,7 @@ import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs
 import { applySecurityHeaders } from './lib/security-headers.mjs'
 import { handleAccommodations } from './routes/accommodations.mjs'
 import { handleAdmin } from './routes/admin.mjs'
+import { handleAuctions } from './routes/auctions.mjs'
 import { handleAuth } from './routes/auth.mjs'
 import { handleBookings } from './routes/bookings.mjs'
 import { handleDriver } from './routes/driver.mjs'
@@ -143,6 +144,7 @@ async function dispatch(req, res, url, context) {
   for (const handler of [
     handleAuth,
     handleAccommodations,
+    handleAuctions,
     handleListings,
     handleBookings,
     handlePayments,

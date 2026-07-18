@@ -59,6 +59,7 @@ const COMPLETE_PROPERTY = {
 
 const COMPLETE_CAR = {
   vehicle: { make: 'Kia', model: 'Rio', year: 2019, mileageKm: 82000, transmission: 'AUTO', fuelType: 'PETROL', condition: 'USED' },
+  mapLocation: { latitude: 33.5138, longitude: 36.2765, pinConfirmed: true },
 }
 
 describe('Marketplace trust Block 1: photos + required attributes + submit guards', () => {

@@ -6,6 +6,9 @@ import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
 import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes, PHOTO_REQUIRED_DIVISIONS } from '../lib/listing-attributes.mjs'
+import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
+import { haversineKm, isValidCoords } from '../lib/sr-geocoding.mjs'
+import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
 import {
   MAX_LISTING_PHOTOS,
   deleteListingMedia,
@@ -77,6 +80,7 @@ export async function handleListings(req, res, url, context) {
   if (url.pathname === '/api/listings') {
     if (req.method === 'GET') {
       await expireOldListings()
+      await expireOpenAuctions()
       const params = url.searchParams
       // Validate the division enum before it reaches Prisma, else an invalid ?division= raises a raw 500.
       const divisionParam = params.get('division')
@@ -93,6 +97,37 @@ export async function handleListings(req, res, url, context) {
       // Marketplace (goods) filters — category + condition live in metadata like the property filters.
       const category = params.get('category') ? String(params.get('category')).toUpperCase() : undefined
       const condition = params.get('condition') ? String(params.get('condition')).toUpperCase() : undefined
+      // CARS filters -- vehicle fields live under metadata.vehicle.* (falling back to flat metadata.*),
+      // same dual-read shape server/lib/listing-attributes.mjs's carRules() requires at submit time.
+      const make = params.get('make') || undefined
+      const model = params.get('model') || undefined
+      const minYear = parsePositiveInt(params.get('minYear'))
+      const maxYear = parsePositiveInt(params.get('maxYear'))
+      const minMileageKm = parsePositiveInt(params.get('minMileageKm'))
+      const maxMileageKm = parsePositiveInt(params.get('maxMileageKm'))
+      const transmission = params.get('transmission') || undefined
+      const fuelType = params.get('fuelType') || undefined
+      // Search radius (025/Carcad Phase F) -- division-agnostic in the filter itself (any listing
+      // with a valid metadata.mapLocation benefits), only surfaced in the CARS browse UI for now.
+      const centerLat = params.get('centerLat') !== null ? Number(params.get('centerLat')) : undefined
+      const centerLng = params.get('centerLng') !== null ? Number(params.get('centerLng')) : undefined
+      const radiusKm = params.get('radiusKm') !== null ? Number(params.get('radiusKm')) : undefined
+      const radiusParamsGiven = [centerLat, centerLng, radiusKm].filter((value) => value !== undefined).length
+      if (radiusParamsGiven > 0) {
+        const valid =
+          radiusParamsGiven === 3 &&
+          isValidCoords({ lat: centerLat, lng: centerLng }) &&
+          Number.isFinite(radiusKm) &&
+          radiusKm > 0 &&
+          radiusKm <= 500
+        if (!valid) {
+          const error = new Error('centerLat, centerLng, and radiusKm must all be provided together as valid Syria coordinates and a positive radius (max 500km).')
+          error.statusCode = 400
+          error.code = 'LISTING_RADIUS_FILTER_INVALID'
+          error.expose = true
+          throw error
+        }
+      }
       const minPrice = parsePositiveInt(params.get('minPrice'))
       const maxPrice = parsePositiveInt(params.get('maxPrice'))
       const minBedrooms = parsePositiveInt(params.get('bedrooms'))
@@ -132,6 +167,32 @@ export async function handleListings(req, res, url, context) {
         // Marketplace goods filters (case-insensitive against the metadata values the sell flow writes).
         if (category && String(meta.category || '').toUpperCase() !== category) return false
         if (condition && String(meta.condition || '').toUpperCase() !== condition) return false
+        // CARS filters -- strict, not lenient: once a car filter is active, a listing missing that
+        // vehicle field is excluded rather than kept "unknown" (unlike bedrooms/bathrooms above),
+        // since make/year/mileage/transmission/fuelType are always required at submit time for CARS.
+        const vehicle = meta.vehicle || {}
+        if (make && String(vehicle.make ?? meta.make ?? '').toLowerCase() !== make.toLowerCase()) return false
+        if (model && String(vehicle.model ?? meta.model ?? '').toLowerCase() !== model.toLowerCase()) return false
+        if (minYear !== undefined || maxYear !== undefined) {
+          const year = Number(vehicle.year ?? meta.year)
+          if (!Number.isFinite(year)) return false
+          if (minYear !== undefined && year < minYear) return false
+          if (maxYear !== undefined && year > maxYear) return false
+        }
+        if (minMileageKm !== undefined || maxMileageKm !== undefined) {
+          const mileageKm = Number(vehicle.mileageKm ?? meta.mileageKm)
+          if (!Number.isFinite(mileageKm)) return false
+          if (minMileageKm !== undefined && mileageKm < minMileageKm) return false
+          if (maxMileageKm !== undefined && mileageKm > maxMileageKm) return false
+        }
+        if (transmission && String(vehicle.transmission ?? meta.transmission ?? '').toLowerCase() !== transmission.toLowerCase()) return false
+        if (fuelType && String(vehicle.fuelType ?? meta.fuelType ?? '').toLowerCase() !== fuelType.toLowerCase()) return false
+        if (radiusKm !== undefined) {
+          const map = (meta.mapLocation && typeof meta.mapLocation === 'object') ? meta.mapLocation : {}
+          const coords = { lat: Number(map.latitude), lng: Number(map.longitude) }
+          if (!isValidCoords(coords)) return false
+          if (haversineKm(coords, { lat: centerLat, lng: centerLng }) > radiusKm) return false
+        }
         // The wizard writes propertyType twice under two different vocabularies (a capitalized
         // English label from the basic step, and a lowercase id from the visual filter chips) —
         // match either, case-insensitively, against the search page's lowercase chip id.
@@ -199,7 +260,22 @@ export async function handleListings(req, res, url, context) {
         }))
       }
 
-      return json(res, 200, { ok: true, listings: listings.slice(0, 50) })
+      let results = listings.slice(0, 50)
+      // Deal Rating (025/Carcad Phase E): CarGurus-style Great/Good/Fair/High price badge, computed
+      // against the pool of currently-live comparable CARS listings. One pool fetch per request.
+      if (division === 'CARS' && results.length) {
+        const pool = await loadCarsComparablePool()
+        results = results.map((listing) => ({ ...listing, dealRating: computeDealRating(listing, pool) }))
+      }
+      // Auctions (026): attach a public, card-safe auction summary to any CARS listing running one.
+      if (division === 'CARS' && results.length) {
+        const summaries = await loadAuctionSummaries(results.map((listing) => listing.id))
+        if (summaries.size) {
+          results = results.map((listing) => ({ ...listing, auction: summaries.get(listing.id) || null }))
+        }
+      }
+
+      return json(res, 200, { ok: true, listings: results })
     }
 
     if (req.method === 'POST') {
@@ -260,6 +336,7 @@ export async function handleListings(req, res, url, context) {
   if (detailMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     await expireOldListings({ id: detailMatch[1] })
+    await expireOpenAuctions({ listing: { id: detailMatch[1] } })
     const listing = await db().listing.findFirst({
       where: { id: detailMatch[1], status: 'APPROVED' },
       include: {
@@ -287,7 +364,17 @@ export async function handleListings(req, res, url, context) {
     // Verification badge: the listing owner's identity document has been admin-approved. Surfaced on
     // the public detail so a buyer can see "verified seller" before contacting them.
     const sellerVerified = listing.owner?.idDocumentStatus === 'APPROVED'
-    return json(res, 200, { ok: true, listing, sellerVerified })
+    let listingWithDealRating = listing
+    if (listing.division === 'CARS') {
+      const pool = await loadCarsComparablePool()
+      listingWithDealRating = { ...listing, dealRating: computeDealRating(listing, pool) }
+      // Auctions (026): the card-safe public summary only -- the detail page's bid panel fetches
+      // GET /api/listings/:id/auction separately for context-aware fields (youAreHighestBidder,
+      // reservePriceMinor for the owner, winnerBidderId for the winner).
+      const summaries = await loadAuctionSummaries([listing.id])
+      if (summaries.size) listingWithDealRating.auction = summaries.get(listing.id)
+    }
+    return json(res, 200, { ok: true, listing: listingWithDealRating, sellerVerified })
   }
 
   const availabilityMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/availability$/)
@@ -530,6 +617,21 @@ export async function handleListings(req, res, url, context) {
     }
     // (c) All required structured attributes for the division must be present and well-formed.
     assertListingAttributes(existing.division, existing.metadata)
+    // (d) Auction-mode CARS listings must have a fully configured Auction row before going live.
+    // carRules() stays synchronous (metadata-only) on purpose -- the actual auction config (reserve,
+    // increment, endsAt) lives in its own table, so this can't be folded into that contract; it
+    // follows the same explicit-extra-block pattern as (a)/(b) above, which already do their own
+    // non-metadata DB checks here rather than inside carRules().
+    if (existing.division === 'CARS' && existing.metadata?.saleType === 'AUCTION') {
+      const auction = await db().auction.findUnique({ where: { listingId: existing.id } })
+      if (!auction) {
+        const error = new Error('Configure the auction (reserve price, duration) before submitting this listing for review.')
+        error.statusCode = 400
+        error.code = 'AUCTION_CONFIG_REQUIRED'
+        error.expose = true
+        throw error
+      }
+    }
 
     const listing = await db().listing.update({
       where: { id: existing.id },
