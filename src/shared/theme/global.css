@@ -806,6 +806,81 @@ a {
   box-shadow: 0 12px 28px rgba(82, 108, 255, 0.22);
 }
 
+.become-host-nav-link {
+  color: #f4d676 !important;
+}
+
+.become-host-perks {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.become-host-perk {
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #263651;
+  border-radius: 16px;
+  display: flex;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.become-host-perk span {
+  color: #20d29b;
+  font-weight: 900;
+}
+
+.become-host-perk p {
+  color: #d6dcec;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.become-host-plans {
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+}
+
+.become-host-plan-card ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.become-host-plan-card li {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #c7d0e0;
+  font-size: 13.5px;
+  padding: 10px 0;
+}
+
+.become-host-plan-card li:first-child {
+  border-top: 0;
+}
+
+.become-host-plan-card .seller-role-title strong {
+  color: var(--accent);
+  margin-inline-start: 8px;
+}
+
+.become-host-alt-link {
+  background: transparent;
+  border: 0;
+  color: #9aa7bd;
+  font-size: 13.5px;
+  margin-top: 18px;
+  text-decoration: underline;
+}
+
+@media (max-width: 760px) {
+  .become-host-perks,
+  .become-host-plans {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 760px) {
   .seller-service-grid,
   .seller-action-panel,

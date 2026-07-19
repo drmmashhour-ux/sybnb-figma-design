@@ -1,4 +1,5 @@
 import type { Lang } from '../../engines/language/languageEngine'
+import { BecomeHostPage } from './BecomeHostPage'
 import { SellerAccountPage } from './SellerAccountPage'
 import { SellerAdvertisingPaymentPage } from './SellerAdvertisingPaymentPage'
 import { SellerEntryPage } from './SellerEntryPage'
@@ -13,6 +14,10 @@ type Props = {
 
 export function SellerDivisionRoutes({ lang, path }: Props) {
   const advertisingPaymentMatch = path.match(/^\/advertising\/payment\/([^/]+)$/)
+
+  if (path === '/become-host') {
+    return <BecomeHostPage lang={lang} />
+  }
 
   if (advertisingPaymentMatch) {
     return <SellerAdvertisingPaymentPage lang={lang} methodId={advertisingPaymentMatch[1]} />

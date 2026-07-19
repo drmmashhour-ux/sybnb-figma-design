@@ -67,6 +67,9 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
               {/* Store-compliance reachability fix: /wallet and /settings (delete account, blocked
                   accounts) existed and were fully wired, but nothing in primary navigation linked to
                   them after the account dashboard route was retired — see docs/release notes. */}
+              <button className="menu-action become-host-nav-link" onClick={() => navigate('/become-host')}>
+                {isAr ? 'كن مضيفاً' : 'Become a host'}
+              </button>
               <button className="menu-action" onClick={() => navigate('/wallet')}>
                 {isAr ? 'المحفظة' : 'Wallet'}
               </button>
@@ -156,6 +159,14 @@ function getRouteContext(path: string, isAr: boolean) {
     return {
       section: isAr ? 'السوق' : 'Marketplace',
       page: isAr ? 'العروض' : 'Offers',
+      backPath: home,
+      nextPath: '',
+    }
+  }
+  if (path === '/become-host') {
+    return {
+      section: isAr ? 'الاستضافة' : 'Hosting',
+      page: isAr ? 'كن مضيفاً' : 'Become a host',
       backPath: home,
       nextPath: '',
     }
