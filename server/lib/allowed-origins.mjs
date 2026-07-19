@@ -11,6 +11,8 @@ const DEFAULT_CORS_ORIGIN = [
   'http://localhost:5180',
   'http://127.0.0.1:5181',
   'http://localhost:5181',
+  'http://127.0.0.1:5199',
+  'http://localhost:5199',
 ].join(',')
 // Capacitor native-app origins (mobile/capacitor-wrapper). The iOS/Android webview loads the packaged
 // SYBNB app from these fixed origins — iOS uses capacitor://localhost, Android uses https://localhost

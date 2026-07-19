@@ -82,15 +82,33 @@ function expectedTotalMinor(booking) {
   return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
 }
 
-// SYP is not a Stripe-supported settlement currency, so test-mode charges run in STRIPE_CURRENCY
-// (USD by default) using a configurable placeholder rate. Swap SYP_PER_USD for a live FX feed
-// before this ever handles real money.
-function stripeChargeAmount(totalMinor) {
-  const currency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
-  if (currency === 'syp') return { currency, unitAmount: Math.max(100, Math.round(totalMinor)) }
-  const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
-  const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd) * 100))
-  return { currency, unitAmount }
+// bookings.amountMinor is a WHOLE-unit amount in the booking's own currency (e.g. 50 means $50 for
+// a USD booking, not 50 cents -- see expectedTotalMinor/guestFeeSummary.ts) -- it is only "minor"
+// relative to SYP, which has no meaningful subunit. Stripe always needs its settlement currency's
+// smallest unit (cents for USD). SYP is not a Stripe-supported settlement currency, so a
+// SYP-denominated booking is FX-converted into STRIPE_CURRENCY (USD by default) using a
+// configurable placeholder rate -- swap SYP_PER_USD for a live FX feed before this handles real
+// money. A booking already denominated in the settlement currency needs ONLY the cents conversion,
+// never FX -- treating every booking as if it needed SYP->USD conversion (dividing by SYP_PER_USD)
+// previously undercharged every USD booking to about 1/150th of what was owed.
+function stripeChargeAmount(totalMinor, bookingCurrency) {
+  const settlementCurrency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
+  const normalizedBookingCurrency = String(bookingCurrency || '').toLowerCase()
+
+  if (normalizedBookingCurrency === settlementCurrency) {
+    return { currency: settlementCurrency, unitAmount: Math.max(50, Math.round(totalMinor * 100)) }
+  }
+
+  if (normalizedBookingCurrency === 'syp' && settlementCurrency !== 'syp') {
+    const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
+    return { currency: settlementCurrency, unitAmount: Math.max(50, Math.round((totalMinor / sypPerUsd) * 100)) }
+  }
+
+  const error = new Error(`No Stripe FX path from ${normalizedBookingCurrency || 'unknown'} to ${settlementCurrency}.`)
+  error.statusCode = 422
+  error.code = 'STRIPE_FX_PATH_MISSING'
+  error.expose = true
+  throw error
 }
 
 async function firstAdminId(tx) {
@@ -162,7 +180,7 @@ export async function finalizeStripeSession(session) {
         userId: booking.guestId,
         provider: 'stripe',
         status: 'PENDING_ADMIN_REVIEW',
-        amountMinor: Number(session.metadata?.sypTotalMinor || booking.amountMinor),
+        amountMinor: Number(session.metadata?.bookingTotalMinor || booking.amountMinor),
         currency: booking.currency,
         providerRef: session.id,
         proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
@@ -241,7 +259,7 @@ export async function handlePayments(req, res, url, context) {
     requireStripe()
 
     const totalMinor = expectedTotalMinor(booking)
-    const { currency, unitAmount } = stripeChargeAmount(totalMinor)
+    const { currency, unitAmount } = stripeChargeAmount(totalMinor, booking.currency)
     const listingTitle = booking.listing?.titleEn || booking.listing?.titleAr || 'SYBNB stay'
 
     const session = await stripe.checkout.sessions.create({
@@ -262,7 +280,7 @@ export async function handlePayments(req, res, url, context) {
       metadata: {
         bookingId: booking.id,
         guestId: context.user.id,
-        sypTotalMinor: String(totalMinor),
+        bookingTotalMinor: String(totalMinor),
       },
       success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}#/booking/${booking.id}`,
       cancel_url: `${origin}/#/booking/${booking.id}`,
