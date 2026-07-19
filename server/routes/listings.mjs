@@ -2,7 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
-import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
+import { stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes, PHOTO_REQUIRED_DIVISIONS } from '../lib/listing-attributes.mjs'
@@ -57,14 +57,14 @@ export async function handleListings(req, res, url, context) {
       throw error
     }
     const quote = await computeStayTotalMinor(listing, checkIn, checkOut)
-    // The listing's own price is SYP; a guest who chooses to pay in USD instead gets that SYP
-    // total (and each night's own price) converted at the platform's fixed rate and rounded up to
-    // the nearest $5 — same change-avoidance rule applied to SR fares and wallet gifts.
+    // A listing's own price is SYP unless the host explicitly priced it in USD (listing.currency).
+    // A guest who chooses to pay in USD gets a SYP-priced listing converted at the platform's fixed
+    // rate; a USD-priced listing is used as-is. Either way each night is rounded up to the nearest
+    // $5 individually and summed, so the total always scales with nights and never asks for change
+    // (see stayQuoteToRoundedUsd for why rounding the lump total once instead does not, and why
+    // running an already-USD listing through the SYP conversion collapses its real price).
     const wantsUsd = url.searchParams.get('currency') === 'USD'
-    const totalMinor = wantsUsd ? sypMinorToRoundedUsdMinor(quote.totalMinor) : quote.totalMinor
-    const perNight = wantsUsd
-      ? quote.perNight.map((night) => ({ ...night, priceMinor: sypMinorToRoundedUsdMinor(night.priceMinor) }))
-      : quote.perNight
+    const { totalMinor, perNight } = wantsUsd ? stayQuoteToRoundedUsd(quote, listing.currency) : quote
     return json(res, 200, {
       ok: true,
       totalMinor,

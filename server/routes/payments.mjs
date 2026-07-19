@@ -1,8 +1,39 @@
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { isAllowedOrigin } from '../lib/allowed-origins.mjs'
+
+// A client-supplied `origin` is trusted verbatim into Stripe's success_url/cancel_url below --
+// unvalidated, that's an open redirect: right after a REAL captured payment, the guest lands on
+// whatever URL the request named, with the Stripe session id in the query string. Validate it
+// against the same allow-list CORS uses before it's ever used in a redirect URL.
+function assertAllowedOrigin(origin) {
+  if (!isAllowedOrigin(origin)) {
+    const error = new Error('origin is not an allowed SYBNB app origin.')
+    error.statusCode = 400
+    error.code = 'STRIPE_SESSION_ORIGIN_NOT_ALLOWED'
+    error.expose = true
+    throw error
+  }
+}
+
+// Guest contact info (PATCH /api/bookings/:id/contact) replaced the old ID-upload-before-payment
+// gate. Originally left as a UI-only nudge rather than a server-enforced requirement -- flagged as
+// a real gap and confirmed it should be a hard requirement instead: a guest cannot start payment
+// (either path) until their booking carries a guestContactPhone, closing the same
+// "client claims a requirement the server never actually checks" gap the old ID-verification
+// gate had before it was fixed.
+function requireGuestContactInfo(booking) {
+  if (!booking.metadata?.guestContactPhone) {
+    const error = new Error('Add your name and phone number before paying for this booking.')
+    error.statusCode = 403
+    error.code = 'GUEST_CONTACT_INFO_REQUIRED'
+    error.expose = true
+    throw error
+  }
+}
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
@@ -17,36 +48,31 @@ function requireStripe() {
   return stripe
 }
 
-// Mirrors the client-side gate in BookingDetailPage.tsx (`hasIdDocument =
-// Boolean(booking?.guest?.idDocumentRef)`) -- that gate only hid the payment buttons in the UI,
-// it was never actually checked here, so any authenticated guest could pay for a booking via a
-// direct API call without ever uploading an ID document. Only requires the document to have been
-// uploaded (idDocumentRef set), not yet reviewed/approved -- review happens asynchronously via the
-// admin queue, same as the client-side condition.
-function requireIdDocumentUploaded(user) {
-  if (!user.idDocumentRef) {
-    const error = new Error('Upload an ID document before paying for this booking.')
-    error.statusCode = 403
-    error.code = 'ID_VERIFICATION_REQUIRED'
-    error.expose = true
-    throw error
-  }
-}
-
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }
 
 // Mirrors src/modules/bookings/guestFeeSummary.ts so the Stripe charge matches what the guest saw.
+//
+// guestFeeSummary.ts is explicit that STR_CLEANING_RATE/STR_TAX_RATE are an internal breakdown of
+// the already-quoted total (same model as finance-ledger.mjs's bookingFinanceSplit, which divides
+// the paid total DOWN by 1+rate+rate to back out the rent component for payout purposes) -- not
+// additional charges on top of it. This function previously auto-added
+// Math.round(stayAmountMinor * STR_CLEANING_RATE/STR_TAX_RATE) here when the listing had no
+// explicit cleaningFeeMinor/taxesMinor metadata, which is every real STAYS listing today (there is
+// no host UI to set those fields). That meant the guest was quoted and shown "Total due: $X" at
+// checkout, submitted a payment proof for exactly $X, and the server rejected it with
+// PAYMENT_AMOUNT_TOO_LOW because it silently expected ~7% more -- a hard dead end in the STR
+// booking flow. Dropping the rate-based fallback (matching guestFeeSummary.ts exactly: metadata
+// value or 0, never auto-computed) is what actually "mirrors" the comment above.
 function expectedTotalMinor(booking) {
   const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
   const listingMetadata = booking.listing?.metadata || {}
   const bookingMetadata = booking.metadata || {}
-  const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
 
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
+  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor')
+  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor')
   const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
   const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
   const cancellationProtectionFeeMinor = cancellationProtectionPurchased
@@ -191,6 +217,7 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+    assertAllowedOrigin(origin)
 
     const booking = await db().booking.findFirst({
       where: { id: bookingId, guestId: context.user.id },
@@ -210,9 +237,7 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
-    // ID-verification gate runs BEFORE the Stripe-config check so an unverified guest gets a clear
-    // 403 ID_VERIFICATION_REQUIRED rather than a 503 about Stripe not being configured.
-    requireIdDocumentUploaded(context.user)
+    requireGuestContactInfo(booking)
     requireStripe()
 
     const totalMinor = expectedTotalMinor(booking)
@@ -221,7 +246,9 @@ export async function handlePayments(req, res, url, context) {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      payment_method_types: ['card'],
+      // Deliberately no payment_method_types: omitting it enables Stripe's Dynamic Payment
+      // Methods, which shows each customer the most relevant eligible methods (configured from
+      // the Dashboard) instead of hardcoding to card only.
       line_items: [
         {
           price_data: {
@@ -330,7 +357,6 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/wallet/topup/stripe-checkout') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context)
-    requireStripe()
     const body = await readJson(req)
     const origin = String(body.origin || '').replace(/\/$/, '')
     const baseMinor = Number(body.baseMinor ?? body.amountMinor)
@@ -341,6 +367,8 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+    assertAllowedOrigin(origin)
+    requireStripe()
     if (!Number.isInteger(baseMinor) || baseMinor <= 0) {
       const error = new Error('Top-up amount must be a whole number greater than zero.')
       error.statusCode = 400
@@ -357,7 +385,8 @@ export async function handlePayments(req, res, url, context) {
     }
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      payment_method_types: ['card'],
+      // Deliberately no payment_method_types -- see the matching comment in
+      // create-checkout-session above.
       line_items: [{
         price_data: {
           currency: 'usd',
@@ -486,8 +515,9 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
-    if (booking) requireIdDocumentUploaded(context.user)
-
+    // Only bookingId-tied proofs (an actual STR-style booking) require contact info -- proofs
+    // with no bookingId (e.g. a seller-plan payment) aren't tied to a booking to attach it to.
+    if (booking) requireGuestContactInfo(booking)
     // Default to the FULL amount due (stay + fees), matching the S11 floor below and the Stripe path —
     // a guest who submits a proof without naming an amount is paying the whole booking, not the bare stay.
     const amountMinor = Number(body.amountMinor || (booking ? expectedTotalMinor(booking) : 0))

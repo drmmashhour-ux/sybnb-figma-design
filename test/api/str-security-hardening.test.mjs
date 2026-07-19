@@ -164,8 +164,8 @@ describe('STR security & money-integrity hardening', () => {
     expect(res.body.error.code).toBe('BOOKING_NOT_AWAITING_PAYMENT')
   })
 
-  // ---- S11: manual payment must cover the full expected total, not the bare stay ----
-  it('S11: a manual proof below the full expected total (stay + fees) is rejected', async () => {
+  // ---- S11: manual payment must cover the full expected total, not less than what was quoted ----
+  it('S11: a manual proof below booking.amountMinor (the quoted total) is rejected', async () => {
     const host = await registerHost('s11-host')
     const guest = await registerGuest('s11-guest')
     await db().user.update({ where: { id: guest.user.id }, data: { idDocumentRef: 'idref-s11', idDocumentSubmittedAt: new Date() } })
@@ -173,12 +173,78 @@ describe('STR security & money-integrity hardening', () => {
     const booking = await db().booking.create({
       data: { listingId: listing.id, guestId: guest.user.id, status: 'PAYMENT_PENDING', amountMinor: 100, currency: 'USD' },
     })
-    // 100 = bare stay, but the expected total adds cleaning + tax, so 100 must be rejected as too low.
+    await request(app)
+      .patch(`/api/bookings/${booking.id}/contact`)
+      .set('authorization', `Bearer ${guest.token}`)
+      .send({ guestName: 'S11 Guest', guestPhone: '+963991110001' })
+    // 90 is less than the 100 the guest was actually quoted (booking.amountMinor) -- must be rejected.
     const res = await request(app)
       .post('/api/payments/local-wallet-proof')
       .set('authorization', `Bearer ${guest.token}`)
-      .send({ bookingId: booking.id, amountMinor: 100, providerRef: uniqueRef('s11') })
+      .send({ bookingId: booking.id, amountMinor: 90, providerRef: uniqueRef('s11') })
     expect(res.status).toBe(400)
     expect(res.body.error.code).toBe('PAYMENT_AMOUNT_TOO_LOW')
+  })
+
+  // ---- Money bug found in a live walkthrough: expectedTotalMinor auto-added a cleaning/tax
+  // surcharge on top of booking.amountMinor whenever the listing had no explicit
+  // cleaningFeeMinor/taxesMinor metadata (i.e. every real STAYS listing, since there is no host UI
+  // to set those fields). guestFeeSummary.ts (what the guest is actually shown at checkout) and
+  // finance-ledger.mjs's bookingFinanceSplit (the real payout accounting) both treat
+  // STR_CLEANING_RATE/STR_TAX_RATE as an internal breakdown of the ALREADY-quoted total, not an
+  // add-on -- so a guest who paid exactly the total they were quoted got PAYMENT_AMOUNT_TOO_LOW,
+  // a hard dead end in checkout. This proves the guest-quoted amount is now actually accepted. ----
+  it('a manual proof for exactly the quoted booking.amountMinor is accepted (no hidden cleaning/tax surcharge)', async () => {
+    const host = await registerHost('s11b-host')
+    const guest = await registerGuest('s11b-guest')
+    await db().user.update({ where: { id: guest.user.id }, data: { idDocumentRef: 'idref-s11b', idDocumentSubmittedAt: new Date() } })
+    const listing = await approvedStay(host)
+    const booking = await db().booking.create({
+      data: { listingId: listing.id, guestId: guest.user.id, status: 'PAYMENT_PENDING', amountMinor: 100, currency: 'USD' },
+    })
+    await request(app)
+      .patch(`/api/bookings/${booking.id}/contact`)
+      .set('authorization', `Bearer ${guest.token}`)
+      .send({ guestName: 'S11b Guest', guestPhone: '+963991110002' })
+    const res = await request(app)
+      .post('/api/payments/local-wallet-proof')
+      .set('authorization', `Bearer ${guest.token}`)
+      .send({ bookingId: booking.id, amountMinor: 100, providerRef: uniqueRef('s11b') })
+    expect(res.status).toBe(201)
+    expect(res.body.proof.amountMinor).toBe(100)
+  })
+
+  it('a manual proof must still cover a purchased cancellation-protection fee on top of the stay', async () => {
+    const host = await registerHost('s11c-host')
+    const guest = await registerGuest('s11c-guest')
+    await db().user.update({ where: { id: guest.user.id }, data: { idDocumentRef: 'idref-s11c', idDocumentSubmittedAt: new Date() } })
+    const listing = await approvedStay(host)
+    const booking = await db().booking.create({
+      data: {
+        listingId: listing.id,
+        guestId: guest.user.id,
+        status: 'PAYMENT_PENDING',
+        amountMinor: 100,
+        currency: 'USD',
+        metadata: { cancellationProtectionPurchased: true, cancellationProtectionFeeMinor: 3 },
+      },
+    })
+    await request(app)
+      .patch(`/api/bookings/${booking.id}/contact`)
+      .set('authorization', `Bearer ${guest.token}`)
+      .send({ guestName: 'S11c Guest', guestPhone: '+963991110003' })
+    // 100 covers the stay but not the purchased 3-unit protection fee -- must be rejected.
+    const tooLow = await request(app)
+      .post('/api/payments/local-wallet-proof')
+      .set('authorization', `Bearer ${guest.token}`)
+      .send({ bookingId: booking.id, amountMinor: 100, providerRef: uniqueRef('s11c-low') })
+    expect(tooLow.status).toBe(400)
+    expect(tooLow.body.error.code).toBe('PAYMENT_AMOUNT_TOO_LOW')
+
+    const enough = await request(app)
+      .post('/api/payments/local-wallet-proof')
+      .set('authorization', `Bearer ${guest.token}`)
+      .send({ bookingId: booking.id, amountMinor: 103, providerRef: uniqueRef('s11c-ok') })
+    expect(enough.status).toBe(201)
   })
 })

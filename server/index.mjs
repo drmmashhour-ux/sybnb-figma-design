@@ -5,6 +5,7 @@ import { getAuthContext } from './lib/auth-context.mjs'
 import { loadEnv, validateProductionConfig } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { checkRateLimit, clientIp } from './lib/rate-limit.mjs'
+import { CORS_ORIGINS } from './lib/allowed-origins.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { applySecurityHeaders } from './lib/security-headers.mjs'
 import { handleAccommodations } from './routes/accommodations.mjs'
@@ -28,28 +29,6 @@ loadEnv()
 
 const PORT = Number(process.env.API_PORT || 3051)
 const HOST = process.env.API_HOST || '127.0.0.1'
-const DEFAULT_CORS_ORIGIN = [
-  'http://127.0.0.1:3050',
-  'http://127.0.0.1:3053',
-  'http://127.0.0.1:3055',
-  'http://127.0.0.1:5180',
-  'http://localhost:5180',
-  'http://127.0.0.1:5181',
-  'http://localhost:5181',
-].join(',')
-// Capacitor native-app origins (mobile/capacitor-wrapper). The iOS/Android webview loads the packaged
-// SYBNB app from these fixed origins — iOS uses capacitor://localhost, Android uses https://localhost
-// (server.androidScheme: 'https'). They are invariant across deployments, so they are ALWAYS allowed —
-// merged in even when a production CORS_ORIGIN env overrides the default list — otherwise the mobile
-// app's API calls would be CORS-blocked in production. A browser page cannot forge these as its origin.
-const CAPACITOR_APP_ORIGINS = ['capacitor://localhost', 'https://localhost']
-const CORS_ORIGINS = [
-  ...new Set(
-    [...(process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN).split(','), ...CAPACITOR_APP_ORIGINS]
-      .map((origin) => origin.trim())
-      .filter(Boolean),
-  ),
-]
 
 // High-risk-endpoint rate limits (security audit F-08). Central table keyed by [method, pathname
 // pattern] rather than scattering limiter calls across 12 route-handler files, so the whole policy
@@ -72,6 +51,9 @@ const RATE_LIMIT_RULES = [
   { name: 'DOCUMENT_ACCESS', method: 'GET', pattern: /^\/api\/(admin\/id-document|me\/id-document)\/[^/]+(\/file)?$/, max: 30, windowMs: 60 * 1000, byUser: true },
   { name: 'GEOCODING', method: 'POST', pattern: /^\/api\/sr\/(quote|rides)$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'DRIVER_STATUS', method: 'PATCH', pattern: /^\/api\/(driver\/rides\/[^/]+\/status|sr\/rides\/[^/]+\/claim)$/, max: 30, windowMs: 60 * 1000, byUser: true },
+  // Public, unauthenticated, phone-guessable (12-char ref + phone) -- capped tightly per IP so it
+  // can't be used to brute-force other guests' trip status.
+  { name: 'BOOKING_LOOKUP', method: 'GET', pattern: /^\/api\/bookings\/lookup$/, max: 20, windowMs: 15 * 60 * 1000, byUser: false },
 ]
 
 function matchRateLimitRule(req, url) {

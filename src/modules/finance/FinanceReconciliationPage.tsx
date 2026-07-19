@@ -64,7 +64,7 @@ const copy = {
     srNote: 'رحلات SR: {count} رحلة مكتملة بقيمة أجرة إجمالية {fare} — هذه أرباح السائقين، والمنصة لا تُحصّل عمولة من رحلات SR حالياً.',
     projectionCaveat: 'هذا امتداد خطي بسيط لمتوسط حقيقي، وليس تنبؤاً بالذكاء الاصطناعي — كلما زادت بيانات الحجوزات الحقيقية، زادت دقته.',
     whatIf: 'حاسبة افتراضية (ماذا لو)',
-    whatIfNote: 'أدخل افتراضاتك الخاصة — هذه ليست بيانات حقيقية، لكن الحساب يستخدم نفس صيغة عمولة SYBNB الفعلية (تنظيف ٥٪ + ضريبة ٢٪ + عمولة استضافة ١٠٪ من الإيجار الصافي).',
+    whatIfNote: 'أدخل افتراضاتك الخاصة — هذه ليست بيانات حقيقية، لكن الحساب يستخدم نفس صيغة عمولة SYBNB الفعلية (تنظيف ٥٪ + ضريبة ٢٪ + عمولة استضافة ١٣٪ من الإيجار الصافي).',
     strBookingsPerMonth: 'حجوزات استضافة شهرياً',
     strAvgPriceSyp: 'متوسط سعر الحجز (ل.س)',
     strUsdSharePercent: 'نسبة الدفع بالدولار (٪)',
@@ -117,7 +117,7 @@ const copy = {
     srNote: '{count} completed SR rides worth {fare} in total fares — that\'s driver earnings; the platform currently collects no commission on SR rides.',
     projectionCaveat: 'This is a simple linear extrapolation of a real average, not an AI forecast — accuracy improves as more real booking data accumulates.',
     whatIf: 'What-if calculator',
-    whatIfNote: 'Enter your own assumptions — this is not real data, but the math uses the real SYBNB commission formula (5% cleaning + 2% tax + 10% host commission on net rent).',
+    whatIfNote: 'Enter your own assumptions — this is not real data, but the math uses the real SYBNB commission formula (5% cleaning + 2% tax + 13% host commission on net rent).',
     strBookingsPerMonth: 'STR bookings per month',
     strAvgPriceSyp: 'Average booking price (SYP)',
     strUsdSharePercent: 'Share paid in USD (%)',
@@ -214,7 +214,7 @@ export function FinanceReconciliationPage({ lang }: Props) {
     setStatus('loading')
     setMessage('')
     try {
-      const [nextQueue, nextAuditLog, nextPayouts, nextRevenue] = await Promise.all([
+      const [{ queue: nextQueue }, nextAuditLog, nextPayouts, nextRevenue] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminAuditLog(10),
         fetchAdminPayouts(),

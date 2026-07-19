@@ -692,19 +692,35 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </section>
           )}
 
-          <section ref={actionBarRef} style={styles.bottomActionBar}>
-            {!inquirySent && (
-              <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
-                {status === 'saving' ? t.saving : actionLabel}
-              </button>
-            )}
-          </section>
-
+          {/* Report/Block render BEFORE the persistent price bar below (not after it in DOM order)
+              so nothing ever sits underneath the fixed bar competing for the same screen region --
+              a real, live-verified overlap bug when this content followed a `position: sticky` bar
+              that engaged near the bottom of a short mobile viewport. */}
           <section style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', marginTop: 8 }}>
             <ReportForm lang={lang} subjectType="LISTING" subjectId={listing.id} />
             <BlockButton lang={lang} userId={listing.ownerId} />
           </section>
         </>
+      )}
+
+      {/* Persistent price + CTA bar, always visible (position: fixed, not sticky-within-flow) --
+          matches the always-visible booking summary Airbnb/Booking.com keep in view while scrolling,
+          instead of requiring the guest to scroll back up to see price or act. styles.page's
+          bottom padding reserves guaranteed clearance so this can never cover page content. */}
+      {listing && !inquirySent && (
+        <section ref={actionBarRef} style={styles.bottomActionBar}>
+          <div style={styles.bottomActionBarInner}>
+            {listing.division === 'STAYS' && (
+              <div style={styles.bottomActionBarPrice}>
+                <strong dir="ltr">{moneyText(cancellationProtection ? protectedTotalMinor : displayedTotalMinor, payCurrency, lang)}</strong>
+                <small>{t.estimatedTotal} · {stayQuote?.nights ?? billableNights} {isAr ? 'ليالٍ' : 'nights'}</small>
+              </div>
+            )}
+            <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
+              {status === 'saving' ? t.saving : actionLabel}
+            </button>
+          </div>
+        </section>
       )}
     </main>
   )
@@ -833,7 +849,7 @@ function readListingReturnPath() {
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#08090d', color: '#fff', padding: '20px 14px 112px', display: 'grid', gap: 14, maxWidth: 1080, margin: '0 auto' },
+  page: { minHeight: '100vh', background: '#08090d', color: '#fff', padding: '20px 14px 128px', display: 'grid', gap: 14, maxWidth: 1080, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   flowNav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
   arrowButton: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
@@ -895,5 +911,9 @@ const styles: Record<string, CSSProperties> = {
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14, display: 'grid', gap: 12 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
-  bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+  // Fixed (not sticky-within-flow) so this stays visible at all times and can never end up
+  // underneath later page content -- see the DOM-order comment above where it's rendered.
+  bottomActionBar: { position: 'fixed', insetInline: 0, bottom: 0, zIndex: 30, borderTop: '1px solid #242a3b', background: 'rgba(13,15,24,.96)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)' },
+  bottomActionBarInner: { maxWidth: 1080, margin: '0 auto', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 },
+  bottomActionBarPrice: { display: 'grid', gap: 2, minWidth: 0 },
 }

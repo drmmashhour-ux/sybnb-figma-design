@@ -142,7 +142,7 @@ export function OperationsCalendarPage({ lang }: Props) {
   async function loadOperations() {
     setStatus('loading')
     try {
-      const [nextQueue, nextMetrics, nextAudit] = await Promise.all([
+      const [{ queue: nextQueue }, nextMetrics, nextAudit] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminMetrics(),
         fetchPrototypeAdminAuditLog(8),

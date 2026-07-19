@@ -178,6 +178,10 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [submitError, setSubmitError] = useState('')
   const [businessType, setBusinessType] = useState<AdvertisingBusinessTypeId>(() => pickAdvertisingBusinessType(window.localStorage.getItem(AD_BUSINESS_TYPE_STORAGE_KEY)).id)
+  // Progressive disclosure: previously every field (account, documents, plan, payment) rendered
+  // on one long page at once. This gates the page into 3 visible steps while reusing all the
+  // same state/handlers below unchanged.
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
   const visiblePlans = SELLER_PLANS
   const plan = visiblePlans.find((item) => item.id === selectedPlan) ?? visiblePlans[0]
   const selectedBusinessType = pickAdvertisingBusinessType(businessType)
@@ -214,6 +218,13 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   // ready — advertising and platform-sale used to skip this via client-only "admin lane" flags.
   const accountReadyForNext =
     accountIdentityReady && mobileCodeConfirmed && accountFileConfirmed && accountSentToAdmin && paymentConfirmed
+  const wizardStep1Complete = accountIdentityReady && mobileCodeConfirmed
+  const wizardStep2Complete = accountDocumentCount > 0 && accountFileConfirmed && accountSentToAdmin
+  const wizardSteps = [
+    { step: 1 as const, label: isAr ? 'الحساب' : 'Account' },
+    { step: 2 as const, label: isAr ? 'المستندات' : 'Documents' },
+    { step: 3 as const, label: isAr ? 'الخطة والدفع' : 'Plan & payment' },
+  ]
   const flowSteps = [
     {
       label: accountMode === 'signup' ? (isAr ? 'إنشاء الحساب' : 'Create account') : isAr ? 'تسجيل الدخول' : 'Sign in',
@@ -530,6 +541,27 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   ? 'بعد إنشاء الحساب، اختر طريقة الدفع، أكّد الدفع، ثم أضف ملفات العقار والتفويض قبل المراجعة.'
                   : 'After account creation, choose a payment method, confirm payment, then add property and authorization files before review.'}
           </p>
+
+          <div className="seller-wizard-steps" role="tablist" aria-label={isAr ? 'خطوات الإعداد' : 'Setup steps'}>
+            {wizardSteps.map((item) => {
+              const reachable =
+                item.step === 1 || (item.step === 2 && wizardStep1Complete) || (item.step === 3 && wizardStep1Complete && wizardStep2Complete)
+              return (
+                <button
+                  key={item.step}
+                  type="button"
+                  className={`seller-wizard-step ${wizardStep === item.step ? 'active' : ''} ${reachable && item.step < wizardStep ? 'done' : ''}`}
+                  disabled={!reachable}
+                  onClick={() => reachable && setWizardStep(item.step)}
+                >
+                  <em>{item.step}</em>
+                  <span>{item.label}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {wizardStep === 1 && (
           <div className="seller-account-mode-switch" role="tablist" aria-label={isAr ? 'طريقة الدخول' : 'Account access mode'}>
             <button
               className={accountMode === 'signup' ? 'active' : ''}
@@ -555,8 +587,9 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               {isAr ? 'تسجيل الدخول' : 'Sign in'}
             </button>
           </div>
+          )}
 
-          {isAdvertisingFlow ? (
+          {wizardStep === 1 && (isAdvertisingFlow ? (
             <div className="seller-selected-role" style={{ '--accent': '#d5a915' } as CSSVars}>
               <span>{isAr ? 'المسار المختار' : 'Selected path'}</span>
               <strong>{isAr ? 'عميل إعلاني' : 'Advertising client'}</strong>
@@ -582,9 +615,9 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               <strong>{role.label[lang]}</strong>
               <small>{role.description[lang]}</small>
             </div>
-          )}
+          ))}
 
-          {isAdvertisingFlow && (
+          {wizardStep === 1 && isAdvertisingFlow && (
             <div className="seller-business-type-panel">
               <div>
                 <strong>{isAr ? 'نوع النشاط الإعلاني' : 'Advertising business type'}</strong>
@@ -605,6 +638,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
             </div>
           )}
 
+          {wizardStep === 1 && (
           <div className="seller-form-grid">
             {accountMode === 'signup' && (
               <>
@@ -748,6 +782,31 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                 {mobileCodeConfirmed ? (isAr ? 'تم تأكيد الرمز' : 'Code confirmed') : isAr ? 'تأكيد الرمز' : 'Confirm code'}
               </button>
             </div>
+          </div>
+          )}
+          {wizardStep === 1 && submitState === 'error' && (
+            <div className="seller-inline-alert seller-account-alert">
+              <strong>{isAr ? 'تعذر المتابعة' : 'Could not continue'}</strong>
+              <span>{submitError}</span>
+            </div>
+          )}
+          {wizardStep === 1 && (
+            <div className="seller-account-actions">
+              <button className="seller-secondary-button" onClick={() => navigate('/sell')}>
+                {isAr ? 'رجوع' : 'Back'}
+              </button>
+              <button
+                className="seller-primary-button"
+                disabled={!wizardStep1Complete}
+                onClick={() => setWizardStep(2)}
+              >
+                {isAr ? 'متابعة إلى المستندات' : 'Continue to documents'}
+              </button>
+            </div>
+          )}
+
+          {wizardStep === 2 && (
+          <div className="seller-form-grid">
             <div className={`seller-account-file-box ${accountFileConfirmed ? 'confirmed' : ''}`}>
               <div>
                 <strong>
@@ -895,10 +954,38 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               </button>
             </div>
           </div>
-          {submitState === 'error' && (
+          )}
+          {wizardStep === 2 && submitState === 'error' && (
             <div className="seller-inline-alert seller-account-alert">
-              <strong>{isAr ? 'تعذر إنشاء الحساب' : 'Account could not be created'}</strong>
+              <strong>{isAr ? 'تعذر المتابعة' : 'Could not continue'}</strong>
               <span>{submitError}</span>
+            </div>
+          )}
+          {wizardStep === 2 && (
+            <div className="seller-account-actions">
+              <button className="seller-secondary-button" onClick={() => setWizardStep(1)}>
+                {isAr ? 'رجوع' : 'Back'}
+              </button>
+              <button
+                className="seller-primary-button"
+                disabled={!wizardStep2Complete}
+                onClick={() => setWizardStep(3)}
+              >
+                {isAr ? 'متابعة إلى الخطة والدفع' : 'Continue to plan & payment'}
+              </button>
+            </div>
+          )}
+          {wizardStep === 3 && (
+            <div className="seller-wizard-summary">
+              <strong>{isAr ? 'الحساب والمستندات جاهزة' : 'Account and documents are ready'}</strong>
+              <span>
+                {isAr
+                  ? `${firstName.trim() || email.trim()} · تم تأكيد الهاتف والمستندات.`
+                  : `${firstName.trim() || email.trim()} · phone and documents confirmed.`}
+              </span>
+              <button type="button" className="seller-secondary-button" onClick={() => setWizardStep(1)}>
+                {isAr ? 'تعديل بيانات الحساب' : 'Edit account details'}
+              </button>
             </div>
           )}
         </div>
@@ -917,7 +1004,20 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   ? 'اختر خطة النشر'
                   : 'Choose publishing plan'}
           </p>
-          {isPlatformSaleFlow ? (
+          {wizardStep !== 3 && (
+            <div className="seller-wizard-locked-panel">
+              <span>
+                {wizardStep === 1
+                  ? isAr
+                    ? 'أكمل بيانات الحساب وتوثيق الهاتف أولاً لفتح الخطة والدفع.'
+                    : 'Finish account details and phone verification first to unlock plan and payment.'
+                  : isAr
+                    ? 'أكمل رفع المستندات وإرسالها للإدارة أولاً لفتح الخطة والدفع.'
+                    : 'Finish uploading and sending documents to admin first to unlock plan and payment.'}
+              </span>
+            </div>
+          )}
+          {wizardStep === 3 && (isPlatformSaleFlow ? (
             <>
               <div className="seller-plan-detail seller-platform-sale-panel">
                 <h2>{isAr ? 'SYBNB تدير البيع' : 'SYBNB-managed sale'}</h2>
@@ -990,8 +1090,8 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                 ))}
               </div>
             </>
-          )}
-          {isPlatformSaleFlow && (
+          ))}
+          {wizardStep === 3 && isPlatformSaleFlow && (
             <div className={`seller-payment-confirmation ${paymentConfirmed ? 'confirmed' : ''}`}>
               <span>
                 {isAr
@@ -1035,7 +1135,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               )}
             </div>
           )}
-          {requiresPlanPayment && <div className={`seller-payment-confirmation ${paymentConfirmed ? 'confirmed' : ''}`}>
+          {wizardStep === 3 && requiresPlanPayment && <div className={`seller-payment-confirmation ${paymentConfirmed ? 'confirmed' : ''}`}>
             <span>{paymentMethod.helper[lang]}</span>
             <div className="seller-payment-destination">
               <span>{paymentMethod.destinationTitle[lang]}</span>
@@ -1200,8 +1300,12 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               </span>
             ))}
           </div>
+          {wizardStep === 3 && (
           <div className="seller-account-actions">
-            <button className="seller-secondary-button" onClick={() => navigate('/sell')}>
+            <button
+              className="seller-secondary-button"
+              onClick={() => setWizardStep(2)}
+            >
               {isAr ? 'رجوع' : 'Back'}
             </button>
             {!isAdvertisingFlow && (
@@ -1232,6 +1336,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               </button>
             )}
           </div>
+          )}
         </aside>
       </section>
     </main>

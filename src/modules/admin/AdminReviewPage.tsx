@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
@@ -19,10 +19,10 @@ import {
   type PlatformPaymentProof,
   type PlatformReviewBooking,
   type PlatformReviewQueue,
-  type PlatformWalletGift,
+  type PlatformReviewQueuePagination,
 } from '../../shared/api/platformApi'
 import { BrandLogo } from '../../shared/brand'
-import { divisionText, listingDescriptionText, listingTitleText, moneyText, providerText, statusText } from '../../shared/i18n/display'
+import { divisionText, listingTitleText, moneyText, providerText, statusText } from '../../shared/i18n/display'
 
 type Props = {
   lang: Lang
@@ -91,9 +91,14 @@ type ShamCashApprovalPayload = {
 }
 
 const SHAM_CASH_ACCOUNT_BALANCE_KEY = 'sybnb_v6_sham_cash_account_minor'
-const STR_ADMIN_COMMISSION_RATE = 0.1
+// Must match server/lib/finance-ledger.mjs's STR_ADMIN_COMMISSION_RATE -- see that file's comment
+// for why 13% (still below Airbnb's ~17-19% combined take and Booking.com's ~15%+ commission).
+const STR_ADMIN_COMMISSION_RATE = 0.13
 const STR_TAX_RATE = 0.02
 const STR_CLEANING_RATE = 0.05
+// Mirrors the Prisma ListingDivision enum -- every division funnels into this one shared queue.
+const REVIEW_QUEUE_DIVISIONS = ['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'] as const
+const REVIEW_QUEUE_PAGE_SIZE = 25
 
 const todayStatBars = [42, 61, 51, 74, 86, 104, 64]
 
@@ -116,6 +121,9 @@ export function AdminReviewPage({ lang }: Props) {
   const [payouts, setPayouts] = useState<AdminPayout[]>([])
   const [payoutHoldDays, setPayoutHoldDays] = useState(14)
   const [releasingPayoutId, setReleasingPayoutId] = useState('')
+  const [queueDivision, setQueueDivision] = useState('')
+  const [queueOffset, setQueueOffset] = useState(0)
+  const [pagination, setPagination] = useState<PlatformReviewQueuePagination | null>(null)
 
   const total = useMemo(() => {
     if (!queue) return 0
@@ -194,18 +202,23 @@ export function AdminReviewPage({ lang }: Props) {
   useEffect(() => {
     void loadQueue()
     void loadPayouts()
-  }, [])
+  }, [queueDivision, queueOffset])
 
   async function loadQueue() {
     setStatus('loading')
     setMessage('')
 
     try {
-      const [nextQueue, nextAuditLog] = await Promise.all([
-        fetchPrototypeReviewQueue(),
+      const [{ queue: nextQueue, pagination: nextPagination }, nextAuditLog] = await Promise.all([
+        fetchPrototypeReviewQueue({
+          limit: REVIEW_QUEUE_PAGE_SIZE,
+          offset: queueOffset,
+          division: queueDivision || undefined,
+        }),
         fetchPrototypeAdminAuditLog(12),
       ])
       setQueue(nextQueue)
+      setPagination(nextPagination)
       setAuditLog(nextAuditLog)
       setStatus('ready')
     } catch (error) {
@@ -213,6 +226,21 @@ export function AdminReviewPage({ lang }: Props) {
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
+
+  function selectDivisionFilter(nextDivision: string) {
+    setQueueDivision(nextDivision)
+    setQueueOffset(0)
+  }
+
+  function goToNextQueuePage() {
+    setQueueOffset((current) => current + REVIEW_QUEUE_PAGE_SIZE)
+  }
+
+  function goToPreviousQueuePage() {
+    setQueueOffset((current) => Math.max(0, current - REVIEW_QUEUE_PAGE_SIZE))
+  }
+
+  const anySectionHasMore = pagination ? Object.values(pagination.hasMore).some(Boolean) : false
 
   async function loadPayouts() {
     try {
@@ -251,11 +279,16 @@ export function AdminReviewPage({ lang }: Props) {
       } else {
         await reviewPrototypeQueueEntity(entityType, id, decision)
       }
-      const [nextQueue, nextAuditLog] = await Promise.all([
-        fetchPrototypeReviewQueue(),
+      const [{ queue: nextQueue, pagination: nextPagination }, nextAuditLog] = await Promise.all([
+        fetchPrototypeReviewQueue({
+          limit: REVIEW_QUEUE_PAGE_SIZE,
+          offset: queueOffset,
+          division: queueDivision || undefined,
+        }),
         fetchPrototypeAdminAuditLog(12),
       ])
       setQueue(nextQueue)
+      setPagination(nextPagination)
       setAuditLog(nextAuditLog)
       setStatus('ready')
     } catch (error) {
@@ -284,225 +317,14 @@ export function AdminReviewPage({ lang }: Props) {
       payoutHoldDays={payoutHoldDays}
       releasingPayoutId={releasingPayoutId}
       onReleasePayout={(id) => void releasePayout(id)}
+      queueDivision={queueDivision}
+      onSelectDivision={selectDivisionFilter}
+      pagination={pagination}
+      queueOffset={queueOffset}
+      queuePageSize={REVIEW_QUEUE_PAGE_SIZE}
+      onNextQueuePage={goToNextQueuePage}
+      onPreviousQueuePage={goToPreviousQueuePage}
     />
-  )
-
-  return (
-    <main dir={isAr ? 'rtl' : 'ltr'} className="admin-console">
-      <section className="admin-shell">
-        <aside className="admin-side">
-          <BrandLogo logo="platform" size="nav" className="admin-side-logo" />
-          <button className="active" onClick={() => setActiveFilter('all')}>{isAr ? 'لوحة التحكم' : 'Dashboard'} <span>▦</span></button>
-          <button onClick={() => setActiveFilter('listings')}>{t.listings} <span>▤</span></button>
-          <button onClick={() => setActiveFilter('payments')}>{t.payments} <span>▭</span></button>
-          <button onClick={() => (window.location.hash = '/finance')}>{isAr ? 'المالية' : 'Finance'} <span>▥</span></button>
-          <button onClick={() => (window.location.hash = '/admin/disputes')}>{isAr ? 'النزاعات' : 'Disputes'} <span>⚖</span></button>
-          <button onClick={() => (window.location.hash = '/admin/reports')}>{isAr ? 'البلاغات' : 'Reports'} <span>⚑</span></button>
-          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'مساعد FAI' : 'FAI helper'} <span>◉</span></button>
-          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'التقارير' : 'Reports'} <span>▧</span></button>
-          <button onClick={() => (window.location.hash = '/')}>{t.back} <span>↩</span></button>
-        </aside>
-
-        <div className="admin-main">
-          <header className="admin-topbar">
-            <div className="admin-avatar" aria-hidden="true">A</div>
-            <div className="admin-language">AR <span /> EN</div>
-            <strong>{timeLabel}</strong>
-            <strong>{nowLabel}</strong>
-            <span>Platform Admin</span>
-            <BrandLogo logo="platform" size="nav" className="admin-wordmark" />
-          </header>
-
-          <section className="admin-metrics" aria-label={isAr ? 'مؤشرات الإدارة' : 'Admin metrics'}>
-            <AdminMetric label={isAr ? 'تنبيهات' : 'Alerts'} value={String(visibleGifts.length + visibleBookings.length)} tone="red" icon="!" />
-            <AdminMetric label={isAr ? 'المعاملات اليوم' : 'Transactions'} value={String(visiblePayments.length)} tone="gold" icon="⚡" />
-            <AdminMetric label={isAr ? 'المستخدمون النشطون' : 'Active users'} value="1,483" tone="green" icon="♙" />
-            <AdminMetric label={isAr ? 'إجمالي الإعلانات' : 'Total listings'} value={String(queue?.listings.length || 0)} tone="blue" icon="▣" />
-          </section>
-
-          <section className="admin-dashboard-grid">
-            <div className="admin-quick-panel">
-              <h2>{isAr ? 'إجراءات سريعة' : 'Quick actions'}</h2>
-              <button className="admin-primary-action" onClick={() => setActiveFilter('payments')}>{isAr ? 'مراجعة المدفوعات' : 'Review payments'} <span>☑</span></button>
-              <button onClick={() => setActiveFilter('listings')}>{isAr ? 'إدارة الإعلانات' : 'Manage listings'} <span>⊕</span></button>
-              <button className="admin-gold-action" onClick={() => setActiveFilter('audit')}>{isAr ? 'تقرير اليوم' : 'Today report'} <span>▥</span></button>
-              <button onClick={() => void loadQueue()}>{t.refresh} <span>↻</span></button>
-              <div className="admin-ai-card">
-                <strong>{isAr ? 'ترقية السيرفر' : 'Server upgrade'}</strong>
-                <p>{isAr ? 'استخدم الذاكرة الذكية للوصول إلى ٨٥٪ من المتابعة.' : 'Use smart memory to reach 85% platform tracking.'}</p>
-                <button onClick={() => setActiveFilter('all')}>{isAr ? 'ابدأ الآن' : 'Start now'}</button>
-              </div>
-            </div>
-
-            <div className="admin-table-card">
-              <div className="admin-card-heading">
-                <button onClick={() => setActiveFilter('all')}>{isAr ? 'عرض الكل' : 'View all'}</button>
-                <h2>{isAr ? 'أحدث الإعلانات' : 'Latest listings'}</h2>
-              </div>
-              <div className="admin-table">
-                {(visibleListings.length ? visibleListings : queue?.listings || []).length > 0 ? (
-                  (visibleListings.length ? visibleListings : queue?.listings || []).slice(0, 5).map((listing) => (
-                    <button key={listing.id} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-                      <span>{listingTitleText(listing, lang)}</span>
-                      <small>{divisionText(listing.division, lang)}</small>
-                      <strong>{statusText(listing.status, lang)}</strong>
-                    </button>
-                  ))
-                ) : (
-                  <p className="admin-empty-row">{status === 'loading' ? t.loading : t.empty}</p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className="admin-activity-panel" aria-label={isAr ? 'آخر الأنشطة' : 'Latest activity'}>
-            <div className="admin-section-title">
-              <button onClick={() => setActiveFilter('audit')}>{isAr ? 'شاهد السجل الكامل' : 'View full log'}</button>
-              <h2>{isAr ? 'آخر الأنشطة' : 'Latest Activity'}</h2>
-            </div>
-            <div className="admin-activity-strip">
-              {activityItems.map((item) => (
-                <button key={`${item.label}-${item.detail}`} className={`admin-activity-chip ${item.tone}`} onClick={() => setActiveFilter('audit')}>
-                  <span>{item.label}</span>
-                  <small>{item.detail}</small>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-stats-card" aria-label={isAr ? 'إحصائيات اليوم' : 'Today stats'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Today Stats' : 'Today Stats'}</span>
-              <h2>{isAr ? 'إحصائيات اليوم' : 'Today Stats'}</h2>
-            </div>
-            <div className="admin-bar-chart">
-              {todayStatBars.map((height, index) => (
-                <span key={height} className={index === 5 ? 'gold' : ''} style={{ '--bar-height': `${height}px` } as CSSProperties} />
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-users-card" aria-label={isAr ? 'آخر المستخدمين' : 'Recent users'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Recent Users' : 'Recent Users'}</span>
-              <h2>{isAr ? 'آخر المستخدمين' : 'Recent Users'}</h2>
-            </div>
-            <div className="admin-recent-list">
-              {recentAdminUsers.map((user) => (
-                <article key={user.en}>
-                  <strong>{isAr ? user.ar[0] : user.en[0]}</strong>
-                  <div>
-                    <b>{isAr ? user.ar : user.en}</b>
-                    <small>{isAr ? user.ageAr : user.ageEn}</small>
-                  </div>
-                  <span className={user.tone}>{isAr ? user.statusAr : user.statusEn}</span>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-tools">
-            <input
-              aria-label={t.search}
-              placeholder={t.search}
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-            />
-            <div>
-              {filterItems.map((item) => (
-                <button
-                  key={item.id}
-                  className={activeFilter === item.id ? 'active' : ''}
-                  onClick={() => setActiveFilter(item.id)}
-                >
-                  {item.label} {item.count}
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
-      </section>
-
-      {status === 'error' && (
-        <section style={styles.alert}>
-          <strong>{t.error}</strong>
-          <span>{message}</span>
-        </section>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'listings') && (
-      <ReviewSection title={t.listings} empty={t.empty}>
-        {visibleListings.map((listing) => (
-          <ListingReviewCard
-            key={listing.id}
-            listing={listing}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('listings', listing.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'payments') && (
-      <ReviewSection title={t.payments} empty={t.empty}>
-        {visiblePayments.map((payment) => (
-          <PaymentReviewCard
-            key={payment.id}
-            payment={payment}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, provider: t.provider, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('payments', payment.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'gifts') && (
-      <ReviewSection title={t.gifts} empty={t.empty}>
-        {visibleGifts.map((gift) => (
-          <GiftReviewCard
-            key={gift.id}
-            gift={gift}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('gifts', gift.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'bookings') && (
-      <ReviewSection title={t.bookings} empty={t.empty}>
-        {visibleBookings.map((booking) => (
-          <BookingReviewCard
-            key={booking.id}
-            booking={booking}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, listing: t.listing, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('bookings', booking.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'audit') && (
-      <ReviewSection title={t.audit} empty={t.auditEmpty}>
-        {visibleAuditLog.map((entry) => (
-          <AuditLogCard
-            key={entry.id}
-            entry={entry}
-            labels={{ actor: t.actor, entity: t.entity, details: t.details }}
-            lang={lang}
-          />
-        ))}
-      </ReviewSection>
-      )}
-    </main>
   )
 }
 
@@ -612,6 +434,70 @@ function matchesSearch(values: Array<unknown>, search: string) {
   return values.some((value) => String(value || '').toLowerCase().includes(search))
 }
 
+function ReviewQueueDivisionAndPager({
+  disabled,
+  isAr,
+  onNextQueuePage,
+  onPreviousQueuePage,
+  onSelectDivision,
+  pagination,
+  queueDivision,
+  queueOffset,
+  queuePageSize,
+}: {
+  disabled: boolean
+  isAr: boolean
+  onNextQueuePage: () => void
+  onPreviousQueuePage: () => void
+  onSelectDivision: (division: string) => void
+  pagination: PlatformReviewQueuePagination | null
+  queueDivision: string
+  queueOffset: number
+  queuePageSize: number
+}) {
+  const listingsTotal = pagination?.totals.listings ?? 0
+  const pageStart = listingsTotal === 0 ? 0 : queueOffset + 1
+  const pageEnd = Math.min(queueOffset + queuePageSize, listingsTotal)
+  const hasPrevious = queueOffset > 0
+  const hasNext = pagination?.hasMore.listings ?? false
+
+  return (
+    <div style={commandStyles.queuePagerRow}>
+      <label style={commandStyles.queuePagerLabel}>
+        <span>{isAr ? 'القسم' : 'Division'}</span>
+        <select
+          value={queueDivision}
+          disabled={disabled}
+          onChange={(event) => onSelectDivision(event.target.value)}
+          style={commandStyles.queuePagerSelect}
+        >
+          <option value="">{isAr ? 'كل الأقسام' : 'All divisions'}</option>
+          {REVIEW_QUEUE_DIVISIONS.map((division) => (
+            <option key={division} value={division}>
+              {divisionText(division, isAr ? 'ar' : 'en')}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div style={commandStyles.queuePagerControls}>
+        <span style={commandStyles.queuePagerCount}>
+          {listingsTotal === 0
+            ? (isAr ? 'لا توجد إعلانات' : 'No listings')
+            : isAr
+              ? `${pageStart}-${pageEnd} من ${listingsTotal}`
+              : `${pageStart}-${pageEnd} of ${listingsTotal}`}
+        </span>
+        <button type="button" disabled={disabled || !hasPrevious} onClick={onPreviousQueuePage} style={commandStyles.queuePagerButton}>
+          {isAr ? 'السابق' : 'Previous'}
+        </button>
+        <button type="button" disabled={disabled || !hasNext} onClick={onNextQueuePage} style={commandStyles.queuePagerButton}>
+          {isAr ? 'التالي' : 'Next'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ShortRentAdminCommandDashboard({
   auditLog,
   bookings,
@@ -631,6 +517,13 @@ function ShortRentAdminCommandDashboard({
   payoutHoldDays,
   releasingPayoutId,
   onReleasePayout,
+  queueDivision,
+  onSelectDivision,
+  pagination,
+  queueOffset,
+  queuePageSize,
+  onNextQueuePage,
+  onPreviousQueuePage,
 }: {
   auditLog: PlatformAdminAuditLog[]
   bookings: PlatformReviewBooking[]
@@ -650,6 +543,13 @@ function ShortRentAdminCommandDashboard({
   payoutHoldDays: number
   releasingPayoutId: string
   onReleasePayout: (bookingId: string) => void
+  queueDivision: string
+  onSelectDivision: (division: string) => void
+  pagination: PlatformReviewQueuePagination | null
+  queueOffset: number
+  queuePageSize: number
+  onNextQueuePage: () => void
+  onPreviousQueuePage: () => void
 }) {
   const [activeCommandView, setActiveCommandView] = useState<AdminCommandView>('general')
   const [expandedCommandCategory, setExpandedCommandCategory] = useState('monitoring')
@@ -1011,7 +911,7 @@ function ShortRentAdminCommandDashboard({
       )}
 
       {status === 'error' && (
-        <section style={styles.alert}>
+        <section style={commandStyles.alertBanner}>
           <strong>{isAr ? 'تعذر تحميل لوحة الإدارة' : 'Could not load admin dashboard'}</strong>
           <span>{message}</span>
         </section>
@@ -1256,6 +1156,17 @@ function ShortRentAdminCommandDashboard({
         )}
         {activeCommandView === 'hosts' && (
           <div style={commandStyles.managementList}>
+            <ReviewQueueDivisionAndPager
+              isAr={isAr}
+              queueDivision={queueDivision}
+              onSelectDivision={onSelectDivision}
+              pagination={pagination}
+              queueOffset={queueOffset}
+              queuePageSize={queuePageSize}
+              onNextQueuePage={onNextQueuePage}
+              onPreviousQueuePage={onPreviousQueuePage}
+              disabled={disabled}
+            />
             {(listings.length ? listings : []).length === 0 ? (
               <AdminEmptyLine text={isAr ? 'لا توجد عقارات في قائمة الإدارة الحالية.' : 'No stays are in the current admin inventory.'} />
             ) : listings.map((listing) => (
@@ -1325,7 +1236,7 @@ function ShortRentAdminCommandDashboard({
       </section>
 
       {status === 'error' && (
-        <section style={styles.alert}>
+        <section style={commandStyles.alertBanner}>
           <strong>{isAr ? 'تعذر تحميل لوحة الإدارة' : 'Could not load admin dashboard'}</strong>
           <span>{message}</span>
         </section>
@@ -2079,6 +1990,7 @@ const commandStyles: Record<string, CSSProperties> = {
   departmentTabActive: { background: 'rgba(82,104,255,.26)', border: '1px solid rgba(82,104,255,.75)', color: '#5268ff', boxShadow: '0 0 0 1px rgba(82,104,255,.14) inset' },
   statsGrid: { display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' },
   warningBanner: { alignItems: 'center', background: 'rgba(230,184,13,.12)', border: '1px solid rgba(230,184,13,.42)', borderRadius: 8, color: '#e6b80d', display: 'flex', gap: 14, justifyContent: 'space-between', padding: '14px 16px' },
+  alertBanner: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', display: 'grid', gap: 4, padding: 14 },
   faiPanel: { background: '#0d111b', border: '1px solid rgba(34,210,143,.28)', borderRadius: 10, display: 'grid', gap: 16, padding: 18 },
   faiHeader: { alignItems: 'start', display: 'flex', gap: 16, justifyContent: 'space-between' },
   faiEyebrow: { color: '#22d28f', fontWeight: 950, letterSpacing: 0 },
@@ -2106,6 +2018,12 @@ const commandStyles: Record<string, CSSProperties> = {
   outboxPanel: { background: 'rgba(82,104,255,.08)', border: '1px solid rgba(82,104,255,.35)', borderRadius: 8, color: '#d9deea', display: 'grid', gap: 8, padding: 12 },
   payoutState: { border: '1px solid rgba(230,184,13,.45)', borderRadius: 999, color: '#e6b80d', fontSize: 12, fontWeight: 950, justifySelf: 'start', padding: '6px 10px' },
   managementList: { display: 'grid', gap: 10 },
+  queuePagerRow: { alignItems: 'center', background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between', padding: '10px 12px' },
+  queuePagerLabel: { alignItems: 'center', color: '#8e93a3', display: 'flex', fontSize: 12, fontWeight: 800, gap: 8 },
+  queuePagerSelect: { background: '#11131d', border: '1px solid rgba(255,255,255,.12)', borderRadius: 6, color: '#f7f7fb', padding: '6px 8px' },
+  queuePagerControls: { alignItems: 'center', display: 'flex', gap: 10 },
+  queuePagerCount: { color: '#8e93a3', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' },
+  queuePagerButton: { background: '#181926', border: '1px solid rgba(255,255,255,.12)', borderRadius: 6, color: '#f7f7fb', fontWeight: 800, padding: '6px 12px' },
   sectionHeadRow: { display: 'grid', gap: 4, color: '#f7f7fb', padding: '4px 2px' },
   managementRow: { alignItems: 'center', background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, color: '#f7f7fb', display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', minHeight: 62, padding: 12, textAlign: 'start' },
   selectedCard: { border: '1px solid rgba(82,104,255,.85)', boxShadow: '0 0 0 1px rgba(82,104,255,.2) inset' },
@@ -2171,238 +2089,6 @@ const commandStyles: Record<string, CSSProperties> = {
   secondaryCommand: { background: 'transparent', border: '1px solid rgba(255,255,255,.3)', borderRadius: 8, color: '#d9deea', fontWeight: 950, minHeight: 44, padding: '0 14px' },
 }
 
-function AdminMetric({ label, value, icon, tone }: { label: string; value: string; icon: string; tone: 'red' | 'gold' | 'green' | 'blue' }) {
-  return (
-    <article className={`admin-metric ${tone}`}>
-      <span>{icon}</span>
-      <small>{label}</small>
-      <strong>{value}</strong>
-    </article>
-  )
-}
-
-function ReviewSection({ title, empty, children }: { title: string; empty: string; children: ReactNode }) {
-  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children)
-
-  return (
-    <section style={styles.section}>
-      <h2 style={styles.sectionTitle}>{title}</h2>
-      {hasChildren ? <div style={styles.grid}>{children}</div> : <p style={styles.empty}>{empty}</p>}
-    </section>
-  )
-}
-
-function ListingReviewCard({
-  listing,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  listing: PlatformListing
-  labels: { approve: string; reject: string; price: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(listing.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h3>
-      <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function PaymentReviewCard({
-  payment,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  payment: PlatformPaymentProof
-  labels: { approve: string; reject: string; price: string; provider: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  const isApproved = payment.status === 'APPROVED'
-  const isRejected = payment.status === 'REJECTED'
-  const isFinal = isApproved || isRejected
-  const confirmationText = isApproved
-    ? lang === 'ar'
-      ? 'تم إرسال تأكيد الدفع للعميل'
-      : 'Payment confirmation sent to client'
-    : lang === 'ar'
-      ? 'تم إرسال نتيجة الرفض للعميل'
-      : 'Payment rejection sent to client'
-
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(payment.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{payment.providerRef || payment.id.slice(0, 8).toUpperCase()}</h3>
-      <div style={styles.meta}>
-        <span>{labels.provider}</span>
-        <strong>{providerText(payment.provider, lang)}</strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
-      </div>
-      {!isFinal && (
-        <p style={styles.moneyReceivedWarning}>
-          {lang === 'ar' ? 'وافق فقط بعد التأكد من استلام المال ومطابقة الإثبات.' : 'Approve only after confirming money was received and proof matches.'}
-        </p>
-      )}
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/payment/receipt/${payment.id}`)}>
-        {labels.details}
-      </button>
-      {isFinal ? (
-        <p style={{ ...styles.confirmationNote, ...(isApproved ? styles.confirmationNoteApproved : styles.confirmationNoteRejected) }}>
-          {confirmationText}
-        </p>
-      ) : (
-        <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-      )}
-    </article>
-  )
-}
-
-function BookingReviewCard({
-  booking,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  booking: PlatformReviewBooking
-  labels: { approve: string; reject: string; price: string; listing: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  const title = booking.listing ? listingTitleText(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase()
-
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(booking.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{title}</h3>
-      <div style={styles.meta}>
-        <span>{labels.listing}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{booking.listing?.division ? divisionText(booking.listing.division, lang) : booking.listingId.slice(0, 8).toUpperCase()}</strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(booking.amountMinor, booking.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function GiftReviewCard({
-  gift,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  gift: PlatformWalletGift
-  labels: { approve: string; reject: string; price: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(gift.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{gift.message || gift.id.slice(0, 8).toUpperCase()}</h3>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(gift.amountMinor, gift.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/wallet/gift/claim/${gift.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function DecisionActions({
-  labels,
-  disabled,
-  onDecision,
-}: {
-  labels: { approve: string; reject: string }
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <div style={styles.actions}>
-      <button disabled={disabled} style={styles.primaryButton} onClick={() => onDecision('APPROVE')}>
-        {labels.approve}
-      </button>
-      <button disabled={disabled} style={styles.dangerButton} onClick={() => onDecision('REJECT')}>
-        {labels.reject}
-      </button>
-    </div>
-  )
-}
-
-function AuditLogCard({
-  entry,
-  labels,
-  lang,
-}: {
-  entry: PlatformAdminAuditLog
-  labels: { actor: string; entity: string; details: string }
-  lang: Lang
-}) {
-  const date = new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SY' : 'en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(entry.createdAt))
-  const actorName = entry.actor?.displayName || entry.actor?.email || entry.actorUserId?.slice(0, 8) || (lang === 'ar' ? 'النظام' : 'System')
-  const detailRoute = auditDetailRoute(entry)
-
-  return (
-    <article style={styles.auditCard}>
-      <div style={styles.auditHeader}>
-        <strong>{auditActionText(entry.action, lang)}</strong>
-        <span>{date}</span>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.entity}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>
-          {auditEntityText(entry.entityType, lang)} / {entry.entityId.slice(0, 8).toUpperCase()}
-        </strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.actor}</span>
-        <strong>{actorName}</strong>
-      </div>
-      {detailRoute && (
-        <button style={styles.secondaryButton} onClick={() => (window.location.hash = detailRoute)}>
-          {labels.details}
-        </button>
-      )}
-    </article>
-  )
-}
-
 function auditActionText(action: string, lang: Lang) {
   const labels: Record<string, Record<Lang, string>> = {
     APPROVE: { ar: 'موافقة', en: 'Approve' },
@@ -2433,62 +2119,3 @@ function auditActionText(action: string, lang: Lang) {
   return labels[action]?.[lang] || (lang === 'ar' ? action.replace(/_/g, ' ') : action.replace(/_/g, ' '))
 }
 
-function auditEntityText(entityType: string, lang: Lang) {
-  const labels: Record<string, Record<Lang, string>> = {
-    booking: { ar: 'حجز', en: 'Booking' },
-    bookings: { ar: 'حجوزات', en: 'Bookings' },
-    gift: { ar: 'هدية', en: 'Gift' },
-    gifts: { ar: 'هدايا', en: 'Gifts' },
-    listing: { ar: 'إعلان', en: 'Listing' },
-    listings: { ar: 'إعلانات', en: 'Listings' },
-    payment: { ar: 'دفع', en: 'Payment' },
-    payments: { ar: 'مدفوعات', en: 'Payments' },
-    payment_proofs: { ar: 'إثبات دفع', en: 'Payment proof' },
-    ride_requests: { ar: 'رحلات', en: 'Ride requests' },
-  }
-  return labels[entityType.toLowerCase()]?.[lang] || entityType.replace(/_/g, ' ')
-}
-
-function auditDetailRoute(entry: PlatformAdminAuditLog) {
-  const entityType = entry.entityType.toLowerCase()
-  if (entityType === 'listings' || entityType === 'listing') return `/listing/${entry.entityId}`
-  if (entityType === 'bookings' || entityType === 'booking') return `/booking/${entry.entityId}`
-  if (entityType === 'payments' || entityType === 'payment' || entityType === 'payment_proofs') return `/payment/receipt/${entry.entityId}`
-  if (entityType === 'ride_requests') return '/driver'
-  return ''
-}
-
-const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 16, maxWidth: 1040, margin: '0 auto' },
-  back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  hero: { border: '1px solid #1e1e2a', borderRadius: 8, padding: 18, background: '#111118' },
-  eyebrow: { color: '#d5a915', letterSpacing: 2, fontWeight: 900, fontSize: 11, margin: 0 },
-  title: { margin: '6px 0', fontSize: 36, lineHeight: 1.08 },
-  body: { color: '#9aa6ba', margin: 0, maxWidth: 720, lineHeight: 1.6 },
-  heroActions: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16 },
-  secondaryButton: { minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  tools: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', padding: 12, display: 'grid', gap: 10 },
-  searchInput: { minHeight: 46, border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  filters: { display: 'flex', gap: 8, overflowX: 'auto' },
-  filterButton: { minHeight: 40, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', padding: '0 12px', fontWeight: 900, whiteSpace: 'nowrap' },
-  filterActive: { minHeight: 40, border: 0, borderRadius: 8, background: '#20d29b', color: '#07110e', padding: '0 12px', fontWeight: 950, whiteSpace: 'nowrap' },
-  alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', display: 'grid', gap: 4, padding: 14 },
-  section: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', padding: 14 },
-  sectionTitle: { fontSize: 22, margin: '0 0 12px' },
-  grid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' },
-  empty: { color: '#9aa6ba', margin: 0 },
-  card: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', padding: 14, display: 'grid', gap: 10 },
-  auditCard: { border: '1px solid #30384d', borderRadius: 8, background: '#0f1524', padding: 14, display: 'grid', gap: 10 },
-  auditHeader: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#f7d45f', fontSize: 13 },
-  status: { color: '#20d29b', fontSize: 12, fontWeight: 900 },
-  cardTitle: { margin: 0, fontSize: 20, lineHeight: 1.15 },
-  cardBody: { color: '#9aa6ba', margin: 0, lineHeight: 1.55 },
-  meta: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#9aa6ba' },
-  actions: { display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' },
-  primaryButton: { minHeight: 44, border: 0, borderRadius: 8, background: '#20d29b', color: '#07110e', fontWeight: 950 },
-  dangerButton: { minHeight: 44, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 950 },
-  moneyReceivedWarning: { border: '1px solid rgba(255,204,0,.34)', borderRadius: 8, background: 'rgba(255,204,0,.08)', color: '#ffe381', fontWeight: 900, lineHeight: 1.45, margin: 0, padding: '10px 12px' },
-  confirmationNote: { borderRadius: 8, margin: 0, padding: '12px 14px', fontWeight: 950, textAlign: 'center' },
-  confirmationNoteApproved: { background: 'rgba(32,210,155,.12)', border: '1px solid rgba(32,210,155,.45)', color: '#77ffd7' },
-  confirmationNoteRejected: { background: 'rgba(255,96,96,.12)', border: '1px solid rgba(255,96,96,.45)', color: '#ffd1d1' },
-}

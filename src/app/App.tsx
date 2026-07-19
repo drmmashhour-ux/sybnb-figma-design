@@ -44,6 +44,7 @@ const SyrianLocalWalletPaymentPage = lazyNamed(
   () => import('../modules/payments/SyrianLocalWalletPaymentPage'),
   'SyrianLocalWalletPaymentPage',
 )
+const TripLookupPage = lazyNamed(() => import('../modules/bookings/TripLookupPage'), 'TripLookupPage')
 const TrustProtectionRoutes = lazyNamed(() => import('../modules/trust/TrustProtectionRoutes'), 'TrustProtectionRoutes')
 const WalletPage = lazyNamed(() => import('../modules/wallet-live/WalletPage'), 'WalletPage')
 
@@ -144,6 +145,8 @@ export function App() {
           <LegalPlaceholderPage lang={lang} page="terms" />
         ) : path === '/privacy' ? (
           <LegalPlaceholderPage lang={lang} page="privacy" />
+        ) : path === '/track' ? (
+          <TripLookupPage lang={lang} />
         ) : bookingReviewMatch ? (
           <BookingReviewPage listingId={bookingReviewMatch[1]} lang={lang} />
         ) : bookingMatch ? (

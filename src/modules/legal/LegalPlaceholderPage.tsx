@@ -6,7 +6,7 @@ type Props = {
   page: 'terms' | 'privacy'
 }
 
-// Every figure and process described below (10% commission, the 3-day free-cancellation window,
+// Every figure and process described below (13% commission, the 3-day free-cancellation window,
 // the $10 flat late-cancellation fee, the 3% protection premium, ID-document handling, manual
 // Sham-Cash-style payment review) mirrors what server/lib/finance-ledger.mjs, server/routes/
 // bookings.mjs, and server/lib/id-document-storage.mjs actually do -- not generic marketplace
@@ -42,7 +42,7 @@ const copy = {
         },
         {
           heading: '٥. الحجز والدفع والعمولة',
-          body: 'تتم معالجة الدفع لحجوزات الإقامة حالياً يدوياً: تُرسل إثبات الدفع (مثل إيصال تحويل عبر شام كاش)، ويراجعه فريق سيبنب ويوافق عليه قبل تأكيد حجزك. تحتفظ سيبنب بعمولة قدرها 10% من مبلغ الإيجار الأساسي لكل حجز إقامة مؤكَّد، ويُفصح عن ذلك لك قبل تأكيد الحجز، وللمضيفين بشكل منفصل عند إدراج عقاراتهم.',
+          body: 'تتم معالجة الدفع لحجوزات الإقامة حالياً يدوياً: تُرسل إثبات الدفع (مثل إيصال تحويل عبر شام كاش)، ويراجعه فريق سيبنب ويوافق عليه قبل تأكيد حجزك. تحتفظ سيبنب بعمولة قدرها 13% من مبلغ الإيجار الأساسي لكل حجز إقامة مؤكَّد، ويُفصح عن ذلك لك قبل تأكيد الحجز، وللمضيفين بشكل منفصل عند إدراج عقاراتهم.',
         },
         {
           heading: '٦. الإلغاء والاسترداد',
@@ -124,7 +124,7 @@ const copy = {
         },
         {
           heading: '5. Booking, payment & commission',
-          body: 'Payment for Stays bookings is currently processed manually: you submit proof of payment (for example, a Sham Cash transfer receipt), which the SYBNB team reviews and approves before your booking is confirmed. SYBNB retains a 10% commission on the base rent portion of every confirmed Stays booking; this is disclosed to you before you confirm a booking, and separately to hosts when they list a property.',
+          body: 'Payment for Stays bookings is currently processed manually: you submit proof of payment (for example, a Sham Cash transfer receipt), which the SYBNB team reviews and approves before your booking is confirmed. SYBNB retains a 13% commission on the base rent portion of every confirmed Stays booking; this is disclosed to you before you confirm a booking, and separately to hosts when they list a property.',
         },
         {
           heading: '6. Cancellations & refunds',

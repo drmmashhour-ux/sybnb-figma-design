@@ -6,7 +6,7 @@ import {
   createStripeCheckoutSession,
   fetchPrototypeBooking,
   fetchStripePaymentStatus,
-  submitGuestIdDocument,
+  submitBookingContact,
   submitPrototypeReview,
   type PlatformBooking,
   type PlatformListing,
@@ -15,9 +15,7 @@ import {
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
-import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { guestFeeSummary } from './guestFeeSummary'
-import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { BookingCancelDispute } from './BookingCancelDispute'
 
 type Props = {
@@ -57,12 +55,12 @@ const copy = {
     stripeConfirmError: 'تعذر تأكيد الدفع بالبطاقة. تواصل مع الدعم إذا خُصم المبلغ.',
     stripeCardNote: 'دفع فوري وآمن عبر Stripe. تأكيد تلقائي دون انتظار مراجعة الإدارة.',
     stripeWalletNote: 'تحويل يدوي عبر شام كاش، تحتاج مراجعة الإدارة بعد رفع الإثبات.',
-    idGateTitle: 'إثبات الهوية مطلوب قبل الدفع',
-    idGateCopy: 'ارفع صورة واضحة عن هويتك الشخصية أو جواز السفر لإكمال الدفع. مطلوب مرة واحدة فقط.',
-    idGateUpload: 'اضغط لرفع صورة الهوية',
-    idGateEmpty: 'لم يتم رفع الهوية بعد.',
-    idGateSubmit: 'إرسال الهوية والمتابعة للدفع',
-    idGateError: 'تعذر رفع الهوية. حاول مرة أخرى.',
+    idGateTitle: 'معلومات التواصل قبل الدفع',
+    idGateCopy: 'اكتب اسمك ورقم هاتفك حتى نتمكن من التواصل معك بخصوص هذه الرحلة، ولتتمكن لاحقاً من متابعة حجزك برقم التأكيد.',
+    contactNameLabel: 'الاسم الكامل',
+    contactPhoneLabel: 'رقم الهاتف',
+    idGateSubmit: 'حفظ ومتابعة الدفع',
+    idGateError: 'تعذر حفظ معلومات التواصل. تحقق من البيانات وحاول مرة أخرى.',
     draftTimeline: ['اختيار الاستضافة', 'ارفع إثبات الدفع', 'SYBNB يراجع', 'المضيف يوافق', 'تأكيد الحجز'],
     paidTimeline: ['تم إرسال الإثبات', 'SYBNB يراجع', 'المضيف يوافق', 'تأكيد الحجز', 'صرف المبلغ'],
     feeBreakdown: 'ملخص الدفع',
@@ -91,6 +89,7 @@ const copy = {
     yourReview: 'تقييمك',
     reviewPlaceholder: 'كيف كانت إقامتك؟ (اختياري)',
     submitReview: 'إرسال التقييم',
+    trackHint: 'احفظ رقم التأكيد أعلاه — استخدمه لاحقاً لمتابعة رحلتك من أي جهاز في صفحة "تابع رحلتك"',
   },
   en: {
     back: 'Back to dashboard',
@@ -117,12 +116,12 @@ const copy = {
     stripeConfirmError: 'Could not confirm the card payment. Contact support if you were charged.',
     stripeCardNote: 'Instant, secure payment via Stripe. Confirmed automatically, no admin wait.',
     stripeWalletNote: 'Manual Sham Cash transfer, needs admin review after you upload proof.',
-    idGateTitle: 'ID verification required before payment',
-    idGateCopy: 'Upload a clear photo of your national ID or passport to complete payment. Required once only.',
-    idGateUpload: 'Tap to upload your ID photo',
-    idGateEmpty: 'No ID uploaded yet.',
-    idGateSubmit: 'Submit ID and continue to payment',
-    idGateError: 'Could not upload the ID. Try again.',
+    idGateTitle: 'Contact details before payment',
+    idGateCopy: "Tell us your name and phone so we can reach you about this trip, and so you can track your booking later with your confirmation number.",
+    contactNameLabel: 'Full name',
+    contactPhoneLabel: 'Phone number',
+    idGateSubmit: 'Save and continue to payment',
+    idGateError: 'Could not save your contact details. Check the fields and try again.',
     draftTimeline: ['Stay selected', 'Upload payment proof', 'SYBNB reviews', 'Host approves', 'Booking confirmed'],
     paidTimeline: ['Proof submitted', 'SYBNB reviewing', 'Host approves', 'Booking confirmed', 'Funds released'],
     feeBreakdown: 'Payment Summary',
@@ -151,6 +150,7 @@ const copy = {
     yourReview: 'Your review',
     reviewPlaceholder: 'How was your stay? (optional)',
     submitReview: 'Submit review',
+    trackHint: 'Save the confirmation number above — use it later to track your trip from any device on the "Track your trip" page',
   },
 }
 
@@ -168,9 +168,9 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const [stripeConfigured, setStripeConfigured] = useState(false)
   const [cardState, setCardState] = useState<'idle' | 'starting' | 'confirming' | 'error'>('idle')
   const [cardError, setCardError] = useState('')
-  const [idFiles, setIdFiles] = useState<string[]>([])
-  const [idFile, setIdFile] = useState<File | null>(null)
-  const [idSaveState, setIdSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [contactName, setContactName] = useState('')
+  const [contactPhone, setContactPhone] = useState('')
+  const [contactSaveState, setContactSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
 
   useEffect(() => {
     void loadBooking()
@@ -226,23 +226,15 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     }
   }
 
-  function addIdFiles(fileList: FileList | null) {
-    const selected = Array.from(fileList || [])
-    const file = selected[selected.length - 1]
-    if (!file) return
-    setIdFile(file)
-    setIdFiles([file.name])
-  }
-
-  async function saveIdDocument() {
-    if (!idFile) return
-    setIdSaveState('saving')
+  async function saveContactInfo() {
+    if (!booking || !contactName.trim() || !contactPhone.trim()) return
+    setContactSaveState('saving')
     try {
-      await submitGuestIdDocument(idFile)
+      await submitBookingContact(booking.id, { guestName: contactName.trim(), guestPhone: contactPhone.trim() })
       await loadBooking()
-      setIdSaveState('idle')
+      setContactSaveState('idle')
     } catch {
-      setIdSaveState('error')
+      setContactSaveState('error')
     }
   }
 
@@ -279,9 +271,9 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const paymentRoute = booking
     ? `/payment/local-wallet/${booking.id}/${fees?.totalMinor ?? booking.amountMinor}/${encodeURIComponent(booking.currency)}`
     : '/'
-  const hasIdDocument = Boolean(booking?.guest?.idDocumentRef)
+  const hasContactInfo = Boolean(booking?.metadata?.guestContactPhone)
   const isFallbackInspectionBooking = booking?.id.startsWith('fallback-booking-') === true
-  const canContinueToPayment = hasIdDocument || isFallbackInspectionBooking
+  const canContinueToPayment = hasContactInfo || isFallbackInspectionBooking
 
   function renderPaymentOptions() {
     if (!canContinueToPayment) {
@@ -289,33 +281,33 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
         <div style={styles.idGate}>
           <strong>{t.idGateTitle}</strong>
           <small>{t.idGateCopy}</small>
-          <PaymentProofUpload
-            lang={lang}
-            files={idFiles}
-            onAddFiles={addIdFiles}
-            title={t.idGateTitle}
-            cta={t.idGateUpload}
-            emptyText={t.idGateEmpty}
-          />
-          {idSaveState === 'error' && <small style={{ color: '#ff9aac' }}>{t.idGateError}</small>}
-          <button style={styles.primaryButton} disabled={!idFile || idSaveState === 'saving'} onClick={() => void saveIdDocument()}>
-            {idSaveState === 'saving' ? t.saving : t.idGateSubmit}
+          <label style={{ display: 'grid', gap: 6, width: '100%' }}>
+            <span style={{ color: '#9aa6ba' }}>{t.contactNameLabel}</span>
+            <input
+              value={contactName}
+              onChange={(event) => setContactName(event.target.value)}
+              style={styles.textInput}
+              dir={isAr ? 'rtl' : 'ltr'}
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 6, width: '100%' }}>
+            <span style={{ color: '#9aa6ba' }}>{t.contactPhoneLabel}</span>
+            <input
+              value={contactPhone}
+              onChange={(event) => setContactPhone(event.target.value)}
+              style={styles.textInput}
+              dir="ltr"
+              type="tel"
+            />
+          </label>
+          {contactSaveState === 'error' && <small style={{ color: '#ff9aac' }}>{t.idGateError}</small>}
+          <button
+            style={styles.primaryButton}
+            disabled={!contactName.trim() || !contactPhone.trim() || contactSaveState === 'saving'}
+            onClick={() => void saveContactInfo()}
+          >
+            {contactSaveState === 'saving' ? t.saving : t.idGateSubmit}
           </button>
-          {booking?.guest?.email && (
-            <small style={{ color: '#9aa6ba', lineHeight: 1.6 }}>
-              {isAr
-                ? `تفضل واتساب أو إيميل؟ أرسل صورة إثبات هويتك مع بريدك الإلكتروني (${booking.guest.email}) إلى `
-                : `Prefer WhatsApp or email? Send your ID photo with your account email (${booking.guest.email}) to `}
-              <a href={whatsappIdSubmissionLink(booking.guest.email, lang)} target="_blank" rel="noreferrer" style={{ color: '#dce3ff' }}>
-                {isAr ? 'واتساب' : 'WhatsApp'} ({SUPPORT_WHATSAPP_LOCAL})
-              </a>
-              {isAr ? ' أو ' : ' or '}
-              <a href={emailIdSubmissionLink(booking.guest.email, lang)} style={{ color: '#dce3ff' }}>
-                {SUPPORT_EMAIL}
-              </a>
-              .
-            </small>
-          )}
         </div>
       )
     }
@@ -366,6 +358,9 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
         <p style={styles.eyebrow}>{bookingId.slice(0, 12).toUpperCase()}</p>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
+        <button type="button" style={styles.trackLink} onClick={() => (window.location.hash = '/track')}>
+          {t.trackHint}
+        </button>
       </section>
 
       {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
@@ -512,6 +507,7 @@ const styles: Record<string, CSSProperties> = {
   eyebrow: { justifySelf: 'start', border: '1px solid rgba(229,184,11,.6)', borderRadius: 4, color: '#e5b80b', letterSpacing: 1, fontWeight: 900, fontSize: 14, margin: 0, padding: '8px 12px' },
   title: { margin: 0, fontSize: 40, lineHeight: 1.08 },
   body: { color: '#9aa6ba', margin: 0, lineHeight: 1.6 },
+  trackLink: { background: 'none', border: 0, color: '#5f8fff', fontWeight: 800, padding: 0, textDecoration: 'underline', cursor: 'pointer' },
   protectionPanel: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 14, background: 'rgba(32,210,155,.05)', padding: 44, display: 'grid', gap: 18, justifyItems: 'center', textAlign: 'center' },
   aiBrainPanel: { border: '1px solid rgba(213,169,21,.4)', borderRadius: 14, background: 'rgba(213,169,21,.07)', padding: 28, display: 'grid', gap: 14, justifyItems: 'center', textAlign: 'center' },
   aiBrainIcon: { width: 56, height: 56, borderRadius: 999, background: 'rgba(213,169,21,.15)', color: '#d5a915', display: 'grid', placeItems: 'center', fontSize: 26 },
@@ -535,6 +531,7 @@ const styles: Record<string, CSSProperties> = {
   payOptions: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', width: '100%' },
   payOptionCard: { display: 'grid', gap: 6, textAlign: 'start', border: '1px solid rgba(255,255,255,.14)', borderRadius: 10, background: 'rgba(255,255,255,.04)', padding: 16, color: '#fff', cursor: 'pointer' },
   idGate: { display: 'grid', gap: 12, width: '100%', textAlign: 'start', border: '1px solid rgba(255,96,96,.35)', borderRadius: 10, background: 'rgba(255,96,96,.06)', padding: 16, color: '#fff' },
+  textInput: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#fff', padding: '0 12px', fontFamily: 'inherit', fontSize: 15 },
   secondaryButton: { minHeight: 48, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
   textarea: { minHeight: 80, border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#fff', padding: 12, fontFamily: 'inherit' },
   dangerButton: { minHeight: 48, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 14px' },

@@ -8,8 +8,14 @@ import {
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
-import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
+import { amountToRoundedUsd, stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
+import { assertBoundedString, assertNoUnknownFields, assertValidPhone } from '../lib/validate.mjs'
+
+// Matches the frictionless-guest display name set at account creation (server/routes/auth.mjs
+// POST /api/auth/checkout-guest) -- only overwritten by the real name below if it's still exactly
+// this placeholder, so a guest who registered normally with their own chosen name is never clobbered.
+const FRICTIONLESS_GUEST_PLACEHOLDER_NAME = 'SYBNB Guest'
 
 // Must match src/shared/booking/cancellationPolicy.ts's STANDARD_FREE_CANCELLATION_DAYS_BEFORE_CHECKIN
 // -- that frontend module only computes the *displayed* cutoff date; this is what was actually
@@ -281,6 +287,109 @@ export async function handleBookings(req, res, url, context) {
     return json(res, 200, { ok: true, booking })
   }
 
+  // Replaces the old ID-upload-before-payment gate: instead of requiring a photo ID, the guest
+  // gives their real name + phone right before paying, so the platform still has a way to reach
+  // them (host contact, dispute follow-up) without the heavier KYC-style friction. Stored on the
+  // booking (not just the user) since a device-bound frictionless guest can have several bookings
+  // and each one's contact details are entered independently.
+  const contactMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/contact$/)
+  if (contactMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context)
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['guestName', 'guestPhone'], 'booking contact body')
+    const guestName = assertBoundedString(body.guestName, { fieldName: 'guestName', maxLength: 120, required: true })
+    const guestPhone = assertValidPhone(body.guestPhone, 'guestPhone')
+    if (!guestPhone) {
+      const error = new Error('guestPhone is required.')
+      error.statusCode = 400
+      error.code = 'VALIDATION_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
+    const existing = await db().booking.findFirst({ where: { id: contactMatch[1], guestId: context.user.id } })
+    if (!existing) {
+      const error = new Error('Booking not found for this guest account.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const [booking] = await db().$transaction([
+      db().booking.update({
+        where: { id: existing.id },
+        data: { metadata: { ...(existing.metadata || {}), guestContactName: guestName, guestContactPhone: guestPhone } },
+      }),
+      ...(context.user.displayName === FRICTIONLESS_GUEST_PLACEHOLDER_NAME
+        ? [db().user.update({ where: { id: context.user.id }, data: { displayName: guestName } })]
+        : []),
+    ])
+
+    return json(res, 200, { ok: true, booking })
+  }
+
+  // Public, unauthenticated trip-status lookup: a guest tracks their trip from ANY device using
+  // just the confirmation number shown on the payment page (bookingId.slice(0, 12), the same 12-char
+  // prefix already displayed there) plus the phone they gave via PATCH .../contact above -- no
+  // login, no session, no device-bound guest account required. The phone is required as a second
+  // factor so a 12-char prefix alone (a small, guessable space) can't be used to browse strangers'
+  // trips; a booking that never had contact info collected simply can't be looked up this way.
+  // Rate-limited (server/index.mjs RATE_LIMIT_RULES) since it's unauthenticated and phone-guessable.
+  if (url.pathname === '/api/bookings/lookup') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const refHex = String(url.searchParams.get('ref') || '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 12)
+    const phone = assertValidPhone(url.searchParams.get('phone'), 'phone')
+    if (!refHex || refHex.length < 8 || !phone) {
+      const error = new Error('A confirmation number and phone number are required.')
+      error.statusCode = 400
+      error.code = 'BOOKING_LOOKUP_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    const idPrefix = refHex.length > 8 ? `${refHex.slice(0, 8)}-${refHex.slice(8, 12)}` : refHex
+    const normalizedPhone = phone.replace(/[\s()-]/g, '')
+
+    const candidates = await db().booking.findMany({
+      where: { id: { startsWith: idPrefix, mode: 'insensitive' } },
+      include: { listing: { select: { titleAr: true, titleEn: true, division: true } } },
+      take: 5,
+    })
+    const booking = candidates.find((row) => {
+      const storedPhone = String(row.metadata?.guestContactPhone || '').replace(/[\s()-]/g, '')
+      return storedPhone && storedPhone === normalizedPhone
+    })
+
+    if (!booking) {
+      const error = new Error('No trip found for this confirmation number and phone number.')
+      error.statusCode = 404
+      error.code = 'BOOKING_LOOKUP_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const latestPayment = await db().paymentProof.findFirst({
+      where: { bookingId: booking.id },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true },
+    })
+
+    return json(res, 200, {
+      ok: true,
+      trip: {
+        confirmationNumber: booking.id.slice(0, 12).toUpperCase(),
+        status: booking.status,
+        checkIn: booking.checkIn,
+        checkOut: booking.checkOut,
+        listingTitleAr: booking.listing?.titleAr || null,
+        listingTitleEn: booking.listing?.titleEn || null,
+        division: booking.listing?.division || null,
+        paymentStatus: latestPayment?.status || null,
+      },
+    })
+  }
+
   const bookingMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)$/)
   if (bookingMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
@@ -436,12 +545,18 @@ export async function handleBookings(req, res, url, context) {
       ? await computeStayTotalMinor(listing, checkIn, checkOut)
       : { totalMinor: listing.priceMinor, nights: 0, perNight: [] }
 
-    // The listing itself is always priced in SYP; a guest who chose to pay in USD (matching
-    // whatever they were quoted at GET /api/listings/:id/quote?currency=USD) gets the exact same
-    // conversion + round-up-to-$5 applied here, so the booking is never created for a different
-    // amount than what was quoted.
+    // A listing's own price is SYP unless the host explicitly priced it in USD (listing.currency).
+    // A guest who chose to pay in USD (matching whatever they were quoted at
+    // GET /api/listings/:id/quote?currency=USD) gets the exact same conversion + round-up-to-$5
+    // applied here, so the booking is never created for a different amount than what was quoted --
+    // and, same as the quote endpoint, a listing already priced in USD is never run through the SYP
+    // conversion (that would collapse its real price to the $5 floor). For an actual per-night stay
+    // quote, each night is rounded and summed (stayQuoteToRoundedUsd) so the total scales with
+    // nights; a single-price listing (no perNight breakdown) rounds that one amount directly.
     const wantsUsd = body.currency === 'USD'
-    const amountMinor = wantsUsd ? sypMinorToRoundedUsdMinor(quote.totalMinor) : quote.totalMinor
+    const amountMinor = wantsUsd
+      ? (quote.perNight.length ? stayQuoteToRoundedUsd(quote, listing.currency).totalMinor : amountToRoundedUsd(quote.totalMinor, listing.currency))
+      : quote.totalMinor
     const currency = wantsUsd ? 'USD' : listing.currency
 
     // SECURITY (S2): cancellation-protection is a SERVER-computed 3% premium on the stay. The guest only

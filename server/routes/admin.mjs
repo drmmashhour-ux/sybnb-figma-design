@@ -11,6 +11,36 @@ import { idempotencyKey } from '../lib/security.mjs'
 import { assertBoundedString } from '../lib/validate.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
+const REVIEW_QUEUE_DEFAULT_LIMIT = 25
+const REVIEW_QUEUE_MAX_LIMIT = 100
+const REVIEW_QUEUE_IN_MEMORY_PAGE_CAP = 2000
+// createdAt alone isn't unique -- rows created in the same millisecond (routine under any bulk-add
+// tool) sort in a DB-implementation-defined order, so two separate skip/take queries against the
+// same createdAt tie can each return a different pick and either duplicate or skip a row across
+// pages. `id` (a UUID) as a secondary sort key makes the order fully deterministic.
+const REVIEW_QUEUE_ORDER_BY_CREATED = [{ createdAt: 'desc' }, { id: 'asc' }]
+// Mirrors the Prisma `ListingDivision` enum (prisma/schema.prisma) -- kept as a literal set here
+// rather than introspected at runtime since the admin route layer has no schema-reflection helper.
+const REVIEW_QUEUE_DIVISIONS = new Set(['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
+
+function parseReviewQueueLimit(raw) {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return REVIEW_QUEUE_DEFAULT_LIMIT
+  return Math.min(Math.floor(parsed), REVIEW_QUEUE_MAX_LIMIT)
+}
+
+function parseReviewQueueOffset(raw) {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0
+  return Math.floor(parsed)
+}
+
+function parseReviewQueueDivision(raw) {
+  if (!raw) return null
+  const value = String(raw).trim().toUpperCase()
+  return REVIEW_QUEUE_DIVISIONS.has(value) ? value : null
+}
+
 function payoutNotEligibleError() {
   const error = new Error(
     `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
@@ -195,10 +225,45 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()
-    const [listings, payments, gifts, bookings, idDocuments] = await Promise.all([
-      db().listing.findMany({ where: { status: 'PENDING_REVIEW' }, take: 25 }),
+
+    const limit = parseReviewQueueLimit(url.searchParams.get('limit'))
+    const offset = parseReviewQueueOffset(url.searchParams.get('offset'))
+    const division = parseReviewQueueDivision(url.searchParams.get('division'))
+
+    // Every division (STAYS, RENTALS, BUY, CARS, NEW_CONSTRUCTION, MARKETPLACE) funnels into this
+    // one shared queue, so the division filter is applied wherever a row traces back to a listing
+    // (listings themselves, bookings, and payments via their booking's listing). Gifts and ID
+    // documents aren't attached to any listing/division, so they're division-agnostic: a division
+    // filter narrows them to none rather than guessing, since showing them under every division
+    // filter would misrepresent them as belonging to that division.
+    const listingWhere = { status: 'PENDING_REVIEW', ...(division ? { division } : {}) }
+    const paymentWhere = {
+      status: 'PENDING_ADMIN_REVIEW',
+      ...(division ? { booking: { listing: { division } } } : {}),
+    }
+    const giftWhere = { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }
+    const bookingWhere = {
+      status: { in: ['REQUESTED', 'DISPUTED'] },
+      ...(division ? { listing: { division } } : {}),
+    }
+    const idDocumentWhere = { idDocumentStatus: 'PENDING_REVIEW' }
+
+    const [
+      listings,
+      listingsTotal,
+      payments,
+      paymentsTotal,
+      gifts,
+      giftsTotal,
+      bookings,
+      bookingsTotal,
+      idDocuments,
+      idDocumentsTotal,
+    ] = await Promise.all([
+      db().listing.findMany({ where: listingWhere, orderBy: REVIEW_QUEUE_ORDER_BY_CREATED, skip: offset, take: limit }),
+      db().listing.count({ where: listingWhere }),
       db().paymentProof.findMany({
-        where: { status: 'PENDING_ADMIN_REVIEW' },
+        where: paymentWhere,
         include: {
           booking: {
             include: {
@@ -211,22 +276,70 @@ export async function handleAdmin(req, res, url, context) {
           },
           payer: { select: { id: true, displayName: true, email: true } },
         },
-        take: 25,
+        orderBy: REVIEW_QUEUE_ORDER_BY_CREATED,
+        // paymentProof has no direct division column, so a division filter (a nested
+        // booking.listing.division match) can't be paged with skip/take at the DB level the same
+        // way as the flat where-clauses below -- it's paged in memory instead (see pagedPayments),
+        // bounded by REVIEW_QUEUE_IN_MEMORY_PAGE_CAP so a division with a very large pending queue
+        // can't force an unbounded fetch.
+        skip: division ? 0 : offset,
+        take: division ? REVIEW_QUEUE_IN_MEMORY_PAGE_CAP : limit,
       }),
-      db().walletGift.findMany({ where: { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }, take: 25 }),
+      db().paymentProof.count({ where: paymentWhere }),
+      division ? [] : db().walletGift.findMany({ where: giftWhere, orderBy: REVIEW_QUEUE_ORDER_BY_CREATED, skip: offset, take: limit }),
+      division ? 0 : db().walletGift.count({ where: giftWhere }),
       db().booking.findMany({
-        where: { status: { in: ['REQUESTED', 'DISPUTED'] } },
+        where: bookingWhere,
         include: { listing: true },
-        orderBy: { createdAt: 'desc' },
-        take: 25,
+        orderBy: REVIEW_QUEUE_ORDER_BY_CREATED,
+        skip: offset,
+        take: limit,
       }),
-      db().user.findMany({
-        where: { idDocumentStatus: 'PENDING_REVIEW' },
+      db().booking.count({ where: bookingWhere }),
+      division ? [] : db().user.findMany({
+        where: idDocumentWhere,
         select: { id: true, displayName: true, email: true, idDocumentMimeType: true, idDocumentSubmittedAt: true },
-        take: 25,
+        orderBy: [{ idDocumentSubmittedAt: 'desc' }, { id: 'asc' }],
+        skip: offset,
+        take: limit,
       }),
+      division ? 0 : db().user.count({ where: idDocumentWhere }),
     ])
-    return json(res, 200, { ok: true, queue: { listings, payments, gifts, bookings, idDocuments } })
+
+    const pagedPayments = division ? payments.slice(offset, offset + limit) : payments
+
+    const totals = {
+      listings: listingsTotal,
+      payments: paymentsTotal,
+      gifts: giftsTotal,
+      bookings: bookingsTotal,
+      idDocuments: idDocumentsTotal,
+    }
+    const counts = {
+      listings: listings.length,
+      payments: pagedPayments.length,
+      gifts: gifts.length,
+      bookings: bookings.length,
+      idDocuments: idDocuments.length,
+    }
+
+    return json(res, 200, {
+      ok: true,
+      queue: { listings, payments: pagedPayments, gifts, bookings, idDocuments },
+      pagination: {
+        limit,
+        offset,
+        division,
+        totals,
+        hasMore: {
+          listings: offset + counts.listings < totals.listings,
+          payments: offset + counts.payments < totals.payments,
+          gifts: offset + counts.gifts < totals.gifts,
+          bookings: offset + counts.bookings < totals.bookings,
+          idDocuments: offset + counts.idDocuments < totals.idDocuments,
+        },
+      },
+    })
   }
 
   const idDocumentFileMatch = url.pathname.match(/^\/api\/admin\/id-document\/([^/]+)\/file$/)

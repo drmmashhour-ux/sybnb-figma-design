@@ -402,6 +402,16 @@ export type PlatformReviewQueue = {
   idDocuments: PlatformIdDocumentReview[]
 }
 
+export type PlatformReviewQueueSectionKey = 'listings' | 'payments' | 'gifts' | 'bookings' | 'idDocuments'
+
+export type PlatformReviewQueuePagination = {
+  limit: number
+  offset: number
+  division: string | null
+  totals: Record<PlatformReviewQueueSectionKey, number>
+  hasMore: Record<PlatformReviewQueueSectionKey, boolean>
+}
+
 export type PlatformAdminAuditLog = {
   id: string
   actorUserId: string | null
@@ -1486,11 +1496,18 @@ export async function reviewPrototypePaymentProof(
   return response.entity
 }
 
-export async function fetchPrototypeReviewQueue() {
-  const response = await runAdminRequest((token) => apiRequest<{ ok: true; queue: PlatformReviewQueue }>('/api/admin/review-queue', {
-    token,
-  }))
-  return response.queue
+export async function fetchPrototypeReviewQueue(options?: { limit?: number; offset?: number; division?: string }) {
+  const params = new URLSearchParams()
+  if (options?.limit != null) params.set('limit', String(options.limit))
+  if (options?.offset != null) params.set('offset', String(options.offset))
+  if (options?.division) params.set('division', options.division)
+  const query = params.toString()
+
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; queue: PlatformReviewQueue; pagination: PlatformReviewQueuePagination }>(
+    `/api/admin/review-queue${query ? `?${query}` : ''}`,
+    { token },
+  ))
+  return { queue: response.queue, pagination: response.pagination }
 }
 
 export async function fetchPrototypeAdminAuditLog(limit = 50) {
@@ -1994,6 +2011,38 @@ export async function fetchPrototypeBooking(bookingId: string) {
     token: session.token,
   })
   return response.booking
+}
+
+// Replaces the old ID-upload-before-payment step: the guest gives their real name + phone right
+// before paying, so the platform has a way to reach them without the heavier photo-ID requirement.
+export async function submitBookingContact(bookingId: string, input: { guestName: string; guestPhone: string }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; booking: PlatformBooking }>(`/api/bookings/${bookingId}/contact`, {
+    method: 'PATCH',
+    token: session.token,
+    body: input,
+  })
+  return response.booking
+}
+
+export type PlatformTripLookup = {
+  confirmationNumber: string
+  status: string
+  checkIn: string | null
+  checkOut: string | null
+  listingTitleAr: string | null
+  listingTitleEn: string | null
+  division: string | null
+  paymentStatus: string | null
+}
+
+// Public, unauthenticated: lets a guest check their trip status from any device using just the
+// confirmation number shown on the payment page plus the phone they gave via submitBookingContact
+// above — no login, no stored session required.
+export async function lookupTripByConfirmation(confirmationNumber: string, phone: string) {
+  const params = new URLSearchParams({ ref: confirmationNumber, phone })
+  const response = await apiRequest<{ ok: true; trip: PlatformTripLookup }>(`/api/bookings/lookup?${params.toString()}`)
+  return response.trip
 }
 
 function createLocalFallbackBooking(input: {

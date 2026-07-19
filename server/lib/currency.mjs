@@ -27,3 +27,43 @@ export function roundUsdUpToStep(amountUsd) {
 export function sypMinorToRoundedUsdMinor(sypAmountMinor) {
   return roundUsdUpToStep(convertSypMinorToUsd(sypAmountMinor))
 }
+
+// A multi-night stay quote (computeStayTotalMinor's SYP-denominated { totalMinor, perNight })
+// converted to USD for display/charging. Each night is rounded up to the $5 step individually and
+// the total is the SUM of those rounded nights -- not the raw SYP total rounded once as a single
+// lump sum. Rounding the lump sum instead would collapse a stay's price to the same $5 floor
+// regardless of night count for any listing priced low enough that the whole multi-night SYP total
+// still sits under one $5-equivalent step (e.g. a 2-night stay costing the same as 1 night), which
+// silently under-charges the guest and under-pays the host. Summing pre-rounded nights guarantees
+// the total scales monotonically with nights while still landing on a clean $5 multiple overall.
+export function sypStayQuoteToRoundedUsd(quote) {
+  return roundStayQuoteNightly(quote, sypMinorToRoundedUsdMinor)
+}
+
+function roundStayQuoteNightly(quote, roundNightMinor) {
+  const perNight = quote.perNight.map((night) => ({
+    ...night,
+    priceMinor: roundNightMinor(night.priceMinor),
+  }))
+  const totalMinor = perNight.reduce((sum, night) => sum + night.priceMinor, 0)
+  return { totalMinor, perNight }
+}
+
+// Same per-night-then-sum rounding as sypStayQuoteToRoundedUsd, but currency-aware: a listing whose
+// OWN currency is already USD must NOT be run through the SYP->USD conversion (dividing an
+// already-dollar amount by SYP_PER_USD=15000 before rounding up to $5 collapses any real price down
+// to the $5 floor -- e.g. a genuine $80/night listing quoted as ~$5/night, a >90% price collapse).
+// It still gets the same $5-step rounding applied directly, so every guest-facing USD total is
+// change-friendly regardless of which currency the host priced in.
+export function stayQuoteToRoundedUsd(quote, listingCurrency) {
+  return listingCurrency === 'USD'
+    ? roundStayQuoteNightly(quote, roundUsdUpToStep)
+    : sypStayQuoteToRoundedUsd(quote)
+}
+
+// Single-amount counterpart of stayQuoteToRoundedUsd, for listings with a flat price and no
+// per-night breakdown (RENTALS/BUY/CARS/MARKETPLACE/NEW_CONSTRUCTION). Same currency-awareness:
+// skip the SYP conversion for an already-USD amount, apply the $5-step rounding directly instead.
+export function amountToRoundedUsd(amountMinor, listingCurrency) {
+  return listingCurrency === 'USD' ? roundUsdUpToStep(amountMinor) : sypMinorToRoundedUsdMinor(amountMinor)
+}

@@ -107,7 +107,7 @@ export function GiftAdminAudit({ lang = 'ar', onAction }: GiftAdminAuditProps) {
     setNotice('')
 
     try {
-      const [nextQueue, nextAuditLog] = await Promise.all([
+      const [{ queue: nextQueue }, nextAuditLog] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminAuditLog(25),
       ])

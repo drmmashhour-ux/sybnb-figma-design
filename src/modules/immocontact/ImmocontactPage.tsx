@@ -202,7 +202,7 @@ export function ImmocontactPage({ lang }: Props) {
     try {
       if (isStaff) {
         if (isAdminViewer) {
-          const queue = await fetchPrototypeReviewQueue()
+          const { queue } = await fetchPrototypeReviewQueue()
           setStaffBookings(queue.bookings)
         } else {
           const hostOverview = await fetchPrototypeHostOverview()

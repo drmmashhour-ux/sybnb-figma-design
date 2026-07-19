@@ -12,7 +12,7 @@ type Props = {
 // $5 / $10 mirror REFEREE_SIGNUP_BONUS_MINOR / REFERRER_REWARD_MINOR in server/lib/referrals.mjs
 // -- if those constants change, update this copy to match (not fetched dynamically, since these
 // are rarely-changed business constants, same as this codebase's other hardcoded-but-disclosed
-// rates like the 10% STR commission).
+// rates like the 13% STR commission).
 const copy = {
   ar: {
     title: 'ادعُ أصدقاءك واربح',

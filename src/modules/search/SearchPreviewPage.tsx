@@ -27,6 +27,9 @@ const T = {
     pendingOnly: 'الإعلانات قيد المراجعة لا تظهر هنا حتى يوافق فريق SYBNB.',
     price: 'السعر',
     book: 'فتح تفاصيل الغرفة',
+    instantBookBadge: '⚡ حجز فوري',
+    verifiedOwnerBadge: '✓ موثّق',
+    specialOfferBadge: '🔥 عرض خاص',
     details: 'عرض التفاصيل',
     filterTitle: 'اختيار ذكي',
     resultTitle: 'النتائج المناسبة',
@@ -86,6 +89,9 @@ const T = {
     pendingOnly: 'Listings under review stay hidden here until SYBNB approves them.',
     price: 'Price',
     book: 'Open room details',
+    instantBookBadge: '⚡ Instant Book',
+    verifiedOwnerBadge: '✓ Verified',
+    specialOfferBadge: '🔥 Special offer',
     details: 'View details',
     filterTitle: 'Smart selection',
     resultTitle: 'Matched results',
@@ -235,7 +241,16 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <div className="search-result-grid">
             {listings.map((listing) => (
               <article key={listing.id} className="search-result-card">
-                <img src={listingImage(listing)} alt="" loading="lazy" />
+                <div className="search-result-media">
+                  <img src={listingImage(listing)} alt="" loading="lazy" />
+                  {(listing.instantBookEnabled || listing.owner?.idDocumentStatus === 'APPROVED' || listing.hasActiveOffer) && (
+                    <div className="search-result-badges">
+                      {listing.instantBookEnabled && <span className="search-result-badge badge-instant">{t.instantBookBadge}</span>}
+                      {listing.owner?.idDocumentStatus === 'APPROVED' && <span className="search-result-badge badge-verified">{t.verifiedOwnerBadge}</span>}
+                      {listing.hasActiveOffer && <span className="search-result-badge badge-offer">{t.specialOfferBadge}</span>}
+                    </div>
+                  )}
+                </div>
                 <div className="search-result-body">
                   <span className="search-result-status">{statusText(listing.status, lang)}</span>
                   <h2>{listingTitleText(listing, lang)}</h2>

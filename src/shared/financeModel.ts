@@ -4,7 +4,9 @@
 // computes numbers from user-entered assumptions, it never touches the database.
 export const STR_CLEANING_RATE = 0.05
 export const STR_TAX_RATE = 0.02
-export const STR_ADMIN_COMMISSION_RATE = 0.1
+// Must match server/lib/finance-ledger.mjs's STR_ADMIN_COMMISSION_RATE -- see that file's comment
+// for why 13% (still below Airbnb's ~17-19% combined take and Booking.com's ~15%+ commission).
+export const STR_ADMIN_COMMISSION_RATE = 0.13
 export const CANCELLATION_PROTECTION_RATE = 0.03
 
 // Real SYBNB revenue per booking (tax + commission share), for a STAYS booking paid in full at

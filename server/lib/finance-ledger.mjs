@@ -6,7 +6,11 @@ import { rewardReferralIfQualifying } from './referrals.mjs'
 export const CANCELLATION_ADMIN_FEE_MINOR = 10
 export const CANCELLATION_ADMIN_FEE_CURRENCY = 'USD'
 export const CANCELLATION_PROTECTION_RATE = 0.03
-export const STR_ADMIN_COMMISSION_RATE = 0.1
+// Raised from 10% -> 13%. Still clearly below both incumbents' effective take: Airbnb's combined
+// host+guest service fees typically run ~17-19%, Booking.com's host commission is commonly ~15%
+// (up to 25% in some markets). 13% stays a meaningfully cheaper host cost than either while no
+// longer leaving obvious revenue on the table relative to what the market actually charges.
+export const STR_ADMIN_COMMISSION_RATE = 0.13
 export const STR_CLEANING_RATE = 0.05
 export const STR_TAX_RATE = 0.02
 
