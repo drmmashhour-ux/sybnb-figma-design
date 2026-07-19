@@ -219,11 +219,11 @@ export function CompetitorsPage({ lang }: Props) {
           </div>
           {rows.map((row) => (
             <div className="competitors-row" key={row.area.en}>
-              <strong>{row.area[lang]}</strong>
-              <span>{row.airbnb[lang]}</span>
-              <span>{row.booking[lang]}</span>
-              <span>{row.guesty[lang]}</span>
-              <span className="sybnb-cell">{row.sybnb[lang]}</span>
+              <strong>{row.area[lang === 'ar' ? 'ar' : 'en']}</strong>
+              <span>{row.airbnb[lang === 'ar' ? 'ar' : 'en']}</span>
+              <span>{row.booking[lang === 'ar' ? 'ar' : 'en']}</span>
+              <span>{row.guesty[lang === 'ar' ? 'ar' : 'en']}</span>
+              <span className="sybnb-cell">{row.sybnb[lang === 'ar' ? 'ar' : 'en']}</span>
             </div>
           ))}
         </div>
@@ -235,7 +235,7 @@ export function CompetitorsPage({ lang }: Props) {
           {gaps.map((gap, index) => (
             <article key={gap.en}>
               <strong>{String(index + 1).padStart(2, '0')}</strong>
-              <p>{gap[lang]}</p>
+              <p>{gap[lang === 'ar' ? 'ar' : 'en']}</p>
             </article>
           ))}
         </div>
@@ -257,11 +257,11 @@ export function CompetitorsPage({ lang }: Props) {
             </div>
             {bookingClickRows.map((row) => (
               <div className="competitors-row" key={row.step.en}>
-                <strong>{row.step[lang]}</strong>
-                <span>{row.airbnb[lang]}</span>
-                <span>{row.booking[lang]}</span>
-                <span>{row.guesty[lang]}</span>
-                <span className="sybnb-cell">{row.sybnb[lang]}</span>
+                <strong>{row.step[lang === 'ar' ? 'ar' : 'en']}</strong>
+                <span>{row.airbnb[lang === 'ar' ? 'ar' : 'en']}</span>
+                <span>{row.booking[lang === 'ar' ? 'ar' : 'en']}</span>
+                <span>{row.guesty[lang === 'ar' ? 'ar' : 'en']}</span>
+                <span className="sybnb-cell">{row.sybnb[lang === 'ar' ? 'ar' : 'en']}</span>
               </div>
             ))}
           </div>
@@ -282,7 +282,7 @@ export function CompetitorsPage({ lang }: Props) {
           {marketSignals.map((signal) => (
             <article key={signal.en}>
               <strong>AI</strong>
-              <span>{signal[lang]}</span>
+              <span>{signal[lang === 'ar' ? 'ar' : 'en']}</span>
             </article>
           ))}
         </div>

@@ -46,7 +46,7 @@ const copy = {
 }
 
 export function PaymentCapsule({ lang, methodLabel, amountLabel, destinationCode, followCode, proofCount, status }: PaymentCapsuleProps) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const stageOrder: PaymentCapsuleStatus[] = ['locked', 'ready', 'proof', 'admin', 'confirmed']
   const activeIndex = Math.max(0, stageOrder.indexOf(status))
   const statusLabel =

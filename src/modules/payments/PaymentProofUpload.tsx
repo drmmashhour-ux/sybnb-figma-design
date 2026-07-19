@@ -37,7 +37,7 @@ export function paymentProofReference(prefix: string, files: string[]) {
 }
 
 export function PaymentProofUpload({ lang, files, onAddFiles, disabled = false, title, cta, help, emptyText }: PaymentProofUploadProps) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
 
   return (
     <div className="payment-proof-upload">

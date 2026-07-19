@@ -56,7 +56,7 @@ const copy = {
 }
 
 export function TripLookupPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [ref, setRef] = useState('')
   const [phone, setPhone] = useState('')

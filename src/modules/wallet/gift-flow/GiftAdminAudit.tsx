@@ -9,7 +9,7 @@ import {
 } from '../../../shared/api/platformApi'
 import { moneyText, statusText } from '../../../shared/i18n/display'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 type AdminGiftAction = 'allow' | 'block' | 'request_review'
 
 type GiftRecord = {
@@ -93,7 +93,7 @@ export function GiftAdminAudit({ lang = 'ar', onAction }: GiftAdminAuditProps) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'error'>('idle')
   const [notice, setNotice] = useState('')
   const isAr = lang === 'ar'
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const gifts = useMemo(() => (queue?.gifts || []) as GiftRecord[], [queue])
   const selectedGift = gifts.find((gift) => gift.id === selectedGiftId) || gifts[0] || null
   const giftAudit = auditLog.filter((item) => item.entityType === 'gifts' || item.entityType === 'gift')

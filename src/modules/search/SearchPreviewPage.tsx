@@ -160,13 +160,13 @@ const OFFER_ROUTE_BY_DIVISION: Partial<Record<SearchDivision, string>> = {
 }
 
 const OFFER_LABEL_BY_DIVISION: Partial<Record<SearchDivision, Record<Lang, string>>> = {
-  stays: { ar: 'كن مضيفاً', en: 'Become a host' },
-  cars: { ar: 'بيع سيارتك', en: 'Sell your car' },
-  newConstruction: { ar: 'انشر مشروعك', en: 'List your project' },
+  stays: { ar: 'كن مضيفاً', en: 'Become a host', fr: 'Devenir hôte' },
+  cars: { ar: 'بيع سيارتك', en: 'Sell your car', fr: 'Vendre votre voiture' },
+  newConstruction: { ar: 'انشر مشروعك', en: 'List your project', fr: 'Publier votre projet' },
 }
 
 export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'general' }: SearchPreviewPageProps) {
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const [effectiveInitialDivision, setEffectiveInitialDivision] = useState<SearchDivision>(() => readInitialSearchDivision(initialDivision))
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
@@ -390,12 +390,12 @@ function metadataMinor(metadata: PlatformListing['metadata'], key: string) {
 
 function searchSummary(value: UnifiedSearchValue, lang: Lang) {
   const divisionLabel: Record<UnifiedSearchValue['division'], Record<Lang, string>> = {
-    stays: { ar: 'إيجار يومي', en: 'Daily rental' },
-    rentals: { ar: 'إيجار شهري', en: 'Monthly rental' },
-    buy: { ar: 'شراء عقار', en: 'Buy property' },
-    newConstruction: { ar: 'مشاريع جديدة', en: 'New construction' },
-    cars: { ar: 'مركبات', en: 'Cars' },
-    marketplace: { ar: 'السوق', en: 'Marketplace' },
+    stays: { ar: 'إيجار يومي', en: 'Daily rental', fr: 'Location courte durée' },
+    rentals: { ar: 'إيجار شهري', en: 'Monthly rental', fr: 'Location mensuelle' },
+    buy: { ar: 'شراء عقار', en: 'Buy property', fr: 'Acheter un bien' },
+    newConstruction: { ar: 'مشاريع جديدة', en: 'New construction', fr: 'Nouveaux projets' },
+    cars: { ar: 'مركبات', en: 'Cars', fr: 'Véhicules' },
+    marketplace: { ar: 'السوق', en: 'Marketplace', fr: 'Marché' },
   }
   return [
     divisionLabel[value.division][lang],

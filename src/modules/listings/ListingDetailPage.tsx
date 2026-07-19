@@ -196,7 +196,7 @@ const DIVISION_IMAGES: Record<string, string> = {
 }
 
 export function ListingDetailPage({ listingId, lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [listing, setListing] = useState<PlatformListing | null>(null)
   const [inquirySent, setInquirySent] = useState(false)
@@ -756,12 +756,12 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
 
 function actionForDivision(division: string, lang: Lang) {
   const actions: Record<string, Record<Lang, string>> = {
-    STAYS: { ar: 'متابعة الحجز', en: 'Continue to review' },
-    RENTALS: { ar: 'طلب تواصل', en: 'Request contact' },
-    BUY: { ar: 'طلب زيارة', en: 'Request visit' },
-    CARS: { ar: 'تواصل مع البائع', en: 'Contact seller' },
-    MARKETPLACE: { ar: 'طلب المنتج', en: 'Request item' },
-    NEW_CONSTRUCTION: { ar: 'حجز زيارة', en: 'Book visit' },
+    STAYS: { ar: 'متابعة الحجز', en: 'Continue to review', fr: 'Continuer la réservation' },
+    RENTALS: { ar: 'طلب تواصل', en: 'Request contact', fr: 'Demander un contact' },
+    BUY: { ar: 'طلب زيارة', en: 'Request visit', fr: 'Demander une visite' },
+    CARS: { ar: 'تواصل مع البائع', en: 'Contact seller', fr: 'Contacter le vendeur' },
+    MARKETPLACE: { ar: 'طلب المنتج', en: 'Request item', fr: 'Demander l’article' },
+    NEW_CONSTRUCTION: { ar: 'حجز زيارة', en: 'Book visit', fr: 'Réserver une visite' },
   }
   return actions[division]?.[lang] || actions.STAYS[lang]
 }

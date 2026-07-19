@@ -88,7 +88,7 @@ const copy = {
 }
 
 export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042', amountMinor = 10, currency = 'SYP' }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const walletAmountDue = Math.max(Number(amountMinor || 10), 1)
   const walletCurrency = currency || 'SYP'

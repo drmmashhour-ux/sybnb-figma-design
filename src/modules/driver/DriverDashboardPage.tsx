@@ -152,7 +152,7 @@ const copy = {
 }
 
 export function DriverDashboardPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [overview, setOverview] = useState<PlatformDriverOverview | null>(null)
   const [documents, setDocuments] = useState<PlatformDriverDocument[]>([])

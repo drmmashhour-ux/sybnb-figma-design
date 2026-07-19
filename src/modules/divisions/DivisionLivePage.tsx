@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Division, DivisionId } from '../../engines/navigation/divisions'
-import type { Lang } from '../../engines/language/languageEngine'
+import type { Lang, Localized } from '../../engines/language/languageEngine'
 import { text } from '../../engines/language/languageEngine'
 import {
   fetchApprovedListings,
@@ -61,7 +61,7 @@ const pageCopy = {
   },
 }
 
-const divisionCopy: Record<Lang, Partial<Record<DivisionId, Partial<typeof pageCopy.ar>>>> = {
+const divisionCopy: Localized<Partial<Record<DivisionId, Partial<typeof pageCopy.ar>>>> = {
   ar: {
     stays: {
       search: 'بحث الإيجار اليومي',
@@ -155,7 +155,7 @@ const divisionCopy: Record<Lang, Partial<Record<DivisionId, Partial<typeof pageC
 }
 
 export function DivisionLivePage({ division, lang }: Props) {
-  const t = { ...pageCopy[lang], ...(divisionCopy[lang][division.id] || {}) }
+  const t = { ...pageCopy[lang === 'ar' ? 'ar' : 'en'], ...(divisionCopy[lang === 'ar' ? 'ar' : 'en'][division.id] || {}) }
   const apiDivision = divisionApi[division.id]
   const [listings, setListings] = useState<PlatformListing[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')

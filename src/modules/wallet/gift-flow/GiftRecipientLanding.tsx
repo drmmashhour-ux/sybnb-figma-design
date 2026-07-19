@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 type Mode = 'signup' | 'signin'
 
 type GiftRecipientLandingProps = {
@@ -172,7 +172,7 @@ export function GiftRecipientLanding({
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const isAr = lang === 'ar'
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const amountText = amount || (isAr ? '٥٠٬٠٠٠ ل.س' : '50,000 SYP')
 
   const canContinue = useMemo(() => {

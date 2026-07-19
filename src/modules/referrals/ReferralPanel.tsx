@@ -39,7 +39,7 @@ const copy = {
 }
 
 export function ReferralPanel({ lang, referralCode, rewardedCount, pendingCount }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const [copied, setCopied] = useState(false)
 
   if (!referralCode) return null

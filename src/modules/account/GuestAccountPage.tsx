@@ -138,7 +138,7 @@ const copy = {
 }
 
 export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: explicitReturnPath }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [mode, setMode] = useState<'signup' | 'signin'>('signup')
   // Verify by email (default) OR phone/SMS — the identifier the OTP is sent to.

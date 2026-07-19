@@ -83,7 +83,7 @@ const AD_SPONSORS = [
 
 export function LandingPage({ lang }: Props) {
   const isAr = lang === 'ar'
-  const about = ABOUT_COPY[lang]
+  const about = ABOUT_COPY[lang === 'ar' ? 'ar' : 'en']
   const movieSrc = isAr ? '/assets/videos/str-promo-ar.mp4' : '/assets/videos/str-promo-en.mp4'
   const heroVideoSrc = isAr ? '/assets/videos/hero-highlight-ar.mp4' : '/assets/videos/hero-highlight-en.mp4'
   const [moviePlaying, setMoviePlaying] = useState(false)

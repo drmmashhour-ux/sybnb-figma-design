@@ -114,7 +114,7 @@ const copy = {
 }
 
 export function WalletPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [wallets, setWallets] = useState<PlatformWallet[]>([])
   const [gift, setGift] = useState<PlatformWalletGift | null>(null)

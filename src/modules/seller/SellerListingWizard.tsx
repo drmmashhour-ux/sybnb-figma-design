@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
-import type { Lang } from '../../engines/language/languageEngine'
+import type { Lang, Localized } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import {
@@ -116,8 +116,8 @@ function monthTitle(date: Date, lang: Lang) {
 
 type WizardStep = {
   id: string
-  title: Record<Lang, string>
-  helper: Record<Lang, string>
+  title: Localized<string>
+  helper: Localized<string>
 }
 
 const STEPS: WizardStep[] = [
@@ -241,7 +241,7 @@ const HOST_LISTING_PLANS: Array<{
   ar: string
   en: string
   priceUsd: number
-  services: Record<Lang, string[]>
+  services: Localized<string[]>
   mediaSlots: MediaSlot[]
 }> = [
   {
@@ -886,10 +886,10 @@ export function SellerListingWizard({ lang }: Props) {
             <div className="seller-wizard-section">
               {!isAdvertisingFlow && (
                 <TouchChoiceGroup
-                  active={DIVISION_OPTIONS.find((item) => item.value === division)?.[lang] || ''}
-                  items={DIVISION_OPTIONS.map((item) => item[lang])}
+                  active={DIVISION_OPTIONS.find((item) => item.value === division)?.[lang === 'ar' ? 'ar' : 'en'] || ''}
+                  items={DIVISION_OPTIONS.map((item) => item[lang === 'ar' ? 'ar' : 'en'])}
                   onChange={(label) => {
-                    const next = DIVISION_OPTIONS.find((item) => item[lang] === label)
+                    const next = DIVISION_OPTIONS.find((item) => item[lang === 'ar' ? 'ar' : 'en'] === label)
                     if (next) setDivision(next.value)
                   }}
                   title={isAr ? 'القسم' : 'Division'}
@@ -956,13 +956,13 @@ export function SellerListingWizard({ lang }: Props) {
                 <div className="seller-form-grid">
                   <TouchChoiceGroup
                     active={adPlacement}
-                    items={AD_PLACEMENTS.map((item) => item[lang])}
+                    items={AD_PLACEMENTS.map((item) => item[lang === 'ar' ? 'ar' : 'en'])}
                     onChange={setAdPlacement}
                     title={isAr ? 'مكان الظهور' : 'Placement'}
                   />
                   <TouchChoiceGroup
                     active={adDuration}
-                    items={AD_DURATIONS.map((item) => item[lang])}
+                    items={AD_DURATIONS.map((item) => item[lang === 'ar' ? 'ar' : 'en'])}
                     onChange={setAdDuration}
                     title={isAr ? 'مدة الإعلان' : 'Ad duration'}
                   />
@@ -1355,10 +1355,10 @@ export function SellerListingWizard({ lang }: Props) {
                     }}
                     type="button"
                   >
-                    <span>{plan[lang]}</span>
+                    <span>{plan[lang === 'ar' ? 'ar' : 'en']}</span>
                     <strong>{`USD ${plan.priceUsd}`}</strong>
                     <ul>
-                      {plan.services[lang].map((service) => (
+                      {plan.services[lang === 'ar' ? 'ar' : 'en'].map((service) => (
                         <li key={service}>{service}</li>
                       ))}
                     </ul>
@@ -1371,7 +1371,7 @@ export function SellerListingWizard({ lang }: Props) {
                 <div className="seller-host-plan-gate-head">
                   <div>
                     <span>{isAr ? 'دفع خطة الإعلان' : 'Listing plan payment'}</span>
-                    <strong>{`${selectedListingPlan[lang]} · USD ${selectedListingPlan.priceUsd}`}</strong>
+                    <strong>{`${selectedListingPlan[lang === 'ar' ? 'ar' : 'en']} · USD ${selectedListingPlan.priceUsd}`}</strong>
                   </div>
                   <em>{listingPlanPaymentConfirmed ? (isAr ? 'مدفوعة' : 'Paid') : isAr ? 'مطلوبة قبل الرفع' : 'Required before upload'}</em>
                 </div>
@@ -1389,7 +1389,7 @@ export function SellerListingWizard({ lang }: Props) {
                       }}
                       type="button"
                     >
-                      {method[lang]}
+                      {method[lang === 'ar' ? 'ar' : 'en']}
                     </button>
                   ))}
                 </div>
@@ -1539,7 +1539,7 @@ export function SellerListingWizard({ lang }: Props) {
                         setAdFilesSent(false)
                       }}
                     >
-                      <strong>{item[lang]}</strong>
+                      <strong>{item[lang === 'ar' ? 'ar' : 'en']}</strong>
                       <span>
                         {uploadedAdFiles.includes(item.id)
                           ? isAr

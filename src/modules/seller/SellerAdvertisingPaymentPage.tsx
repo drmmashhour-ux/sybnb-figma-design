@@ -65,7 +65,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
   const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'error'>('idle')
   const [submitError, setSubmitError] = useState('')
 
-  const title = method.label[lang]
+  const title = method.label[lang === 'ar' ? 'ar' : 'en']
   const hasPaymentReference = paymentReference.trim().length >= 4
   const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || ''
   const stripeConfigured = method.usesStripe ? stripePublishableKey.length > 0 : true
@@ -218,7 +218,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
         </div>
 
         <div className="seller-payment-destination">
-          <span>{method.codeTitle[lang]}</span>
+          <span>{method.codeTitle[lang === 'ar' ? 'ar' : 'en']}</span>
           <strong dir="ltr">{method.destinationCode}</strong>
           <small>
             {isAr ? 'كود المتابعة:' : 'Follow-up code:'} <b dir="ltr">{followCode}</b>
@@ -230,7 +230,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
           destinationCode={method.destinationCode}
           followCode={followCode}
           lang={lang}
-          methodLabel={method.label[lang]}
+          methodLabel={method.label[lang === 'ar' ? 'ar' : 'en']}
           proofCount={paymentUploadedFiles.length}
           status={capsuleStatus}
         />

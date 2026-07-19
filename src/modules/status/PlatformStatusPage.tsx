@@ -83,7 +83,7 @@ const copy = {
 }
 
 export function PlatformStatusPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [health, setHealth] = useState<PlatformHealth | null>(null)
   const [contracts, setContracts] = useState<PlatformContracts | null>(null)

@@ -87,7 +87,7 @@ function monthRange(cursor: Date) {
 
 export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, currency, mode = 'host' }: Props) {
   const isAr = lang === 'ar'
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const [cursor, setCursor] = useState(() => new Date())
   const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set())
   const [bookedDates, setBookedDates] = useState<Set<string>>(new Set())
@@ -246,7 +246,7 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
         >
           ‹
         </button>
-        <strong style={styles.monthTitle}>{MONTHS[lang][cursor.getMonth()]} {cursor.getFullYear()}</strong>
+        <strong style={styles.monthTitle}>{MONTHS[lang === 'ar' ? 'ar' : 'en'][cursor.getMonth()]} {cursor.getFullYear()}</strong>
         <button
           type="button"
           style={styles.navButton}
@@ -257,7 +257,7 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
       </div>
 
       <div style={styles.weekGrid}>
-        {DAYS[lang].map((day, index) => (
+        {DAYS[lang === 'ar' ? 'ar' : 'en'].map((day, index) => (
           <span key={`${day}-${index}`} style={styles.weekDay}>{day}</span>
         ))}
       </div>

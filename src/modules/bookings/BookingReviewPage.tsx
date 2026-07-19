@@ -80,7 +80,7 @@ const DIVISION_IMAGES: Record<string, string> = {
 }
 
 export function BookingReviewPage({ listingId, lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [listing, setListing] = useState<PlatformListing | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')

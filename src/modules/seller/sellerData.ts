@@ -1,4 +1,4 @@
-import type { Lang } from '../../engines/language/languageEngine'
+import type { Lang, Localized } from '../../engines/language/languageEngine'
 
 export type SellerRoleId = 'owner' | 'broker' | 'agency' | 'developer' | 'multi'
 export type SellerPlanId = 'plus' | 'premium'
@@ -6,10 +6,10 @@ export type SellerPlanId = 'plus' | 'premium'
 export type SellerRole = {
   id: SellerRoleId
   accent: string
-  label: Record<Lang, string>
-  shortLabel: Record<Lang, string>
-  description: Record<Lang, string>
-  nextStep: Record<Lang, string>
+  label: Localized<string>
+  shortLabel: Localized<string>
+  description: Localized<string>
+  nextStep: Localized<string>
 }
 
 export type SellerPlan = {
@@ -17,8 +17,8 @@ export type SellerPlan = {
   accent: string
   name: string
   price: string
-  label: Record<Lang, string>
-  features: Array<Record<Lang, string>>
+  label: Localized<string>
+  features: Array<Localized<string>>
 }
 
 export const SELLER_ROLES: SellerRole[] = [

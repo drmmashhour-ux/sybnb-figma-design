@@ -34,7 +34,7 @@ function goToAbout() {
 
 export function Footer({ lang }: Props) {
   const isAr = lang === 'ar'
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const year = new Date().getFullYear()
 
   return (

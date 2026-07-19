@@ -55,7 +55,7 @@ export function LocationCascade({ lang, value, onChange }: LocationCascadeProps)
   const [openPanel, setOpenPanel] = useState<Panel | null>(null)
   const governorate = getGovernorate(value.governorate)
   const city = getCity(value.governorate, value.city)
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const displayLabel = (item?: { key?: string; ar: string; en: string }) => {
     if (!item) return ''
     return lang === 'ar' && item.key && AR_LABEL_OVERRIDES[item.key] ? AR_LABEL_OVERRIDES[item.key] : labelFor(lang, item)

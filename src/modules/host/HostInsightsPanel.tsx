@@ -46,7 +46,7 @@ const copy = {
 }
 
 export function HostInsightsPanel({ lang, mode = 'host' }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [insights, setInsights] = useState<PlatformHostInsight[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')

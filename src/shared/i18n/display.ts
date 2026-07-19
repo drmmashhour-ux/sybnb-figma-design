@@ -64,6 +64,37 @@ export const statusLabels: Record<Lang, Record<string, string>> = {
     REQUESTED: 'Requested',
     SENT: 'Sent',
   },
+  fr: {
+    ACTIVE: 'Actif',
+    APPROVED: 'Approuvé',
+    CANCELLED: 'Annulé',
+    CLAIM_PENDING: 'En attente de vérification',
+    CLAIMED: 'Réclamé',
+    COMPLETED: 'Terminé',
+    CONFIRMED: 'Confirmé',
+    CREDIT: 'Crédit',
+    CREATED: 'Créé',
+    DEBIT: 'Débit',
+    DRAFT: 'Brouillon',
+    DRIVER_ARRIVING: 'Chauffeur en approche',
+    DRIVER_ASSIGNED: 'Chauffeur assigné',
+    DISPUTED: 'Litige en cours',
+    EXPIRED: 'Expiré',
+    IN_PROGRESS: 'En cours',
+    LOCKED: 'Verrouillé',
+    MATCHING: 'Recherche en cours',
+    PAUSED: 'En pause',
+    PAYMENT_APPROVED: 'Paiement approuvé',
+    PAYMENT_PENDING: 'Justificatif de paiement attendu',
+    PENDING_ADMIN_REVIEW: 'En attente de vérification SYBNB',
+    PENDING_PROOF: 'Justificatif en attente',
+    PENDING_REVIEW: 'En attente de vérification',
+    RELEASE: 'Déblocage',
+    REFUNDED: 'Remboursé',
+    REJECTED: 'Refusé',
+    REQUESTED: 'Demande envoyée',
+    SENT: 'Envoyé',
+  },
 }
 
 export const divisionLabels: Record<Lang, Record<string, string>> = {
@@ -83,32 +114,46 @@ export const divisionLabels: Record<Lang, Record<string, string>> = {
     MARKETPLACE: 'Marketplace',
     NEW_CONSTRUCTION: 'New construction',
   },
+  fr: {
+    STAYS: 'Séjours courts',
+    RENTALS: 'Locations mensuelles',
+    BUY: 'Acheter un bien',
+    CARS: 'Véhicules',
+    MARKETPLACE: 'Marché',
+    NEW_CONSTRUCTION: 'Nouveaux projets',
+  },
 }
 
 export const divisionDescriptions: Record<string, Record<Lang, string>> = {
   STAYS: {
     ar: 'ابحث بالتاريخ والضيوف ثم أرسل طلب الحجز.',
     en: 'Search by dates and guests, then request a stay.',
+    fr: 'Recherchez par dates et voyageurs, puis envoyez une demande de réservation.',
   },
   RENTALS: {
     ar: 'خيارات حسب المدينة، الميزانية، والغرف.',
     en: 'Filter by city, budget, and bedrooms.',
+    fr: 'Filtrez par ville, budget et nombre de chambres.',
   },
   BUY: {
     ar: 'شاهد العقارات، أرسل عرضاً، أو احجز زيارة.',
     en: 'View properties, make an offer, or request a visit.',
+    fr: 'Consultez les biens, faites une offre ou demandez une visite.',
   },
   CARS: {
     ar: 'ابحث عن السيارة، تحقق من التفاصيل، وتواصل مع البائع.',
     en: 'Find a car, inspect details, and contact the seller.',
+    fr: 'Trouvez une voiture, vérifiez les détails et contactez le vendeur.',
   },
   MARKETPLACE: {
     ar: 'تصفح المنتجات وتواصل مع البائع بعد إنشاء حساب.',
     en: 'Browse items and contact sellers after account.',
+    fr: 'Parcourez les articles et contactez les vendeurs après création d’un compte.',
   },
   NEW_CONSTRUCTION: {
     ar: 'شاهد المشروع على أقسام: الأسلوب، المخططات، الطوابق، التشطيب، والدفع.',
     en: 'View projects by sections: style, plans, floors, finishing, and terms.',
+    fr: 'Explorez les projets par sections : style, plans, étages, finitions et conditions.',
   },
 }
 
@@ -126,8 +171,10 @@ export function divisionText(division: string | null | undefined, lang: Lang) {
   return divisionLabels[lang][division] || division.replace(/_/g, ' ')
 }
 
+const MONEY_LOCALE_BY_LANG: Record<Lang, string> = { ar: 'ar-SY', en: 'en-US', fr: 'fr-CA' }
+
 export function moneyText(amountMinor: number | null | undefined, currency = 'SYP', lang: Lang) {
-  const amount = Number(amountMinor || 0).toLocaleString(lang === 'ar' ? 'ar-SY' : 'en-US')
+  const amount = Number(amountMinor || 0).toLocaleString(MONEY_LOCALE_BY_LANG[lang])
   const currencyText = lang === 'ar' && currency === 'SYP' ? 'ل.س' : currency
   return `${amount} ${currencyText}`
 }
@@ -152,6 +199,9 @@ export function listingDescriptionText(
 
 export function providerText(provider: string | null | undefined, lang: Lang) {
   if (!provider) return '-'
-  if (lang === 'ar' && provider === 'syrian_local_wallet') return 'المحفظة المحلية السورية'
+  if (provider === 'syrian_local_wallet') {
+    if (lang === 'ar') return 'المحفظة المحلية السورية'
+    if (lang === 'fr') return 'Portefeuille local syrien'
+  }
   return provider.replace(/_/g, ' ')
 }

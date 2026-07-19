@@ -53,7 +53,7 @@ const copy = {
 }
 
 export function HostInquiriesPage({ lang, mode = 'host' }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [threads, setThreads] = useState<PlatformHostInquiryThread[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')

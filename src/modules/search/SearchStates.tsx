@@ -33,7 +33,7 @@ const T = {
 }
 
 export function SearchStateCard({ lang, state, onReset }: SearchStatesProps) {
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const copy = {
     loading: { icon: '⌛', title: t.loadingTitle, body: t.loadingBody, tone: '#4f6cff' },
     empty: { icon: '⌕', title: t.emptyTitle, body: t.emptyBody, tone: '#d5a915' },

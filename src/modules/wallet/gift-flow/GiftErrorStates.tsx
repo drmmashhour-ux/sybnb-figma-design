@@ -1,6 +1,6 @@
 import React from 'react'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 type GiftErrorState = 'wrong_phone' | 'already_redeemed' | 'expired' | 'blocked_admin' | 'security_review'
 
 type GiftErrorStatesProps = {
@@ -110,7 +110,7 @@ const COPY = {
 export function GiftErrorStates({ lang = 'ar', initialState = 'wrong_phone', onPrimary, onSupport }: GiftErrorStatesProps) {
   const state = initialState
   const isAr = lang === 'ar'
-  const t = COPY[lang]
+  const t = COPY[lang === 'ar' ? 'ar' : 'en']
   const active = t.states[state]
 
   return (

@@ -127,7 +127,7 @@ const statusLabel = {
 }
 
 export function OperationsCalendarPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
   const [metrics, setMetrics] = useState<PlatformAdminMetrics | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])
@@ -223,7 +223,7 @@ export function OperationsCalendarPage({ lang }: Props) {
                   <strong>{event.title}</strong>
                   <span>{event.meta}</span>
                 </div>
-                <small>{statusLabel[lang][event.status]}</small>
+                <small>{statusLabel[lang === 'ar' ? 'ar' : 'en'][event.status]}</small>
                 {event.href ? <button onClick={() => openEvent(event.href as string)}>{t.open}</button> : null}
               </article>
             )) : <p>{t.empty}</p>}
@@ -268,7 +268,7 @@ export function OperationsCalendarPage({ lang }: Props) {
           <aside className="operations-task-detail">
             <div className="operations-card-head">
               <h2>{t.detail}</h2>
-              <span>{selectedTask ? statusLabel[lang][selectedTask.status] : '-'}</span>
+              <span>{selectedTask ? statusLabel[lang === 'ar' ? 'ar' : 'en'][selectedTask.status] : '-'}</span>
             </div>
             {selectedTask ? (
               <>

@@ -135,7 +135,7 @@ const labels = {
 }
 
 export function StaffAccessPage({ lang, role, returnPath }: Props) {
-  const t = labels[lang]
+  const t = labels[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const canSignUp = role !== 'ADMIN'
   const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgotPassword'>('signIn')

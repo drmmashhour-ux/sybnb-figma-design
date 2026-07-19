@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import type { Lang, Localized } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
   fetchIdDocumentBlobUrl,
@@ -110,7 +110,7 @@ const recentAdminUsers = [
 ]
 
 export function AdminReviewPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])
@@ -2110,7 +2110,7 @@ const commandStyles: Record<string, CSSProperties> = {
 }
 
 function auditActionText(action: string, lang: Lang) {
-  const labels: Record<string, Record<Lang, string>> = {
+  const labels: Record<string, Localized<string>> = {
     APPROVE: { ar: 'موافقة', en: 'Approve' },
     APPROVED: { ar: 'تمت الموافقة', en: 'Approved' },
     REJECT: { ar: 'رفض', en: 'Reject' },

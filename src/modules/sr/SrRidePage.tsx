@@ -99,7 +99,7 @@ const rideCategoryByFilter: Record<string, string> = {
 }
 
 export function SrRidePage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [pickup, setPickup] = useState(isAr ? 'دمشق، المالكي' : 'Damascus, Malki')
   const [dropoff, setDropoff] = useState(isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh')
@@ -240,7 +240,7 @@ export function SrRidePage({ lang }: Props) {
         <p style={styles.body}>{t.subtitle}</p>
       </section>
 
-      <DivisionTriad lang={lang} offerLabel={{ ar: 'كن سائقاً', en: 'Drive with SR' }} offerHref="/driver" />
+      <DivisionTriad lang={lang} offerLabel={{ ar: 'كن سائقاً', en: 'Drive with SR', fr: 'Devenir chauffeur SR' }} offerHref="/driver" />
 
       <section style={styles.driveBanner}>
         <div>

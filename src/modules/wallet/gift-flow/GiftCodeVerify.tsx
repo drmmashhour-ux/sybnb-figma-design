@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 
 type GiftCodeVerifyProps = {
   lang?: Lang
@@ -58,7 +58,7 @@ export function GiftCodeVerify({ lang = 'ar', phoneMasked = '+963 9•• ••
   const [verifying, setVerifying] = useState(false)
   const inputs = useRef<Array<HTMLInputElement | null>>([])
   const isAr = lang === 'ar'
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
 
   const code = useMemo(() => digits.join(''), [digits])
   const complete = code.length === 6

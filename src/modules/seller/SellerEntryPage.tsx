@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import type { Lang, Localized } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import { SELLER_ROLES } from './sellerData'
@@ -17,9 +17,9 @@ type SellerServiceMode = 'seller-plan' | 'platform-sale'
 const SELLER_SERVICE_MODES: Array<{
   id: SellerServiceMode
   accent: string
-  label: Record<Lang, string>
-  description: Record<Lang, string>
-  nextStep: Record<Lang, string>
+  label: Localized<string>
+  description: Localized<string>
+  nextStep: Localized<string>
 }> = [
   {
     id: 'seller-plan',
@@ -120,7 +120,7 @@ export function SellerEntryPage({ lang }: Props) {
               style={{ '--accent': role.accent } as CSSVars}
             >
               <span className="seller-role-icon" aria-hidden="true">
-                {role.shortLabel[lang].slice(0, 2)}
+                {role.shortLabel[lang === 'ar' ? 'ar' : 'en'].slice(0, 2)}
               </span>
               <span className="seller-role-title">{role.label[lang]}</span>
               <span className="seller-role-copy">{role.description[lang]}</span>

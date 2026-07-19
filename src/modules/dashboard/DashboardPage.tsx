@@ -138,7 +138,7 @@ const copy = {
 }
 
 export function DashboardPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [overview, setOverview] = useState<PlatformOverview | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')

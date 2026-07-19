@@ -697,7 +697,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
             <div className="seller-business-type-panel">
               <div>
                 <strong>{isAr ? 'نوع النشاط الإعلاني' : 'Advertising business type'}</strong>
-                <span>{selectedBusinessType.helper[lang]}</span>
+                <span>{selectedBusinessType.helper[lang === 'ar' ? 'ar' : 'en']}</span>
               </div>
               <div className="seller-business-type-options">
                 {AD_BUSINESS_TYPES.map((item) => (
@@ -707,7 +707,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                     type="button"
                     onClick={() => setBusinessType(item.id)}
                   >
-                    {item.label[lang]}
+                    {item.label[lang === 'ar' ? 'ar' : 'en']}
                   </button>
                 ))}
               </div>
@@ -913,7 +913,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                     ? isAr
                       ? 'ارفع صور المطعم، المنيو، اللوغو، السجل التجاري أو الترخيص بصيغة PDF أو PNG أو JPG.'
                       : 'Upload restaurant photos, menu, logo, commercial record or license as PDF, PNG, or JPG.'
-                    : selectedBusinessType.helper[lang]}
+                    : selectedBusinessType.helper[lang === 'ar' ? 'ar' : 'en']}
                 </span>
               </div>
               {adminFollowCode && (
@@ -951,7 +951,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                     ? isAr
                       ? 'ارفع صور المطعم، المنيو، اللوغو، السجل التجاري أو الترخيص.'
                       : 'Upload restaurant photos, menu, logo, commercial record, or license.'
-                    : selectedBusinessType.helper[lang]
+                    : selectedBusinessType.helper[lang === 'ar' ? 'ar' : 'en']
                 }
                 lang={lang}
                 onAddFiles={addAccountDocumentFiles}
@@ -1163,7 +1163,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                       if (isAdvertisingFlow) navigate(`/advertising/payment/${method.id}`)
                     }}
                   >
-                    {method.label[lang]}
+                    {method.label[lang === 'ar' ? 'ar' : 'en']}
                   </button>
                 ))}
               </div>
@@ -1214,12 +1214,12 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
             </div>
           )}
           {wizardStep === 3 && requiresPlanPayment && <div className={`seller-payment-confirmation ${paymentConfirmed ? 'confirmed' : ''}`}>
-            <span>{paymentMethod.helper[lang]}</span>
+            <span>{paymentMethod.helper[lang === 'ar' ? 'ar' : 'en']}</span>
             <div className="seller-payment-destination">
-              <span>{paymentMethod.destinationTitle[lang]}</span>
+              <span>{paymentMethod.destinationTitle[lang === 'ar' ? 'ar' : 'en']}</span>
               <strong dir="ltr">{paymentMethod.destinationCode}</strong>
               <small>
-                {paymentMethod.destinationHint[lang]} {isAr ? 'كود المتابعة:' : 'Follow-up code:'}{' '}
+                {paymentMethod.destinationHint[lang === 'ar' ? 'ar' : 'en']} {isAr ? 'كود المتابعة:' : 'Follow-up code:'}{' '}
                 <b dir="ltr">{adminFollowCode}</b>
               </small>
             </div>
@@ -1256,7 +1256,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               destinationCode={paymentMethod.destinationCode}
               followCode={adminFollowCode}
               lang={lang}
-              methodLabel={paymentMethod.label[lang]}
+              methodLabel={paymentMethod.label[lang === 'ar' ? 'ar' : 'en']}
               proofCount={paymentProofFiles.length}
               status={paymentCapsuleStatus}
             />

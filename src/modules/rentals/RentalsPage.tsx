@@ -253,7 +253,7 @@ const buyerCopy = {
 
 export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const isBuyMode = mode === 'buy'
-  const t = isBuyMode ? { ...copy[lang], ...buyerCopy[lang] } : copy[lang]
+  const t = isBuyMode ? { ...copy[lang === 'ar' ? 'ar' : 'en'], ...buyerCopy[lang === 'ar' ? 'ar' : 'en'] } : copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [listings, setListings] = useState<PlatformListing[]>([])
   const [selectedId, setSelectedId] = useState('')
@@ -428,7 +428,11 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <DivisionTriad
         lang={lang}
-        offerLabel={isBuyMode ? { ar: 'بيع عقارك', en: 'Sell your property' } : { ar: 'أجّر عقارك', en: 'Rent out your property' }}
+        offerLabel={
+          isBuyMode
+            ? { ar: 'بيع عقارك', en: 'Sell your property', fr: 'Vendre votre bien' }
+            : { ar: 'أجّر عقارك', en: 'Rent out your property', fr: 'Louer votre bien' }
+        }
         offerHref={isBuyMode ? '/sell-property' : '/list-for-rent'}
       />
       <section style={styles.listOwnerBanner}>

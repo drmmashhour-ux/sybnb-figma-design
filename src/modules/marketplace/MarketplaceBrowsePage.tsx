@@ -80,7 +80,7 @@ export function MarketplaceBrowsePage({ lang }: { lang: Lang }) {
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <DivisionTriad
         lang={lang}
-        offerLabel={{ ar: 'بيع شيء ما', en: 'Sell something' }}
+        offerLabel={{ ar: 'بيع شيء ما', en: 'Sell something', fr: 'Vendre un article' }}
         offerHref="/marketplace/sell"
       />
       <div style={styles.header}>

@@ -186,7 +186,7 @@ const copy = {
 
 export function LegalPlaceholderPage({ lang, page }: Props) {
   const isAr = lang === 'ar'
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const section = t[page]
 
   return (
@@ -194,7 +194,7 @@ export function LegalPlaceholderPage({ lang, page }: Props) {
       <article style={styles.card}>
         <p style={styles.draftBadge}>{isAr ? 'مسودة — غير نهائية' : 'DRAFT — NOT FINAL'}</p>
         <h1 style={styles.title}>{section.title}</h1>
-        <p style={styles.effectiveDate}>{t.effectiveDatePrefix}{EFFECTIVE_DATE[lang]}</p>
+        <p style={styles.effectiveDate}>{t.effectiveDatePrefix}{EFFECTIVE_DATE[lang === 'ar' ? 'ar' : 'en']}</p>
         {section.sections.map((entry) => (
           <section key={entry.heading} style={styles.section}>
             <h2 style={styles.heading}>{entry.heading}</h2>

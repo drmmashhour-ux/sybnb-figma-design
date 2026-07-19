@@ -277,7 +277,7 @@ const sortOptions: FilterOption[] = [
 ]
 
 export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [openCalendar, setOpenCalendar] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
@@ -697,7 +697,7 @@ function OptionGroup({
   options: FilterOption[]
   value: string
 }) {
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
 
   return (
     <fieldset style={styles.optionGroup}>

@@ -132,7 +132,7 @@ const copy = {
 }
 
 export function FinanceReconciliationPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])

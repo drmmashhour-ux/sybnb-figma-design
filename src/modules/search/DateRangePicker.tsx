@@ -87,8 +87,8 @@ export function nightsBetween(start: string, end: string) {
 
 export function formatDateForLang(value: string, lang: Lang) {
   const date = fromISO(value)
-  if (!date) return T[lang].unset
-  return `${date.getDate()} ${MONTHS[lang][date.getMonth()]} ${date.getFullYear()}`
+  if (!date) return T[lang === 'ar' ? 'ar' : 'en'].unset
+  return `${date.getDate()} ${MONTHS[lang === 'ar' ? 'ar' : 'en'][date.getMonth()]} ${date.getFullYear()}`
 }
 
 export function DateField({ lang, label, value, active, onClick }: DateFieldProps) {
@@ -98,7 +98,7 @@ export function DateField({ lang, label, value, active, onClick }: DateFieldProp
       <span dir="ltr" style={styles.fieldValue}>
         {value || 'yyyy-mm-dd'}
       </span>
-      <span style={styles.fieldHint}>{value ? formatDateForLang(value, lang) : T[lang].choose}</span>
+      <span style={styles.fieldHint}>{value ? formatDateForLang(value, lang) : T[lang === 'ar' ? 'ar' : 'en'].choose}</span>
     </button>
   )
 }
@@ -108,7 +108,7 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
   const [cursor, setCursor] = useState(() => new Date(baseDate.getFullYear(), baseDate.getMonth(), 1))
   const [selecting, setSelecting] = useState<'checkIn' | 'checkOut'>(value.checkIn && !value.checkOut ? 'checkOut' : 'checkIn')
   const [blockedRangeWarning, setBlockedRangeWarning] = useState(false)
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
 
   const days = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
@@ -163,7 +163,7 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
         <button type="button" style={styles.navButton} onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}>
           ‹
         </button>
-        <strong style={styles.monthTitle}>{MONTHS[lang][cursor.getMonth()]} {cursor.getFullYear()}</strong>
+        <strong style={styles.monthTitle}>{MONTHS[lang === 'ar' ? 'ar' : 'en'][cursor.getMonth()]} {cursor.getFullYear()}</strong>
         <button type="button" style={styles.navButton} onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}>
           ›
         </button>
@@ -173,7 +173,7 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
       {blockedRangeWarning && disabledHint && <p style={styles.warning}>{disabledHint}</p>}
 
       <div style={styles.weekGrid}>
-        {DAYS[lang].map((day, index) => (
+        {DAYS[lang === 'ar' ? 'ar' : 'en'].map((day, index) => (
           <span key={`${day}-${index}`} style={styles.weekDay}>{day}</span>
         ))}
       </div>

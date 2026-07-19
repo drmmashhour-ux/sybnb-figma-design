@@ -53,11 +53,14 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
               </div>
             )}
             <div className="language-switch" role="group" aria-label={isAr ? 'اختيار اللغة' : 'Choose language'}>
-              <button className={isAr ? 'active' : ''} onClick={() => onLanguageChange('ar')}>
+              <button className={lang === 'ar' ? 'active' : ''} onClick={() => onLanguageChange('ar')}>
                 AR
               </button>
-              <button className={!isAr ? 'active' : ''} onClick={() => onLanguageChange('en')}>
+              <button className={lang === 'en' ? 'active' : ''} onClick={() => onLanguageChange('en')}>
                 EN
+              </button>
+              <button className={lang === 'fr' ? 'active' : ''} onClick={() => onLanguageChange('fr')}>
+                FR
               </button>
             </div>
             <div className="public-auth-actions">

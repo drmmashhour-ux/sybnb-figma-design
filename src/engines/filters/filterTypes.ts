@@ -1,4 +1,4 @@
-import type { Lang } from '../language/languageEngine'
+import type { Localized } from '../language/languageEngine'
 
 export type VisualFilterArt =
   | 'any'
@@ -129,16 +129,16 @@ export type VisualFilterArt =
 
 export type VisualFilterOption = {
   id: string
-  label: Record<Lang, string>
+  label: Localized<string>
   art: VisualFilterArt
   photoSrc?: string
-  photoAlt?: Record<Lang, string>
+  photoAlt?: Localized<string>
   photoPosition?: string
 }
 
 export type VisualFilterGroup = {
   id: string
-  title: Record<Lang, string>
+  title: Localized<string>
   mode: 'single' | 'multi'
   options: VisualFilterOption[]
 }

@@ -1,6 +1,6 @@
 import React from 'react'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 
 type GiftRedeemedSuccessProps = {
   lang?: Lang
@@ -53,7 +53,7 @@ export function GiftRedeemedSuccess({
   onBrowse,
 }: GiftRedeemedSuccessProps) {
   const isAr = lang === 'ar'
-  const t = T[lang]
+  const t = T[lang === 'ar' ? 'ar' : 'en']
   const amountText = amount || (isAr ? '٥٠٬٠٠٠ ل.س' : '50,000 SYP')
   const balanceText = balance || (isAr ? '١٢٥٬٠٠٠ ل.س' : '125,000 SYP')
   return (

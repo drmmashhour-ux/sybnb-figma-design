@@ -1,4 +1,5 @@
 import { OSM_SYRIA_ROAD_CITIES } from './osmSyriaRoads'
+import type { Lang } from '../language/languageEngine'
 
 export type SyriaPlaceLabel = {
   key: string
@@ -367,7 +368,11 @@ export function getCity(governorateKey: string, cityKey: string) {
   return getGovernorate(governorateKey)?.cities.find((city) => city.key === cityKey)
 }
 
-export function labelFor(lang: 'ar' | 'en', item?: { ar: string; en: string }) {
+// Syrian place names (governorates/cities/areas/streets) are not yet translated to French --
+// place names are commonly left in their English/Latin transliteration for French readers too
+// (the way an English speaker sees "Damascus" rather than a translated word), so French falls
+// back to the English label here rather than needing a separate French gazetteer right away.
+export function labelFor(lang: Lang, item?: { ar: string; en: string }) {
   if (!item) return ''
   return lang === 'ar' ? item.ar : item.en
 }

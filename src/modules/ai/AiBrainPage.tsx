@@ -41,7 +41,7 @@ const copy = {
 
 export function AiBrainPage({ lang }: Props) {
   const isAr = lang === 'ar'
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const [insights, setInsights] = useState<PlatformAdminHostInsight[]>([])
   const [totals, setTotals] = useState({ generated: 0, emailed: 0, read: 0 })
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')

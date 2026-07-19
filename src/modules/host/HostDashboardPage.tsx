@@ -256,7 +256,7 @@ const copy = {
 }
 
 export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const isStaysHost = focus === 'stays'
   const providerCopy = getProviderCopy(t, isAr, focus)

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import type { Lang, Localized } from '../../engines/language/languageEngine'
 import {
   fetchBookingThread,
   fetchPrototypeHostOverview,
@@ -136,7 +136,7 @@ const copy = {
 }
 
 export function ImmocontactPage({ lang }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [overview, setOverview] = useState<PlatformOverview | null>(null)
   const [staffBookings, setStaffBookings] = useState<Array<PlatformBooking & { listing?: StaffBookingListing }>>([])
@@ -482,7 +482,7 @@ function ContextRow({ label, value }: { label: string; value: string }) {
 }
 
 function threadTypeText(type: Thread['type'], lang: Lang) {
-  const labels: Record<Thread['type'], Record<Lang, string>> = {
+  const labels: Record<Thread['type'], Localized<string>> = {
     booking: { ar: 'حجز', en: 'Booking' },
     payment: { ar: 'دفع', en: 'Payment' },
     ride: { ar: 'رحلة', en: 'Ride' },

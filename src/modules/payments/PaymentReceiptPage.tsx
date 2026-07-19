@@ -79,7 +79,7 @@ const copy = {
 }
 
 export function PaymentReceiptPage({ lang, proofId }: Props) {
-  const t = copy[lang]
+  const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [proof, setProof] = useState<PlatformPaymentProof | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')

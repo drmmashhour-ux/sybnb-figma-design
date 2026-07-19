@@ -1,4 +1,4 @@
-import type { Lang } from '../../engines/language/languageEngine'
+import type { Lang, Localized } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import { SELLER_PLANS } from './sellerData'
@@ -22,14 +22,14 @@ const STR_COMMISSION_LABEL = { ar: '13%', en: '13%' }
 
 type IntentConfig = {
   division: 'STAYS' | 'RENTALS' | 'BUY' | 'CARS' | 'NEW_CONSTRUCTION'
-  eyebrow: Record<Lang, string>
-  title: Record<Lang, string>
-  body: Record<Lang, string>
-  logoCaption: Record<Lang, string>
-  perks: Array<Record<Lang, string>>
-  pricingTitle: Record<Lang, string>
-  pricingBody: Record<Lang, string>
-  altLinkLabel: Record<Lang, string>
+  eyebrow: Localized<string>
+  title: Localized<string>
+  body: Localized<string>
+  logoCaption: Localized<string>
+  perks: Array<Localized<string>>
+  pricingTitle: Localized<string>
+  pricingBody: Localized<string>
+  altLinkLabel: Localized<string>
 }
 
 const INTENT_CONFIG: Record<Props['intent'], IntentConfig> = {
