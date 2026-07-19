@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { navigate } from '../../app/routes'
 import { srRideFilterGroupsFromConfig, type VisualFilterSelection } from '../../engines/filters'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -238,6 +239,20 @@ export function SrRidePage({ lang }: Props) {
         <p style={styles.body}>{t.subtitle}</p>
       </section>
 
+      <section style={styles.driveBanner}>
+        <div>
+          <strong style={styles.driveBannerTitle}>{isAr ? 'كن سائقاً مع SR' : 'Drive with SR'}</strong>
+          <span style={styles.driveBannerBody}>
+            {isAr
+              ? 'اكسب دخلاً إضافياً بقيادة سيارتك. سجّل حساب سائق، أضف مركبتك، وابدأ استقبال الرحلات.'
+              : 'Earn extra income driving your own car. Create a driver account, add your vehicle, and start accepting rides.'}
+          </span>
+        </div>
+        <button style={styles.driveBannerButton} onClick={() => navigate('/driver')}>
+          {isAr ? 'ابدأ الآن' : 'Get started'}
+        </button>
+      </section>
+
       <section style={styles.grid}>
         <article style={styles.card}>
           <div style={styles.mapPreview}>
@@ -399,6 +414,10 @@ const styles: Record<string, CSSProperties> = {
   eyebrow: { color: '#19d7ff', letterSpacing: 2, fontWeight: 900, fontSize: 11, margin: 0 },
   title: { margin: '6px 0', fontSize: 38, lineHeight: 1.08 },
   body: { color: '#9aa6ba', margin: 0, maxWidth: 720, lineHeight: 1.6 },
+  driveBanner: { alignItems: 'center', background: 'linear-gradient(135deg, rgba(25,215,255,0.14), #101722)', border: '1px solid rgba(25,215,255,0.35)', borderRadius: 8, display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'space-between', padding: '16px 18px' },
+  driveBannerTitle: { color: '#fff', display: 'block', fontSize: 17 },
+  driveBannerBody: { color: '#9aa6ba', display: 'block', fontSize: 13.5, marginTop: 4 },
+  driveBannerButton: { background: '#19d7ff', border: 0, borderRadius: 8, color: '#06131a', fontWeight: 950, minHeight: 46, padding: '0 20px' },
   grid: { display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' },
   card: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#101722', padding: 16, display: 'grid', gap: 12 },
   cardTitle: { fontSize: 22, margin: 0 },
