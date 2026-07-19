@@ -6,7 +6,9 @@ import {
   createSellerAccountSession,
   fetchSellerOverview,
   getStoredSellerSession,
+  sendPhoneVerificationCode,
   submitSellerPlanProof,
+  verifyPhoneVerificationCode,
 } from '../../shared/api/platformApi'
 import { SELLER_PLANS, pickSellerRole } from './sellerData'
 import type { SellerPlanId } from './sellerData'
@@ -116,10 +118,6 @@ function createAdminFollowCode() {
   return `ADV-${suffix}`
 }
 
-function createMobileVerificationCode() {
-  return `${Math.floor(100000 + Math.random() * 900000)}`
-}
-
 function readStoredFollowCode() {
   const stored = window.sessionStorage.getItem(AD_FOLLOW_CODE_STORAGE_KEY)
   return stored || createAdminFollowCode()
@@ -149,9 +147,10 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
   const [mobileCodeSent, setMobileCodeSent] = useState(false)
-  const [sentMobileCode, setSentMobileCode] = useState('')
+  const [devMobileCode, setDevMobileCode] = useState('')
   const [mobileCode, setMobileCode] = useState('')
   const [mobileCodeConfirmed, setMobileCodeConfirmed] = useState(false)
+  const [mobileCodeBusy, setMobileCodeBusy] = useState<'idle' | 'sending' | 'confirming'>('idle')
   const [accountDocumentCount, setAccountDocumentCount] = useState(() => readStoredUploadedFiles().length)
   const [accountUploadedFiles, setAccountUploadedFiles] = useState<string[]>(() => readStoredUploadedFiles())
   const [accountFileReviewed, setAccountFileReviewed] = useState(false)
@@ -259,6 +258,54 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
       done: accountReadyForNext,
     },
   ]
+
+  // Real, server-verified phone OTP (purpose 'staff-login', same as HOST/DRIVER/ADMIN sign-in) --
+  // replaces a previous client-only code that was generated and checked entirely in the browser
+  // and never actually verified anything. The real backend requires a genuinely-verified phone
+  // (or email) before /api/auth/register will create a SELLER account, so the old fake check let
+  // every step of this wizard appear to succeed while account creation silently failed afterward.
+  async function sendMobileCode() {
+    if (!phone.trim()) return
+    setMobileCodeBusy('sending')
+    setSubmitState('idle')
+    setSubmitError('')
+    try {
+      const result = await sendPhoneVerificationCode(phone.trim(), 'staff-login')
+      setMobileCodeSent(true)
+      setMobileCode('')
+      setMobileCodeConfirmed(false)
+      setAccountSentToAdmin(false)
+      setDevMobileCode(result.devCode || '')
+    } catch (error) {
+      setSubmitState('error')
+      setSubmitError(error instanceof Error ? error.message : isAr ? 'تعذر إرسال رمز التحقق.' : 'Could not send the verification code.')
+    } finally {
+      setMobileCodeBusy('idle')
+    }
+  }
+
+  async function confirmMobileCode() {
+    setMobileCodeBusy('confirming')
+    setSubmitState('idle')
+    setSubmitError('')
+    try {
+      await verifyPhoneVerificationCode(phone.trim(), mobileCode.trim(), 'staff-login')
+      setMobileCodeConfirmed(true)
+      setAccountSentToAdmin(false)
+    } catch (error) {
+      setMobileCodeConfirmed(false)
+      setSubmitState('error')
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : isAr
+            ? 'رمز الهاتف غير صحيح. اكتب الرمز المرسل إلى رقم الهاتف.'
+            : 'Incorrect mobile code. Enter the code sent to the phone number.',
+      )
+    } finally {
+      setMobileCodeBusy('idle')
+    }
+  }
 
   function addAccountDocumentFiles(fileList: FileList | null) {
     const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
@@ -683,7 +730,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                 onChange={(event) => {
                   setPhone(event.target.value)
                   setMobileCodeSent(false)
-                  setSentMobileCode('')
+                  setDevMobileCode('')
                   setMobileCode('')
                   setMobileCodeConfirmed(false)
                   setAccountSentToAdmin(false)
@@ -729,26 +776,28 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                       ? 'أرسل رمز تحقق قبل إنشاء الحساب.'
                       : 'Send a verification code before creating the account.'}
                 </span>
-                {mobileCodeSent && sentMobileCode && (
+                {mobileCodeSent && devMobileCode && (
                   <small className="seller-demo-sms-code">
-                    {isAr ? 'رمز التحقق المرسل:' : 'Sent verification code:'} <b dir="ltr">{sentMobileCode}</b>
+                    {isAr ? 'رمز التحقق (بيئة الاختبار):' : 'Verification code (test env):'} <b dir="ltr">{devMobileCode}</b>
                   </small>
                 )}
               </div>
               <button
                 type="button"
-                disabled={!phone.trim()}
-                onClick={() => {
-                  setSentMobileCode(createMobileVerificationCode())
-                  setMobileCodeSent(true)
-                  setMobileCode('')
-                  setMobileCodeConfirmed(false)
-                  setAccountSentToAdmin(false)
-                  setSubmitState('idle')
-                  setSubmitError('')
-                }}
+                disabled={!phone.trim() || mobileCodeBusy !== 'idle'}
+                onClick={() => void sendMobileCode()}
               >
-                {mobileCodeSent ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isAr ? 'إرسال الرمز' : 'Send code'}
+                {mobileCodeBusy === 'sending'
+                  ? isAr
+                    ? 'جارٍ الإرسال...'
+                    : 'Sending...'
+                  : mobileCodeSent
+                    ? isAr
+                      ? 'إعادة إرسال الرمز'
+                      : 'Resend code'
+                    : isAr
+                      ? 'إرسال الرمز'
+                      : 'Send code'}
               </button>
               <label>
                 <small>{isAr ? 'رمز التحقق' : 'Verification code'}</small>
@@ -766,20 +815,20 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               </label>
               <button
                 type="button"
-                disabled={!mobileCodeSent || mobileCode.trim().length !== 6}
-                onClick={() => {
-                  if (mobileCode.trim() !== sentMobileCode) {
-                    setSubmitState('error')
-                    setSubmitError(isAr ? 'رمز الهاتف غير صحيح. اكتب الرمز المرسل إلى رقم الهاتف.' : 'Incorrect mobile code. Enter the code sent to the phone number.')
-                    return
-                  }
-                  setSubmitState('idle')
-                  setSubmitError('')
-                  setMobileCodeConfirmed(true)
-                  setAccountSentToAdmin(false)
-                }}
+                disabled={!mobileCodeSent || mobileCode.trim().length !== 6 || mobileCodeBusy !== 'idle'}
+                onClick={() => void confirmMobileCode()}
               >
-                {mobileCodeConfirmed ? (isAr ? 'تم تأكيد الرمز' : 'Code confirmed') : isAr ? 'تأكيد الرمز' : 'Confirm code'}
+                {mobileCodeBusy === 'confirming'
+                  ? isAr
+                    ? 'جارٍ التأكيد...'
+                    : 'Confirming...'
+                  : mobileCodeConfirmed
+                    ? isAr
+                      ? 'تم تأكيد الرمز'
+                      : 'Code confirmed'
+                    : isAr
+                      ? 'تأكيد الرمز'
+                      : 'Confirm code'}
               </button>
             </div>
           </div>
