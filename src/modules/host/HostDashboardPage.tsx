@@ -12,7 +12,7 @@ import {
   type PlatformHostOverview,
   type PlatformListing,
 } from '../../shared/api/platformApi'
-import { hostInventoryFilterGroups, type VisualFilterSelection } from '../../engines/filters'
+import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { divisionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -580,11 +580,11 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
             <strong>{t.filters}</strong>
             <span>{providerCopy.filtersHint}</span>
           </div>
-          <b>{selectedFilterLabels(hostInventoryFilterGroups, inventoryFilters, lang).length}</b>
+          <b>{selectedFilterLabels(renterPropertyFilterGroups, inventoryFilters, lang).length}</b>
         </div>
         <VisualFilterPanel
           compact
-          groups={hostInventoryFilterGroups}
+          groups={renterPropertyFilterGroups}
           lang={lang}
           selection={inventoryFilters}
           onChange={setInventoryFilters}

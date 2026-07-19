@@ -773,6 +773,32 @@ export async function fetchAccommodation(accommodationId: string) {
   return apiRequest<{ ok: true; accommodation: PlatformAccommodation }>(`/api/accommodations/${accommodationId}`)
 }
 
+export type ListingDescriptionFacts = {
+  division: string
+  titleAr: string
+  governorate: string
+  city: string
+  area: string
+  propertyType: string
+  roomType: string
+  bedType: string
+  bedrooms: number | null
+  bathrooms: number | null
+  guestCapacity: number | null
+  amenities: string[]
+  priceMinor: number | null
+  currency: string
+}
+
+export async function generateListingDescription(facts: ListingDescriptionFacts) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  return apiRequest<{ ok: true; descriptionAr: string; descriptionEn: string | null }>('/api/host/listings/describe', {
+    method: 'POST',
+    token: session.token,
+    body: facts,
+  })
+}
+
 export async function createSellerAccountSession(input: {
   displayName: string
   email: string

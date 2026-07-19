@@ -73,3 +73,50 @@ export async function generatePricingInsightMessage(facts) {
 
   return { messageAr: parsed.messageAr, messageEn: parsed.messageEn || null, model: MODEL }
 }
+
+const LISTING_DESCRIPTION_SYSTEM_PROMPT = `You write a short, appealing listing description for a property/car/product on the SYBNB marketplace (Syria). You are given real, already-entered facts about the listing (division, title, city/area, property or room type, bed type, capacity, bedrooms, bathrooms, selected amenities, and price). Restate only those given facts naturally, in an inviting tone -- never invent an amenity, room count, view, or any other detail that is not in the given facts. Do not invent a host name, exact address, or promises about availability. Reply with strict JSON: {"descriptionAr": "...", "descriptionEn": "..."}. Keep each description under 500 characters, a short paragraph, no markdown, no emoji.`
+
+export async function generateListingDescriptionMessage(facts) {
+  const client = requireAnthropic()
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 500,
+    system: LISTING_DESCRIPTION_SYSTEM_PROMPT,
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify(facts),
+      },
+    ],
+  })
+
+  const textBlock = response.content.find((block) => block.type === 'text')
+  if (!textBlock) {
+    const error = new Error('AI response did not contain a text block.')
+    error.statusCode = 502
+    error.code = 'AI_RESPONSE_INVALID'
+    error.expose = true
+    throw error
+  }
+
+  let parsed
+  try {
+    parsed = JSON.parse(textBlock.text)
+  } catch {
+    const error = new Error('AI response was not valid JSON.')
+    error.statusCode = 502
+    error.code = 'AI_RESPONSE_INVALID'
+    error.expose = true
+    throw error
+  }
+
+  if (!parsed.descriptionAr) {
+    const error = new Error('AI response was missing the Arabic description.')
+    error.statusCode = 502
+    error.code = 'AI_RESPONSE_INVALID'
+    error.expose = true
+    throw error
+  }
+
+  return { descriptionAr: parsed.descriptionAr, descriptionEn: parsed.descriptionEn || null, model: MODEL }
+}

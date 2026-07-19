@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import QRCode from 'qrcode'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
@@ -6,6 +7,7 @@ import {
   addAccommodationRoomType,
   createAccommodation,
   createAndSubmitPrototypeListing,
+  generateListingDescription,
   submitAccommodation,
 } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
@@ -13,6 +15,7 @@ import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSel
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
+import { SellerLocationMap } from './SellerLocationMap'
 
 type Props = {
   lang: Lang
@@ -78,6 +81,11 @@ function loadDraft(): Partial<WizardDraft> {
 function clearDraft() {
   if (typeof window === 'undefined') return
   window.sessionStorage.removeItem(DRAFT_STORAGE_KEY)
+}
+
+function createListingPlanFollowCode() {
+  const suffix = `${Date.now()}`.slice(-6)
+  return `LST-${suffix}`
 }
 
 function addDaysIso(days: number) {
@@ -317,6 +325,12 @@ export function SellerListingWizard({ lang }: Props) {
   const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'plus')
   const [listingPlanPaymentMethod, setListingPlanPaymentMethod] = useState(draft.listingPlanPaymentMethod || 'shamCash')
   const [listingPlanPaymentConfirmed, setListingPlanPaymentConfirmed] = useState(draft.listingPlanPaymentConfirmed ?? false)
+  const [listingPlanFollowCode] = useState(() => createListingPlanFollowCode())
+  const [listingPlanQrDataUrl, setListingPlanQrDataUrl] = useState('')
+  const [listingCardHolder, setListingCardHolder] = useState('')
+  const [listingCardNumber, setListingCardNumber] = useState('')
+  const [listingCardExpiry, setListingCardExpiry] = useState('')
+  const [listingCardCvv, setListingCardCvv] = useState('')
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
@@ -360,6 +374,8 @@ export function SellerListingWizard({ lang }: Props) {
   )
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [submitError, setSubmitError] = useState('')
+  const [descriptionAiState, setDescriptionAiState] = useState<'idle' | 'generating' | 'error'>('idle')
+  const [descriptionAiError, setDescriptionAiError] = useState('')
   // Set once the accommodation shell + first STAYS room type are created; every following room
   // type in the same session reuses it instead of re-collecting location/documents/photos.
   const [accommodationId, setAccommodationId] = useState<string | null>(null)
@@ -426,6 +442,32 @@ export function SellerListingWizard({ lang }: Props) {
   ).slice(0, 16)
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
   const selectedListingPlan = HOST_LISTING_PLANS.find((plan) => plan.id === listingPlan) || HOST_LISTING_PLANS[1]
+
+  // Real, scannable QR (same qrcode package + pattern already used in SellerAccountPage.tsx,
+  // SyrianLocalWalletPaymentPage, and SellerAdvertisingPaymentPage) instead of plain text.
+  useEffect(() => {
+    if (listingPlanPaymentMethod !== 'shamCash') return
+    let cancelled = false
+    const payload = [
+      'SYBNB-V6-LISTING-PLAN-PAYMENT',
+      'CODE=SYBNB-SHAM-LISTING',
+      `AMOUNT=${selectedListingPlan.priceUsd}`,
+      'CURRENCY=USD',
+      `FOLLOWUP=${listingPlanFollowCode}`,
+    ].join('|')
+    void QRCode.toDataURL(payload, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      scale: 6,
+      color: { dark: '#07111f', light: '#f7f8ff' },
+    }).then((url) => {
+      if (!cancelled) setListingPlanQrDataUrl(url)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [listingPlanPaymentMethod, listingPlanFollowCode, selectedListingPlan.priceUsd])
+
   const selectedOfferProofSlots = useMemo(() => selectedOfferProofMediaSlots(visualFilters), [visualFilters])
   const planAllowsOfferProofs = selectedListingPlan.id !== 'basic'
   const activeOfferProofSlots = !isAdvertisingFlow && division === 'STAYS' && planAllowsOfferProofs ? selectedOfferProofSlots : []
@@ -478,6 +520,11 @@ export function SellerListingWizard({ lang }: Props) {
     setArea(nextCity?.areas[0]?.key || '')
     setAreaQuery('')
     setMapPinConfirmed(false)
+    const center = GOVERNORATE_CENTERS[value]
+    if (center) {
+      setLatitude(center[0].toFixed(6))
+      setLongitude(center[1].toFixed(6))
+    }
   }
 
   function chooseCity(value: string) {
@@ -486,6 +533,39 @@ export function SellerListingWizard({ lang }: Props) {
     setArea(nextCity?.areas[0]?.key || '')
     setAreaQuery('')
     setMapPinConfirmed(false)
+    const center = GOVERNORATE_CENTERS[governorate]
+    if (center) {
+      setLatitude(center[0].toFixed(6))
+      setLongitude(center[1].toFixed(6))
+    }
+  }
+
+  async function suggestDescription() {
+    setDescriptionAiState('generating')
+    setDescriptionAiError('')
+    try {
+      const result = await generateListingDescription({
+        division,
+        titleAr: title,
+        governorate: selectedGovernorateLabel,
+        city: selectedCityLabel,
+        area: selectedAreaLabel,
+        propertyType: String(visualFilters.propertyType || selectedType),
+        roomType: String(visualFilters.roomType || ''),
+        bedType: String(visualFilters.bedType || ''),
+        bedrooms: division === 'STAYS' || division === 'RENTALS' || division === 'BUY' ? toNumber(bedrooms) : null,
+        bathrooms: division === 'STAYS' || division === 'RENTALS' || division === 'BUY' ? toNumber(bathrooms) : null,
+        guestCapacity: division === 'STAYS' ? toNumber(guestCapacity) : null,
+        amenities: Array.isArray(visualFilters.amenities) ? visualFilters.amenities : visualFilters.amenities ? [visualFilters.amenities] : [],
+        priceMinor: toMinor(price),
+        currency: listingCurrency,
+      })
+      setDescription(isAr ? result.descriptionAr : result.descriptionEn || result.descriptionAr)
+      setDescriptionAiState('idle')
+    } catch (error) {
+      setDescriptionAiState('error')
+      setDescriptionAiError(error instanceof Error ? error.message : isAr ? 'تعذر توليد الوصف.' : 'Could not generate the description.')
+    }
   }
 
   const next = async () => {
@@ -852,6 +932,26 @@ export function SellerListingWizard({ lang }: Props) {
                   value={description}
                 />
               </label>
+              <button
+                className="seller-secondary-button"
+                disabled={descriptionAiState === 'generating' || !title.trim()}
+                onClick={() => void suggestDescription()}
+                type="button"
+              >
+                {descriptionAiState === 'generating'
+                  ? isAr
+                    ? 'جارٍ توليد الوصف...'
+                    : 'Generating description...'
+                  : isAr
+                    ? 'اقتراح وصف بالذكاء الاصطناعي'
+                    : 'Suggest description with AI'}
+              </button>
+              {descriptionAiState === 'error' && (
+                <div className="seller-inline-alert">
+                  <strong>{isAr ? 'تعذر التوليد' : 'Could not generate'}</strong>
+                  <span>{descriptionAiError}</span>
+                </div>
+              )}
               {isAdvertisingFlow && (
                 <div className="seller-form-grid">
                   <TouchChoiceGroup
@@ -940,20 +1040,18 @@ export function SellerListingWizard({ lang }: Props) {
               </label>
               <div className="seller-map-panel">
                 <div className="seller-map-card" aria-label={isAr ? 'خريطة موقع الإعلان' : 'Listing location map'}>
-                  <div className="seller-map-grid-lines" />
-                  <div className="seller-map-route seller-map-route-a" />
-                  <div className="seller-map-route seller-map-route-b" />
-                  <button
-                    aria-label={isAr ? 'تأكيد دبوس الموقع' : 'Confirm map pin'}
-                    className={`seller-map-pin ${mapPinConfirmed ? 'confirmed' : ''}`}
-                    onClick={() => setMapPinConfirmed(true)}
-                    type="button"
-                  >
-                    <span />
-                  </button>
+                  <SellerLocationMap
+                    latitude={toNumber(latitude)}
+                    longitude={toNumber(longitude)}
+                    onMove={(lat, lng) => {
+                      setLatitude(lat.toFixed(6))
+                      setLongitude(lng.toFixed(6))
+                      setMapPinConfirmed(true)
+                    }}
+                  />
                   <div className="seller-map-chip">
                     <strong>{selectedAreaLabel || selectedCityLabel}</strong>
-                    <span>{mapPinConfirmed ? (isAr ? 'تم تأكيد الموقع' : 'Pin confirmed') : isAr ? 'اضغط الدبوس لتأكيد الموقع' : 'Press the pin to confirm'}</span>
+                    <span>{mapPinConfirmed ? (isAr ? 'تم تأكيد الموقع' : 'Pin confirmed') : isAr ? 'اضغط أو اسحب الدبوس على الخريطة لتحديد الموقع' : 'Click or drag the pin on the map to set the location'}</span>
                   </div>
                 </div>
                 <div className="seller-map-controls">
@@ -1308,6 +1406,18 @@ export function SellerListingWizard({ lang }: Props) {
                         <b>{isAr ? 'المبلغ' : 'Amount'}</b>
                         <p>{`USD ${selectedListingPlan.priceUsd}`}</p>
                       </div>
+                      <div className="seller-sham-qr-panel">
+                        {listingPlanQrDataUrl ? (
+                          <img className="seller-sham-qr" src={listingPlanQrDataUrl} alt={isAr ? 'رمز QR شام كاش' : 'Sham Cash QR'} />
+                        ) : (
+                          <div className="seller-sham-qr seller-sham-qr-loading" aria-label={isAr ? 'جارٍ إنشاء رمز QR' : 'Generating QR code'} />
+                        )}
+                        <div>
+                          <strong>{isAr ? 'امسح QR أو ادفع بالكود' : 'Scan QR or pay by code'}</strong>
+                          <span dir="ltr">SYBNB-SHAM-LISTING</span>
+                          <small>{isAr ? 'اكتب هذا الكود في ملاحظة الدفع:' : 'Write this code in the payment note:'} <b dir="ltr">{listingPlanFollowCode}</b></small>
+                        </div>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -1320,6 +1430,26 @@ export function SellerListingWizard({ lang }: Props) {
                       <div>
                         <b>{isAr ? 'المبلغ' : 'Amount'}</b>
                         <p>{`USD ${selectedListingPlan.priceUsd}`}</p>
+                      </div>
+                      <div className="seller-card-payment-form">
+                        <label>
+                          <small>{isAr ? 'اسم حامل البطاقة' : 'Cardholder name'}</small>
+                          <input value={listingCardHolder} onChange={(event) => setListingCardHolder(event.target.value)} placeholder={isAr ? 'الاسم كما هو على البطاقة' : 'Name on card'} />
+                        </label>
+                        <label>
+                          <small>{isAr ? 'رقم البطاقة' : 'Card number'}</small>
+                          <input dir="ltr" inputMode="numeric" maxLength={19} value={listingCardNumber} onChange={(event) => setListingCardNumber(event.target.value)} placeholder="4242 4242 4242 4242" />
+                        </label>
+                        <div className="seller-card-row">
+                          <label>
+                            <small>{isAr ? 'تاريخ الانتهاء' : 'Expiry date'}</small>
+                            <input dir="ltr" inputMode="numeric" maxLength={5} value={listingCardExpiry} onChange={(event) => setListingCardExpiry(event.target.value)} placeholder="MM/YY" />
+                          </label>
+                          <label>
+                            <small>{isAr ? 'CVV' : 'CVV'}</small>
+                            <input dir="ltr" inputMode="numeric" maxLength={4} value={listingCardCvv} onChange={(event) => setListingCardCvv(event.target.value)} placeholder="123" />
+                          </label>
+                        </div>
                       </div>
                     </>
                   )}
@@ -1600,6 +1730,25 @@ function TouchChoiceGroup({
 
 function toNumber(value: string) {
   return Number(String(value).replace(/[^\d.]/g, '')) || 0
+}
+
+// Real city-center coordinates for each Syrian governorate capital, used only to recenter the
+// map when the host switches governorate/city -- the host then drags/clicks the exact spot.
+const GOVERNORATE_CENTERS: Record<string, [number, number]> = {
+  damascus: [33.5138, 36.2765],
+  'rif-dimashq': [33.5731, 36.4028],
+  aleppo: [36.2021, 37.1343],
+  homs: [34.7324, 36.7137],
+  hama: [35.1318, 36.75],
+  latakia: [35.5317, 35.7915],
+  tartus: [34.8886, 35.8866],
+  idlib: [35.9306, 36.6339],
+  daraa: [32.6189, 36.1021],
+  sweida: [32.7094, 36.5661],
+  'deir-ezzor': [35.3359, 40.1408],
+  raqqa: [35.95, 39.01],
+  hasakah: [36.502, 40.746],
+  quneitra: [33.1257, 35.8245],
 }
 
 function toMinor(value: string) {

@@ -12,6 +12,7 @@ import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
+import { generateListingDescriptionMessage } from '../lib/ai-insights.mjs'
 
 // SECURITY (S7/S10): the ONLY guest + payment-proof fields a host is allowed to receive.
 // A host must never see the guest's email, nor a proof's uploaded transfer screenshot (proofAssetUrl),
@@ -197,6 +198,15 @@ export async function handleHost(req, res, url, context) {
     // This is the only path that ever spends real AI money — surfaces AI_NOT_CONFIGURED honestly
     // to the host who explicitly clicked the button, unlike the free opportunistic signal above.
     const result = await generateHostInsights(context.user.id)
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  if (url.pathname === '/api/host/listings/describe') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const body = await readJson(req)
+    const facts = sanitizeListingDescriptionFacts(body)
+    const result = await generateListingDescriptionMessage(facts)
     return json(res, 200, { ok: true, ...result })
   }
 
@@ -697,6 +707,35 @@ function normalizeHostDecision(value) {
   error.code = 'INVALID_HOST_REQUEST_DECISION'
   error.expose = true
   throw error
+}
+
+// Whitelisted, length-capped facts only -- these get embedded in the AI prompt as untrusted user
+// input, so we cap string/array sizes here rather than trust the client to keep the payload sane.
+function sanitizeListingText(value, maxLength) {
+  if (typeof value !== 'string') return ''
+  return value.trim().slice(0, maxLength)
+}
+
+function sanitizeListingDescriptionFacts(body) {
+  const amenities = Array.isArray(body?.amenities)
+    ? body.amenities.filter((item) => typeof item === 'string').slice(0, 20).map((item) => sanitizeListingText(item, 40))
+    : []
+  return {
+    division: sanitizeListingText(body?.division, 40),
+    titleAr: sanitizeListingText(body?.titleAr, 200),
+    governorate: sanitizeListingText(body?.governorate, 80),
+    city: sanitizeListingText(body?.city, 80),
+    area: sanitizeListingText(body?.area, 80),
+    propertyType: sanitizeListingText(body?.propertyType, 40),
+    roomType: sanitizeListingText(body?.roomType, 40),
+    bedType: sanitizeListingText(body?.bedType, 40),
+    bedrooms: Number.isFinite(Number(body?.bedrooms)) ? Number(body.bedrooms) : null,
+    bathrooms: Number.isFinite(Number(body?.bathrooms)) ? Number(body.bathrooms) : null,
+    guestCapacity: Number.isFinite(Number(body?.guestCapacity)) ? Number(body.guestCapacity) : null,
+    amenities,
+    priceMinor: Number.isFinite(Number(body?.priceMinor)) ? Number(body.priceMinor) : null,
+    currency: sanitizeListingText(body?.currency, 8),
+  }
 }
 
 function normalizeCheckpointAction(value) {
