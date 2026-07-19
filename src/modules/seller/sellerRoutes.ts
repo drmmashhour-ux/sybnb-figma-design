@@ -3,6 +3,7 @@ export const SELLER_ROUTE_COVERAGE = [
   '/list-for-rent',
   '/sell-property',
   '/sell-car',
+  '/list-project',
   '/sell',
   '/sell/account',
   '/sell/platform',
@@ -21,6 +22,7 @@ export function isSellerRoute(path: string) {
     path === '/list-for-rent' ||
     path === '/sell-property' ||
     path === '/sell-car' ||
+    path === '/list-project' ||
     path === '/sell' ||
     path.startsWith('/sell/') ||
     path.startsWith('/advertising/')

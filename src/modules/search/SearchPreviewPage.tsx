@@ -222,17 +222,32 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         </div>
       </section>
 
-      {effectiveInitialDivision === 'cars' && (
+      {(effectiveInitialDivision === 'cars' || effectiveInitialDivision === 'newConstruction') && (
         <section className="search-sell-banner">
           <div>
-            <strong>{lang === 'ar' ? 'بيع سيارتك' : 'Sell your car'}</strong>
+            <strong>
+              {effectiveInitialDivision === 'cars'
+                ? lang === 'ar'
+                  ? 'بيع سيارتك'
+                  : 'Sell your car'
+                : lang === 'ar'
+                  ? 'انشر مشروعك'
+                  : 'List your project'}
+            </strong>
             <span>
-              {lang === 'ar'
-                ? 'انشر سيارتك للبيع بخطة نشر ثابتة، وأدر طلبات التواصل مباشرة.'
-                : 'List your car for sale with a fixed publishing plan, and manage inquiries directly.'}
+              {effectiveInitialDivision === 'cars'
+                ? lang === 'ar'
+                  ? 'انشر سيارتك للبيع بخطة نشر ثابتة، وأدر طلبات التواصل مباشرة.'
+                  : 'List your car for sale with a fixed publishing plan, and manage inquiries directly.'
+                : lang === 'ar'
+                  ? 'انشر مشروع البناء الجديد بخطة نشر ثابتة، وأدر طلبات المهتمين مباشرة.'
+                  : 'List your new construction project with a fixed publishing plan, and manage inquiries directly.'}
             </span>
           </div>
-          <button type="button" onClick={() => navigate('/sell-car')}>
+          <button
+            type="button"
+            onClick={() => navigate(effectiveInitialDivision === 'cars' ? '/sell-car' : '/list-project')}
+          >
             {lang === 'ar' ? 'ابدأ الآن' : 'Get started'}
           </button>
         </section>

@@ -6,7 +6,7 @@ import type { CSSVars } from '../../shared/theme/cssVars'
 
 type Props = {
   lang: Lang
-  intent: 'host' | 'rent' | 'sell' | 'car'
+  intent: 'host' | 'rent' | 'sell' | 'car' | 'project'
 }
 
 const ROLE_STORAGE_KEY = 'sybnb_v6_selected_seller_role'
@@ -21,7 +21,7 @@ const DRAFT_STORAGE_KEY = 'sybnb_v6_sell_wizard_draft'
 const STR_COMMISSION_LABEL = { ar: '13%', en: '13%' }
 
 type IntentConfig = {
-  division: 'STAYS' | 'RENTALS' | 'BUY' | 'CARS'
+  division: 'STAYS' | 'RENTALS' | 'BUY' | 'CARS' | 'NEW_CONSTRUCTION'
   eyebrow: Record<Lang, string>
   title: Record<Lang, string>
   body: Record<Lang, string>
@@ -117,6 +117,33 @@ const INTENT_CONFIG: Record<Props['intent'], IntentConfig> = {
     },
     altLinkLabel: { ar: 'تريد بيع سلعة أخرى بدلاً من ذلك؟', en: 'Want to sell something else instead?' },
   },
+  project: {
+    division: 'NEW_CONSTRUCTION',
+    eyebrow: { ar: 'SYBNB / مشاريع جديدة', en: 'SYBNB / New construction' },
+    title: { ar: 'انشر مشروعك مع SYBNB', en: 'List your project with SYBNB' },
+    body: {
+      ar: 'انشر مشروع البناء الجديد مع المخططات والطوابق والوحدات، وصِل إلى مشترين ومستثمرين جادين داخل سوريا.',
+      en: 'List your new construction project with plans, floors, and units, and reach serious buyers and investors across Syria.',
+    },
+    logoCaption: { ar: 'نشر واضح، متابعة مباشرة مع المهتمين', en: 'Clear listing, direct follow-up with interested buyers' },
+    perks: [
+      { ar: 'يصل مشروعك لمشترين ومستثمرين يبحثون فعلاً داخل سوريا.', en: 'Your project reaches buyers and investors actively searching across Syria.' },
+      { ar: 'تراخيص البناء والمخططات تُراجع من الإدارة قبل النشر.', en: 'Building permits and plans are reviewed by admin before publishing.' },
+      { ar: 'تدير الوحدات وطلبات التواصل من حسابك مباشرة.', en: 'Manage units and inquiries directly from your account.' },
+    ],
+    pricingTitle: { ar: 'تسعيرك من أول يوم', en: 'Your pricing, from day one' },
+    pricingBody: {
+      ar: 'تختار خطة نشر ثابتة (Plus أو Premium) وتدفعها مرة واحدة -- بدون أي عمولة على أسعار الوحدات.',
+      en: 'Pick a fixed publishing plan (Plus or Premium) and pay it once -- no commission on unit prices.',
+    },
+    altLinkLabel: { ar: 'تريد بيع عقار واحد بدلاً من مشروع؟', en: 'Want to list a single property instead of a project?' },
+  },
+}
+
+function roleForDivision(division: IntentConfig['division']) {
+  if (division === 'CARS') return 'multi'
+  if (division === 'NEW_CONSTRUCTION') return 'developer'
+  return 'owner'
 }
 
 export function SellerIntentPage({ lang, intent }: Props) {
@@ -126,7 +153,7 @@ export function SellerIntentPage({ lang, intent }: Props) {
   const premium = SELLER_PLANS.find((plan) => plan.id === 'premium') ?? SELLER_PLANS[1]
 
   function startFlow() {
-    window.localStorage.setItem(ROLE_STORAGE_KEY, config.division === 'CARS' ? 'multi' : 'owner')
+    window.localStorage.setItem(ROLE_STORAGE_KEY, roleForDivision(config.division))
     window.localStorage.setItem(FLOW_STORAGE_KEY, 'listing')
     if (config.division !== 'STAYS') {
       window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ division: config.division }))

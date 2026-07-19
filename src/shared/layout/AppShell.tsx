@@ -195,6 +195,14 @@ function getRouteContext(path: string, isAr: boolean) {
       nextPath: '',
     }
   }
+  if (path === '/list-project') {
+    return {
+      section: isAr ? 'مشاريع جديدة' : 'New construction',
+      page: isAr ? 'انشر مشروعك' : 'List your project',
+      backPath: '/new-construction',
+      nextPath: '',
+    }
+  }
   if (path.startsWith('/sell') || path.startsWith('/advertising')) {
     const isPaymentTunnel = path.includes('/payment')
     return {
