@@ -793,7 +793,10 @@ export async function createSellerAccountSession(input: {
   try {
     session = await register(account)
   } catch {
-    session = await login(input.email, input.password)
+    // The seller wizard's "Mobile verification" step only ever verifies phone (there is no email
+    // OTP option in this UI) -- login by phone first when one was provided, since login(email, ...)
+    // would fail the server's staff-login OTP gate (no email verification exists to check against).
+    session = input.phone ? await loginByPhone(input.phone, input.password) : await login(input.email, input.password)
   }
 
   const storedSession = {
