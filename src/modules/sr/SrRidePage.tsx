@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { navigate } from '../../app/routes'
 import { srRideFilterGroupsFromConfig, type VisualFilterSelection } from '../../engines/filters'
+import { DivisionTriad } from '../../shared/layout/DivisionTriad'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   createPrototypeSrRide,
@@ -238,6 +239,8 @@ export function SrRidePage({ lang }: Props) {
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
       </section>
+
+      <DivisionTriad lang={lang} offerLabel={{ ar: 'كن سائقاً', en: 'Drive with SR' }} offerHref="/driver" />
 
       <section style={styles.driveBanner}>
         <div>

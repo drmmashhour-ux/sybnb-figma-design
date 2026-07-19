@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { fetchApprovedListings, type PlatformListing } from '../../shared/api/platformApi'
+import { DivisionTriad } from '../../shared/layout/DivisionTriad'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
 import { MARKETPLACE_CATEGORIES, MARKETPLACE_CONDITIONS, categoryLabel, conditionLabel } from '../../shared/marketplace/categories'
 
@@ -77,6 +78,11 @@ export function MarketplaceBrowsePage({ lang }: { lang: Lang }) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+      <DivisionTriad
+        lang={lang}
+        offerLabel={{ ar: 'بيع شيء ما', en: 'Sell something' }}
+        offerHref="/marketplace/sell"
+      />
       <div style={styles.header}>
         <div>
           <h1 style={styles.title}>{t.title}</h1>

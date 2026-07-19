@@ -8,6 +8,7 @@ import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/Vi
 import { fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
+import { DivisionTriad } from '../../shared/layout/DivisionTriad'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
 
 type Props = {
@@ -425,6 +426,11 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+      <DivisionTriad
+        lang={lang}
+        offerLabel={isBuyMode ? { ar: 'بيع عقارك', en: 'Sell your property' } : { ar: 'أجّر عقارك', en: 'Rent out your property' }}
+        offerHref={isBuyMode ? '/sell-property' : '/list-for-rent'}
+      />
       <section style={styles.listOwnerBanner}>
         <div style={{ display: 'grid', gap: 4 }}>
           <strong style={{ fontSize: 17 }}>{isBuyMode ? (isAr ? 'بيع عقارك' : 'Sell your property') : (isAr ? 'أجّر عقارك' : 'Rent out your property')}</strong>

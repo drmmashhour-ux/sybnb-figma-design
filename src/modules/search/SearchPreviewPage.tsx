@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
+import { DivisionTriad } from '../../shared/layout/DivisionTriad'
 import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
@@ -150,6 +151,20 @@ const DIVISION_IMAGES: Record<string, string> = {
   MARKETPLACE: '/assets/divisions/marketplace.webp',
 }
 
+// Offer-side (supply) entry point per division, for the demand/offer/admin triad -- see
+// DivisionTriad.tsx for the reasoning behind the three-part structure.
+const OFFER_ROUTE_BY_DIVISION: Partial<Record<SearchDivision, string>> = {
+  stays: '/become-host',
+  cars: '/sell-car',
+  newConstruction: '/list-project',
+}
+
+const OFFER_LABEL_BY_DIVISION: Partial<Record<SearchDivision, Record<Lang, string>>> = {
+  stays: { ar: 'كن مضيفاً', en: 'Become a host' },
+  cars: { ar: 'بيع سيارتك', en: 'Sell your car' },
+  newConstruction: { ar: 'انشر مشروعك', en: 'List your project' },
+}
+
 export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'general' }: SearchPreviewPageProps) {
   const t = T[lang]
   const [effectiveInitialDivision, setEffectiveInitialDivision] = useState<SearchDivision>(() => readInitialSearchDivision(initialDivision))
@@ -159,6 +174,8 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const isStaysEntry = entry === 'stays'
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
+  const offerHref = OFFER_ROUTE_BY_DIVISION[effectiveInitialDivision]
+  const offerLabel = OFFER_LABEL_BY_DIVISION[effectiveInitialDivision]
   const isSampleMode = listings.some(isSampleListing)
 
   useEffect(() => {
@@ -221,6 +238,8 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <small>{isSampleMode ? t.sampleResults : t.liveResults}</small>
         </div>
       </section>
+
+      {offerHref && offerLabel && <DivisionTriad lang={lang} offerLabel={offerLabel} offerHref={offerHref} />}
 
       {(effectiveInitialDivision === 'cars' || effectiveInitialDivision === 'newConstruction') && (
         <section className="search-sell-banner">

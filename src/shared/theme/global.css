@@ -6173,6 +6173,36 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   padding: 0 22px;
 }
 
+.division-triad {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.division-triad-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: #9aa7bd;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 850;
+  min-height: 40px;
+  padding: 0 18px;
+}
+
+button.division-triad-item:hover {
+  border-color: rgba(82, 108, 255, 0.5);
+  color: #fff;
+}
+
+.division-triad-item.active {
+  background: rgba(82, 108, 255, 0.16);
+  border-color: rgba(82, 108, 255, 0.5);
+  color: #fff;
+  cursor: default;
+}
+
 .search-experience > section[style] {
   border-radius: 18px !important;
   max-width: 100%;
