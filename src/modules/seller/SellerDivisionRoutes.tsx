@@ -27,6 +27,10 @@ export function SellerDivisionRoutes({ lang, path }: Props) {
     return <SellerIntentPage intent="sell" lang={lang} />
   }
 
+  if (path === '/sell-car') {
+    return <SellerIntentPage intent="car" lang={lang} />
+  }
+
   if (advertisingPaymentMatch) {
     return <SellerAdvertisingPaymentPage lang={lang} methodId={advertisingPaymentMatch[1]} />
   }

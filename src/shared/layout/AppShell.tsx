@@ -187,6 +187,14 @@ function getRouteContext(path: string, isAr: boolean) {
       nextPath: '',
     }
   }
+  if (path === '/sell-car') {
+    return {
+      section: isAr ? 'المركبات' : 'Cars',
+      page: isAr ? 'بيع سيارتك' : 'Sell your car',
+      backPath: '/cars',
+      nextPath: '',
+    }
+  }
   if (path.startsWith('/sell') || path.startsWith('/advertising')) {
     const isPaymentTunnel = path.includes('/payment')
     return {

@@ -6138,6 +6138,41 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   text-align: center;
 }
 
+.search-sell-banner {
+  align-items: center;
+  background: linear-gradient(135deg, rgba(82, 108, 255, 0.14), rgba(16, 17, 25, 0.9));
+  border: 1px solid rgba(82, 108, 255, 0.35);
+  border-radius: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 18px 22px;
+}
+
+.search-sell-banner strong {
+  color: #fff;
+  display: block;
+  font-size: 17px;
+}
+
+.search-sell-banner span {
+  color: #9aa7bd;
+  display: block;
+  font-size: 13.5px;
+  margin-top: 4px;
+}
+
+.search-sell-banner button {
+  background: #526cff;
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 950;
+  min-height: 50px;
+  padding: 0 22px;
+}
+
 .search-experience > section[style] {
   border-radius: 18px !important;
   max-width: 100%;

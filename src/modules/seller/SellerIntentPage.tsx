@@ -6,7 +6,7 @@ import type { CSSVars } from '../../shared/theme/cssVars'
 
 type Props = {
   lang: Lang
-  intent: 'host' | 'rent' | 'sell'
+  intent: 'host' | 'rent' | 'sell' | 'car'
 }
 
 const ROLE_STORAGE_KEY = 'sybnb_v6_selected_seller_role'
@@ -21,7 +21,7 @@ const DRAFT_STORAGE_KEY = 'sybnb_v6_sell_wizard_draft'
 const STR_COMMISSION_LABEL = { ar: '13%', en: '13%' }
 
 type IntentConfig = {
-  division: 'STAYS' | 'RENTALS' | 'BUY'
+  division: 'STAYS' | 'RENTALS' | 'BUY' | 'CARS'
   eyebrow: Record<Lang, string>
   title: Record<Lang, string>
   body: Record<Lang, string>
@@ -96,6 +96,27 @@ const INTENT_CONFIG: Record<Props['intent'], IntentConfig> = {
     },
     altLinkLabel: { ar: 'تفضل أن تدير SYBNB عملية البيع بالكامل؟', en: 'Prefer SYBNB to manage the whole sale for you?' },
   },
+  car: {
+    division: 'CARS',
+    eyebrow: { ar: 'SYBNB / المركبات', en: 'SYBNB / Cars' },
+    title: { ar: 'بيع سيارتك مع SYBNB', en: 'Sell your car with SYBNB' },
+    body: {
+      ar: 'انشر سيارتك للبيع وصِل إلى مشترين جادين داخل سوريا. خطة نشر ثابتة، بدون أي عمولة على سعر البيع -- أنت تدير التفاوض والمتابعة مباشرة.',
+      en: 'List your car for sale and reach serious buyers across Syria. A fixed publishing plan, no commission on the sale price -- you manage negotiation and follow-up directly.',
+    },
+    logoCaption: { ar: 'نشر واضح، تفاوض مباشر مع المشترين', en: 'Clear listing, direct negotiation with buyers' },
+    perks: [
+      { ar: 'يصل إعلان سيارتك لمشترين يبحثون فعلاً داخل سوريا.', en: 'Your car reaches buyers actively searching across Syria.' },
+      { ar: 'أوراق المركبة تُراجع من الإدارة قبل النشر.', en: 'Vehicle papers are reviewed by admin before publishing.' },
+      { ar: 'تدير طلبات التواصل والمعاينة من حسابك مباشرة.', en: 'Manage inquiries and viewing requests directly from your account.' },
+    ],
+    pricingTitle: { ar: 'تسعيرك من أول يوم', en: 'Your pricing, from day one' },
+    pricingBody: {
+      ar: 'تختار خطة نشر ثابتة (Plus أو Premium) وتدفعها مرة واحدة -- بدون أي عمولة على سعر بيع السيارة.',
+      en: 'Pick a fixed publishing plan (Plus or Premium) and pay it once -- no commission on the car sale price.',
+    },
+    altLinkLabel: { ar: 'تريد بيع سلعة أخرى بدلاً من ذلك؟', en: 'Want to sell something else instead?' },
+  },
 }
 
 export function SellerIntentPage({ lang, intent }: Props) {
@@ -105,7 +126,7 @@ export function SellerIntentPage({ lang, intent }: Props) {
   const premium = SELLER_PLANS.find((plan) => plan.id === 'premium') ?? SELLER_PLANS[1]
 
   function startFlow() {
-    window.localStorage.setItem(ROLE_STORAGE_KEY, 'owner')
+    window.localStorage.setItem(ROLE_STORAGE_KEY, config.division === 'CARS' ? 'multi' : 'owner')
     window.localStorage.setItem(FLOW_STORAGE_KEY, 'listing')
     if (config.division !== 'STAYS') {
       window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ division: config.division }))

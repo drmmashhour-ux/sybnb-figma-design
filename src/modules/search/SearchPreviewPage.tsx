@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { navigate } from '../../app/routes'
 import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
@@ -220,6 +221,22 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <small>{isSampleMode ? t.sampleResults : t.liveResults}</small>
         </div>
       </section>
+
+      {effectiveInitialDivision === 'cars' && (
+        <section className="search-sell-banner">
+          <div>
+            <strong>{lang === 'ar' ? 'بيع سيارتك' : 'Sell your car'}</strong>
+            <span>
+              {lang === 'ar'
+                ? 'انشر سيارتك للبيع بخطة نشر ثابتة، وأدر طلبات التواصل مباشرة.'
+                : 'List your car for sale with a fixed publishing plan, and manage inquiries directly.'}
+            </span>
+          </div>
+          <button type="button" onClick={() => navigate('/sell-car')}>
+            {lang === 'ar' ? 'ابدأ الآن' : 'Get started'}
+          </button>
+        </section>
+      )}
 
       <UnifiedSearchBar
         lang={lang}
