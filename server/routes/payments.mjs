@@ -159,11 +159,48 @@ export async function creditWalletTopupSession(session) {
   })
 }
 
+// Sourced from Stripe's own balance_transaction for this specific charge -- never an assumed
+// rate, since the real fee varies by card type/country and, when the account settles in a
+// different currency than the charge (this account charges USD but settles in CAD), by a
+// currency-conversion fee on top of the base processing fee. Converts the fee back into the
+// charge's own currency using the very exchange_rate Stripe applied to this charge.
+//
+// The balance_transaction isn't always attached to the charge the instant it succeeds -- when a
+// currency conversion is involved (as here), Stripe needs a moment to resolve the FX rate before
+// attaching fee/exchange_rate. Retrying immediately with no wait reliably read this as "not there
+// yet" and returned 0, silently skipping the host-side deduction. Poll with short backoff instead
+// of a single best-effort read.
+async function fetchStripeCardFeeMinor(session) {
+  if (!session.payment_intent) return 0
+  const delaysMs = [300, 700, 1500, 3000]
+  for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
+    try {
+      const intent = await stripe.paymentIntents.retrieve(session.payment_intent, {
+        expand: ['latest_charge.balance_transaction'],
+      })
+      const balanceTransaction = intent.latest_charge?.balance_transaction
+      if (balanceTransaction && typeof balanceTransaction.fee === 'number') {
+        const exchangeRate = balanceTransaction.exchange_rate || 1
+        return Math.max(0, Math.round(balanceTransaction.fee / exchangeRate / 100))
+      }
+    } catch {
+      // Fall through to retry/give-up below -- never let a fee-lookup failure block a real,
+      // already-captured payment from being confirmed.
+    }
+    if (attempt < delaysMs.length) {
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]))
+    }
+  }
+  return 0
+}
+
 export async function finalizeStripeSession(session) {
   // A wallet top-up is credited exclusively by creditWalletTopupSession() from the webhook — never here.
   if (session.metadata?.kind === 'wallet_topup') return null
   const bookingId = session.metadata?.bookingId
   if (!bookingId || session.payment_status !== 'paid') return null
+
+  const paymentProcessingFeeMinor = await fetchStripeCardFeeMinor(session)
 
   return db().$transaction(async (tx) => {
     const existingProof = await tx.paymentProof.findFirst({
@@ -192,6 +229,7 @@ export async function finalizeStripeSession(session) {
       proofId: created.id,
       actorUserId,
       note: 'Auto-approved: Stripe confirmed the card charge was captured.',
+      paymentProcessingFeeMinor,
     })
 
     await tx.adminAuditLog.create({

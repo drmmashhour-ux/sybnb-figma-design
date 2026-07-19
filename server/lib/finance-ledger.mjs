@@ -134,7 +134,10 @@ export async function recordWalletEntry(tx, {
 
 // Shared by the admin manual-review path and any automatic payment confirmation (e.g. Stripe)
 // so both move a payment proof to APPROVED and progress the booking the exact same way.
-export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
+// Only ever non-zero for card payments (see server/routes/payments.mjs), sourced from the real
+// fee Stripe reports on that specific charge -- never an assumed/hardcoded rate. Manual proofs
+// (Sham Cash, bank transfer, etc.) have no processor fee, so this defaults to 0 for them.
+export async function approvePaymentProof(tx, { proofId, actorUserId, note, paymentProcessingFeeMinor = 0 }) {
   const existing = await tx.paymentProof.findUnique({
     where: { id: proofId },
     include: { booking: { include: { listing: true } } },
@@ -193,15 +196,22 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     }
 
     const split = bookingFinanceSplit(existing.booking, proof.amountMinor)
+    // Card-processing fee comes out of the HOST's share, never the platform's commission --
+    // the commission (adminShareMinor below) is still computed on the full rent regardless.
+    const clampedFeeMinor = Math.max(0, Math.min(Math.round(paymentProcessingFeeMinor), split.hostGrossMinor))
+    const hostNetMinor = split.hostGrossMinor - clampedFeeMinor
     await recordWalletEntry(tx, {
       userId: existing.booking?.listing?.ownerId,
       type: 'HOLD',
-      amountMinor: split.hostGrossMinor,
+      amountMinor: hostNetMinor,
       currency: proof.currency,
       referenceType: 'booking_payout',
       referenceId: proof.bookingId,
       keyParts: ['booking-host-hold', proof.bookingId, proof.id],
-      note: 'Host payout is protected until booking confirmation and completion.',
+      note:
+        clampedFeeMinor > 0
+          ? `Host payout is protected until booking confirmation and completion. A ${proof.currency} ${clampedFeeMinor} card-processing fee (charged by the payment processor on this card payment) was already deducted from this amount.`
+          : 'Host payout is protected until booking confirmation and completion.',
     })
     if (actorUserId) {
       await recordWalletEntry(tx, {
