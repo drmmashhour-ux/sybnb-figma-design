@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { navigate } from '../../app/routes'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
@@ -424,6 +425,23 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+      <section style={styles.listOwnerBanner}>
+        <div style={{ display: 'grid', gap: 4 }}>
+          <strong style={{ fontSize: 17 }}>{isBuyMode ? (isAr ? 'بيع عقارك' : 'Sell your property') : (isAr ? 'أجّر عقارك' : 'Rent out your property')}</strong>
+          <span style={{ color: colors.muted, fontSize: 13.5 }}>
+            {isBuyMode
+              ? isAr
+                ? 'انشر عقارك للبيع بخطة نشر ثابتة، وأدر طلبات التواصل بنفسك.'
+                : 'List your property for sale with a fixed publishing plan, and manage inquiries yourself.'
+              : isAr
+                ? 'انشر عقارك للإيجار الشهري بخطة نشر ثابتة، وأدر المستأجرين بنفسك.'
+                : 'List your property for monthly rent with a fixed publishing plan, and manage tenants yourself.'}
+          </span>
+        </div>
+        <button style={styles.listOwnerButton} onClick={() => navigate(isBuyMode ? '/sell-property' : '/list-for-rent')}>
+          {isAr ? 'ابدأ الآن' : 'Get started'}
+        </button>
+      </section>
       <section style={styles.searchCapsule}>
         <div style={styles.searchCapsuleText}>
           <span style={styles.eyebrow}>{t.searchCapsule}</span>
@@ -701,6 +719,8 @@ function Info({ label, value }: { label: string; value: string }) {
 
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: colors.bg, color: colors.text, padding: '0 clamp(14px, 3vw, 36px) 90px', display: 'grid', gap: 28, maxWidth: 1240, margin: '0 auto' },
+  listOwnerBanner: { border: `1px solid ${withAlpha(colors.blue, 0.35)}`, borderRadius: 20, background: `linear-gradient(135deg, ${withAlpha(colors.blue, 0.14)}, ${withAlpha(colors.bg2, 0.9)})`, padding: '16px 20px', display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', justifyContent: 'space-between' },
+  listOwnerButton: { minHeight: 50, border: 0, borderRadius: 14, background: colors.blue, color: colors.text, fontWeight: 950, padding: '0 22px', boxShadow: `0 12px 26px ${withAlpha(colors.blue, 0.24)}` },
   searchCapsule: { border: `1px solid ${colors.line}`, borderRadius: 30, background: `linear-gradient(135deg, ${withAlpha(colors.blue, 0.16)}, ${withAlpha(colors.bg2, 0.96)})`, padding: 16, display: 'grid', gap: 14, boxShadow: '0 18px 55px rgba(0,0,0,.22)', position: 'relative', zIndex: 3 },
   searchCapsuleText: { display: 'grid', gap: 5, justifyItems: 'start', color: colors.text },
   mainGroupCapsule: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 22, background: withAlpha(colors.bg, 0.64), padding: 12, display: 'grid', gap: 10 },

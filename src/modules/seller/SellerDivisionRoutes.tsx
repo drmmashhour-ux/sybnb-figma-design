@@ -1,8 +1,8 @@
 import type { Lang } from '../../engines/language/languageEngine'
-import { BecomeHostPage } from './BecomeHostPage'
 import { SellerAccountPage } from './SellerAccountPage'
 import { SellerAdvertisingPaymentPage } from './SellerAdvertisingPaymentPage'
 import { SellerEntryPage } from './SellerEntryPage'
+import { SellerIntentPage } from './SellerIntentPage'
 import { SellerListingWizard } from './SellerListingWizard'
 import { SellerSubmittedPage } from './SellerSubmittedPage'
 export { isSellerRoute } from './sellerRoutes'
@@ -16,7 +16,15 @@ export function SellerDivisionRoutes({ lang, path }: Props) {
   const advertisingPaymentMatch = path.match(/^\/advertising\/payment\/([^/]+)$/)
 
   if (path === '/become-host') {
-    return <BecomeHostPage lang={lang} />
+    return <SellerIntentPage intent="host" lang={lang} />
+  }
+
+  if (path === '/list-for-rent') {
+    return <SellerIntentPage intent="rent" lang={lang} />
+  }
+
+  if (path === '/sell-property') {
+    return <SellerIntentPage intent="sell" lang={lang} />
   }
 
   if (advertisingPaymentMatch) {

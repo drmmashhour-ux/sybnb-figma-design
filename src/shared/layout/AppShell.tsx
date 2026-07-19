@@ -171,6 +171,22 @@ function getRouteContext(path: string, isAr: boolean) {
       nextPath: '',
     }
   }
+  if (path === '/list-for-rent') {
+    return {
+      section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
+      page: isAr ? 'أجّر عقارك' : 'Rent out your property',
+      backPath: '/rentals',
+      nextPath: '',
+    }
+  }
+  if (path === '/sell-property') {
+    return {
+      section: isAr ? 'بيع العقارات' : 'Property sales',
+      page: isAr ? 'بيع عقارك' : 'Sell your property',
+      backPath: '/buy',
+      nextPath: '',
+    }
+  }
   if (path.startsWith('/sell') || path.startsWith('/advertising')) {
     const isPaymentTunnel = path.includes('/payment')
     return {
