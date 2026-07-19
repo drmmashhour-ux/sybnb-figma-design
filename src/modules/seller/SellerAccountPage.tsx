@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import QRCode from 'qrcode'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
@@ -163,6 +164,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [paymentProofFiles, setPaymentProofFiles] = useState<string[]>([])
   const [paymentAmountConfirmed, setPaymentAmountConfirmed] = useState(false)
   const [paymentStarted, setPaymentStarted] = useState(false)
+  const [shamCashQrDataUrl, setShamCashQrDataUrl] = useState('')
   const [cardNumber, setCardNumber] = useState('')
   const [cardExpiry, setCardExpiry] = useState('')
   const [cardCvv, setCardCvv] = useState('')
@@ -406,6 +408,33 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   useEffect(() => {
     window.localStorage.setItem(AD_BUSINESS_TYPE_STORAGE_KEY, businessType)
   }, [businessType])
+
+  // Real, scannable QR (same qrcode package + pattern already used in SyrianLocalWalletPaymentPage
+  // and SellerAdvertisingPaymentPage) -- previously this rendered a 7x7 grid of <i> elements with
+  // no CSS at all, so it was permanently invisible (just the empty background box) and never
+  // actually encoded anything even when visible.
+  useEffect(() => {
+    if (selectedPaymentMethod !== 'shamCash') return
+    let cancelled = false
+    const payload = [
+      'SYBNB-V6-SELLER-PAYMENT',
+      `CODE=${paymentMethod.destinationCode}`,
+      `AMOUNT=${plan.id === 'premium' ? 4900 : 1900}`,
+      `CURRENCY=USD`,
+      `FOLLOWUP=${adminFollowCode}`,
+    ].join('|')
+    void QRCode.toDataURL(payload, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      scale: 6,
+      color: { dark: '#07111f', light: '#f7f8ff' },
+    }).then((url) => {
+      if (!cancelled) setShamCashQrDataUrl(url)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedPaymentMethod, adminFollowCode, plan.id])
 
   // Create the real backend account as soon as identity + phone are verified, well before the
   // final "complete" step — the plan-payment proof below needs a real auth session to submit to,
@@ -1233,11 +1262,11 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
             />
             {selectedPaymentMethod === 'shamCash' && (
               <div className="seller-sham-qr-panel">
-                <div className="seller-sham-qr" aria-label={isAr ? 'رمز QR شام كاش' : 'Sham Cash QR'}>
-                  {Array.from({ length: 49 }, (_, index) => (
-                    <i key={index} className={(index + adminFollowCode.length + paymentMethod.destinationCode.length) % 3 === 0 ? 'on' : ''} />
-                  ))}
-                </div>
+                {shamCashQrDataUrl ? (
+                  <img className="seller-sham-qr" src={shamCashQrDataUrl} alt={isAr ? 'رمز QR شام كاش' : 'Sham Cash QR'} />
+                ) : (
+                  <div className="seller-sham-qr seller-sham-qr-loading" aria-label={isAr ? 'جارٍ إنشاء رمز QR' : 'Generating QR code'} />
+                )}
                 <div>
                   <strong>{isAr ? 'امسح QR أو ادفع بالكود' : 'Scan QR or pay by code'}</strong>
                   <span dir="ltr">{paymentMethod.destinationCode}</span>
