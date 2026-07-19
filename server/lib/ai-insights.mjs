@@ -21,6 +21,14 @@ export function isAnthropicConfigured() {
   return Boolean(anthropic)
 }
 
+// Haiku (and Claude models generally) will still wrap "strict JSON" in a ```json ... ``` markdown
+// fence even when the system prompt explicitly says not to -- observed live, not hypothetical.
+// Strip a wrapping fence before parsing rather than trusting the prompt instruction alone.
+function parseJsonResponse(text) {
+  const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  return JSON.parse(fenced ? fenced[1] : text)
+}
+
 const SYSTEM_PROMPT = `You write a single short pricing recommendation for a short-term rental host on the SYBNB platform. You are given real, already-computed facts about one listing (title, base nightly price, currency, and a count of upcoming open nights with no discount set). Restate only those facts naturally — never invent a number, date, or statistic that is not in the given facts. Suggest exactly one concrete action: adding a lower price override for some of those open nights to attract bookings during a slow period. Reply with strict JSON: {"messageAr": "...", "messageEn": "..."}. Keep each message under 240 characters, one or two sentences, no markdown.`
 
 export async function generatePricingInsightMessage(facts) {
@@ -54,7 +62,7 @@ export async function generatePricingInsightMessage(facts) {
 
   let parsed
   try {
-    parsed = JSON.parse(textBlock.text)
+    parsed = parseJsonResponse(textBlock.text)
   } catch {
     const error = new Error('AI response was not valid JSON.')
     error.statusCode = 502
@@ -101,7 +109,7 @@ export async function generateListingDescriptionMessage(facts) {
 
   let parsed
   try {
-    parsed = JSON.parse(textBlock.text)
+    parsed = parseJsonResponse(textBlock.text)
   } catch {
     const error = new Error('AI response was not valid JSON.')
     error.statusCode = 502
