@@ -312,6 +312,7 @@ export function AdminReviewPage({ lang }: Props) {
       onBookingDecision={(id, decision) => void decide('bookings', id, decision)}
       onPaymentDecision={(id, decision, shamCashReconciliation) => void decide('payments', id, decision, { shamCashReconciliation })}
       onIdDocumentDecision={(id, decision) => void decide('iddocuments', id, decision)}
+      onListingDecision={(id, decision) => void decide('listings', id, decision)}
       bookings={visibleBookings}
       payouts={payouts}
       payoutHoldDays={payoutHoldDays}
@@ -513,6 +514,7 @@ function ShortRentAdminCommandDashboard({
   onBookingDecision,
   onPaymentDecision,
   onIdDocumentDecision,
+  onListingDecision,
   payouts,
   payoutHoldDays,
   releasingPayoutId,
@@ -539,6 +541,7 @@ function ShortRentAdminCommandDashboard({
   onBookingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   onPaymentDecision: (id: string, decision: 'APPROVE' | 'REJECT', shamCashReconciliation?: ShamCashApprovalPayload) => void
   onIdDocumentDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
+  onListingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   payouts: AdminPayout[]
   payoutHoldDays: number
   releasingPayoutId: string
@@ -1170,11 +1173,28 @@ function ShortRentAdminCommandDashboard({
             {(listings.length ? listings : []).length === 0 ? (
               <AdminEmptyLine text={isAr ? 'لا توجد عقارات في قائمة الإدارة الحالية.' : 'No stays are in the current admin inventory.'} />
             ) : listings.map((listing) => (
-              <button key={listing.id} style={commandStyles.managementRow} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-                <span>{listingTitleText(listing, lang)}</span>
-                <small>{divisionText(listing.division, lang)}</small>
-                <strong>{statusText(listing.status, lang)}</strong>
-              </button>
+              <article key={listing.id} style={commandStyles.managementRow}>
+                <div>
+                  <strong>{listingTitleText(listing, lang)}</strong>
+                  <small>{divisionText(listing.division, lang)}</small>
+                </div>
+                <span>{statusText(listing.status, lang)}</span>
+                <div style={commandStyles.managementRowActions}>
+                  {listing.status === 'PENDING_REVIEW' && (
+                    <>
+                      <button disabled={disabled} style={commandStyles.acceptButton} onClick={() => onListingDecision(listing.id, 'APPROVE')}>
+                        {isAr ? 'قبول' : 'Approve'}
+                      </button>
+                      <button disabled={disabled} style={commandStyles.rejectButton} onClick={() => onListingDecision(listing.id, 'REJECT')}>
+                        {isAr ? 'رفض' : 'Reject'}
+                      </button>
+                    </>
+                  )}
+                  <button style={commandStyles.blueButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
+                    {isAr ? 'تفاصيل' : 'Details'}
+                  </button>
+                </div>
+              </article>
             ))}
           </div>
         )}
