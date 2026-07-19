@@ -238,4 +238,39 @@ describe('Admin review queue — pagination and division filtering (platform-wid
     expect(res.body.pagination.limit).toBe(5)
     expect(res.body.pagination.division).toBe('CARS')
   })
+
+  it('a Premium listing surfaces ahead of an older Basic listing (priority admin review)', async () => {
+    const basicListing = await db().listing.create({
+      data: {
+        ownerId: host.user.id,
+        division: 'RENTALS',
+        titleAr: 'Priority test — basic',
+        priceMinor: 100,
+        currency: 'USD',
+        status: 'PENDING_REVIEW',
+        metadata: { listingPlan: 'basic' },
+      },
+    })
+    // Guarantee the basic listing is strictly older, so createdAt-only ordering would rank it first.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const premiumListing = await db().listing.create({
+      data: {
+        ownerId: host.user.id,
+        division: 'RENTALS',
+        titleAr: 'Priority test — premium',
+        priceMinor: 100,
+        currency: 'USD',
+        status: 'PENDING_REVIEW',
+        metadata: { listingPlan: 'premium' },
+      },
+    })
+
+    const res = await request(app)
+      .get('/api/admin/review-queue?division=RENTALS&limit=100')
+      .set('Authorization', `Bearer ${admin.token}`)
+
+    expect(res.status).toBe(200)
+    const ids = res.body.queue.listings.map((listing) => listing.id)
+    expect(ids.indexOf(premiumListing.id)).toBeLessThan(ids.indexOf(basicListing.id))
+  })
 })

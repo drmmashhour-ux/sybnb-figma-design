@@ -19,6 +19,21 @@ const REVIEW_QUEUE_IN_MEMORY_PAGE_CAP = 2000
 // same createdAt tie can each return a different pick and either duplicate or skip a row across
 // pages. `id` (a UUID) as a secondary sort key makes the order fully deterministic.
 const REVIEW_QUEUE_ORDER_BY_CREATED = [{ createdAt: 'desc' }, { id: 'asc' }]
+// Backs the Plus/Premium "priority admin review" plan copy (src/modules/seller/SellerListingWizard.tsx
+// HOST_LISTING_PLANS) with real queue ordering. listingPlan lives in the JSONB metadata column, which
+// Prisma can't portably order by in a single DB query -- sorted in memory instead, same pattern as the
+// division-filtered payment-proof queue below (bounded by REVIEW_QUEUE_IN_MEMORY_PAGE_CAP).
+const LISTING_PLAN_REVIEW_PRIORITY = { premium: 0, plus: 1, basic: 2 }
+function listingReviewPriority(listing) {
+  return LISTING_PLAN_REVIEW_PRIORITY[listing.metadata?.listingPlan] ?? 3
+}
+function sortListingsByReviewPriority(listings) {
+  return [...listings].sort((a, b) => {
+    const priorityDelta = listingReviewPriority(a) - listingReviewPriority(b)
+    if (priorityDelta !== 0) return priorityDelta
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })
+}
 // Mirrors the Prisma `ListingDivision` enum (prisma/schema.prisma) -- kept as a literal set here
 // rather than introspected at runtime since the admin route layer has no schema-reflection helper.
 const REVIEW_QUEUE_DIVISIONS = new Set(['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
@@ -260,7 +275,11 @@ export async function handleAdmin(req, res, url, context) {
       idDocuments,
       idDocumentsTotal,
     ] = await Promise.all([
-      db().listing.findMany({ where: listingWhere, orderBy: REVIEW_QUEUE_ORDER_BY_CREATED, skip: offset, take: limit }),
+      db().listing.findMany({
+        where: listingWhere,
+        orderBy: REVIEW_QUEUE_ORDER_BY_CREATED,
+        take: REVIEW_QUEUE_IN_MEMORY_PAGE_CAP,
+      }),
       db().listing.count({ where: listingWhere }),
       db().paymentProof.findMany({
         where: paymentWhere,
@@ -307,6 +326,7 @@ export async function handleAdmin(req, res, url, context) {
     ])
 
     const pagedPayments = division ? payments.slice(offset, offset + limit) : payments
+    const pagedListings = sortListingsByReviewPriority(listings).slice(offset, offset + limit)
 
     const totals = {
       listings: listingsTotal,
@@ -316,7 +336,7 @@ export async function handleAdmin(req, res, url, context) {
       idDocuments: idDocumentsTotal,
     }
     const counts = {
-      listings: listings.length,
+      listings: pagedListings.length,
       payments: pagedPayments.length,
       gifts: gifts.length,
       bookings: bookings.length,
@@ -325,7 +345,7 @@ export async function handleAdmin(req, res, url, context) {
 
     return json(res, 200, {
       ok: true,
-      queue: { listings, payments: pagedPayments, gifts, bookings, idDocuments },
+      queue: { listings: pagedListings, payments: pagedPayments, gifts, bookings, idDocuments },
       pagination: {
         limit,
         offset,

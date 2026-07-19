@@ -26,6 +26,20 @@ import {
 // which would otherwise surface as an uncaught 500. Reject those up front as a clean 404.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// Backs the Premium "تمييز أعلى داخل البحث" (higher search highlight) plan copy
+// (src/modules/seller/SellerListingWizard.tsx HOST_LISTING_PLANS) with real ranking: Premium
+// listings sort first under the platform's own default ordering. Never applied when the guest
+// picked an explicit price sort -- that's a deliberate choice and shouldn't be overridden by a
+// paid boost. Array.prototype.sort is stable (ES2019+), so equal-priority listings keep the
+// relative order the DB/filters already gave them.
+function applySearchBoost(listings) {
+  return [...listings].sort((a, b) => {
+    const boostA = a.metadata?.listingPlan === 'premium' ? 0 : 1
+    const boostB = b.metadata?.listingPlan === 'premium' ? 0 : 1
+    return boostA - boostB
+  })
+}
+
 export async function handleListings(req, res, url, context) {
   const idSegmentMatch = url.pathname.match(/^\/api\/listings\/([^/]+)(?:\/(?:quote|availability|reviews|submit))?$/)
   if (idSegmentMatch && !UUID_RE.test(idSegmentMatch[1])) {
@@ -199,7 +213,8 @@ export async function handleListings(req, res, url, context) {
         }))
       }
 
-      return json(res, 200, { ok: true, listings: listings.slice(0, 50) })
+      const rankedListings = sort === 'priceAsc' || sort === 'priceDesc' ? listings : applySearchBoost(listings)
+      return json(res, 200, { ok: true, listings: rankedListings.slice(0, 50) })
     }
 
     if (req.method === 'POST') {
