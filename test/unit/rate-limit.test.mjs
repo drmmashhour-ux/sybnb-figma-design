@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetRateLimitsForTests, checkRateLimit, clientIp } from '../../server/lib/rate-limit.mjs'
 
 describe('rate-limit: checkRateLimit', () => {
@@ -6,13 +6,13 @@ describe('rate-limit: checkRateLimit', () => {
     __resetRateLimitsForTests()
   })
 
-  it('allows requests up to the configured max, then blocks', () => {
+  it('allows requests up to the configured max, then blocks', async () => {
     const opts = { bucketKey: 'ip:1.1.1.1', name: 'TEST_A', defaultMax: 3, defaultWindowMs: 60_000 }
 
-    const first = checkRateLimit(opts)
-    const second = checkRateLimit(opts)
-    const third = checkRateLimit(opts)
-    const fourth = checkRateLimit(opts)
+    const first = await checkRateLimit(opts)
+    const second = await checkRateLimit(opts)
+    const third = await checkRateLimit(opts)
+    const fourth = await checkRateLimit(opts)
 
     expect(first.allowed).toBe(true)
     expect(second.allowed).toBe(true)
@@ -25,51 +25,51 @@ describe('rate-limit: checkRateLimit', () => {
   it('resets the window after it expires', async () => {
     const opts = { bucketKey: 'ip:2.2.2.2', name: 'TEST_B', defaultMax: 1, defaultWindowMs: 50 }
 
-    expect(checkRateLimit(opts).allowed).toBe(true)
-    expect(checkRateLimit(opts).allowed).toBe(false)
+    expect((await checkRateLimit(opts)).allowed).toBe(true)
+    expect((await checkRateLimit(opts)).allowed).toBe(false)
 
     await new Promise((resolve) => setTimeout(resolve, 80))
 
-    expect(checkRateLimit(opts).allowed).toBe(true)
+    expect((await checkRateLimit(opts)).allowed).toBe(true)
   })
 
-  it('does not let unrelated bucket keys share a limit', () => {
+  it('does not let unrelated bucket keys share a limit', async () => {
     const base = { name: 'TEST_C', defaultMax: 1, defaultWindowMs: 60_000 }
 
-    expect(checkRateLimit({ ...base, bucketKey: 'user:alice' }).allowed).toBe(true)
+    expect((await checkRateLimit({ ...base, bucketKey: 'user:alice' })).allowed).toBe(true)
     // alice is now exhausted, but bob is a completely independent bucket
-    expect(checkRateLimit({ ...base, bucketKey: 'user:alice' }).allowed).toBe(false)
-    expect(checkRateLimit({ ...base, bucketKey: 'user:bob' }).allowed).toBe(true)
+    expect((await checkRateLimit({ ...base, bucketKey: 'user:alice' })).allowed).toBe(false)
+    expect((await checkRateLimit({ ...base, bucketKey: 'user:bob' })).allowed).toBe(true)
   })
 
-  it('does not let unrelated rule names share a limit for the same bucket key', () => {
+  it('does not let unrelated rule names share a limit for the same bucket key', async () => {
     const key = 'ip:3.3.3.3'
-    expect(checkRateLimit({ bucketKey: key, name: 'TEST_D1', defaultMax: 1, defaultWindowMs: 60_000 }).allowed).toBe(true)
-    expect(checkRateLimit({ bucketKey: key, name: 'TEST_D1', defaultMax: 1, defaultWindowMs: 60_000 }).allowed).toBe(false)
+    expect((await checkRateLimit({ bucketKey: key, name: 'TEST_D1', defaultMax: 1, defaultWindowMs: 60_000 })).allowed).toBe(true)
+    expect((await checkRateLimit({ bucketKey: key, name: 'TEST_D1', defaultMax: 1, defaultWindowMs: 60_000 })).allowed).toBe(false)
     // Different rule name, same underlying bucketKey -> independent bucket.
-    expect(checkRateLimit({ bucketKey: key, name: 'TEST_D2', defaultMax: 1, defaultWindowMs: 60_000 }).allowed).toBe(true)
+    expect((await checkRateLimit({ bucketKey: key, name: 'TEST_D2', defaultMax: 1, defaultWindowMs: 60_000 })).allowed).toBe(true)
   })
 
-  it('honors RATE_LIMIT_<NAME>_MAX / _WINDOW_MS env overrides at call time', () => {
+  it('honors RATE_LIMIT_<NAME>_MAX / _WINDOW_MS env overrides at call time', async () => {
     process.env.RATE_LIMIT_TEST_E_MAX = '2'
     process.env.RATE_LIMIT_TEST_E_WINDOW_MS = '60000'
     try {
       const opts = { bucketKey: 'ip:4.4.4.4', name: 'TEST_E', defaultMax: 100, defaultWindowMs: 60_000 }
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(false)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(false)
     } finally {
       delete process.env.RATE_LIMIT_TEST_E_MAX
       delete process.env.RATE_LIMIT_TEST_E_WINDOW_MS
     }
   })
 
-  it('bypasses the limiter entirely when DISABLE_RATE_LIMIT=1', () => {
+  it('bypasses the limiter entirely when DISABLE_RATE_LIMIT=1', async () => {
     process.env.DISABLE_RATE_LIMIT = '1'
     try {
       const opts = { bucketKey: 'ip:5.5.5.5', name: 'TEST_F', defaultMax: 1, defaultWindowMs: 60_000 }
       for (let i = 0; i < 5; i += 1) {
-        expect(checkRateLimit(opts).allowed).toBe(true)
+        expect((await checkRateLimit(opts)).allowed).toBe(true) // eslint-disable-line no-await-in-loop
       }
     } finally {
       delete process.env.DISABLE_RATE_LIMIT
@@ -82,54 +82,121 @@ describe('rate-limit: checkRateLimit', () => {
       delete process.env.RATE_LIMIT_TEST_G_WINDOW_MS
     })
 
-    it('a non-numeric MAX override is ignored (falls back to the default, not NaN)', () => {
+    it('a non-numeric MAX override is ignored (falls back to the default, not NaN)', async () => {
       process.env.RATE_LIMIT_TEST_G_MAX = 'not-a-number'
       const opts = { bucketKey: 'ip:6.6.6.1', name: 'TEST_G', defaultMax: 2, defaultWindowMs: 60_000 }
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(false) // still enforces the default of 2, not unlimited
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(false) // still enforces the default of 2, not unlimited
     })
 
-    it('a zero MAX override is ignored (falls back to the default, not "block everything")', () => {
+    it('a zero MAX override is ignored (falls back to the default, not "block everything")', async () => {
       process.env.RATE_LIMIT_TEST_G_MAX = '0'
       const opts = { bucketKey: 'ip:6.6.6.2', name: 'TEST_G', defaultMax: 2, defaultWindowMs: 60_000 }
-      expect(checkRateLimit(opts).allowed).toBe(true) // would be false immediately if 0 were honored
+      expect((await checkRateLimit(opts)).allowed).toBe(true) // would be false immediately if 0 were honored
     })
 
-    it('a negative MAX override is ignored', () => {
+    it('a negative MAX override is ignored', async () => {
       process.env.RATE_LIMIT_TEST_G_MAX = '-5'
       const opts = { bucketKey: 'ip:6.6.6.3', name: 'TEST_G', defaultMax: 2, defaultWindowMs: 60_000 }
-      expect(checkRateLimit(opts).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
     })
 
-    it('a non-integer MAX override is ignored', () => {
+    it('a non-integer MAX override is ignored', async () => {
       process.env.RATE_LIMIT_TEST_G_MAX = '2.5'
       const opts = { bucketKey: 'ip:6.6.6.4', name: 'TEST_G', defaultMax: 2, defaultWindowMs: 60_000 }
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(false)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(false)
     })
 
-    it('a zero or negative WINDOW_MS override is ignored (falls back to the default)', () => {
+    it('a zero or negative WINDOW_MS override is ignored (falls back to the default)', async () => {
       process.env.RATE_LIMIT_TEST_G_WINDOW_MS = '0'
       const opts = { bucketKey: 'ip:6.6.6.5', name: 'TEST_G', defaultMax: 1, defaultWindowMs: 60_000 }
-      expect(checkRateLimit(opts).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
       // If windowMs=0 were honored, the bucket would expire instantly and this would also be
       // "allowed" — so additionally confirm the *default* window value is really what's active by
       // checking resetAt is far in the future, not "now".
-      const result = checkRateLimit(opts)
+      const result = await checkRateLimit(opts)
       expect(result.allowed).toBe(false)
       expect(result.resetAt - Date.now()).toBeGreaterThan(50_000)
     })
 
-    it('a valid override still works alongside the validation (regression check)', () => {
+    it('a valid override still works alongside the validation (regression check)', async () => {
       process.env.RATE_LIMIT_TEST_G_MAX = '3'
       const opts = { bucketKey: 'ip:6.6.6.6', name: 'TEST_G', defaultMax: 100, defaultWindowMs: 60_000 }
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(true)
-      expect(checkRateLimit(opts).allowed).toBe(false)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(true)
+      expect((await checkRateLimit(opts)).allowed).toBe(false)
     })
+  })
+})
+
+// Distributed-store failure handling (STR launch blocker P0, 2026-07-22): exercises the real
+// Upstash-configured code path in server/lib/rate-limit-store.mjs against a fake Ratelimit
+// instance that throws, rather than mocking server/lib/rate-limit.mjs's own import -- this proves
+// the failMode branch in checkRateLimit() actually reacts to a real rejected promise coming out of
+// the store module, not just a hand-constructed test double of checkRateLimit's internals.
+describe('rate-limit: fail-open / fail-closed when the distributed store is unreachable', () => {
+  let __setRatelimitFactoryForTests
+
+  beforeEach(async () => {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://example.upstash.io'
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token'
+    vi.resetModules()
+    ;({ __setRatelimitFactoryForTests } = await import('../../server/lib/rate-limit-store.mjs'))
+    const failingRatelimit = { limit: vi.fn(async () => { throw new Error('upstash unreachable') }) }
+    __setRatelimitFactoryForTests(() => failingRatelimit)
+  })
+
+  afterEach(() => {
+    delete process.env.UPSTASH_REDIS_REST_URL
+    delete process.env.UPSTASH_REDIS_REST_TOKEN
+    vi.resetModules()
+  })
+
+  it('failMode "closed" rejects the request when the store is unreachable', async () => {
+    const { checkRateLimit: checkRateLimitFresh } = await import('../../server/lib/rate-limit.mjs')
+    const result = await checkRateLimitFresh({
+      bucketKey: 'ip:7.7.7.1',
+      name: 'TEST_H_CLOSED',
+      defaultMax: 5,
+      defaultWindowMs: 60_000,
+      failMode: 'closed',
+    })
+    expect(result.allowed).toBe(false)
+    expect(result.storeError).toBe(true)
+  })
+
+  it('failMode "open" (the default) allows the request through when the store is unreachable', async () => {
+    const { checkRateLimit: checkRateLimitFresh } = await import('../../server/lib/rate-limit.mjs')
+    const result = await checkRateLimitFresh({
+      bucketKey: 'ip:7.7.7.2',
+      name: 'TEST_H_OPEN',
+      defaultMax: 5,
+      defaultWindowMs: 60_000,
+    })
+    expect(result.allowed).toBe(true)
+    expect(result.storeError).toBe(true)
+  })
+
+  it('DISABLE_RATE_LIMIT=1 still short-circuits before ever touching the store, regardless of failMode', async () => {
+    process.env.DISABLE_RATE_LIMIT = '1'
+    try {
+      const { checkRateLimit: checkRateLimitFresh } = await import('../../server/lib/rate-limit.mjs')
+      const result = await checkRateLimitFresh({
+        bucketKey: 'ip:7.7.7.3',
+        name: 'TEST_H_DISABLED',
+        defaultMax: 1,
+        defaultWindowMs: 60_000,
+        failMode: 'closed',
+      })
+      expect(result.allowed).toBe(true)
+      expect(result.storeError).toBeUndefined()
+    } finally {
+      delete process.env.DISABLE_RATE_LIMIT
+    }
   })
 })
 

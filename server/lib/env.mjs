@@ -44,6 +44,18 @@ export function validateProductionConfig() {
     problems.push('DISABLE_RATE_LIMIT must not be "1" in production.')
   }
 
+  // STR launch blocker P0 (distributed rate limiting, 2026-07-22): the in-memory rate-limit store
+  // (server/lib/rate-limit-store.mjs) is dev/test-only -- each Vercel serverless instance/cold
+  // start gets its own empty Map, so a production deployment without a real shared store has no
+  // effective rate limiting at all. Fail loudly at startup rather than silently degrade to
+  // per-instance counting.
+  if (!process.env.UPSTASH_REDIS_REST_URL) {
+    problems.push('UPSTASH_REDIS_REST_URL must be set — production requires the distributed rate-limit store, not the in-memory fallback.')
+  }
+  if (!process.env.UPSTASH_REDIS_REST_TOKEN) {
+    problems.push('UPSTASH_REDIS_REST_TOKEN must be set — production requires the distributed rate-limit store, not the in-memory fallback.')
+  }
+
   // A typo'd RATE_LIMIT_<NAME>_MAX/_WINDOW_MS (non-numeric, zero, negative, non-integer) would
   // silently fall back to the caller's default at request time (see
   // server/lib/rate-limit.mjs's safePositiveInt) rather than crash — safe at runtime, but a

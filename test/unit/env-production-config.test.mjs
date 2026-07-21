@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { validateProductionConfig } from '../../server/lib/env.mjs'
 
-const REQUIRED_KEYS = ['AUTH_SECRET', 'PHONE_HASH_SECRET', 'DATABASE_URL', 'CORS_ORIGIN', 'DISABLE_RATE_LIMIT']
+const REQUIRED_KEYS = [
+  'AUTH_SECRET',
+  'PHONE_HASH_SECRET',
+  'DATABASE_URL',
+  'CORS_ORIGIN',
+  'DISABLE_RATE_LIMIT',
+  'UPSTASH_REDIS_REST_URL',
+  'UPSTASH_REDIS_REST_TOKEN',
+]
 
 function setValidBaseline() {
   process.env.AUTH_SECRET = 'a'.repeat(32)
@@ -9,6 +17,10 @@ function setValidBaseline() {
   process.env.DATABASE_URL = 'postgresql://user:pass@127.0.0.1:5432/placeholder'
   process.env.CORS_ORIGIN = 'https://example.com'
   delete process.env.DISABLE_RATE_LIMIT
+  // STR launch blocker P0 (distributed rate limiting, 2026-07-22): production now requires a real
+  // shared rate-limit store -- the in-memory Map is dev/test-only (server/lib/rate-limit-store.mjs).
+  process.env.UPSTASH_REDIS_REST_URL = 'https://example.upstash.io'
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'placeholder-token'
 }
 
 describe('validateProductionConfig: pre-existing checks still pass with a valid baseline', () => {
@@ -44,6 +56,22 @@ describe('validateProductionConfig: pre-existing checks still pass with a valid 
   it('throws when DISABLE_RATE_LIMIT=1', () => {
     process.env.DISABLE_RATE_LIMIT = '1'
     expect(() => validateProductionConfig()).toThrow(/DISABLE_RATE_LIMIT/)
+  })
+
+  describe('new: distributed rate-limit store is required in production (STR P0, 2026-07-22)', () => {
+    it('throws when UPSTASH_REDIS_REST_URL is missing', () => {
+      delete process.env.UPSTASH_REDIS_REST_URL
+      expect(() => validateProductionConfig()).toThrow(/UPSTASH_REDIS_REST_URL/)
+    })
+
+    it('throws when UPSTASH_REDIS_REST_TOKEN is missing', () => {
+      delete process.env.UPSTASH_REDIS_REST_TOKEN
+      expect(() => validateProductionConfig()).toThrow(/UPSTASH_REDIS_REST_TOKEN/)
+    })
+
+    it('does not throw when both Upstash vars are set alongside an otherwise-valid baseline', () => {
+      expect(() => validateProductionConfig()).not.toThrow()
+    })
   })
 
   describe('new: RATE_LIMIT_* override validation', () => {

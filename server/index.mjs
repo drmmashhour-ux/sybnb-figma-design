@@ -38,25 +38,40 @@ const HOST = process.env.API_HOST || '127.0.0.1'
 // is reviewable in one place. Defaults are conservative starting points, not a final production
 // tuning — see docs/security/SYBNB_V6_RATE_LIMIT_POLICY.md for rationale and how to override each
 // one via env vars without a code change.
+//
+// failMode ('closed' | 'open', STR launch blocker P0, 2026-07-22): what happens if the distributed
+// rate-limit store itself is unreachable (e.g. an Upstash outage) -- see
+// docs/security/SYBNB_V6_RATE_LIMIT_POLICY.md's fail-open/fail-closed table for the approved
+// policy and rationale. 'closed' rejects the request rather than risk unbounded abuse on
+// pre-authentication, abuse-prone endpoints; 'open' lets it through rather than take down an
+// already-authenticated business action or public browsing over an unrelated storage outage. This
+// property only changes behavior when the Redis backend is configured and fails -- it is inert on
+// the in-memory backend (a Map read/write does not fail) used by local dev and this test suite.
 const RATE_LIMIT_RULES = [
-  { name: 'AUTH_LOGIN', method: 'POST', pattern: /^\/api\/auth\/login$/, max: 10, windowMs: 5 * 60 * 1000, byUser: false },
-  { name: 'AUTH_REGISTER', method: 'POST', pattern: /^\/api\/auth\/register$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
-  { name: 'AUTH_EMAIL_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/email-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
-  { name: 'AUTH_EMAIL_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/email-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false },
+  { name: 'AUTH_LOGIN', method: 'POST', pattern: /^\/api\/auth\/login$/, max: 10, windowMs: 5 * 60 * 1000, byUser: false, failMode: 'closed' },
+  { name: 'AUTH_REGISTER', method: 'POST', pattern: /^\/api\/auth\/register$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
+  { name: 'AUTH_EMAIL_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/email-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
+  { name: 'AUTH_EMAIL_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/email-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
   // Phone/SMS OTP: same per-IP caps as email — bounds SMS cost/bombing on send and brute-force on verify.
-  { name: 'AUTH_PHONE_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/phone-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
-  { name: 'AUTH_PHONE_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/phone-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false },
-  { name: 'PUBLIC_SEARCH', method: 'GET', pattern: /^\/api\/listings$/, max: 60, windowMs: 60 * 1000, byUser: false },
-  { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
-  { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true },
-  { name: 'PAYMENT_PROOF', method: 'POST', pattern: /^\/api\/payments\/(seller-plan-proof|local-wallet-proof)$/, max: 10, windowMs: 60 * 1000, byUser: true },
-  { name: 'ADMIN_DECISION', method: 'PATCH', pattern: /^\/api\/admin\/review-queue\/[^/]+\/[^/]+$/, max: 60, windowMs: 60 * 1000, byUser: true },
-  { name: 'DOCUMENT_ACCESS', method: 'GET', pattern: /^\/api\/(admin\/id-document|me\/id-document)\/[^/]+(\/file)?$/, max: 30, windowMs: 60 * 1000, byUser: true },
-  { name: 'GEOCODING', method: 'POST', pattern: /^\/api\/sr\/(quote|rides)$/, max: 20, windowMs: 60 * 1000, byUser: true },
-  { name: 'DRIVER_STATUS', method: 'PATCH', pattern: /^\/api\/(driver\/rides\/[^/]+\/status|sr\/rides\/[^/]+\/claim)$/, max: 30, windowMs: 60 * 1000, byUser: true },
+  { name: 'AUTH_PHONE_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/phone-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
+  { name: 'AUTH_PHONE_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/phone-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
+  { name: 'PUBLIC_SEARCH', method: 'GET', pattern: /^\/api\/listings$/, max: 60, windowMs: 60 * 1000, byUser: false, failMode: 'open' },
+  { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true, failMode: 'open' },
+  { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true, failMode: 'open' },
+  { name: 'PAYMENT_PROOF', method: 'POST', pattern: /^\/api\/payments\/(seller-plan-proof|local-wallet-proof)$/, max: 10, windowMs: 60 * 1000, byUser: true, failMode: 'open' },
+  // ADMIN_DECISION/DOCUMENT_ACCESS/GEOCODING/DRIVER_STATUS: classified as "authenticated business
+  // operations" per the approved fail-open bucket. GEOCODING and DRIVER_STATUS are SR-owned rules
+  // included here only because they share this one central table with STR's rules -- failMode is
+  // being added mechanically to every existing rule as part of this migration, not a change to
+  // SR's own limits, routes, or policy.
+  { name: 'ADMIN_DECISION', method: 'PATCH', pattern: /^\/api\/admin\/review-queue\/[^/]+\/[^/]+$/, max: 60, windowMs: 60 * 1000, byUser: true, failMode: 'open' },
+  { name: 'DOCUMENT_ACCESS', method: 'GET', pattern: /^\/api\/(admin\/id-document|me\/id-document)\/[^/]+(\/file)?$/, max: 30, windowMs: 60 * 1000, byUser: true, failMode: 'open' },
+  { name: 'GEOCODING', method: 'POST', pattern: /^\/api\/sr\/(quote|rides)$/, max: 20, windowMs: 60 * 1000, byUser: true, failMode: 'open' },
+  { name: 'DRIVER_STATUS', method: 'PATCH', pattern: /^\/api\/(driver\/rides\/[^/]+\/status|sr\/rides\/[^/]+\/claim)$/, max: 30, windowMs: 60 * 1000, byUser: true, failMode: 'open' },
   // Public, unauthenticated, phone-guessable (12-char ref + phone) -- capped tightly per IP so it
-  // can't be used to brute-force other guests' trip status.
-  { name: 'BOOKING_LOOKUP', method: 'GET', pattern: /^\/api\/bookings\/lookup$/, max: 20, windowMs: 15 * 60 * 1000, byUser: false },
+  // can't be used to brute-force other guests' trip status. Classified fail-open (browsing/lookup
+  // bucket, not an auth-abuse vector like login/register/OTP).
+  { name: 'BOOKING_LOOKUP', method: 'GET', pattern: /^\/api\/bookings\/lookup$/, max: 20, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'open' },
 ]
 
 function matchRateLimitRule(req, url) {
@@ -102,7 +117,7 @@ export async function handleRequest(req, res) {
       // throttle every user behind it); unauthenticated ones (login, register, public search) are
       // limited per-IP, since there's no account yet to key on.
       const bucketKey = rule.byUser && context?.user ? `user:${context.user.id}` : `ip:${clientIp(req)}`
-      const result = checkRateLimit({ bucketKey, name: rule.name, defaultMax: rule.max, defaultWindowMs: rule.windowMs })
+      const result = await checkRateLimit({ bucketKey, name: rule.name, defaultMax: rule.max, defaultWindowMs: rule.windowMs, failMode: rule.failMode })
       if (!result.allowed) {
         res.setHeader('retry-after', String(result.retryAfterSeconds))
         return json(res, 429, {
