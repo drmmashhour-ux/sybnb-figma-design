@@ -6,8 +6,23 @@ import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerifi
 import { consumePhoneVerificationCode, hasRecentlyVerifiedPhone, sendPhoneVerificationCode } from '../lib/phone-verification.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { attachReferralOnRegister, generateUniqueReferralCode } from '../lib/referrals.mjs'
+import { checkRateLimit } from '../lib/rate-limit.mjs'
+import { createHash } from 'node:crypto'
 
 const NAME_FIELD_MAX_LENGTH = 120
+
+// Per-email send limit (Resend hardening item 8), applied IN ADDITION to the per-IP limit in
+// server/index.mjs's RATE_LIMIT_RULES table. The per-IP limit can't stop a rotating-IP attacker from
+// email-bombing one victim address; this keys the bucket on the normalized address itself. Uses the
+// same distributed limiter (Upstash in prod, in-memory in dev/test). failMode 'closed' matches the
+// other pre-auth OTP rules. Overridable via RATE_LIMIT_AUTH_EMAIL_CODE_SEND_PER_EMAIL_MAX/_WINDOW_MS.
+const EMAIL_CODE_SEND_PER_EMAIL = { name: 'AUTH_EMAIL_CODE_SEND_PER_EMAIL', max: 3, windowMs: 15 * 60 * 1000 }
+
+// The rate-limit key holds only a one-way SHA-256 hash of the normalized email — never the raw
+// address — so no PII sits in the (potentially shared/Upstash) rate-limit store.
+function emailRateBucketKey(normalizedEmail) {
+  return `email:${createHash('sha256').update(normalizedEmail).digest('hex').slice(0, 32)}`
+}
 
 const PUBLIC_REGISTER_ROLES = new Set(['GUEST', 'HOST', 'SELLER', 'DRIVER'])
 
@@ -55,7 +70,31 @@ export async function handleAuth(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
     assertNoUnknownFields(body, ['email', 'purpose'], 'email-code send body')
-    const validEmail = assertValidEmail(body.email)
+    const validEmail = assertValidEmail(body.email) // already normalized (trimmed + lowercased)
+    if (!validEmail) {
+      const error = new Error('A valid email address is required.')
+      error.statusCode = 400
+      error.code = 'EMAIL_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const perEmail = await checkRateLimit({
+      bucketKey: emailRateBucketKey(validEmail),
+      name: EMAIL_CODE_SEND_PER_EMAIL.name,
+      defaultMax: EMAIL_CODE_SEND_PER_EMAIL.max,
+      defaultWindowMs: EMAIL_CODE_SEND_PER_EMAIL.windowMs,
+      failMode: 'closed',
+    })
+    if (!perEmail.allowed) {
+      res.setHeader('retry-after', String(perEmail.retryAfterSeconds))
+      return json(res, 429, {
+        ok: false,
+        error: {
+          code: 'RATE_LIMITED',
+          message: `Too many verification codes requested for this email. Try again in ${perEmail.retryAfterSeconds} seconds.`,
+        },
+      })
+    }
     const purpose = resolveEmailCodePurpose(body.purpose)
     const result = await sendEmailVerificationCode(validEmail, purpose)
     return json(res, 200, result)

@@ -64,6 +64,7 @@ const labels = {
     verifyByPhone: 'التحقق بالهاتف',
     sendCodePhone: 'إرسال رمز SMS',
     phoneCodeSent: 'تم إرسال رمز التحقق إلى هاتفك عبر SMS.',
+    codeSendFailed: 'تعذّر إرسال رمز التحقق حالياً. يرجى المحاولة مرة أخرى بعد قليل.',
     phoneConfirmed: 'تم تأكيد رقم الهاتف.',
     demoCode: 'رمز الاختبار',
     openAdmin: 'دخول الإدارة',
@@ -116,6 +117,7 @@ const labels = {
     verifyByPhone: 'Verify by phone',
     sendCodePhone: 'Send SMS code',
     phoneCodeSent: 'Verification code sent to your phone via SMS.',
+    codeSendFailed: 'We could not send the verification code right now. Please try again in a moment.',
     phoneConfirmed: 'Phone number confirmed.',
     demoCode: 'Test code',
     openAdmin: 'Open admin',
@@ -194,12 +196,20 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       const result = usePhone
         ? await sendPhoneVerificationCode(phone.trim(), otpPurpose)
         : await sendEmailVerificationCode(email.trim(), otpPurpose)
-      setCodeSent(true)
-      setIsErrorMessage(false)
       if (result.devCode) {
+        setCodeSent(true)
+        setIsErrorMessage(false)
         setDevCode(result.devCode)
         setMessage(t.codeSentDev)
+      } else if (!usePhone && !('emailSent' in result && result.emailSent)) {
+        // Email delivery not confirmed and no dev code -> surface a real failure instead of a false
+        // "code sent" (Resend hardening item 7). Phone/SMS path is unchanged.
+        setCodeSent(false)
+        setMessage(t.codeSendFailed)
+        setIsErrorMessage(true)
       } else {
+        setCodeSent(true)
+        setIsErrorMessage(false)
         setMessage(usePhone ? t.phoneCodeSent : t.codeSentReal)
       }
     } catch (error) {

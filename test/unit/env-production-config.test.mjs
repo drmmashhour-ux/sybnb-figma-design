@@ -9,6 +9,9 @@ const REQUIRED_KEYS = [
   'DISABLE_RATE_LIMIT',
   'UPSTASH_REDIS_REST_URL',
   'UPSTASH_REDIS_REST_TOKEN',
+  'EMAIL_PROVIDER',
+  'RESEND_API_KEY',
+  'SMTP_HOST',
 ]
 
 function setValidBaseline() {
@@ -21,6 +24,11 @@ function setValidBaseline() {
   // shared rate-limit store -- the in-memory Map is dev/test-only (server/lib/rate-limit-store.mjs).
   process.env.UPSTASH_REDIS_REST_URL = 'https://example.upstash.io'
   process.env.UPSTASH_REDIS_REST_TOKEN = 'placeholder-token'
+  // Resend hardening item 1: email is the sole launch verification channel, so a configured mailer
+  // is part of a valid production baseline — otherwise every verification email silently fails.
+  process.env.EMAIL_PROVIDER = 'resend'
+  process.env.RESEND_API_KEY = 're_placeholder_key'
+  delete process.env.SMTP_HOST
 }
 
 describe('validateProductionConfig: pre-existing checks still pass with a valid baseline', () => {
@@ -56,6 +64,34 @@ describe('validateProductionConfig: pre-existing checks still pass with a valid 
   it('throws when DISABLE_RATE_LIMIT=1', () => {
     process.env.DISABLE_RATE_LIMIT = '1'
     expect(() => validateProductionConfig()).toThrow(/DISABLE_RATE_LIMIT/)
+  })
+
+  describe('new: email provider must be configured in production (Resend hardening item 1)', () => {
+    it('throws when no email provider is configured', () => {
+      delete process.env.EMAIL_PROVIDER
+      delete process.env.RESEND_API_KEY
+      delete process.env.SMTP_HOST
+      expect(() => validateProductionConfig()).toThrow(/EMAIL|RESEND|mail/i)
+    })
+
+    it('throws when resend is selected but RESEND_API_KEY is missing', () => {
+      process.env.EMAIL_PROVIDER = 'resend'
+      delete process.env.RESEND_API_KEY
+      delete process.env.SMTP_HOST
+      expect(() => validateProductionConfig()).toThrow(/EMAIL|RESEND|mail/i)
+    })
+
+    it('does not throw when Resend is fully configured', () => {
+      // baseline already sets EMAIL_PROVIDER=resend + RESEND_API_KEY
+      expect(() => validateProductionConfig()).not.toThrow()
+    })
+
+    it('does not throw when SMTP is configured instead', () => {
+      delete process.env.EMAIL_PROVIDER
+      delete process.env.RESEND_API_KEY
+      process.env.SMTP_HOST = 'smtp.example.test'
+      expect(() => validateProductionConfig()).not.toThrow()
+    })
   })
 
   describe('new: distributed rate-limit store is required in production (STR P0, 2026-07-22)', () => {

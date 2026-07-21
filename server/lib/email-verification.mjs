@@ -1,6 +1,6 @@
 import { db } from './prisma.mjs'
 import { generateEmailVerificationCode, hashEmailVerificationCode, verifyEmailVerificationCodeHash } from './security.mjs'
-import { isMailerConfigured, sendVerificationCodeEmail } from './mailer.mjs'
+import { isMailerConfigured, sanitizeEmailError, sendVerificationCodeEmail } from './mailer.mjs'
 
 const CODE_TTL_MINUTES = 10
 const MAX_ATTEMPTS = 5
@@ -31,26 +31,42 @@ export async function sendEmailVerificationCode(email, purpose = 'guest-signup')
   const codeHash = hashEmailVerificationCode(code)
   const expiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000)
 
-  await db().emailVerificationCode.create({
-    data: { email: normalized, codeHash, purpose, expiresAt },
-  })
+  // Single-active-code invariant (Q2) + row hygiene (item 9), atomically: delete EVERY prior
+  // unconsumed code for this email+purpose (expired or not), then create the new one, in one
+  // transaction so a concurrent verifier never observes a window with zero valid codes. This makes
+  // "only the newest code is valid" an explicit invariant rather than an emergent property of
+  // consume()'s ordering, removes the concurrent same-instant tie where a valid code could look
+  // invalid, and stops stale codes from accumulating. Consumed rows are NEVER touched — the 30-min
+  // trust window (hasRecentlyVerifiedEmail) depends on them — and only this email+purpose is
+  // affected. Scoped by the existing [email, purpose] index; no schema change. Not best-effort:
+  // invalidation is a correctness step, so a DB failure here correctly fails the whole issuance.
+  await db().$transaction([
+    db().emailVerificationCode.deleteMany({ where: { email: normalized, purpose, consumedAt: null } }),
+    db().emailVerificationCode.create({ data: { email: normalized, codeHash, purpose, expiresAt } }),
+  ])
 
   const isProduction = process.env.NODE_ENV === 'production'
   let emailSent = false
-  let emailError
-  // Send real mail in local/staging when Resend/SMTP is configured so owner QA can exercise
-  // the exact staff access flow before launch. Tests stay isolated from external email delivery.
-  if (process.env.NODE_ENV !== 'test' && isMailerConfigured()) {
+  // Item 6: attempt real delivery whenever a provider is configured (read at CALL time). A definitive
+  // delivery failure (after mailer.mjs's bounded retry) throws EMAIL_SEND_FAILED (502) rather than
+  // returning a misleading ok:true — the client must see a real failure, not a false "code sent".
+  // The generic vs detailed message is decided by sanitizeEmailError (item 5): production never
+  // leaks provider/URL/status detail. devCode stays the dev-only fallback and is never set in prod.
+  if (isMailerConfigured()) {
     try {
       await sendVerificationCodeEmail(normalized, code)
       emailSent = true
     } catch (error) {
-      emailError = error instanceof Error ? error.message : 'Unknown email error'
+      const err = new Error(sanitizeEmailError(error instanceof Error ? error.message : undefined, { isProduction }))
+      err.statusCode = 502
+      err.code = 'EMAIL_SEND_FAILED'
+      err.expose = true
+      throw err
     }
   }
 
   const devCode = isProduction ? undefined : code
-  return { ok: true, emailSent, emailError, devCode }
+  return { ok: true, emailSent, devCode }
 }
 
 // Verifies + immediately consumes (single-use) the most recent, non-expired, non-consumed code

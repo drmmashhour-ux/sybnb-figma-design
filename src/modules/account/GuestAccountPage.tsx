@@ -69,6 +69,7 @@ const copy = {
     verifyByPhone: 'التحقق بالهاتف',
     sendCodePhone: 'إرسال رمز SMS',
     phoneCodeSent: 'تم إرسال رمز التحقق إلى هاتفك عبر SMS.',
+    codeSendFailed: 'تعذّر إرسال رمز التحقق حالياً. يرجى المحاولة مرة أخرى بعد قليل.',
     phoneConfirmed: 'تم تأكيد رقم الهاتف.',
     ready: 'تم تجهيز حساب العميل. يمكنك الآن إرسال طلب الحجز.',
     rentalsReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الإيجار.',
@@ -125,6 +126,7 @@ const copy = {
     verifyByPhone: 'Verify by phone',
     sendCodePhone: 'Send SMS code',
     phoneCodeSent: 'Verification code sent to your phone via SMS.',
+    codeSendFailed: 'We could not send the verification code right now. Please try again in a moment.',
     phoneConfirmed: 'Phone number confirmed.',
     ready: 'Guest account is ready. You can now send the booking request.',
     rentalsReady: 'Guest account is ready. You can now continue the rental request.',
@@ -190,12 +192,20 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
       const result = verifyMethod === 'phone'
         ? await sendPhoneVerificationCode(phone.trim())
         : await sendEmailVerificationCode(email.trim())
-      setCodeSent(true)
       if (result.devCode) {
+        setCodeSent(true)
         setDevCode(result.devCode)
         setMessage(t.codeSentDev)
         setIsErrorMessage(false)
+      } else if (verifyMethod === 'email' && !('emailSent' in result && result.emailSent)) {
+        // Delivery was not confirmed and there is no dev code -> do not falsely claim the code was
+        // sent (Resend hardening item 7). A definitive failure now returns a non-2xx and lands in
+        // catch below; this guard covers any remaining not-delivered case for the email channel.
+        setCodeSent(false)
+        setMessage(t.codeSendFailed)
+        setIsErrorMessage(true)
       } else {
+        setCodeSent(true)
         setMessage(verifyMethod === 'phone' ? t.phoneCodeSent : t.codeSentReal)
         setIsErrorMessage(false)
       }

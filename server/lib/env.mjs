@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { safePositiveInt } from './rate-limit.mjs'
+import { isMailerConfigured } from './mailer.mjs'
 
 export function loadEnv(path = '.env') {
   const file = resolve(process.cwd(), path)
@@ -54,6 +55,15 @@ export function validateProductionConfig() {
   }
   if (!process.env.UPSTASH_REDIS_REST_TOKEN) {
     problems.push('UPSTASH_REDIS_REST_TOKEN must be set — production requires the distributed rate-limit store, not the in-memory fallback.')
+  }
+
+  // Resend hardening item 1 (2026-07-22): email is the sole verification channel for the Syria-first
+  // launch (SMS deliberately unconfigured). Without a configured mailer, every verification email
+  // silently fails while the endpoint still looks healthy — fail loudly at boot instead. Uses the
+  // exact same isMailerConfigured() the send path checks, so "valid to boot" == "will actually send"
+  // (resend needs RESEND_API_KEY; smtp needs SMTP_HOST). Provider choice is an operational decision.
+  if (!isMailerConfigured()) {
+    problems.push('An email provider must be configured in production (set EMAIL_PROVIDER=resend with RESEND_API_KEY, or configure SMTP_HOST) — otherwise verification emails silently fail.')
   }
 
   // A typo'd RATE_LIMIT_<NAME>_MAX/_WINDOW_MS (non-numeric, zero, negative, non-integer) would
