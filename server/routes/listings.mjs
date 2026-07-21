@@ -2,7 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertNoUnknownFields } from '../lib/validate.mjs'
-import { computeStayTotalMinor, splitStayAmountMinor } from '../lib/pricing.mjs'
+import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pricing.mjs'
 import { computeQuebecStayTaxesResolved } from '../lib/quebec-stay-tax.mjs'
 import { stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
@@ -91,22 +91,22 @@ export async function handleListings(req, res, url, context) {
     // (see stayQuoteToRoundedUsd for why rounding the lump total once instead does not, and why
     // running an already-USD listing through the SYP conversion collapses its real price).
     const wantsUsd = url.searchParams.get('currency') === 'USD'
-    const { totalMinor, perNight } = wantsUsd ? stayQuoteToRoundedUsd(quote, listing.currency) : quote
+    const { totalMinor: nightlySubtotalMinor, perNight } = wantsUsd ? stayQuoteToRoundedUsd(quote, listing.currency) : quote
     const currency = wantsUsd ? 'USD' : listing.currency
 
-    // Pre-booking price-transparency breakdown (item 2 of the Québec compliance review): decompose
-    // the same all-inclusive total the guest is about to pay into its rent/cleaning components, and
-    // -- for a Québec (country: 'CA') listing only -- show the lodging tax/GST/QST that would apply
-    // to the rent portion. This is a DISCLOSURE of what the price already includes, not an added
-    // charge: nightlySubtotalMinor + cleaningFeeMinor always equals totalMinor exactly. Whether SYBNB
-    // should switch Québec Stays to tax-EXCLUSIVE pricing (taxes added on top, raising the guest's
-    // total) is a pricing-model decision for legal/CPA, not something decided here -- see
-    // STAY_TAX_PLATFORM_COLLECTION in compliance-feature-flags.mjs, which stays off either way.
-    const { rentMinor, cleaningFeeMinor } = splitStayAmountMinor(totalMinor, listing.metadata)
+    // Money-model correction (2026-07-22): the guest's real, charged total -- nightly subtotal +
+    // cleaning fee + any other currently-supported mandatory charge -- computed the same way
+    // bookings.mjs computes booking.amountMinor at creation, so the quote a guest sees here is never
+    // contradicted by what they're later asked to pay. Québec lodging tax stays disclosure-only
+    // (explicit product decision, 2026-07-22) and is deliberately not part of totalMinor -- shown
+    // below purely as an estimate, never collected. Whether to eventually switch to tax-inclusive
+    // collection is a pricing/legal decision, not something decided here.
+    const guestTotal = computeGuestBookingTotalMinor({ nightlySubtotalMinor, listingMetadata: listing.metadata })
+    const { cleaningFeeMinor, extraFeesMinor, amountMinor: totalMinor } = guestTotal
     const isQuebec = listing.metadata?.country === 'CA'
     const quebecTaxes = isQuebec
       ? await computeQuebecStayTaxesResolved(db(), {
-          accommodationMinor: rentMinor,
+          accommodationMinor: nightlySubtotalMinor,
           country: 'CA',
           province: listing.metadata?.governorate || null,
           municipality: listing.metadata?.city || null,
@@ -128,8 +128,9 @@ export async function handleListings(req, res, url, context) {
       perNight,
       currency,
       breakdown: {
-        nightlySubtotalMinor: rentMinor,
+        nightlySubtotalMinor,
         cleaningFeeMinor,
+        extraFeesMinor,
         // Neither of these is a real SYBNB charge today -- there is no guest service fee and no
         // refundable damage deposit as an actual product feature. They're returned as explicit
         // zeros (never omitted) so the checkout UI can show "Guest service fee: not charged" /

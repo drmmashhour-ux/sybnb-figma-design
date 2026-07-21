@@ -1155,6 +1155,7 @@ export async function fetchListingAvailability(listingId: string, from: string, 
 export type PlatformStayQuoteBreakdown = {
   nightlySubtotalMinor: number
   cleaningFeeMinor: number
+  extraFeesMinor: number
   guestServiceFeeMinor: number
   refundableDepositMinor: number
   lodgingTaxMinor: number

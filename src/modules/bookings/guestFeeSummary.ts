@@ -27,8 +27,12 @@ export function guestFeeSummary(booking: BookingLike): GuestFeeSummary {
 
   // Guest checkout must keep the exact confirmed quote. Fees appear only when they were
   // explicitly configured; there are no hidden automatic cleaning, tax, or platform fees.
+  // Money-model correction (2026-07-22): canonical tax key is taxFeeMinor (what the host wizard
+  // writes); taxesMinor is the legacy key honored as a fallback for any older record that only has
+  // it set. This field stays disclosure-only (see pricing.mjs's computeGuestBookingTotalMinor) --
+  // it is never actually part of booking.amountMinor, so it always displays as 0 here today.
   const cleaningFeeMinor = metadataNumber(metadata, 'cleaningFeeMinor')
-  const taxesMinor = metadataNumber(metadata, 'taxesMinor')
+  const taxesMinor = metadataNumber(metadata, 'taxFeeMinor') || metadataNumber(metadata, 'taxesMinor')
   const extraFeesMinor = metadataNumber(metadata, 'extraFeesMinor')
   const cancellationProtectionPurchased = bookingMetadata?.cancellationProtectionPurchased === true
   const cancellationProtectionFeeMinor = cancellationProtectionPurchased ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') : 0

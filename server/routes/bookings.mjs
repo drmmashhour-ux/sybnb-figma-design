@@ -7,7 +7,7 @@ import {
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { computeStayTotalMinor } from '../lib/pricing.mjs'
+import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pricing.mjs'
 import { amountToRoundedUsd, stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
 import { getOperationalDocumentStatuses } from '../lib/listing-document-retention.mjs'
@@ -586,17 +586,30 @@ export async function handleBookings(req, res, url, context) {
     // quote, each night is rounded and summed (stayQuoteToRoundedUsd) so the total scales with
     // nights; a single-price listing (no perNight breakdown) rounds that one amount directly.
     const wantsUsd = body.currency === 'USD'
-    const amountMinor = wantsUsd
+    const nightlySubtotalMinor = wantsUsd
       ? (quote.perNight.length ? stayQuoteToRoundedUsd(quote, listing.currency).totalMinor : amountToRoundedUsd(quote.totalMinor, listing.currency))
       : quote.totalMinor
     const currency = wantsUsd ? 'USD' : listing.currency
 
+    // Money-model correction (2026-07-22): booking.amountMinor is now the FINAL all-inclusive guest
+    // total confirmed at checkout -- nightly subtotal + cleaning fee + any other currently-supported
+    // mandatory charge (computeGuestBookingTotalMinor) -- never just the "clean" nightly total. This
+    // is what fixed the checkout mismatch: a guest who confirms and pays exactly booking.amountMinor
+    // is never asked for more at charge time. Québec lodging tax stays disclosure-only (explicit
+    // product decision) and is deliberately not part of this total. Cancellation protection remains
+    // a separate, optional add-on computed below and is never folded into amountMinor itself.
+    const amountMinor = isShortStay
+      ? computeGuestBookingTotalMinor({ nightlySubtotalMinor, listingMetadata: listing.metadata }).amountMinor
+      : nightlySubtotalMinor
+
     // SECURITY (S2): cancellation-protection is a SERVER-computed 3% premium on the stay. The guest only
     // chooses WHETHER to buy it (a boolean) — they can NEVER set the fee amount from the request body.
-    // booking.amountMinor stays the clean stay total (fees + protection are added at charge time by
-    // expectedTotalMinor and reconciled by bookingFinanceSplit). Storing the server-computed fee here
-    // closes two exploits: (a) free protection via a token fee, and (b) a huge forged fee that carves out
-    // the host's payout base (finance-ledger subtracts cancellationProtectionFeeMinor from the split base).
+    // The premium is computed on the full all-inclusive amountMinor above (what the guest actually
+    // stands to lose if they must cancel), tracked separately in booking.metadata, and added on top
+    // only at charge time (server/routes/payments.mjs's expectedTotalMinor) — never folded into
+    // amountMinor itself. Storing the server-computed fee here closes two exploits: (a) free
+    // protection via a token fee, and (b) a huge forged fee that carves out the host's payout base
+    // (finance-ledger subtracts cancellationProtectionFeeMinor from the split base).
     const protectionPurchased = body.cancellationProtectionPurchased === true || body.cancellationProtection === true
     const protectionFeeMinor = protectionPurchased ? Math.round(amountMinor * CANCELLATION_PROTECTION_RATE) : 0
 

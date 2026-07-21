@@ -277,7 +277,14 @@ export function BookingReviewPage({ listingId, lang }: Props) {
             <div style={styles.grid}>
               <Info label={t.checkIn} value={dateRange.checkIn} />
               <Info label={t.checkOut} value={dateRange.checkOut} />
-              <Info label={t.nights(nights)} value={moneyText(stayAmountMinor / Math.max(nights, 1), payCurrency, lang)} />
+              {/* Money-model correction (2026-07-22): stayAmountMinor is now the all-inclusive total
+                  (nightly + cleaning fee), so dividing IT by nights would inflate the shown per-night
+                  rate whenever a cleaning fee applies. Use the breakdown's real nightly-only subtotal
+                  once it's loaded; fall back to the inclusive figure only before the quote resolves. */}
+              <Info
+                label={t.nights(nights)}
+                value={moneyText((stayBreakdown?.nightlySubtotalMinor ?? stayAmountMinor) / Math.max(nights, 1), payCurrency, lang)}
+              />
             </div>
             <em style={styles.cancellationCutoff}>
               {t.freeCancellation}: {freeCancellationLabel(dateRange.checkIn, cancellationProtection, lang)}

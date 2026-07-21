@@ -53,33 +53,27 @@ function metadataNumber(metadata, key) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }
 
-// Mirrors src/modules/bookings/guestFeeSummary.ts so the Stripe charge matches what the guest saw.
-//
-// guestFeeSummary.ts is explicit that STR_CLEANING_RATE/STR_TAX_RATE are an internal breakdown of
-// the already-quoted total (same model as finance-ledger.mjs's bookingFinanceSplit, which divides
-// the paid total DOWN by 1+rate+rate to back out the rent component for payout purposes) -- not
-// additional charges on top of it. This function previously auto-added
-// Math.round(stayAmountMinor * STR_CLEANING_RATE/STR_TAX_RATE) here when the listing had no
-// explicit cleaningFeeMinor/taxesMinor metadata, which is every real STAYS listing today (there is
-// no host UI to set those fields). That meant the guest was quoted and shown "Total due: $X" at
-// checkout, submitted a payment proof for exactly $X, and the server rejected it with
-// PAYMENT_AMOUNT_TOO_LOW because it silently expected ~7% more -- a hard dead end in the STR
-// booking flow. Dropping the rate-based fallback (matching guestFeeSummary.ts exactly: metadata
-// value or 0, never auto-computed) is what actually "mirrors" the comment above.
+// Money-model correction (2026-07-22): booking.amountMinor is now the canonical, all-inclusive
+// guest total set once at creation (server/lib/pricing.mjs's computeGuestBookingTotalMinor --
+// nightly subtotal + cleaning fee + extra fees). This function used to ALSO add
+// metadata.cleaningFeeMinor/taxesMinor here, a second time, on top of booking.amountMinor -- so a
+// guest who paid exactly the total they were quoted and confirmed at checkout got
+// PAYMENT_AMOUNT_TOO_LOW (an earlier, incomplete fix already removed a similar rate-based
+// auto-surcharge; this removes the remaining metadata-driven one, the actual root cause). The only
+// thing that may still legitimately add to booking.amountMinor at charge time is the optional
+// cancellation-protection premium, which is deliberately never folded into amountMinor itself (see
+// bookings.mjs's creation comment) since it's an opt-in add-on, not part of the base stay price.
+// Québec lodging tax stays disclosure-only (explicit product decision) and was never added here.
 function expectedTotalMinor(booking) {
   const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
-  const listingMetadata = booking.listing?.metadata || {}
   const bookingMetadata = booking.metadata || {}
 
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor')
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor')
-  const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
   const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
   const cancellationProtectionFeeMinor = cancellationProtectionPurchased
     ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * CANCELLATION_PROTECTION_RATE)
     : 0
 
-  return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
+  return stayAmountMinor + cancellationProtectionFeeMinor
 }
 
 // bookings.amountMinor is a WHOLE-unit amount in the booking's own currency (e.g. 50 means $50 for

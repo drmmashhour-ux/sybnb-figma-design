@@ -1,7 +1,12 @@
-// Mirrors the real STR revenue split (server/lib/finance-ledger.mjs bookingFinanceSplit, STAYS
-// branch) so the what-if calculator on the Finance page projects using the platform's actual
-// commission math, not an invented flat percentage. Kept read-only/pure — this file only ever
-// computes numbers from user-entered assumptions, it never touches the database.
+// Mirrors the STANDARD-CASE STR revenue split (server/lib/finance-ledger.mjs's bookingFinanceSplit,
+// STAYS branch, no declared cleaning-fee override) so the what-if calculator on the Finance page
+// projects using the platform's actual commission math, not an invented flat percentage. This is a
+// pure, single-number "what if a stay cost $X" projection with no real listing to consult, so it
+// cannot (and structurally never will) reflect the exact-subtraction path bookingFinanceSplit uses
+// for a real booking with an explicitly declared cleaningFeeMinor (money-model correction,
+// 2026-07-22, docs/architecture/STR_MONEY_MODEL.md) -- it always uses the 1.05-divisor estimate.
+// Kept read-only/pure — this file only ever computes numbers from user-entered assumptions, it
+// never touches the database.
 export const STR_CLEANING_RATE = 0.05
 // Tax-compliance foundation (030): removed STR_TAX_RATE (was 0.02) -- it was never backed by any
 // jurisdiction's real tax law, just an invented placeholder folded into the rent/cleaning

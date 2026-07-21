@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CANCELLATION_PROTECTION_RATE,
   STR_ADMIN_COMMISSION_RATE,
   bookingFinanceSplit,
   buildPayoutRow,
@@ -85,6 +86,80 @@ describe('bookingFinanceSplit: STAYS division invariant (rent + cleaning + tax r
     expect(split.taxesMinor).toBe(50000)
     expect(split.stayAmountMinor).toBe(900000)
     expect(split.cleaningFeeMinor).toBe(50000)
+  })
+
+  // Money-model correction (2026-07-22): the real product path -- the host wizard has never written
+  // metadata.rentMinor, only cleaningFeeMinor. Before the fix, rentMinor was estimated via the 1.05
+  // divisor regardless of the declared cleaning fee, so rent+cleaning did NOT reconstruct the paid
+  // amount whenever a real cleaning fee was set (rentMinor was overstated, silently shrinking the
+  // host's commission base and misattributing the difference to admin). Direct subtraction fixes this.
+  it('rentMinor is derived by direct subtraction (not the 1.05 divisor) when cleaningFeeMinor is declared without an explicit rentMinor', () => {
+    const booking = strBooking({
+      amountMinor: 120,
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: 20 } },
+    })
+    const split = bookingFinanceSplit(booking, 120)
+
+    expect(split.stayAmountMinor).toBe(100) // 120 - 20, not round(120/1.05)=114
+    expect(split.cleaningFeeMinor).toBe(20)
+    expect(split.stayAmountMinor + split.cleaningFeeMinor + split.taxesMinor + split.extraFeesMinor).toBe(split.paidTotalMinor)
+    expect(split.adminCommissionMinor).toBe(Math.round(100 * STR_ADMIN_COMMISSION_RATE))
+  })
+
+  it('host gross + admin share still reconstructs the paid amount exactly when a cleaning fee is declared', () => {
+    const booking = strBooking({
+      amountMinor: 120,
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: 20 } },
+    })
+    const split = bookingFinanceSplit(booking, 120)
+
+    expect(split.hostGrossMinor + split.adminShareMinor).toBe(120)
+  })
+
+  it('multiple nights: a flat declared cleaning fee is still subtracted exactly once, not per night', () => {
+    // 4 nights x 100 = 400 nightly + a single flat 20 cleaning fee = 420 paid.
+    const booking = strBooking({
+      amountMinor: 420,
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: 20 } },
+    })
+    const split = bookingFinanceSplit(booking, 420)
+
+    expect(split.stayAmountMinor).toBe(400)
+    expect(split.cleaningFeeMinor).toBe(20)
+  })
+
+  it('extraFeesMinor, when declared, is subtracted correctly and flows to the host (not silently absorbed into admin share)', () => {
+    const booking = strBooking({
+      amountMinor: 130,
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: 20, extraFeesMinor: 10 } },
+    })
+    const split = bookingFinanceSplit(booking, 130)
+
+    expect(split.stayAmountMinor).toBe(100) // 130 - 20 - 10
+    expect(split.extraFeesMinor).toBe(10)
+    expect(split.hostGrossMinor + split.adminShareMinor).toBe(130)
+  })
+
+  it('cancellation protection, cleaning fee, and a declared tax all reconcile together', () => {
+    const protectionFeeMinor = Math.round(120 * CANCELLATION_PROTECTION_RATE)
+    const booking = strBooking({
+      amountMinor: 120,
+      metadata: { cancellationProtectionPurchased: true, cancellationProtectionFeeMinor: protectionFeeMinor },
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: 20, country: 'CA', taxFeeMinor: 350 } },
+    })
+    const paid = 120 + protectionFeeMinor
+    const split = bookingFinanceSplit(booking, paid)
+
+    expect(split.cancellationProtectionFeeMinor).toBe(protectionFeeMinor)
+    expect(split.cleaningFeeMinor).toBe(20)
+    expect(split.stayAmountMinor).toBe(100)
+    // Legacy taxesMinor key is honored as a fallback when the canonical taxFeeMinor key is absent.
+    const legacyBooking = strBooking({
+      amountMinor: 120,
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: 20, taxesMinor: 350 } },
+    })
+    const legacySplit = bookingFinanceSplit(legacyBooking, 120)
+    expect(legacySplit.taxesMinor).toBe(350)
   })
 })
 

@@ -67,16 +67,32 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     }
   }
 
-  // Cleaning-only divisor now (no invented tax rate folded in). Any explicit metadata.taxesMinor
-  // (e.g. Quebec's real 3.5% lodging tax, set by the wizard) is still honored; when absent, the
-  // remainder after rent+cleaning is at most a rounding artifact of a cent or two, never a
-  // meaningful "tax" figure -- Math.max(0, ...) keeps it from ever going negative.
+  // Money-model correction (2026-07-22): cleaningFeeMinor is a real, host-declared, additive fee
+  // (now folded into booking.amountMinor at creation -- see pricing.mjs's
+  // computeGuestBookingTotalMinor), so it must be READ directly here, never re-estimated via the
+  // 5% divisor once it's known. The divisor guess is now only a fallback for the case where NOTHING
+  // was declared at all (legacy/synthetic bookings with no fee metadata), matching the original
+  // behavior for that case exactly. When cleaningFeeMinor IS declared but rentMinor is not (the real
+  // product path -- the wizard has never written rentMinor), rentMinor is derived by direct
+  // subtraction (staySplitBase − cleaningFeeMinor − extraFeesMinor), which reconstructs the paid
+  // total exactly instead of guessing at it -- this is what fixes the previous mismatch where a
+  // declared cleaning fee left rent+cleaning not summing back to what was actually paid.
+  // taxesMinor here is a DISCLOSURE/reporting figure for tax statements only (see
+  // stay-statements.mjs) -- it is never part of hostGrossMinor/adminShareMinor's calculation below,
+  // matching the product decision that Québec lodging tax stays disclosure-only, never charged.
+  const explicitCleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor')
+  const explicitExtraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
+  const explicitLodgingTaxMinor = metadataNumber(listingMetadata, 'taxFeeMinor') || metadataNumber(listingMetadata, 'taxesMinor')
   const divisor = 1 + STR_CLEANING_RATE
-  const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
+  const rentMinor = metadataNumber(listingMetadata, 'rentMinor')
+    || (explicitCleaningFeeMinor
+      ? Math.max(0, staySplitBaseMinor - explicitCleaningFeeMinor - explicitExtraFeesMinor)
+      : Math.round(staySplitBaseMinor / divisor))
+  const cleaningFeeMinor = explicitCleaningFeeMinor || Math.round(rentMinor * STR_CLEANING_RATE)
+  const extraFeesMinor = explicitExtraFeesMinor
+  const taxesMinor = explicitLodgingTaxMinor || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor - extraFeesMinor)
   const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
-  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
+  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor + extraFeesMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 
   return {
@@ -84,7 +100,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     cleaningFeeMinor,
     taxesMinor,
     adminCommissionMinor,
-    extraFeesMinor: 0,
+    extraFeesMinor,
     cancellationProtectionFeeMinor,
     cancellationProtectionPurchased,
     hostGrossMinor,

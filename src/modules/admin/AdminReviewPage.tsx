@@ -660,10 +660,10 @@ function ShortRentAdminCommandDashboard({
   const confirmedBookings = confirmedBookingRows.length
   const pendingPayments = payments.filter((payment) => payment.status !== 'APPROVED' && payment.status !== 'REJECTED').length
   const heldTotal = displayPayments.reduce((sum, payment) => sum + payment.amountMinor, 0)
-  const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 0)
-  const readyPayout = Math.round(displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor).hostPayoutMinor, 0))
+  const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 0, previewPayment?.booking?.listing?.metadata)
+  const readyPayout = Math.round(displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor, payment.booking?.listing?.metadata).hostPayoutMinor, 0))
   const adminCommission = activeLedger.adminCommissionMinor
-  const totalAdminCommission = displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor).adminCommissionMinor, 0)
+  const totalAdminCommission = displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor, payment.booking?.listing?.metadata).adminCommissionMinor, 0)
   const shamCashReconciliation = createShamCashReconciliation(payments, displayPayments, lang, manualShamCashByPayment)
   const bookingRef = bookingReference(previewPayment)
   const listingTitle = paymentListingTitle(previewPayment, lang)
@@ -2409,10 +2409,25 @@ function shortBookingReference(booking: PlatformReviewBooking | undefined) {
   return `BK-${booking.id.slice(0, 4).toUpperCase()}-${booking.id.slice(4, 8).toUpperCase()}`
 }
 
-function createShortRentLedger(totalMinor: number) {
+function metadataNumber(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+// Money-model correction (2026-07-22): this admin-dashboard preview used to guess rentMinor via a
+// flat 1.05 divisor with no access to the listing's real declared cleaningFeeMinor -- a third,
+// independent copy of the same decomposition bug already fixed in server/lib/finance-ledger.mjs's
+// bookingFinanceSplit. It now mirrors that same fix: when a cleaning fee is explicitly declared,
+// rentMinor is derived by direct subtraction (exact), not a divisor guess. listingMetadata is
+// optional so every existing call site (which previously passed no metadata at all) keeps working
+// with the same divisor-based fallback for a listing with no declared fee.
+function createShortRentLedger(totalMinor: number, listingMetadata?: Record<string, unknown>) {
+  const explicitCleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor')
   const divisor = 1 + STR_CLEANING_RATE
-  const rentMinor = Math.round(totalMinor / divisor)
-  const cleaningFeeMinor = Math.round(rentMinor * STR_CLEANING_RATE)
+  const rentMinor = explicitCleaningFeeMinor
+    ? Math.max(0, totalMinor - explicitCleaningFeeMinor)
+    : Math.round(totalMinor / divisor)
+  const cleaningFeeMinor = explicitCleaningFeeMinor || Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = Math.max(0, totalMinor - rentMinor - cleaningFeeMinor)
   const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
   const hostPayoutMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
