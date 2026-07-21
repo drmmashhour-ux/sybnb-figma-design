@@ -119,3 +119,76 @@ defaults" means not pre-authorizing a source this app doesn't currently use.
 This phase does not configure Cloudflare, DNS, or any production hosting. Nothing here was applied
 to any live/public environment; the `<meta>` tag lives in source and only takes effect wherever
 this repository's own build output is served (currently: local dev/test only).
+
+## 2026-07-22 update — P0 production CSP fix
+
+STR launch-blocker P0 ("production CSP configuration breaks API calls after deployment") closed two
+of the three items above and confirmed the third was mischaracterized:
+
+- **`frame-src` was completely absent** (not previously flagged in this doc — found during the P0
+  trace), which fell back to `default-src 'self'` and blocked the Google Maps embed `<iframe>` every
+  listing detail page renders. Fixed: `frame-src https://www.google.com` added to `index.html`.
+- **`connect-src`'s local dev ports were hardcoded directly in `index.html`** (this doc's original
+  `OWNER DECISION REQUIRED` note above). Fixed via option 1 above: [`vite-csp-plugin.mjs`](../../vite-csp-plugin.mjs)
+  templates `index.html`'s `__CSP_CONNECT_SRC_EXTRA__` placeholder at build time — dev server gets
+  the two local ports, a production build gets nothing extra unless `VITE_API_BASE_URL` is set (the
+  same env var `platformApi.ts` reads), and never ships a dev origin into a real build.
+- **`frame-ancestors` via a real HTTP header** — this doc's option 2 above, previously deferred only
+  because no production host was chosen. `vercel.json` now has a `headers` block applying
+  `frame-ancestors 'none'` (plus `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`) to
+  every route, since this project's production host (Vercel) is now known.
+- **The original P0 framing ("CSP breaks API calls") was conditional, not universal.** Under this
+  project's actual topology — `vercel.json`'s existing `rewrites` route `/api/*` to the same
+  deployment as the static frontend — `connect-src 'self'` already covers real production API calls
+  today. The hardcoded dev ports were a real defect (dev-only origins shipping in a production
+  build), but they were never actually blocking a production API call, since no production API call
+  ever went to `127.0.0.1`.
+
+### Investigated and rejected (for now): a single canonical CSP source
+
+Adding the header (`vercel.json`) alongside the already-build-templated meta tag (`index.html` +
+`vite-csp-plugin.mjs`) reintroduces exactly the kind of two-source duplication this doc has been
+tracking since 2026-07-11 — now with an additional, concrete drift risk: if `VITE_API_BASE_URL` is
+ever set (splitting the API onto its own domain), `vite-csp-plugin.mjs` would correctly add that
+origin to the meta tag's `connect-src`, but `vercel.json`'s header `connect-src` is static JSON and
+would still say `'self'` only. Per the CSP spec, when a header CSP and a meta CSP are both present,
+browsers enforce the **intersection** of the two — so the static header would end up blocking real
+API calls the meta tag correctly permits.
+
+A single canonical source generating both was investigated before closing this fix:
+
+- **Vercel genuinely has a mechanism for this**: `vercel.ts` (`@vercel/config` on npm, confirmed to
+  exist — versions 0.0.37 through 0.5.5 as of this writing) replaces `vercel.json` with a TypeScript
+  config that executes at build time and can read `process.env` directly (confirmed against
+  Vercel's current docs, e.g. `outputDirectory: \`.${process.env.framework}\``). In principle,
+  `vercel.ts` could import the exact same `cspConnectSrcExtra()` decision function from
+  `vite-csp-plugin.mjs` that drives the meta tag, making both genuinely derive from one source.
+- **Not adopted in this fix, for two concrete reasons, not just caution:**
+  1. Vercel requires **exactly one** config file per project (`vercel.ts` *or* `vercel.json`, never
+     both) — adopting it means migrating `buildCommand`, `outputDirectory`, `framework`,
+     `functions`, and `rewrites` into the new format too, not just `headers`. That is materially
+     larger than "CSP generation" and a disproportionate blast radius for what this task scoped as
+     the smallest safe correction.
+  2. It cannot be verified end-to-end in the environment this fix was built in: there was no
+     authenticated Vercel access available, and the locally installed Vercel CLI (52.0.0) predates
+     `vercel.ts`'s documented rollout. A parse/compatibility failure on a config-file-format swap
+     would silently drop **all** routing configuration at once in production — rewrites, functions,
+     and headers together, not just the CSP header — which is not a risk to take unverified on a
+     security-critical config file without a real preview-deployment test first.
+
+**Chosen instead**: keep the two sources (`vite-csp-plugin.mjs` and `vercel.json`), but added an
+automated canary — `test/unit/csp-config.test.mjs`'s "the two CSPs agree" test asserts the meta
+tag's and the header's `connect-src` values are identical under today's actual, default topology (no
+`VITE_API_BASE_URL` set). This does not prevent the *hypothetical future* drift described above, but
+it does catch any *accidental* divergence between the two files the moment either one is edited.
+
+### Operational requirement (read this before ever setting `VITE_API_BASE_URL`)
+
+If the API is ever split onto its own domain via `VITE_API_BASE_URL`, **`vercel.json`'s
+`Content-Security-Policy` header's `connect-src` must be manually updated to include that same
+origin in the same change** — it will not happen automatically. Forgetting this will not show up as
+a broken build or a failing test (the canary test above only checks today's no-origin-set case); it
+will show up as production API calls failing under the header CSP despite the meta tag looking
+correct. If/when this becomes a real, current need (not hypothetical), that is the point to revisit
+the `vercel.ts` + `@vercel/config` migration above properly — as its own scoped, preview-tested
+change, not bundled into whatever change introduces `VITE_API_BASE_URL`.

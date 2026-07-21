@@ -5,18 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0f1d" />
     <!--
-      Baseline frontend CSP (see docs/security/SYBNB_V6_FRONTEND_CSP_PLAN.md for the full design,
-      what this does and does not cover, and what production hosting still has to add).
+      Baseline frontend CSP (see docs/security/SYBNB_V6_FRONTEND_CSP_PLAN.md for the original
+      design, and the STR P0 production-CSP fix, 2026-07-22, for what changed and why).
 
       This is a real, working, locally-testable policy — not a placeholder — but a <meta> CSP has
-      hard limits the eventual production static host/CDN must still close:
-        - frame-ancestors is silently ignored by browsers when delivered via <meta> (CSP spec);
-          clickjacking protection for the frontend still requires a real HTTP header from
-          whatever serves the built files in production. EXTERNAL INFRASTRUCTURE REQUIRED.
-        - connect-src below only lists the known local API ports (dev + isolated test); a real
-          deployment must add its actual API origin here (or move this policy to a response
-          header the host controls, which can be templated per-environment; a static <meta> tag
-          cannot). OWNER DECISION REQUIRED once a production API origin exists.
+      hard limits production hosting still has to close:
+        - frame-ancestors is silently ignored by browsers when delivered via <meta> (CSP spec) —
+          fixed for real via a proper HTTP response header in vercel.json, which also repeats this
+          policy (and the other security headers already applied to the API) for the static
+          frontend response itself.
+        - connect-src's extra origins (beyond 'self', which already covers same-origin /api/*
+          calls under this project's default same-deployment Vercel routing) are templated at
+          build time by vite-csp-plugin.mjs, NOT hardcoded here: the dev server gets the two local
+          API ports, a production build gets nothing extra unless VITE_API_BASE_URL splits the API
+          onto its own domain — the same env var src/shared/api/platformApi.ts already reads, so
+          the two can never disagree about where the API lives.
+        - frame-src allows exactly one origin, https://www.google.com, for the Google Maps embed
+          <iframe> every listing detail page renders (src/modules/listings/ListingDetailPage.tsx,
+          googleMapsEmbedUrl) — previously missing entirely, which silently fell back to
+          default-src 'self' and blocked the map in every environment enforcing this policy.
         - style-src needs 'unsafe-inline': this codebase applies React inline `style={}` props
           extensively (not a small number of components) — removing this would require a broader
           refactor to CSS classes/modules, out of scope for this fix. Documented as an accepted,
@@ -26,7 +33,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:3051 http://127.0.0.1:3061; base-uri 'self'; form-action 'self'; object-src 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; frame-src https://www.google.com; connect-src 'self'__CSP_CONNECT_SRC_EXTRA__; base-uri 'self'; form-action 'self'; object-src 'none'"
     />
     <title>SYBNB V6</title>
   </head>
