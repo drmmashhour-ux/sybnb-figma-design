@@ -4,9 +4,12 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   claimPrototypeSrRide,
   fetchDriverDocuments,
+  uploadDriverDocument,
+  type PlatformDriverDocumentType,
   fetchDriverVehicles,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
+  updateDriverLocation,
   updatePrototypeDriverRideStatus,
   verifyDriverPickupPin,
   type PlatformDriverDocument,
@@ -20,10 +23,20 @@ type Props = {
   lang: Lang
 }
 
+const DOCUMENT_TYPES: PlatformDriverDocumentType[] = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE', 'SAAQ_AUTHORIZED_DRIVER_PERMIT', 'CRIMINAL_RECORD_CHECK']
+
+const DOCUMENT_TYPE_LABELS: Record<PlatformDriverDocumentType, { ar: string; en: string }> = {
+  LICENSE: { ar: 'رخصة القيادة', en: 'Driver license' },
+  VEHICLE_REGISTRATION: { ar: 'دفتر المركبة', en: 'Vehicle registration' },
+  INSURANCE: { ar: 'التأمين', en: 'Insurance' },
+  SAAQ_AUTHORIZED_DRIVER_PERMIT: { ar: 'رخصة سائق معتمد (SAAQ - كيبيك)', en: 'SAAQ authorized driver permit (Quebec)' },
+  CRIMINAL_RECORD_CHECK: { ar: 'سجل عدم المحكومية القضائية (كيبيك)', en: 'Criminal record check (Quebec)' },
+}
+
 const copy = {
   ar: {
     back: 'العودة للرئيسية',
-    title: 'لوحة سائق SR',
+    title: 'لوحة سائق SYBNB Ride',
     subtitle: 'الرحلات المسندة للسائق وحالات التنفيذ مباشرة من قاعدة البيانات.',
     refresh: 'تحديث',
     loading: 'جار التحميل',
@@ -47,6 +60,7 @@ const copy = {
     verifyPickup: 'تأكيد الرمز وبدء الرحلة',
     verifying: 'جار التحقق...',
     myVehicles: 'مركباتي',
+    taxProfile: 'الملف الضريبي',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -87,7 +101,7 @@ const copy = {
   },
   en: {
     back: 'Back to landing',
-    title: 'SR Driver Dashboard',
+    title: 'SYBNB Ride Driver Dashboard',
     subtitle: 'Assigned driver rides and live execution states directly from PostgreSQL.',
     refresh: 'Refresh',
     loading: 'Loading',
@@ -111,6 +125,7 @@ const copy = {
     verifyPickup: 'Confirm code & start trip',
     verifying: 'Verifying…',
     myVehicles: 'My vehicles',
+    taxProfile: 'Tax profile',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -156,6 +171,8 @@ export function DriverDashboardPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const [overview, setOverview] = useState<PlatformDriverOverview | null>(null)
   const [documents, setDocuments] = useState<PlatformDriverDocument[]>([])
+  const [uploadingType, setUploadingType] = useState<PlatformDriverDocumentType | ''>('')
+  const [uploadError, setUploadError] = useState('')
   const [vehicles, setVehicles] = useState<PlatformDriverVehicle[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -164,6 +181,8 @@ export function DriverDashboardPage({ lang }: Props) {
   const [pendingStatus, setPendingStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [claimingRideId, setClaimingRideId] = useState('')
   const [claimError, setClaimError] = useState('')
+  const [isOnline, setIsOnline] = useState(false)
+  const [onlineError, setOnlineError] = useState('')
 
   useEffect(() => {
     void loadOverview()
@@ -171,6 +190,68 @@ export function DriverDashboardPage({ lang }: Props) {
     const interval = window.setInterval(() => void loadPendingRides(), 6000)
     return () => window.clearInterval(interval)
   }, [])
+
+  // SIR ETA (027): while online, ping the real device location every 45s (well inside the 2-minute
+  // server-side staleness window, server/lib/sr-eta.mjs) so riders searching this category see a real
+  // ETA instead of none. Going offline (toggle, tab close) stops the ping and flips the flag.
+  useEffect(() => {
+    if (!isOnline) return
+    let cancelled = false
+    const pingOnce = () => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) return
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          if (cancelled) return
+          void updateDriverLocation({ lat: position.coords.latitude, lng: position.coords.longitude, online: true }).catch(() => {})
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
+      )
+    }
+    pingOnce()
+    const interval = window.setInterval(pingOnce, 45000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [isOnline])
+
+  const toggleOnline = async () => {
+    setOnlineError('')
+    const next = !isOnline
+    if (!next) {
+      setIsOnline(false)
+      await updateDriverLocation({ online: false }).catch(() => {})
+      return
+    }
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setOnlineError(isAr ? 'هذا الجهاز لا يدعم تحديد الموقع.' : 'This device does not support location.')
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setIsOnline(true)
+        void updateDriverLocation({ lat: position.coords.latitude, lng: position.coords.longitude, online: true }).catch(() => {})
+      },
+      () => setOnlineError(isAr ? 'يجب السماح بالوصول للموقع لتصبح متصلاً.' : 'Location permission is required to go online.'),
+      { enableHighAccuracy: true, timeout: 8000 },
+    )
+  }
+
+  async function handleUploadDocument(type: PlatformDriverDocumentType, fileList: FileList | null) {
+    const file = fileList?.[0]
+    if (!file) return
+    setUploadingType(type)
+    setUploadError('')
+    try {
+      await uploadDriverDocument(type, file)
+      setDocuments(await fetchDriverDocuments())
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+    } finally {
+      setUploadingType('')
+    }
+  }
 
   async function loadPendingRides() {
     try {
@@ -268,7 +349,7 @@ export function DriverDashboardPage({ lang }: Props) {
       </section>
 
       <section style={styles.hero}>
-        <p style={styles.eyebrow}>SR / SYBNB</p>
+        <p style={styles.eyebrow}>SYBNB Ride</p>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
         <div style={styles.stats}>
@@ -280,13 +361,25 @@ export function DriverDashboardPage({ lang }: Props) {
           ))}
         </div>
         <div style={styles.actions}>
+          <button
+            style={{ ...styles.primaryButton, background: isOnline ? '#1c9d5b' : '#3a3f52' }}
+            onClick={() => void toggleOnline()}
+          >
+            {isOnline
+              ? (isAr ? '● متصل — يظهر في تقدير الوصول' : '● Online — visible in ETA estimates')
+              : (isAr ? 'اتصال لاستقبال الرحلات' : 'Go online to receive rides')}
+          </button>
           <button style={styles.primaryButton} onClick={() => void loadOverview()}>
             {status === 'loading' ? t.loading : t.refresh}
           </button>
           <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/driver/vehicles')}>
             {t.myVehicles}
           </button>
+          <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/driver/tax-profile')}>
+            {t.taxProfile}
+          </button>
         </div>
+        {onlineError && <p style={{ color: '#f87171', fontSize: 13, fontWeight: 800 }}>{onlineError}</p>}
       </section>
 
       {status === 'error' && <section style={styles.alert}>{message}</section>}
@@ -340,6 +433,41 @@ export function DriverDashboardPage({ lang }: Props) {
               </div>
             )
           })()}
+        </article>
+
+        <article style={styles.docsPanel}>
+          <h2>{isAr ? 'رفع الوثائق' : 'Upload documents'}</h2>
+          <p style={{ color: '#9aa6ba', fontSize: 13, margin: 0 }}>
+            {isAr
+              ? 'الرخصة، دفتر المركبة، والتأمين مطلوبة للعمل في سوريا. رخصة SAAQ وسجل عدم المحكومية القضائية خاصة بكيبيك فقط.'
+              : 'License, vehicle registration, and insurance are required to work in Syria. The SAAQ permit and criminal record check are Quebec-only.'}
+          </p>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {DOCUMENT_TYPES.map((type) => {
+              const doc = documents.find((d) => d.type === type)
+              return (
+                <div key={type} style={styles.docUploadRow}>
+                  <div>
+                    <strong>{DOCUMENT_TYPE_LABELS[type][isAr ? 'ar' : 'en']}</strong>
+                    <div style={{ fontSize: 12, color: doc?.status === 'APPROVED' ? '#0a7d33' : doc?.status === 'REJECTED' ? '#b3261e' : '#8a6d0b' }}>
+                      {doc ? (doc.status === 'APPROVED' ? t.checkYes : doc.status === 'REJECTED' ? (isAr ? 'مرفوض' : 'Rejected') : (isAr ? 'قيد المراجعة' : 'Pending review')) : (isAr ? 'لم يُرفع بعد' : 'Not uploaded yet')}
+                    </div>
+                  </div>
+                  <label style={styles.docUploadButton}>
+                    {uploadingType === type ? (isAr ? 'جارٍ الرفع...' : 'Uploading...') : doc ? (isAr ? 'استبدال' : 'Replace') : (isAr ? 'رفع' : 'Upload')}
+                    <input
+                      accept=".pdf,.png,.jpg,.jpeg,image/png,image/jpeg,application/pdf"
+                      disabled={uploadingType !== ''}
+                      style={{ display: 'none' }}
+                      type="file"
+                      onChange={(event) => void handleUploadDocument(type, event.target.files)}
+                    />
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+          {uploadError && <p style={{ color: '#ff8f9f', fontSize: 13 }}>{uploadError}</p>}
         </article>
         <article style={styles.docsPanel}>
           <h2>{t.todayEarnings}</h2>
@@ -511,6 +639,8 @@ const styles: Record<string, CSSProperties> = {
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
+  docUploadRow: { alignItems: 'center', background: '#181a24', border: '1px solid #232638', borderRadius: 10, display: 'flex', gap: 10, justifyContent: 'space-between', padding: '10px 12px' },
+  docUploadButton: { background: '#1f2330', border: '1px solid #30384d', borderRadius: 10, color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 800, padding: '8px 12px', whiteSpace: 'nowrap' },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },
   driverCtas: { display: 'grid', gap: 28, gridTemplateColumns: '1fr 1fr 1fr' },
   sosButton: { border: 0, borderRadius: 12, background: '#ff5274', color: '#06070c', fontWeight: 950, minHeight: 72, fontSize: 22 },

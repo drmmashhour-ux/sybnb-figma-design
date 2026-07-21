@@ -12,12 +12,28 @@ export const VEHICLE_AGE_LIMITS = {
   'SR XXL': 7, // larger-capacity vehicle for bigger groups/luggage — newer cars only
 }
 
+// Quebec SAAQ "qualified vehicle" rule (028) — a single, uniform 10-year cap across every category
+// (unlike Syria's tiered 10/7/7), confirmed from saaq.gouv.qc.ca/en/transportation-passengers/
+// remunerated-passenger-transportation-automobile/owners/. Only applied when the vehicle's own
+// `country` is 'CA'. SAAQ also requires wheelbase >=261cm, net weight <3,500kg, and <=9 seats — those
+// three are NOT enforced here yet because DriverVehicle has no fields for them; this is a real,
+// documented gap, not an oversight, until that data is collected.
+export const QUEBEC_VEHICLE_AGE_LIMITS = {
+  'SR Economy': 10,
+  'SR Comfort': 10,
+  'SR SUV': 10,
+  'SR XXL': 10,
+}
+
 // A model year older than this is almost certainly a typo / not a real rideshare vehicle.
 const OLDEST_PLAUSIBLE_YEAR = 1980
 
 // Throws a 400 the driver can act on if the vehicle can't be admitted to the fleet for its category.
-// Uses the real calendar year at call time (server runtime), so the 10-year window rolls forward.
-export function assertVehicleEligible(vehicle, now = new Date()) {
+// Uses the real calendar year at call time (server runtime), so the age window rolls forward.
+// `country` selects which market's age-limit table applies (server/lib/jurisdiction-compliance.mjs's
+// same 'SY'|'CA' vocabulary) -- this only judges document/vehicle eligibility, it does not itself
+// permit ride-matching in that market (see requireRoadReadyDriver's separate jurisdiction-approval gate).
+export function assertVehicleEligible(vehicle, now = new Date(), country = 'SY') {
   const category = String(vehicle?.category || '')
   if (!SR_VEHICLE_CATEGORIES.includes(category)) {
     fail(`Vehicle category must be one of: ${SR_VEHICLE_CATEGORIES.join(', ')}.`, 'VEHICLE_CATEGORY_INVALID')
@@ -27,7 +43,8 @@ export function assertVehicleEligible(vehicle, now = new Date()) {
   if (!Number.isInteger(year) || year < OLDEST_PLAUSIBLE_YEAR || year > currentYear + 1) {
     fail('Vehicle year must be a valid model year.', 'VEHICLE_YEAR_INVALID')
   }
-  const maxAge = VEHICLE_AGE_LIMITS[category]
+  const ageLimits = country === 'CA' ? QUEBEC_VEHICLE_AGE_LIMITS : VEHICLE_AGE_LIMITS
+  const maxAge = ageLimits[category]
   const age = currentYear - year
   if (age > maxAge) {
     const error = new Error(
@@ -36,7 +53,7 @@ export function assertVehicleEligible(vehicle, now = new Date()) {
     error.statusCode = 400
     error.code = 'VEHICLE_TOO_OLD'
     error.expose = true
-    error.details = { category, year, age, maxAge }
+    error.details = { category, year, age, maxAge, country }
     throw error
   }
   return { category, year, age, maxAge }

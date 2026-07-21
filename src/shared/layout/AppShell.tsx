@@ -301,7 +301,7 @@ function getRouteContext(path: string, isAr: boolean) {
   if (path.startsWith('/driver')) {
     return {
       section: isAr ? 'السائق' : 'Driver',
-      page: isAr ? 'لوحة SR' : 'SR dashboard',
+      page: isAr ? 'لوحة SYBNB Ride' : 'SYBNB Ride dashboard',
       backPath: home,
       nextPath: '',
     }

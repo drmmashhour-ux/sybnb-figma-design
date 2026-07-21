@@ -11,5 +11,10 @@ import '../../scripts/require-test-env.mjs'
 // it. resetTestDatabase() re-validates the safety guard itself; this is not this file's only
 // protection.
 import { resetTestDatabase } from './resetTestDatabase.mjs'
+import { seedApprovedJurisdictions } from './seedApprovedJurisdictions.mjs'
 
 await resetTestDatabase()
+// Jurisdiction compliance (026) fail-closes STR/SR by default -- every existing test fixture
+// implicitly assumes "the market is fine, test the feature," so seed Syria as APPROVED here.
+// Tests that specifically exercise the jurisdiction gate itself override this per-test.
+await seedApprovedJurisdictions()

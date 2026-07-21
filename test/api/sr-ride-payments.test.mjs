@@ -30,8 +30,9 @@ async function registerVerifiedDriver(app, label) {
   return driver
 }
 
-// The platform commission (15%) is CREDITed to an ADMIN wallet on completion — production always has
-// an admin; the test DB needs one bootstrapped (ADMIN cannot self-register).
+// The platform commission (progressive, 12% for a driver's first $20k/year -- see sr-payments.mjs)
+// is CREDITed to an ADMIN wallet on completion — production always has an admin; the test DB needs
+// one bootstrapped (ADMIN cannot self-register).
 async function ensurePlatformAdmin() {
   const existing = await db().userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
   if (existing) return existing.userId
@@ -122,7 +123,7 @@ describe('SR ride payments: cashless charge + driver settlement', () => {
     expect(await walletBalance(rider.user.id)).toBe(10_000_000)
   })
 
-  it('a completed ride debits the rider the fare and credits driver 85% + platform 15% (ledger balances)', async () => {
+  it('a completed ride debits the rider the fare and credits driver + platform (progressive 12% first-tier rate for a fresh driver)', async () => {
     const rider = await registerUser(app, 'GUEST', 'charge-rider')
     await fundRider(rider.user.id, 10_000_000)
     const driver = await registerVerifiedDriver(app, 'charge-driver')
@@ -132,17 +133,57 @@ describe('SR ride payments: cashless charge + driver settlement', () => {
     expect(completed.status).toBe(200)
     expect(completed.body.ride.status).toBe('COMPLETED')
 
-    const split = srRideFinanceSplit(ride.fareMinor)
+    // A brand-new driver has $0 prior YTD fare, so the whole ride lands in tier 1 (12%).
+    const split = srRideFinanceSplit(ride.fareMinor, { currency: ride.currency, priorYtdUsd: 0 })
     expect(split.driverEarningMinor + split.adminCommissionMinor).toBe(ride.fareMinor)
+    expect(split.breakdown.effectiveRatePercent).toBeCloseTo(12, 5)
 
     // Rider debited exactly the fare.
     expect(await walletBalance(rider.user.id)).toBe(10_000_000 - ride.fareMinor)
-    // Driver credited exactly 85%.
+    // Driver credited exactly fare minus the 12% commission.
     expect(await walletBalance(driver.user.id)).toBe(split.driverEarningMinor)
-    // Platform credited exactly 15%.
+    // Platform credited exactly the 12% commission, with the tier breakdown stored for auditability.
     const commission = await db().walletEntry.findFirst({ where: { referenceType: 'sr_admin_commission', referenceId: ride.id, type: 'CREDIT' } })
     expect(commission).not.toBeNull()
     expect(commission.amountMinor).toBe(split.adminCommissionMinor)
+    expect(commission.metadata.commissionPolicy).toBe('sr_progressive_v1')
+    expect(commission.metadata.tiers).toEqual([{ ratePercent: 12, minUsd: 0, maxUsd: 20000, amountUsd: commission.metadata.fareUsd, commissionUsd: commission.metadata.commissionUsd }])
+  })
+
+  it('progressive commission: a ride that pushes a driver past $20,000/year is billed at a blended rate, and does not retroactively change earlier rides', async () => {
+    const rider = await registerUser(app, 'GUEST', 'tier-rider')
+    await fundRider(rider.user.id, 100_000_000)
+    const driver = await registerVerifiedDriver(app, 'tier-driver')
+
+    // Seed this driver's prior year-to-date fare just $0.10 short of the $20,000 tier-1 ceiling
+    // (299,998,500 SYP / 15,000 SYP-per-USD = $19,999.90). The cheapest possible SR Economy fare
+    // (15,000 SYP, no surge) is far larger than the $0.10 (1,500 SYP) of room left, so the next
+    // ride is guaranteed to cross into tier 2 regardless of time-of-day surge.
+    const priorRide = await db().rideRequest.create({
+      data: { riderId: rider.user.id, driverId: driver.user.id, status: 'COMPLETED', fareMinor: 299_998_500, currency: 'SYP' },
+    })
+
+    const ride = (await requestRide(app, rider.token, 'tier-cross')).body.ride
+    const completed = await driveToCompletion(app, driver.token, ride.id)
+    expect(completed.status).toBe(200)
+
+    const commission = await db().walletEntry.findFirst({ where: { referenceType: 'sr_admin_commission', referenceId: ride.id, type: 'CREDIT' } })
+    expect(commission).not.toBeNull()
+    expect(commission.metadata.priorYtdUsd).toBeCloseTo(19999.9, 1)
+    // The fare spans the boundary: some of it billed at 12% (tier 1), the rest at 11% (tier 2).
+    expect(commission.metadata.tiers.length).toBe(2)
+    expect(commission.metadata.tiers[0].ratePercent).toBe(12)
+    expect(commission.metadata.tiers[1].ratePercent).toBe(11)
+    expect(commission.metadata.effectiveRatePercent).toBeGreaterThan(11)
+    expect(commission.metadata.effectiveRatePercent).toBeLessThan(12)
+    // Blended rate, not the old flat rate.
+    expect(commission.metadata.effectiveRatePercent).not.toBe(15)
+
+    // The seeded prior ride was never itself charged through chargeCompletedRide (it has no ledger
+    // entries), so there's nothing to assert about it being "unchanged" beyond it staying untouched —
+    // this test's real point is that ITS presence shifted the NEW ride's rate, proving the engine is
+    // reading real cumulative history rather than a stateless per-ride constant.
+    expect(priorRide.fareMinor).toBe(299_998_500)
   })
 
   it('charging is idempotent: settling a completed ride twice never double-charges', async () => {

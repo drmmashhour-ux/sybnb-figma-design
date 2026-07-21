@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
-import type { Lang, Localized } from '../../engines/language/languageEngine'
+import { text, type Lang, type Localized } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import {
@@ -12,7 +12,18 @@ import {
 } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
-import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
+import {
+  CANADA_PROVINCES,
+  COUNTRIES,
+  getCanadianCity,
+  getCanadianProvince,
+  getCity,
+  getGovernorate,
+  isStrBannedArea,
+  labelFor,
+  SYRIA_GOVERNORATES,
+  type CountryKey,
+} from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { SellerLocationMap } from './SellerLocationMap'
@@ -43,10 +54,14 @@ type WizardDraft = {
   selectedType: string
   title: string
   description: string
+  country: CountryKey
   governorate: string
   city: string
   area: string
   address: string
+  citqRegistrationNumber: string
+  citqCertificateExpiresAt: string
+  residencyType: 'principal' | 'investment' | ''
   latitude: string
   longitude: string
   mapPinConfirmed: boolean
@@ -205,6 +220,9 @@ type MediaSlot = {
   offerProof?: boolean
 }
 
+// Revenu Quebec Tax on Lodging: https://www.revenuquebec.ca/en/citizens/your-situation/short-term-accommodations/registration-tax-on-lodging/
+const QUEBEC_LODGING_TAX_RATE = 0.035
+
 const OFFER_PROOF_PREFIX = 'offerProof:'
 const OFFER_PROOF_GROUP_IDS = new Set(['popular', 'amenities', 'meals', 'views', 'access', 'payments'])
 const OFFER_PROOF_EXCLUDED_OPTION_IDS = new Set(['any', 'nearMe', 'rating8', 'verifiedHost', 'fastResponse', 'featuredHost', 'instantBooking'])
@@ -334,11 +352,26 @@ export function SellerListingWizard({ lang }: Props) {
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
+  const [country, setCountry] = useState<CountryKey>(draft.country || 'SY')
   const [governorate, setGovernorate] = useState(draft.governorate || 'damascus')
   const [city, setCity] = useState(draft.city || 'damascus-city')
   const [area, setArea] = useState(draft.area || 'old-city')
   const [areaQuery, setAreaQuery] = useState('')
   const [address, setAddress] = useState(draft.address ?? (isAr ? 'قرب شارع رئيسي' : 'Near a main street'))
+  // Quebec tourist-accommodation registration (CITQ) -- required by Quebec law for any unit rented
+  // 31 days or less for payment. Presence is enforced server-side before a CA listing can submit;
+  // whether the borough/season it's in is actually legal is judged by an admin reviewer, not this
+  // form (see canadaData.ts strBanned flags and AdminReviewPage's Quebec compliance panel).
+  const [citqRegistrationNumber, setCitqRegistrationNumber] = useState(draft.citqRegistrationNumber ?? '')
+  // Jurisdiction pricing engine (030): CITQ certificates expire and must be renewed -- an expired or
+  // missing expiry date now blocks listing approval and new bookings server-side (listing-attributes.mjs).
+  const [citqCertificateExpiresAt, setCitqCertificateExpiresAt] = useState(draft.citqCertificateExpiresAt ?? '')
+  // Montreal bans investment/secondary-property STR almost everywhere except specific named streets
+  // (not tracked here), while principal-residence STR is allowed within the seasonal window. Self-
+  // declared, not verified by this form -- an 'investment' declaration surfaces a stricter-review flag
+  // to the admin (AdminReviewPage's Quebec compliance panel), it does not hard-block submission, since
+  // a named-street exception may legitimately apply.
+  const [residencyType, setResidencyType] = useState<'principal' | 'investment' | ''>(draft.residencyType || '')
   const [latitude, setLatitude] = useState(draft.latitude || '33.5138')
   const [longitude, setLongitude] = useState(draft.longitude || '36.2765')
   const [mapPinConfirmed, setMapPinConfirmed] = useState(draft.mapPinConfirmed ?? false)
@@ -392,10 +425,14 @@ export function SellerListingWizard({ lang }: Props) {
       selectedType,
       title,
       description,
+      country,
       governorate,
       city,
       area,
       address,
+      citqRegistrationNumber,
+      citqCertificateExpiresAt,
+      residencyType,
       latitude,
       longitude,
       mapPinConfirmed,
@@ -417,22 +454,51 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, listingPlan, listingPlanPaymentMethod, listingPlanPaymentConfirmed, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
+  }, [division, listingPlan, listingPlanPaymentMethod, listingPlanPaymentConfirmed, selectedType, title, description, country, governorate, city, area, address, citqRegistrationNumber, citqCertificateExpiresAt, residencyType, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
   const isLast = stepIndex === steps.length - 1
-  const selectedGovernorateData = getGovernorate(governorate)
-  const selectedCityData = getCity(governorate, city)
+  const isCanada = country === 'CA'
+  const selectedGovernorateData = isCanada ? getCanadianProvince(governorate) : getGovernorate(governorate)
+  const selectedCityData = isCanada ? getCanadianCity(governorate, city) : getCity(governorate, city)
   const selectedAreaData = selectedCityData?.areas.find((item) => item.key === area)
-  const selectedGovernorateLabel = labelFor(lang, selectedGovernorateData)
-  const selectedCityLabel = labelFor(lang, selectedCityData)
-  const selectedAreaLabel = labelFor(lang, selectedAreaData)
+  const selectedGovernorateLabel = isCanada ? text(selectedGovernorateData || { ar: '', en: '', fr: '' }, lang) : labelFor(lang, selectedGovernorateData)
+  const selectedCityLabel = isCanada ? text(selectedCityData || { ar: '', en: '', fr: '' }, lang) : labelFor(lang, selectedCityData)
+  const selectedAreaLabel = isCanada ? text(selectedAreaData || { ar: '', en: '', fr: '' }, lang) : labelFor(lang, selectedAreaData)
   const areaOptions = selectedCityData?.areas || []
+  const selectedAreaStrBanned = isCanada && isStrBannedArea(governorate, city, area)
+  // The CITQ/insurance registration requirement is specific to Quebec's "tourist accommodation"
+  // rule (stays of 31 days or less rented for payment) -- RENTALS/BUY/etc. in Quebec aren't
+  // short-term tourist accommodation, so this only applies to the STAYS division.
+  const isQuebecStr = isCanada && division === 'STAYS' && !isAdvertisingFlow
+  // Montreal bans investment/secondary-property STR almost everywhere except a small set of named
+  // streets (not tracked here) and restricts principal-residence STR to a seasonal window -- both
+  // enforced server-side (server/lib/quebec-str-rules.mjs) only when city === 'montreal'.
+  const isMontrealStr = isQuebecStr && city === 'montreal'
+  // Revenu Quebec's Tax on Lodging is a flat 3.5% of the nightly rate (confirmed from the official
+  // source when this jurisdiction's compliance profile was reviewed -- see server/lib/
+  // jurisdiction-compliance.mjs). Unlike Syria, where "Tax USD" is whatever the host chooses to
+  // type, a Quebec listing's tax figure is computed here and the field is locked so it can't drift
+  // from the real rate.
+  useEffect(() => {
+    if (!isQuebecStr) return
+    const nightly = Number(price)
+    if (!Number.isFinite(nightly) || nightly <= 0) return
+    setTaxFee((Math.round(nightly * QUEBEC_LODGING_TAX_RATE * 100) / 100).toFixed(2))
+    // Only price and the Quebec gate should retrigger this -- taxFee itself is the output, not an input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isQuebecStr, price])
+  // Syria place data is {ar,en}; Canada place data is {ar,en,fr} -- route each through the right
+  // label function rather than forcing one shape on both.
+  function placeLabel(item?: { ar: string; en: string; fr?: string }) {
+    if (!item) return ''
+    return isCanada ? text({ ar: item.ar, en: item.en, fr: item.fr || item.en }, lang) : labelFor(lang, item)
+  }
   const normalizedAreaQuery = areaQuery.trim().toLowerCase()
   const filteredAreaOptions = (normalizedAreaQuery
     ? areaOptions.filter((item) =>
-        [item.ar, item.en, item.key]
+        [item.ar, item.en, (item as { fr?: string }).fr, item.key]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -471,8 +537,15 @@ export function SellerListingWizard({ lang }: Props) {
   const selectedOfferProofSlots = useMemo(() => selectedOfferProofMediaSlots(visualFilters), [visualFilters])
   const planAllowsOfferProofs = selectedListingPlan.id !== 'basic'
   const activeOfferProofSlots = !isAdvertisingFlow && division === 'STAYS' && planAllowsOfferProofs ? selectedOfferProofSlots : []
-  const allowedMediaSlots = isAdvertisingFlow ? adFileSlots : [...selectedListingPlan.mediaSlots, ...activeOfferProofSlots]
+  // Quebec's $2M civil liability insurance requirement applies regardless of which plan the host
+  // bought -- it's a legal requirement, not a plan feature, so it's added on top of the plan's own
+  // slots rather than gated by plan tier the way offer-proof slots are.
+  const quebecComplianceSlots: MediaSlot[] = isQuebecStr
+    ? [{ id: 'insuranceProof', ar: 'إثبات التأمين (٢ مليون دولار)', en: 'Insurance proof ($2M CAD)', required: true }]
+    : []
+  const allowedMediaSlots = isAdvertisingFlow ? adFileSlots : [...selectedListingPlan.mediaSlots, ...activeOfferProofSlots, ...quebecComplianceSlots]
   const missingRequiredOfferProofSlots = activeOfferProofSlots.filter((slot) => !uploadedAdFiles.includes(slot.id))
+  const missingQuebecComplianceSlots = quebecComplianceSlots.filter((slot) => !uploadedAdFiles.includes(slot.id))
   const stayNightPrice = Math.max(0, toNumber(variableNightPrice || price))
   const stayCleaningFee = division === 'STAYS' ? Math.max(0, toNumber(cleaningFee)) : 0
   const stayTaxFee = division === 'STAYS' ? Math.max(0, toNumber(taxFee)) : 0
@@ -512,32 +585,84 @@ export function SellerListingWizard({ lang }: Props) {
     updateAvailabilityDates(selectedAvailabilityDays.has(day) ? availabilityDates.filter((item) => item !== day) : [...availabilityDates, day])
   }
 
-  function chooseGovernorate(value: string) {
-    const nextGovernorate = getGovernorate(value)
-    const nextCity = nextGovernorate?.cities[0]
-    setGovernorate(value)
-    setCity(nextCity?.key || '')
-    setArea(nextCity?.areas[0]?.key || '')
+  function chooseCountry(value: CountryKey) {
+    setCountry(value)
+    if (value === 'CA') {
+      const firstProvince = CANADA_PROVINCES[0]
+      const firstCity = firstProvince?.cities[0]
+      setGovernorate(firstProvince?.key || '')
+      setCity(firstCity?.key || '')
+      setArea(firstCity?.areas[0]?.key || '')
+      const center = firstCity ? CANADA_CITY_CENTERS[firstCity.key] : undefined
+      if (center) {
+        setLatitude(center[0].toFixed(6))
+        setLongitude(center[1].toFixed(6))
+      }
+    } else {
+      const firstGovernorate = SYRIA_GOVERNORATES[0]
+      const firstCity = firstGovernorate?.cities[0]
+      setGovernorate(firstGovernorate?.key || '')
+      setCity(firstCity?.key || '')
+      setArea(firstCity?.areas[0]?.key || '')
+      const center = firstGovernorate ? GOVERNORATE_CENTERS[firstGovernorate.key] : undefined
+      if (center) {
+        setLatitude(center[0].toFixed(6))
+        setLongitude(center[1].toFixed(6))
+      }
+    }
+    setCitqRegistrationNumber('')
     setAreaQuery('')
     setMapPinConfirmed(false)
-    const center = GOVERNORATE_CENTERS[value]
-    if (center) {
-      setLatitude(center[0].toFixed(6))
-      setLongitude(center[1].toFixed(6))
+  }
+
+  function chooseGovernorate(value: string) {
+    setGovernorate(value)
+    if (country === 'CA') {
+      const nextProvince = getCanadianProvince(value)
+      const nextCity = nextProvince?.cities[0]
+      setCity(nextCity?.key || '')
+      setArea(nextCity?.areas[0]?.key || '')
+      const center = nextCity ? CANADA_CITY_CENTERS[nextCity.key] : undefined
+      if (center) {
+        setLatitude(center[0].toFixed(6))
+        setLongitude(center[1].toFixed(6))
+      }
+    } else {
+      const nextGovernorate = getGovernorate(value)
+      const nextCity = nextGovernorate?.cities[0]
+      setCity(nextCity?.key || '')
+      setArea(nextCity?.areas[0]?.key || '')
+      const center = GOVERNORATE_CENTERS[value]
+      if (center) {
+        setLatitude(center[0].toFixed(6))
+        setLongitude(center[1].toFixed(6))
+      }
     }
+    setAreaQuery('')
+    setMapPinConfirmed(false)
   }
 
   function chooseCity(value: string) {
-    const nextCity = getCity(governorate, value)
     setCity(value)
-    setArea(nextCity?.areas[0]?.key || '')
+    if (country === 'CA') {
+      const nextCity = getCanadianCity(governorate, value)
+      setArea(nextCity?.areas[0]?.key || '')
+      const center = CANADA_CITY_CENTERS[value]
+      if (center) {
+        setLatitude(center[0].toFixed(6))
+        setLongitude(center[1].toFixed(6))
+      }
+    } else {
+      const nextCity = getCity(governorate, value)
+      setArea(nextCity?.areas[0]?.key || '')
+      const center = GOVERNORATE_CENTERS[governorate]
+      if (center) {
+        setLatitude(center[0].toFixed(6))
+        setLongitude(center[1].toFixed(6))
+      }
+    }
     setAreaQuery('')
     setMapPinConfirmed(false)
-    const center = GOVERNORATE_CENTERS[governorate]
-    if (center) {
-      setLatitude(center[0].toFixed(6))
-      setLongitude(center[1].toFixed(6))
-    }
   }
 
   async function suggestDescription() {
@@ -569,6 +694,45 @@ export function SellerListingWizard({ lang }: Props) {
   }
 
   const next = async () => {
+    if (!isAdvertisingFlow && activeStep.id === 'location' && isQuebecStr && selectedAreaStrBanned) {
+      setSubmitState('error')
+      setSubmitError(
+        isAr
+          ? 'يمنع بلدية مونتريال الإيجار القصير في هذا الحي بشكل كامل. اختر منطقة أخرى.'
+          : 'The City of Montreal prohibits short-term rental in this borough entirely. Choose a different area.',
+      )
+      return
+    }
+    if (!isAdvertisingFlow && activeStep.id === 'location' && isQuebecStr && !citqRegistrationNumber.trim()) {
+      setSubmitState('error')
+      setSubmitError(
+        isAr
+          ? 'رقم تسجيل الإقامة السياحية (CITQ) مطلوب لأي إعلان في كيبيك.'
+          : 'A tourist accommodation registration number (CITQ) is required for any Quebec listing.',
+      )
+      return
+    }
+    if (!isAdvertisingFlow && activeStep.id === 'location' && isQuebecStr) {
+      const expiry = citqCertificateExpiresAt ? new Date(citqCertificateExpiresAt) : null
+      if (!expiry || Number.isNaN(expiry.getTime()) || expiry.getTime() <= Date.now()) {
+        setSubmitState('error')
+        setSubmitError(
+          isAr
+            ? 'تاريخ انتهاء شهادة CITQ مطلوب ويجب أن يكون في المستقبل. لا يمكن نشر إعلان بشهادة منتهية.'
+            : 'A CITQ certificate expiry date is required and must be in the future. A listing cannot go live with an expired certificate.',
+        )
+        return
+      }
+    }
+    if (!isAdvertisingFlow && activeStep.id === 'location' && isQuebecStr && !residencyType) {
+      setSubmitState('error')
+      setSubmitError(
+        isAr
+          ? 'حدد نوع الملكية (سكني أساسي أو استثماري) لأي إعلان في كيبيك.'
+          : 'Select the property residency type (principal or investment) for any Quebec listing.',
+      )
+      return
+    }
     if (!isAdvertisingFlow && activeStep.id === 'plan' && !listingPlanPaymentConfirmed) {
       setSubmitState('error')
       setSubmitError(isAr ? 'اختر الخطة وادفعها قبل رفع الصور والملفات.' : 'Choose and pay the plan before uploading photos and files.')
@@ -580,6 +744,15 @@ export function SellerListingWizard({ lang }: Props) {
         isAr
           ? `ارفع إثبات واضح للخيارات المختارة: ${missingRequiredOfferProofSlots.map((slot) => slot.ar).join('، ')}`
           : `Upload clear proof for selected offers: ${missingRequiredOfferProofSlots.map((slot) => slot.en).join(', ')}`,
+      )
+      return
+    }
+    if (!isAdvertisingFlow && activeStep.id === 'media' && missingQuebecComplianceSlots.length) {
+      setSubmitState('error')
+      setSubmitError(
+        isAr
+          ? 'ارفع إثبات التأمين قبل المتابعة -- مطلوب قانونياً لأي إقامة سياحية في كيبيك.'
+          : 'Upload insurance proof before continuing -- legally required for any Quebec tourist accommodation.',
       )
       return
     }
@@ -611,6 +784,10 @@ export function SellerListingWizard({ lang }: Props) {
       setSubmitError('')
 
       const roomTypeMetadata = {
+        country,
+        citqRegistrationNumber: isQuebecStr ? citqRegistrationNumber.trim() : undefined,
+        citqCertificateExpiresAt: isQuebecStr ? citqCertificateExpiresAt : undefined,
+        residencyType: isQuebecStr ? residencyType : undefined,
         propertyType: selectedType,
         sizeSqm: toNumber(size),
         guestCapacity: toNumber(guestCapacity),
@@ -632,6 +809,8 @@ export function SellerListingWizard({ lang }: Props) {
         selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
         uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
         missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
+        quebecComplianceSlots: quebecComplianceSlots.map((slot) => slot.id),
+        missingQuebecComplianceSlots: missingQuebecComplianceSlots.map((slot) => slot.id),
         visualFilters,
         availabilityCalendar,
         mapLocation,
@@ -649,6 +828,10 @@ export function SellerListingWizard({ lang }: Props) {
               area,
               address,
               metadata: {
+                country,
+                citqRegistrationNumber: isQuebecStr ? citqRegistrationNumber.trim() : undefined,
+        citqCertificateExpiresAt: isQuebecStr ? citqCertificateExpiresAt : undefined,
+                residencyType: isQuebecStr ? residencyType : undefined,
                 uploadedDocumentFiles,
                 governorateLabel: selectedGovernorateLabel,
                 cityLabel: selectedCityLabel,
@@ -663,6 +846,8 @@ export function SellerListingWizard({ lang }: Props) {
                 selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
                 uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
                 missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
+                quebecComplianceSlots: quebecComplianceSlots.map((slot) => slot.id),
+                missingQuebecComplianceSlots: missingQuebecComplianceSlots.map((slot) => slot.id),
               },
             })
             await addAccommodationRoomType(accommodation.id, {
@@ -707,6 +892,10 @@ export function SellerListingWizard({ lang }: Props) {
             uploadedAdFiles,
             uploadedDocumentFiles,
             propertyType: selectedType,
+            country,
+            citqRegistrationNumber: isQuebecStr ? citqRegistrationNumber.trim() : undefined,
+        citqCertificateExpiresAt: isQuebecStr ? citqCertificateExpiresAt : undefined,
+            residencyType: isQuebecStr ? residencyType : undefined,
             governorate,
             city,
             area,
@@ -734,6 +923,8 @@ export function SellerListingWizard({ lang }: Props) {
             selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
             uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
             missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
+            quebecComplianceSlots: quebecComplianceSlots.map((slot) => slot.id),
+            missingQuebecComplianceSlots: missingQuebecComplianceSlots.map((slot) => slot.id),
             visualFilters,
             availabilityCalendar,
             mapLocation,
@@ -974,16 +1165,26 @@ export function SellerListingWizard({ lang }: Props) {
           {activeStep.id === 'location' && (
             <div className="seller-wizard-section">
               <div className="seller-location-capsule">
+                <div className="seller-location-group">
+                  <span>{isAr ? 'الدولة' : 'Country'}</span>
+                  <div className="seller-location-options">
+                    {COUNTRIES.map((item) => (
+                      <button className={item.key === country ? 'active' : ''} key={item.key} onClick={() => chooseCountry(item.key)} type="button">
+                        {text(item, lang)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="seller-location-summary">
                   <span>{isAr ? 'الموقع المختار' : 'Selected location'}</span>
                   <strong>{[selectedGovernorateLabel, selectedCityLabel, selectedAreaLabel].filter(Boolean).join(' ← ')}</strong>
                 </div>
                 <div className="seller-location-group">
-                  <span>{isAr ? 'المحافظة' : 'Governorate'}</span>
+                  <span>{isAr ? (isCanada ? 'المقاطعة' : 'المحافظة') : isCanada ? 'Province' : 'Governorate'}</span>
                   <div className="seller-location-options">
-                    {SYRIA_GOVERNORATES.map((item) => (
+                    {(isCanada ? CANADA_PROVINCES : SYRIA_GOVERNORATES).map((item) => (
                       <button className={item.key === governorate ? 'active' : ''} key={item.key} onClick={() => chooseGovernorate(item.key)}>
-                        {labelFor(lang, item)}
+                        {placeLabel(item)}
                       </button>
                     ))}
                   </div>
@@ -993,13 +1194,13 @@ export function SellerListingWizard({ lang }: Props) {
                   <div className="seller-location-options">
                     {(selectedGovernorateData?.cities || []).map((item) => (
                       <button className={item.key === city ? 'active' : ''} key={item.key} onClick={() => chooseCity(item.key)}>
-                        {labelFor(lang, item)}
+                        {placeLabel(item)}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div className="seller-location-group">
-                  <span>{isAr ? 'المنطقة / الشارع' : 'Area / street'}</span>
+                  <span>{isAr ? (isCanada ? 'الحي / الشارع' : 'المنطقة / الشارع') : isCanada ? 'Borough / street' : 'Area / street'}</span>
                   <div className="seller-location-search-line">
                     <input
                       dir={isAr ? 'rtl' : 'ltr'}
@@ -1017,11 +1218,11 @@ export function SellerListingWizard({ lang }: Props) {
                         key={item.key}
                         onClick={() => {
                           setArea(item.key)
-                          setAreaQuery(labelFor(lang, item))
+                          setAreaQuery(placeLabel(item))
                         }}
                         type="button"
                       >
-                        {labelFor(lang, item)}
+                        {placeLabel(item)}
                       </button>
                     ))}
                     {!filteredAreaOptions.length && (
@@ -1029,6 +1230,94 @@ export function SellerListingWizard({ lang }: Props) {
                     )}
                   </div>
                 </div>
+                {isQuebecStr && selectedAreaStrBanned && (
+                  <div className="seller-inline-alert">
+                    <strong>{isAr ? 'الإيجار القصير ممنوع في هذا الحي' : 'Short-term rental is banned in this borough'}</strong>
+                    <span>
+                      {isAr
+                        ? 'يمنع بلدية مونتريال الإيجار القصير في هذا الحي بشكل كامل. لن يتم قبول هذا الإعلان مهما كانت المستندات.'
+                        : 'The City of Montreal prohibits short-term rental in this borough entirely. This listing cannot be approved regardless of documentation.'}
+                    </span>
+                  </div>
+                )}
+                {isQuebecStr && (
+                  <label className="seller-wide-field">
+                    <span>{isAr ? 'رقم تسجيل الإقامة السياحية (CITQ)' : 'Tourist accommodation registration number (CITQ)'}</span>
+                    <input
+                      dir="ltr"
+                      onChange={(event) => setCitqRegistrationNumber(event.target.value)}
+                      placeholder={isAr ? 'مثال: 123456' : 'e.g. 123456'}
+                      value={citqRegistrationNumber}
+                    />
+                    <small>
+                      {isAr
+                        ? 'مطلوب قانونياً في كيبيك لأي إقامة تُؤجر 31 يوماً أو أقل مقابل دفع. سجّل عبر Corporation de l’industrie touristique du Québec (CITQ).'
+                        : "Legally required in Quebec for any unit rented 31 days or less for payment. Register through the Corporation de l'industrie touristique du Québec (CITQ)."}
+                    </small>
+                  </label>
+                )}
+                {isQuebecStr && (
+                  <label className="seller-wide-field">
+                    <span>{isAr ? 'تاريخ انتهاء شهادة CITQ' : 'CITQ certificate expiry date'}</span>
+                    <input
+                      dir="ltr"
+                      onChange={(event) => setCitqCertificateExpiresAt(event.target.value)}
+                      type="date"
+                      value={citqCertificateExpiresAt}
+                    />
+                    <small>
+                      {isAr
+                        ? 'يجب أن يكون تاريخاً مستقبلياً. لن يُقبل الإعلان أو يُسمح بحجوزات جديدة بشهادة منتهية.'
+                        : 'Must be a future date. A listing cannot go live, and an already-live listing cannot accept new bookings, with an expired certificate.'}
+                    </small>
+                  </label>
+                )}
+                {isQuebecStr && (
+                  <label className="seller-wide-field">
+                    <span>{isAr ? 'نوع الملكية' : 'Property residency type'}</span>
+                    <div className="seller-location-options">
+                      <button
+                        className={residencyType === 'principal' ? 'active' : ''}
+                        onClick={() => setResidencyType('principal')}
+                        type="button"
+                      >
+                        {isAr ? 'سكني أساسي (أعيش هنا)' : 'Principal residence (I live here)'}
+                      </button>
+                      <button
+                        className={residencyType === 'investment' ? 'active' : ''}
+                        onClick={() => setResidencyType('investment')}
+                        type="button"
+                      >
+                        {isAr ? 'عقار استثماري (لا أعيش هنا)' : "Investment property (I don't live here)"}
+                      </button>
+                    </div>
+                    <small>
+                      {isAr
+                        ? 'يحدد فئة تسجيل CITQ. في مونتريال، العقارات الاستثمارية ممنوعة تقريباً في كل مكان إلا شوارع محددة، وتخضع لمراجعة إدارية أدق.'
+                        : "Determines your CITQ registration category. In Montreal, investment properties are banned almost everywhere except specific named streets and get stricter admin review."}
+                    </small>
+                    {isMontrealStr && residencyType === 'investment' && (
+                      <div className="seller-inline-alert">
+                        <strong>{isAr ? 'مراجعة إدارية أدق مطلوبة' : 'Stricter admin review required'}</strong>
+                        <span>
+                          {isAr
+                            ? 'مونتريال تمنع تأجير العقارات الاستثمارية قصيرة المدة في معظم الأحياء. سيُعلَّم هذا الإعلان للمراجعة اليدوية الدقيقة قبل أي قبول.'
+                            : 'Montreal bans short-term rental of investment properties in most areas. This listing will be flagged for careful manual review before any approval.'}
+                        </span>
+                      </div>
+                    )}
+                    {isMontrealStr && residencyType === 'principal' && (
+                      <div className="seller-inline-alert">
+                        <strong>{isAr ? 'نافذة موسمية إلزامية' : 'Mandatory seasonal window'}</strong>
+                        <span>
+                          {isAr
+                            ? 'يسمح بالإقامة الأساسية في مونتريال فقط من ١٠ يونيو إلى ١٠ سبتمبر، وبحد أقصى ٩٠ ليلة سنوياً. النظام يمنع تلقائياً أي تاريخ توفر أو حجز خارج هذه النافذة.'
+                            : 'Montreal allows principal-residence STR only June 10-Sept 10, capped at 90 nights/year. The system automatically blocks any availability or booking date outside this window.'}
+                        </span>
+                      </div>
+                    )}
+                  </label>
+                )}
               </div>
               <label className="seller-wide-field">
                 <span>{isAr ? 'العنوان التفصيلي' : 'Detailed address'}</span>
@@ -1122,17 +1411,33 @@ export function SellerListingWizard({ lang }: Props) {
               )}
               {division === 'STAYS' && (
                 <label>
-                  <span>{isAr ? 'الضريبة بالدولار (اختياري)' : 'Tax USD (optional)'}</span>
+                  <span>
+                    {isQuebecStr
+                      ? isAr
+                        ? 'ضريبة الإقامة (كيبيك — ٣٫٥٪ محسوبة تلقائياً)'
+                        : 'Lodging tax (Quebec — 3.5%, calculated automatically)'
+                      : isAr
+                        ? 'الضريبة بالدولار (اختياري)'
+                        : 'Tax USD (optional)'}
+                  </span>
                   <div className="seller-price-input-shell">
                     <b>USD</b>
                     <input
                       dir="ltr"
+                      disabled={isQuebecStr}
                       inputMode="numeric"
                       onChange={(event) => setTaxFee(event.target.value)}
                       placeholder="0"
                       value={taxFee}
                     />
                   </div>
+                  {isQuebecStr && (
+                    <small>
+                      {isAr
+                        ? 'رقم إلزامي بموجب ضريبة الإقامة لدى Revenu Québec (٣٫٥٪ من السعر لليلة). لا يمكن تعديله يدوياً.'
+                        : "Required by Revenu Québec's Tax on Lodging (3.5% of the nightly rate). Cannot be edited manually."}
+                    </small>
+                  )}
                 </label>
               )}
               <label>
@@ -1749,6 +2054,19 @@ const GOVERNORATE_CENTERS: Record<string, [number, number]> = {
   raqqa: [35.95, 39.01],
   hasakah: [36.502, 40.746],
   quneitra: [33.1257, 35.8245],
+}
+
+// Real city-center coordinates for Quebec's cities -- only one province is supported today, so
+// this recenters by city (rather than province, as Syria's map above does).
+const CANADA_CITY_CENTERS: Record<string, [number, number]> = {
+  montreal: [45.5017, -73.5673],
+  'quebec-city': [46.8139, -71.208],
+  gatineau: [45.4765, -75.7013],
+  laval: [45.6066, -73.7124],
+  longueuil: [45.5312, -73.5185],
+  sherbrooke: [45.4042, -71.8929],
+  'trois-rivieres': [46.3432, -72.5432],
+  saguenay: [48.4283, -71.0678],
 }
 
 function toMinor(value: string) {

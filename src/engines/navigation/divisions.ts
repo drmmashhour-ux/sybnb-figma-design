@@ -260,7 +260,7 @@ export const DIVISIONS: Division[] = [
     status: 'active',
     accent: '#19d7ff',
     mark: 'pin',
-    title: { ar: 'سير', en: 'SYBNB Ride', fr: 'SYBNB Ride' },
+    title: { ar: 'SYBNB Ride', en: 'SYBNB Ride', fr: 'SYBNB Ride' },
     kicker: { ar: 'رحلات مباشرة', en: 'Live rides', fr: 'Courses en direct' },
     description: {
       ar: 'اطلب رحلة، اختر الفئة، وتابع تعيين السائق.',

@@ -12,6 +12,7 @@ import { handleAccommodations } from './routes/accommodations.mjs'
 import { handleAdmin } from './routes/admin.mjs'
 import { handleAuth } from './routes/auth.mjs'
 import { handleBookings } from './routes/bookings.mjs'
+import { handleCompliance } from './routes/compliance.mjs'
 import { handleDriver } from './routes/driver.mjs'
 import { handleHost } from './routes/host.mjs'
 import { handleListings } from './routes/listings.mjs'
@@ -19,10 +20,12 @@ import { handleMe } from './routes/me.mjs'
 import { handleMessages } from './routes/messages.mjs'
 import { handlePayments } from './routes/payments.mjs'
 import { handleDisputes } from './routes/disputes.mjs'
+import { handleQuebecDriverOnboarding } from './routes/quebec-driver-onboarding.mjs'
 import { handleReports } from './routes/reports.mjs'
 import { handleReviews } from './routes/reviews.mjs'
 import { handleSellers } from './routes/sellers.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
+import { handleTaxProfile } from './routes/tax-profile.mjs'
 import { handleWallet } from './routes/wallet.mjs'
 
 loadEnv()
@@ -132,6 +135,7 @@ async function dispatch(req, res, url, context) {
     handleMe,
     handleHost,
     handleDriver,
+    handleQuebecDriverOnboarding,
     handleAdmin,
     handleSrRides,
     handleReviews,
@@ -139,6 +143,8 @@ async function dispatch(req, res, url, context) {
     handleDisputes,
     handleReports,
     handleMessages,
+    handleTaxProfile,
+    handleCompliance,
   ]) {
     const handled = await handler(req, res, url, context)
     if (handled !== false) return handled

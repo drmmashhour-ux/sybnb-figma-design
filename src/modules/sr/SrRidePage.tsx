@@ -23,7 +23,7 @@ type Props = {
 const copy = {
   ar: {
     back: 'العودة للرئيسية',
-    title: 'سير',
+    title: 'SYBNB Ride',
     subtitle: 'طلب رحلة حقيقي محفوظ في قاعدة البيانات، يُعرض مباشرة على السائقين القريبين ليقبلوه بأنفسهم.',
     mode: 'وضع بيانات منخفض',
     pickup: 'نقطة الانطلاق',
@@ -46,16 +46,30 @@ const copy = {
     location: 'الموقع',
     accuracy: 'دقة الموقع',
     saved: 'تم حفظ الرحلة',
-    error: 'تعذر تنفيذ طلب SR',
+    error: 'تعذر تنفيذ طلب SYBNB Ride',
     saving: 'جار الحفظ',
     gps: 'استخدام موقعي الحالي',
     manualHint: 'يمكن متابعة الطلب حتى بدون GPS عبر العناوين اليدوية.',
     waitingForDriver: 'بانتظار قبول أحد السائقين القريبين للرحلة...',
     driverAssigned: 'تم تعيين سائق لرحلتك.',
+    priceBreakdown: 'تفاصيل السعر',
+    baseFare: 'الأجرة الأساسية',
+    distanceCharge: 'رسوم المسافة',
+    trackingSurcharge: 'رسوم التتبع الحي',
+    dynamicAdjustment: 'تعديل الطلب (ذروة/موسم)',
+    regulatoryContribution: 'مساهمة تنظيمية',
+    gst: 'ضريبة GST',
+    qst: 'ضريبة QST',
+    total: 'الإجمالي',
+    tipHint: 'لا يشمل الإكرامية — تُضاف بعد الرحلة، ولا تخضع لعمولة المنصة.',
+    commissionHint: 'قد تتضمن هذه الأجرة عمولة خدمة SYBNB التصاعدية للسائق (9%–12%)، تُخصم من أجرة السائق ولا تُضاف على إجمالي الراكب.',
+    pendingConfirmation: 'قيد التأكيد — 0',
+    testModeBadge: 'وضع الاختبار',
+    taxDisclosureBanner: 'وضع الاختبار — تقدير ضريبي لأغراض إعلامية فقط. لا يُحوَّل ولا يُسدَّد أي مبلغ لأي جهة حكومية.',
   },
   en: {
     back: 'Back to landing',
-    title: 'SR Ride',
+    title: 'SYBNB Ride',
     subtitle: 'Real ride request saved in PostgreSQL, broadcast live to nearby drivers to self-accept.',
     mode: 'Low-data mode',
     pickup: 'Pickup',
@@ -78,18 +92,97 @@ const copy = {
     location: 'Location',
     accuracy: 'Accuracy',
     saved: 'Ride saved',
-    error: 'Could not complete SR request',
+    error: 'Could not complete SYBNB Ride request',
     saving: 'Saving',
     gps: 'Use my current location',
     manualHint: 'The request can continue without GPS through manual addresses.',
     waitingForDriver: 'Waiting for a nearby driver to accept the ride...',
     driverAssigned: 'A driver has been assigned to your ride.',
+    priceBreakdown: 'Price breakdown',
+    baseFare: 'Base fare',
+    distanceCharge: 'Distance charge',
+    trackingSurcharge: 'Live-tracking surcharge',
+    dynamicAdjustment: 'Demand adjustment (peak/season)',
+    regulatoryContribution: 'Regulatory contribution',
+    gst: 'GST',
+    qst: 'QST',
+    total: 'Total',
+    tipHint: "Doesn't include a tip — tips are added after the ride and are never commissionable.",
+    commissionHint: "This fare may include SYBNB's progressive driver service commission (9%-12%), taken from the driver's fare share -- never added on top of the passenger's total.",
+    pendingConfirmation: 'Pending confirmation — 0',
+    testModeBadge: 'TEST MODE',
+    taxDisclosureBanner: 'TEST MODE — Tax estimate for information only. No amount is transmitted or remitted to a government authority.',
+  },
+  fr: {
+    back: "Retour à l'accueil",
+    title: 'SYBNB Ride',
+    subtitle: 'Demande de course réelle enregistrée dans PostgreSQL, diffusée en direct aux conducteurs à proximité pour acceptation.',
+    mode: 'Mode données réduites',
+    pickup: 'Départ',
+    dropoff: 'Destination',
+    category: 'Catégorie',
+    fare: 'Tarif estimé',
+    payCurrency: 'Devise de paiement',
+    payCash: 'Comptant (LSP)',
+    payUsd: 'Dollar américain',
+    usdRoundingNote: "Les tarifs en dollars sont arrondis au 5$ supérieur pour éviter d'avoir à rendre la monnaie.",
+    distance: 'Distance estimée',
+    distanceApprox: "(approximative, d'après le texte de l'adresse)",
+    request: 'Demander une course',
+    refresh: 'Actualiser le statut',
+    status: 'Statut de la course',
+    rideId: 'Numéro de la course',
+    driver: 'Conducteur',
+    pickupCode: 'Code de départ',
+    pickupCodeHint: 'Lisez ce code à votre conducteur à son arrivée pour démarrer la course.',
+    location: 'Emplacement',
+    accuracy: 'Précision',
+    saved: 'Course enregistrée',
+    error: 'Impossible de compléter la demande SYBNB Ride',
+    saving: 'Enregistrement',
+    gps: 'Utiliser ma position actuelle',
+    manualHint: "La demande peut continuer sans GPS grâce aux adresses saisies manuellement.",
+    waitingForDriver: "En attente qu'un conducteur à proximité accepte la course...",
+    driverAssigned: 'Un conducteur a été assigné à votre course.',
+    priceBreakdown: 'Détail du prix',
+    baseFare: 'Tarif de base',
+    distanceCharge: 'Frais de distance',
+    trackingSurcharge: 'Frais de suivi en direct',
+    dynamicAdjustment: 'Ajustement de la demande (pointe/saison)',
+    regulatoryContribution: 'Contribution réglementaire',
+    gst: 'TPS',
+    qst: 'TVQ',
+    total: 'Total',
+    tipHint: "N'inclut pas de pourboire — celui-ci est ajouté après la course et n'est jamais soumis à la commission de la plateforme.",
+    commissionHint: "Ce tarif peut inclure la commission de service progressive de SYBNB pour le conducteur (9%-12%), prélevée sur la part du conducteur -- jamais ajoutée au total du passager.",
+    pendingConfirmation: 'En attente de confirmation — 0',
+    testModeBadge: 'MODE TEST',
+    taxDisclosureBanner: "MODE TEST — Estimation fiscale fournie à titre informatif seulement. Aucun montant n'est transmis ou remis à une autorité gouvernementale.",
   },
 }
 
 const ACTIVE_RIDE_ID_KEY = 'sybnb.v6.activeSrRideId'
 
 const categories = ['SR Economy', 'SR Comfort', 'SR SUV', 'SR XXL']
+
+// Display-only rebrand (SR/SIR is the internal code; customer-facing label is "SYBNB Ride" per the
+// Québec compliance review): the stored category value posted to the server and saved on the
+// ride/vehicle rows must stay exactly as `categories` above -- only the label shown to the rider changes.
+const CATEGORY_LABELS: Record<string, string> = {
+  'SR Economy': 'SYBNB Ride Economy',
+  'SR Comfort': 'SYBNB Ride Comfort',
+  'SR SUV': 'SYBNB Ride SUV',
+  'SR XXL': 'SYBNB Ride XXL',
+}
+
+// Real vehicle-class seating capacity (a static fleet fact, server/lib/fleet.mjs's SR_VEHICLE_CATEGORIES
+// -- not live telemetry), shown the same way Lyft/Uber show "up to N" per tier.
+const TIER_CAPACITY: Record<string, number> = {
+  'SR Economy': 4,
+  'SR Comfort': 4,
+  'SR SUV': 6,
+  'SR XXL': 6,
+}
 
 const rideCategoryByFilter: Record<string, string> = {
   economy: 'SR Economy',
@@ -99,7 +192,7 @@ const rideCategoryByFilter: Record<string, string> = {
 }
 
 export function SrRidePage({ lang }: Props) {
-  const t = copy[lang === 'ar' ? 'ar' : 'en']
+  const t = copy[lang] ?? copy.en
   const isAr = lang === 'ar'
   const [pickup, setPickup] = useState(isAr ? 'دمشق، المالكي' : 'Damascus, Malki')
   const [dropoff, setDropoff] = useState(isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh')
@@ -109,7 +202,13 @@ export function SrRidePage({ lang }: Props) {
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
   const [ride, setRide] = useState<PlatformRideRequest | null>(null)
-  const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
+  // One quote per tier, fetched in parallel -- each tier has its own real rate card (server/lib/
+  // sr-geocoding.mjs CATEGORY_RATES) and etaByCategory is identical across all four responses (same
+  // server-side computation regardless of which category was requested), so any one of them can
+  // supply the ETA map.
+  const [quotesByCategory, setQuotesByCategory] = useState<Record<string, PlatformSrQuote>>({})
+  const quote = quotesByCategory[category] ?? null
+  const etaByCategory = Object.values(quotesByCategory)[0]?.etaByCategory ?? null
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
@@ -120,21 +219,33 @@ export function SrRidePage({ lang }: Props) {
   const [message, setMessage] = useState('')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
-  const fallbackFareSypMinor = useMemo(() => {
-    const base = category === 'SR XXL' ? 78000 : category === 'SR SUV' ? 58000 : category === 'SR Comfort' ? 46000 : 35000
-    return lowDataMode ? base : base + 2500
-  }, [category, lowDataMode])
-  const fallbackFareMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(fallbackFareSypMinor) : fallbackFareSypMinor
-
-  const fareMinor = quote?.fareMinor ?? fallbackFareMinor
+  const fallbackFareMinorFor = (cat: string) => {
+    const base = cat === 'SR XXL' ? 78000 : cat === 'SR SUV' ? 58000 : cat === 'SR Comfort' ? 46000 : 35000
+    const sypMinor = lowDataMode ? base : base + 2500
+    return payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(sypMinor) : sypMinor
+  }
+  const fareMinorFor = (cat: string) => quotesByCategory[cat]?.fareMinor ?? fallbackFareMinorFor(cat)
+  const fareMinor = fareMinorFor(category)
 
   useEffect(() => {
     if (ride) return
     const timer = window.setTimeout(() => {
-      fetchSrQuote({ pickup, dropoff, category, currency: payCurrency, lowDataMode, pickupCoords }).then(setQuote).catch(() => setQuote(null))
+      Promise.all(
+        categories.map((item) =>
+          fetchSrQuote({ pickup, dropoff, category: item, currency: payCurrency, lowDataMode, pickupCoords })
+            .then((result) => [item, result] as const)
+            .catch(() => null),
+        ),
+      ).then((entries) => {
+        const next: Record<string, PlatformSrQuote> = {}
+        for (const entry of entries) {
+          if (entry) next[entry[0]] = entry[1]
+        }
+        setQuotesByCategory(next)
+      })
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [pickup, dropoff, category, payCurrency, lowDataMode, pickupCoords, ride])
+  }, [pickup, dropoff, payCurrency, lowDataMode, pickupCoords, ride])
 
   // The active ride otherwise lives only in this component's state — reloading the page or
   // navigating away and back loses all track of it even though it's fully real and persisted
@@ -235,16 +346,16 @@ export function SrRidePage({ lang }: Props) {
       </button>
 
       <section style={styles.hero}>
-        <p style={styles.eyebrow}>SR / SYBNB</p>
+        <p style={styles.eyebrow}>SYBNB Ride</p>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
       </section>
 
-      <DivisionTriad lang={lang} offerLabel={{ ar: 'كن سائقاً', en: 'Drive with SR', fr: 'Devenir chauffeur SR' }} offerHref="/driver" />
+      <DivisionTriad lang={lang} offerLabel={{ ar: 'كن سائقاً', en: 'Drive with SYBNB Ride', fr: 'Devenir chauffeur SYBNB Ride' }} offerHref="/driver" />
 
       <section style={styles.driveBanner}>
         <div>
-          <strong style={styles.driveBannerTitle}>{isAr ? 'كن سائقاً مع SR' : 'Drive with SR'}</strong>
+          <strong style={styles.driveBannerTitle}>{isAr ? 'كن سائقاً مع SYBNB Ride' : 'Drive with SYBNB Ride'}</strong>
           <span style={styles.driveBannerBody}>
             {isAr
               ? 'اكسب دخلاً إضافياً بقيادة سيارتك. سجّل حساب سائق، أضف مركبتك، وابدأ استقبال الرحلات.'
@@ -280,19 +391,68 @@ export function SrRidePage({ lang }: Props) {
 
           <section style={styles.categoryCapsule}>
             <span style={styles.categoryTitle}>{t.category}</span>
-            <div style={styles.categoryStrip}>
-              {categories.map((item) => (
-                <button
-                  key={item}
-                  style={item === category ? styles.categoryActive : styles.categoryButton}
-                  onClick={() => setCategory(item)}
-                  type="button"
-                >
-                  {item}
-                </button>
-              ))}
+            <div style={styles.tierList}>
+              {categories.map((item) => {
+                const etaMinutes = etaByCategory?.[item]
+                return (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setCategory(item)}
+                    style={item === category ? styles.tierCardActive : styles.tierCard}
+                  >
+                    <span style={styles.tierIcon} aria-hidden="true">🚗</span>
+                    <span style={styles.tierInfo}>
+                      <strong>{CATEGORY_LABELS[item] || item}</strong>
+                      <span style={styles.tierCapacity}>
+                        {isAr ? `حتى ${TIER_CAPACITY[item]} ركاب` : `Up to ${TIER_CAPACITY[item]}`}
+                      </span>
+                    </span>
+                    <span style={styles.tierMeta}>
+                      <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinorFor(item), payCurrency, lang)}</strong>
+                      <span style={etaMinutes ? styles.tierEta : styles.tierEtaNone}>
+                        {etaMinutes
+                          ? (isAr ? `خلال ${etaMinutes} د` : `in ${etaMinutes} min`)
+                          : (isAr ? 'لا سائق قريب الآن' : 'No driver nearby now')}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           </section>
+
+          {quote?.breakdown && (
+            <section style={styles.categoryCapsule}>
+              <span style={styles.categoryTitle}>{t.priceBreakdown}</span>
+              <div style={styles.breakdownList}>
+                <div style={styles.breakdownRow}><span>{t.baseFare}</span><span dir="ltr">{moneyText(quote.breakdown.baseFareMinor, quote.breakdown.currency, lang)}</span></div>
+                <div style={styles.breakdownRow}><span>{t.distanceCharge}</span><span dir="ltr">{moneyText(quote.breakdown.distanceChargeMinor, quote.breakdown.currency, lang)}</span></div>
+                {quote.breakdown.liveTrackingSurchargeMinor > 0 && (
+                  <div style={styles.breakdownRow}><span>{t.trackingSurcharge}</span><span dir="ltr">{moneyText(quote.breakdown.liveTrackingSurchargeMinor, quote.breakdown.currency, lang)}</span></div>
+                )}
+                {quote.breakdown.dynamicPricingAdjustmentMinor !== 0 && (
+                  <div style={styles.breakdownRow}><span>{t.dynamicAdjustment}</span><span dir="ltr">{moneyText(quote.breakdown.dynamicPricingAdjustmentMinor, quote.breakdown.currency, lang)}</span></div>
+                )}
+                <p style={styles.taxDisclosureBanner}>{t.taxDisclosureBanner}</p>
+                <div style={styles.breakdownRow}>
+                  <span>{t.regulatoryContribution} {quote.breakdown.regulatoryContributionMinor === 0 && <em style={styles.testModeBadge}>{t.testModeBadge}</em>}</span>
+                  <span dir="ltr">{quote.breakdown.regulatoryContributionMinor > 0 ? moneyText(quote.breakdown.regulatoryContributionMinor, quote.breakdown.currency, lang) : t.pendingConfirmation}</span>
+                </div>
+                <div style={styles.breakdownRow}>
+                  <span>{t.gst} {quote.breakdown.gstMinor === 0 && <em style={styles.testModeBadge}>{t.testModeBadge}</em>}</span>
+                  <span dir="ltr">{quote.breakdown.gstMinor > 0 ? moneyText(quote.breakdown.gstMinor, quote.breakdown.currency, lang) : t.pendingConfirmation}</span>
+                </div>
+                <div style={styles.breakdownRow}>
+                  <span>{t.qst} {quote.breakdown.qstMinor === 0 && <em style={styles.testModeBadge}>{t.testModeBadge}</em>}</span>
+                  <span dir="ltr">{quote.breakdown.qstMinor > 0 ? moneyText(quote.breakdown.qstMinor, quote.breakdown.currency, lang) : t.pendingConfirmation}</span>
+                </div>
+                <div style={styles.breakdownRowTotal}><span>{t.total}</span><span dir="ltr">{moneyText(quote.breakdown.totalMinor, quote.breakdown.currency, lang)}</span></div>
+              </div>
+              <small style={styles.breakdownHint}>{t.tipHint}</small>
+              <small style={styles.breakdownHint}>{t.commissionHint}</small>
+            </section>
+          )}
 
           <section style={styles.touchFilters}>
             <div style={styles.filtersHead}>
@@ -341,13 +501,12 @@ export function SrRidePage({ lang }: Props) {
             </strong>
           </div>
 
-          <div style={styles.stat}>
-            <span>{t.fare}</span>
-            <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, payCurrency, lang)}</strong>
-          </div>
-
           <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>
-            {status === 'saving' ? t.saving : t.request}
+            {status === 'saving'
+              ? t.saving
+              : isAr
+                ? `اختيار ${CATEGORY_LABELS[category] || category} · ${moneyText(fareMinor, payCurrency, lang)}`
+                : `Select ${CATEGORY_LABELS[category] || category} · ${moneyText(fareMinor, payCurrency, lang)}`}
           </button>
         </article>
 
@@ -430,9 +589,37 @@ const styles: Record<string, CSSProperties> = {
   input: { minHeight: 52, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 14px', fontWeight: 900 },
   categoryCapsule: { border: '1px solid #263651', borderRadius: 8, background: '#070b12', display: 'grid', gap: 10, padding: 12 },
   categoryTitle: { color: '#9aa6ba', fontSize: 12, fontWeight: 900 },
+  breakdownList: { display: 'grid', gap: 6 },
+  breakdownRow: { display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#c7d2e0' },
+  breakdownRowTotal: { display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 900, color: '#fff', borderTop: '1px solid #263651', paddingTop: 6, marginTop: 2 },
+  breakdownHint: { color: '#6b7688', fontSize: 11 },
+  testModeBadge: {
+    fontSize: 9, fontWeight: 800, letterSpacing: '.04em', color: '#1a1a1a', background: '#f5c451',
+    borderRadius: 4, padding: '1px 5px', textTransform: 'uppercase', fontStyle: 'normal', marginInlineStart: 6,
+  },
+  taxDisclosureBanner: {
+    fontSize: 11, fontWeight: 700, color: '#1a1a1a', background: '#f5c451', borderRadius: 6,
+    padding: '6px 8px', margin: '4px 0',
+  },
   categoryStrip: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' },
   categoryButton: { minHeight: 48, border: '1px solid #263651', borderRadius: 8, background: '#131e2e', color: '#fff', fontWeight: 900, padding: '0 12px' },
   categoryActive: { minHeight: 48, border: 0, borderRadius: 8, background: '#19d7ff', color: '#051014', fontWeight: 950, padding: '0 12px' },
+  tierList: { display: 'grid', gap: 8 },
+  tierCard: {
+    alignItems: 'center', background: '#131e2e', border: '1px solid #263651', borderRadius: 12,
+    display: 'grid', gap: 10, gridTemplateColumns: 'auto 1fr auto', minHeight: 64, padding: '10px 14px', textAlign: 'start',
+  },
+  tierCardActive: {
+    alignItems: 'center', background: '#0d2733', border: '1.5px solid #19d7ff', borderRadius: 12,
+    boxShadow: '0 0 0 1px rgba(25,215,255,.25)', display: 'grid', gap: 10, gridTemplateColumns: 'auto 1fr auto',
+    minHeight: 64, padding: '10px 14px', textAlign: 'start',
+  },
+  tierIcon: { fontSize: 26 },
+  tierInfo: { display: 'grid', gap: 2 },
+  tierCapacity: { color: '#9aa6ba', fontSize: 12, fontWeight: 700 },
+  tierMeta: { display: 'grid', gap: 2, justifyItems: 'end', textAlign: 'end' },
+  tierEta: { color: '#34d399', fontSize: 12, fontWeight: 800 },
+  tierEtaNone: { color: '#6b7688', fontSize: 12, fontWeight: 700 },
   touchFilters: { border: '1px solid #263651', borderRadius: 18, background: '#070b12', padding: 12, display: 'grid', gap: 10 },
   filtersHead: { alignItems: 'center', color: '#fff', display: 'flex', justifyContent: 'space-between', gap: 12 },
   toggle: { minHeight: 52, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', fontWeight: 900 },

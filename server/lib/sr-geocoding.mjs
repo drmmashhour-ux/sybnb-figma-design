@@ -115,7 +115,17 @@ function billingCoords(override, text) {
 
 // pickupCoordsOverride comes from the rider's device GPS (navigator.geolocation), which is more
 // accurate than gazetteer text-matching and should win whenever it's consistent with the named location.
-export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoordsOverride, dropoffCoordsOverride, currency }) {
+// Jurisdiction pricing engine (030): quote breakdown now itemizes base fare / distance charge /
+// dynamic-pricing adjustment / regulatory contribution / GST / QST as separate figures, not one
+// lump fareMinor. Tips are deliberately NOT part of a quote -- they're decided by the rider after
+// the ride (tipCompletedRide in sr-payments.mjs), never at quote time.
+//
+// db/country/province are optional and default to no jurisdiction resolution (regulatory
+// contribution/GST/QST stay 0) -- correct for every ride today, since SR is geofenced to Syria
+// (assertSyriaCoords) and nothing is modeled there. The moment a caller has a real Quebec rider
+// context to pass, this resolves any active JurisdictionTaxRate rows for RIDE the same way the
+// Stay side already does (see quebec-stay-tax.mjs's computeQuebecStayTaxesResolved).
+export async function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoordsOverride, dropoffCoordsOverride, currency, country = 'SY', province = null, db = null }) {
   const rates = CATEGORY_RATES[category] || CATEGORY_RATES['SR Economy']
   const pickupCoords = billingCoords(pickupCoordsOverride, pickup)
   const dropoffCoords = billingCoords(dropoffCoordsOverride, dropoff)
@@ -127,18 +137,49 @@ export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoor
     estimated = false
   }
 
-  const baseFareMinor = rates.baseMinor + rates.perKmMinor * distanceKm + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
+  const baseFareMinor = rates.baseMinor
+  // Unrounded in the sum (matches the pre-030 combined baseFareMinor calc bit-for-bit, so the surge
+  // multiplication and final nearest-500 rounding below produce an identical fareMinor to before)
+  // -- rounded only for the breakdown's own display figure.
+  const rawDistanceChargeMinor = rates.perKmMinor * distanceKm
+  const distanceChargeMinor = Math.round(rawDistanceChargeMinor)
+  const liveTrackingSurchargeMinor = lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR
+  // SR has no per-minute/duration pricing component today -- distance and a flat base are the whole
+  // model. 0, not omitted, so the breakdown shape is stable for a UI to render a line item either way.
+  const timeChargeMinor = 0
+  const preSurgeMinor = baseFareMinor + rawDistanceChargeMinor + liveTrackingSurchargeMinor + timeChargeMinor
+
   // SR dynamic pricing (016): apply night / traffic / holiday / high-season multipliers to the raw fare.
   // The rider is shown the breakdown (pricing.factors) BEFORE committing — transparent surge.
   const surge = computeFareMultiplier(new Date())
-  const rawFareMinor = baseFareMinor * surge.multiplier
+  const rawFareMinor = preSurgeMinor * surge.multiplier
+  const dynamicPricingAdjustmentMinor = Math.round(rawFareMinor - preSurgeMinor)
   const fareSypMinor = Math.round(rawFareMinor / 500) * 500
 
+  // Jurisdiction-config-aware: 0 for every ride today (Syria has no regulatory-contribution/tax
+  // regime modeled; Quebec SR isn't live). Ready the moment a caller passes a real db+country and an
+  // admin activates a JurisdictionTaxRate row for RIDE.
+  let regulatoryContributionMinor = 0
+  let gstMinor = 0
+  let qstMinor = 0
+  let taxSource = null
+  if (db) {
+    const { resolveTaxRates, computeTaxAmountMinor } = await import('./jurisdiction-pricing.mjs')
+    const rows = await resolveTaxRates(db, { country, province, municipality: null, serviceType: 'RIDE' })
+    const byType = Object.fromEntries(rows.map((r) => [r.taxType, r]))
+    if (byType.REGULATORY_CONTRIBUTION) regulatoryContributionMinor = computeTaxAmountMinor(fareSypMinor, byType.REGULATORY_CONTRIBUTION.rateParts)
+    if (byType.GST) gstMinor = computeTaxAmountMinor(fareSypMinor, byType.GST.rateParts)
+    if (byType.QST) qstMinor = computeTaxAmountMinor(fareSypMinor, byType.QST.rateParts)
+    if (rows.length) taxSource = byType
+  }
+
+  const totalSypMinor = fareSypMinor + regulatoryContributionMinor + gstMinor + qstMinor
+
   // The rate table above is SYP-denominated. A rider who chooses to pay in USD gets that SYP
-  // fare converted at the platform's fixed rate and rounded up to the nearest $5 — riders and
+  // total converted at the platform's fixed rate and rounded up to the nearest $5 — riders and
   // drivers dealing in cash or card shouldn't need to make change for a fractional dollar fare.
   const resolvedCurrency = currency === 'USD' ? 'USD' : 'SYP'
-  const fareMinor = resolvedCurrency === 'USD' ? sypMinorToRoundedUsdMinor(fareSypMinor) : fareSypMinor
+  const fareMinor = resolvedCurrency === 'USD' ? sypMinorToRoundedUsdMinor(totalSypMinor) : totalSypMinor
 
   return {
     fareMinor,
@@ -148,6 +189,19 @@ export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoor
     pickupCoords,
     dropoffCoords,
     pricing: { multiplier: surge.multiplier, factors: surge.factors, capped: surge.capped },
+    breakdown: {
+      baseFareMinor,
+      timeChargeMinor,
+      distanceChargeMinor,
+      liveTrackingSurchargeMinor,
+      dynamicPricingAdjustmentMinor,
+      regulatoryContributionMinor,
+      gstMinor,
+      qstMinor,
+      totalMinor: fareMinor,
+      currency: resolvedCurrency,
+      taxSource,
+    },
   }
 }
 

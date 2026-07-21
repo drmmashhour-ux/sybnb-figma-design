@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { summarizeOffers } from '../lib/offers.mjs'
+import { assertListingAttributes } from '../lib/listing-attributes.mjs'
 
 // Lets a hotel-like host (Studio/Suite/Double-Queen room types under one physical property)
 // share one location + one set of seller documents/photos across multiple STAYS Listing rows,
@@ -126,6 +127,14 @@ export async function handleAccommodations(req, res, url, context) {
       error.code = 'ACCOMMODATION_NO_ROOM_TYPES'
       error.expose = true
       throw error
+    }
+    // Same "can't go live incomplete" guard the single-listing submit route enforces
+    // (server/routes/listings.mjs) -- this accommodation flow bypasses that route entirely, so a
+    // Quebec STAYS room type without a CITQ number / insurance proof would otherwise skip the check.
+    for (const listing of accommodation.listings) {
+      if (['DRAFT', 'REJECTED'].includes(listing.status)) {
+        assertListingAttributes(listing.division, listing.metadata)
+      }
     }
 
     const [updatedAccommodation] = await db().$transaction([

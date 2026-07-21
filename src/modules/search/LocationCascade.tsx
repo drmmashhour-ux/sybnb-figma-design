@@ -1,8 +1,19 @@
 import { useState, type CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
-import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
+import { text, type Lang } from '../../engines/language/languageEngine'
+import {
+  CANADA_PROVINCES,
+  COUNTRIES,
+  getCanadianCity,
+  getCanadianProvince,
+  getCity,
+  getGovernorate,
+  labelFor,
+  SYRIA_GOVERNORATES,
+  type CountryKey,
+} from '../../engines/search'
 
 export type LocationValue = {
+  country: CountryKey
   governorate: string
   city: string
   area: string
@@ -12,10 +23,15 @@ type LocationCascadeProps = {
   lang: Lang
   value: LocationValue
   onChange: (value: LocationValue) => void
+  // Only STAYS search has any Canadian inventory today -- other divisions (RENTALS/BUY/CARS/
+  // MARKETPLACE) never have Quebec listings, so the country row stays hidden there and this
+  // cascade behaves exactly as it did before Quebec existed (Syria-only).
+  allowCanada?: boolean
 }
 
 const T = {
   ar: {
+    country: 'الدولة',
     governorate: 'المحافظة / الولاية',
     city: 'المدينة / القضاء',
     area: 'المنطقة / الشارع',
@@ -27,6 +43,7 @@ const T = {
     areas: 'المناطق / الشوارع',
   },
   en: {
+    country: 'Country',
     governorate: 'Governorate / State',
     city: 'City / District',
     area: 'Area / Street',
@@ -49,20 +66,33 @@ const AR_LABEL_OVERRIDES: Record<string, string> = {
   yabroud: 'يبرود',
 }
 
-type Panel = 'governorate' | 'city' | 'area'
+type Panel = 'country' | 'governorate' | 'city' | 'area'
 
-export function LocationCascade({ lang, value, onChange }: LocationCascadeProps) {
+export function LocationCascade({ lang, value, onChange, allowCanada = false }: LocationCascadeProps) {
   const [openPanel, setOpenPanel] = useState<Panel | null>(null)
-  const governorate = getGovernorate(value.governorate)
-  const city = getCity(value.governorate, value.city)
+  const isCanada = allowCanada && value.country === 'CA'
+  const governorateList = isCanada ? CANADA_PROVINCES : SYRIA_GOVERNORATES
+  const governorate = isCanada ? getCanadianProvince(value.governorate) : getGovernorate(value.governorate)
+  const city = isCanada ? getCanadianCity(value.governorate, value.city) : getCity(value.governorate, value.city)
   const t = T[lang === 'ar' ? 'ar' : 'en']
-  const displayLabel = (item?: { key?: string; ar: string; en: string }) => {
+  // Syrian places use { key, ar, en } (labelFor + a handful of AR_LABEL_OVERRIDES for places whose
+  // formal Arabic differs from the transliteration key); Canadian places carry a real `fr` field and
+  // use the shared text() fallback helper instead -- same split the host wizard uses (placeLabel).
+  const displayLabel = (item?: { key?: string; ar: string; en: string; fr?: string }) => {
     if (!item) return ''
+    if (isCanada) return text(item as { ar: string; en: string; fr?: string }, lang)
     return lang === 'ar' && item.key && AR_LABEL_OVERRIDES[item.key] ? AR_LABEL_OVERRIDES[item.key] : labelFor(lang, item)
   }
+  const selectCountry = (nextCountry: CountryKey) => {
+    if (nextCountry === value.country) return
+    const nextGovernorate = nextCountry === 'CA' ? CANADA_PROVINCES[0] : SYRIA_GOVERNORATES[0]
+    const nextCity = nextGovernorate?.cities[0]
+    onChange({ country: nextCountry, governorate: nextGovernorate?.key || '', city: nextCity?.key || '', area: '' })
+    setOpenPanel('governorate')
+  }
   const selectGovernorate = (key: string) => {
-    const nextGovernorate = getGovernorate(key)
-    onChange({ governorate: key, city: nextGovernorate?.cities[0]?.key || '', area: '' })
+    const nextGovernorate = isCanada ? getCanadianProvince(key) : getGovernorate(key)
+    onChange({ ...value, governorate: key, city: nextGovernorate?.cities[0]?.key || '', area: '' })
     setOpenPanel('city')
   }
   const selectCity = (key: string) => {
@@ -77,6 +107,9 @@ export function LocationCascade({ lang, value, onChange }: LocationCascadeProps)
   return (
     <div style={styles.shell}>
       <div style={styles.searchRow} dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+        {allowCanada && (
+          <TouchField label={t.country} value={COUNTRIES.find((item) => item.key === value.country)?.[lang === 'ar' ? 'ar' : 'en'] || ''} active={openPanel === 'country'} onClick={() => setOpenPanel(openPanel === 'country' ? null : 'country')} />
+        )}
         <TouchField label={t.governorate} value={displayLabel(governorate)} active={openPanel === 'governorate'} onClick={() => setOpenPanel(openPanel === 'governorate' ? null : 'governorate')} />
         <TouchField label={t.city} value={displayLabel(city) || t.chooseCity} active={openPanel === 'city'} onClick={() => setOpenPanel(openPanel === 'city' ? null : 'city')} />
         <TouchField
@@ -87,10 +120,22 @@ export function LocationCascade({ lang, value, onChange }: LocationCascadeProps)
         />
       </div>
 
+      {allowCanada && openPanel === 'country' && (
+        <TouchPanel label={t.country}>
+          <div style={styles.govGrid}>
+            {COUNTRIES.map((item) => (
+              <ChoiceButton key={item.key} active={item.key === value.country} onClick={() => selectCountry(item.key)}>
+                {text(item, lang)}
+              </ChoiceButton>
+            ))}
+          </div>
+        </TouchPanel>
+      )}
+
       {openPanel === 'governorate' && (
         <TouchPanel label={t.allGovernorates}>
           <div style={styles.govGrid}>
-            {SYRIA_GOVERNORATES.map((item) => (
+            {governorateList.map((item) => (
               <ChoiceButton key={item.key} active={item.key === value.governorate} onClick={() => selectGovernorate(item.key)}>
                 {displayLabel(item)}
               </ChoiceButton>
@@ -156,7 +201,7 @@ const styles: Record<string, CSSProperties> = {
   shell: { display: 'grid', gap: 12 },
   searchRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
     gap: 10,
   },
   fieldButton: {

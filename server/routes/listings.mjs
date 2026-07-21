@@ -1,7 +1,9 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { computeStayTotalMinor } from '../lib/pricing.mjs'
+import { assertNoUnknownFields } from '../lib/validate.mjs'
+import { computeStayTotalMinor, splitStayAmountMinor } from '../lib/pricing.mjs'
+import { computeQuebecStayTaxesResolved } from '../lib/quebec-stay-tax.mjs'
 import { stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
@@ -15,6 +17,17 @@ import {
   readListingMedia,
   saveListingMedia,
 } from '../lib/listing-media-storage.mjs'
+import { deleteListingDocument, readListingDocument, saveListingDocument } from '../lib/listing-document-storage.mjs'
+import { retentionDeleteAfter } from '../lib/listing-document-retention.mjs'
+
+// Québec compliance review (item 1): real certificate types a host can upload against a listing.
+const LISTING_DOCUMENT_TYPES = ['CITQ_CERTIFICATE']
+const LISTING_DOCUMENT_SAFE_SELECT = {
+  id: true, listingId: true, type: true, mimeType: true, status: true,
+  reviewedById: true, reviewedAt: true, expiresAt: true, retentionDeleteAfter: true,
+  legalHold: true, legalHoldReason: true, deletedAt: true, createdAt: true, updatedAt: true,
+  version: true, isCurrent: true, replacesId: true,
+}
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how Centris
 // pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the paid-plan
@@ -79,12 +92,61 @@ export async function handleListings(req, res, url, context) {
     // running an already-USD listing through the SYP conversion collapses its real price).
     const wantsUsd = url.searchParams.get('currency') === 'USD'
     const { totalMinor, perNight } = wantsUsd ? stayQuoteToRoundedUsd(quote, listing.currency) : quote
+    const currency = wantsUsd ? 'USD' : listing.currency
+
+    // Pre-booking price-transparency breakdown (item 2 of the Québec compliance review): decompose
+    // the same all-inclusive total the guest is about to pay into its rent/cleaning components, and
+    // -- for a Québec (country: 'CA') listing only -- show the lodging tax/GST/QST that would apply
+    // to the rent portion. This is a DISCLOSURE of what the price already includes, not an added
+    // charge: nightlySubtotalMinor + cleaningFeeMinor always equals totalMinor exactly. Whether SYBNB
+    // should switch Québec Stays to tax-EXCLUSIVE pricing (taxes added on top, raising the guest's
+    // total) is a pricing-model decision for legal/CPA, not something decided here -- see
+    // STAY_TAX_PLATFORM_COLLECTION in compliance-feature-flags.mjs, which stays off either way.
+    const { rentMinor, cleaningFeeMinor } = splitStayAmountMinor(totalMinor, listing.metadata)
+    const isQuebec = listing.metadata?.country === 'CA'
+    const quebecTaxes = isQuebec
+      ? await computeQuebecStayTaxesResolved(db(), {
+          accommodationMinor: rentMinor,
+          country: 'CA',
+          province: listing.metadata?.governorate || null,
+          municipality: listing.metadata?.city || null,
+        })
+      : null
+
+    // Second compliance-review correction pass: the interface must never imply a tax was collected
+    // or remitted just because a rate is displayed. estimatedTaxMinor is the sum of the three
+    // published rates above -- purely informational. collectedTaxMinor/remittedTaxMinor are ALWAYS
+    // zero here: this is a pre-booking quote, nothing has been charged yet, and even once booked,
+    // real collection stays off (STAY_TAX_PLATFORM_COLLECTION) until legally activated. The three
+    // are never conflated into one number.
+    const estimatedTaxMinor = (quebecTaxes?.lodgingTaxMinor || 0) + (quebecTaxes?.gstMinor || 0) + (quebecTaxes?.qstMinor || 0)
+
     return json(res, 200, {
       ok: true,
       totalMinor,
       nights: quote.nights,
       perNight,
-      currency: wantsUsd ? 'USD' : listing.currency,
+      currency,
+      breakdown: {
+        nightlySubtotalMinor: rentMinor,
+        cleaningFeeMinor,
+        // Neither of these is a real SYBNB charge today -- there is no guest service fee and no
+        // refundable damage deposit as an actual product feature. They're returned as explicit
+        // zeros (never omitted) so the checkout UI can show "Guest service fee: not charged" /
+        // "Refundable deposit: not applicable" instead of silently leaving guests to wonder whether
+        // one exists. Turning either into a real charge is a pricing decision, not an engineering one.
+        guestServiceFeeMinor: 0,
+        refundableDepositMinor: 0,
+        lodgingTaxMinor: quebecTaxes?.lodgingTaxMinor || 0,
+        gstMinor: quebecTaxes?.gstMinor || 0,
+        qstMinor: quebecTaxes?.qstMinor || 0,
+        estimatedTaxMinor,
+        collectedTaxMinor: 0,
+        remittedTaxMinor: 0,
+        totalMinor,
+        currency,
+        taxSource: quebecTaxes?.source || null,
+      },
     })
   }
 
@@ -98,6 +160,7 @@ export async function handleListings(req, res, url, context) {
       // Listings created through the wizard never populate the `location` relation — governorate/
       // city/area/bedrooms/bathrooms/propertyType/amenities all live in `metadata` instead, so those
       // filters are applied in-memory below rather than as a Prisma `where` clause.
+      const country = params.get('country') || undefined
       const governorate = params.get('governorate') || undefined
       const city = params.get('city') || undefined
       const area = params.get('area') || undefined
@@ -140,6 +203,9 @@ export async function handleListings(req, res, url, context) {
       let listings = candidates.filter((listing) => {
         const meta = listing.metadata || {}
         const visual = meta.visualFilters || {}
+        // Legacy listings created before the Quebec work never wrote metadata.country -- treat them
+        // as Syria, matching resolveListingJurisdiction's same default (server/lib/jurisdiction-compliance.mjs).
+        if (country && (typeof meta.country === 'string' && meta.country ? meta.country : 'SY') !== country) return false
         if (governorate && meta.governorate !== governorate) return false
         if (city && meta.city !== city) return false
         if (area && meta.area !== area) return false
@@ -494,6 +560,143 @@ export async function handleListings(req, res, url, context) {
     await db().listingMedia.delete({ where: { id: mediaId } })
     await deleteListingMedia(String(media.url || '').split('/').pop())
     return json(res, 200, { ok: true, deleted: true })
+  }
+
+  // ---- Québec compliance review (item 1): real certificate files, not just a free-text expiry
+  // date, admin-reviewed before a listing can be treated as verified. ----
+  const documentCollectionMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/documents$/)
+  if (documentCollectionMatch) {
+    const listingId = documentCollectionMatch[1]
+    assertListingUuid(listingId)
+
+    if (req.method === 'POST') {
+      requireAuth(context, ['SELLER', 'HOST'])
+      const listing = await db().listing.findFirst({ where: { id: listingId }, select: { ownerId: true, metadata: true } })
+      if (!listing || listing.ownerId !== context.user.id) {
+        const error = new Error('Listing not found for this account.')
+        error.statusCode = 404
+        error.code = 'LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['type', 'fileBase64', 'mimeType'], 'listing document body')
+      const type = String(body.type || '')
+      if (!LISTING_DOCUMENT_TYPES.includes(type)) {
+        const error = new Error(`type must be one of: ${LISTING_DOCUMENT_TYPES.join(', ')}.`)
+        error.statusCode = 400
+        error.code = 'LISTING_DOCUMENT_TYPE_INVALID'
+        error.expose = true
+        throw error
+      }
+      const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+      const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+      if (!fileBase64 || !mimeType) {
+        const error = new Error('A listing document file is required.')
+        error.statusCode = 400
+        error.code = 'LISTING_DOCUMENT_REQUIRED'
+        error.expose = true
+        throw error
+      }
+
+      // Third compliance-review correction pass: a legal hold must preserve the held certificate
+      // (and its audit trail) but must NEVER block the host from uploading a newer renewal -- so
+      // uploading here never throws on legalHold. Instead every upload creates a new version row;
+      // the previous current row (if any) simply stops being current. A held previous row keeps its
+      // legalHold flag, its file, and its own version number completely untouched.
+      const previous = await db().listingDocument.findFirst({
+        where: { listingId, type, isCurrent: true }, select: { id: true, assetUrl: true, legalHold: true, version: true },
+      })
+
+      const storageKey = await saveListingDocument(fileBase64, mimeType)
+      // A hold-free superseded file is deleted immediately (no reason to keep a document that no
+      // longer describes the listing's active registration). A held file's bytes are preserved --
+      // only its own retention/purge job may ever delete it, never a new upload.
+      if (previous && !previous.legalHold && previous.assetUrl && previous.assetUrl !== storageKey) {
+        await deleteListingDocument(previous.assetUrl)
+      }
+
+      // The certificate's own expiry comes from the listing metadata the host already entered
+      // (citqCertificateExpiresAt) -- the retention clock (one year past that date) is derived from
+      // it, not invented separately.
+      const expiresAtRaw = listing.metadata?.citqCertificateExpiresAt
+      const expiresAt = expiresAtRaw ? new Date(expiresAtRaw) : null
+      const validExpiresAt = expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null
+
+      // A new version always starts PENDING_REVIEW -- admin review never survives a new file (the
+      // certificate must be looked at again) -- and never inherits a legal hold from the row it
+      // replaces; a hold is a decision about ONE specific certificate file, not the listing's slot.
+      const document = await db().$transaction(async (tx) => {
+        if (previous) await tx.listingDocument.update({ where: { id: previous.id }, data: { isCurrent: false } })
+        return tx.listingDocument.create({
+          data: {
+            listingId, type, assetUrl: storageKey, mimeType, status: 'PENDING_REVIEW',
+            version: previous ? previous.version + 1 : 1,
+            isCurrent: true,
+            replacesId: previous ? previous.id : null,
+            expiresAt: validExpiresAt, retentionDeleteAfter: retentionDeleteAfter(validExpiresAt),
+          },
+          select: LISTING_DOCUMENT_SAFE_SELECT,
+        })
+      })
+      return json(res, 201, { ok: true, document })
+    }
+
+    if (req.method === 'GET') {
+      requireAuth(context, ['SELLER', 'HOST'])
+      const listing = await db().listing.findFirst({ where: { id: listingId }, select: { ownerId: true } })
+      if (!listing || listing.ownerId !== context.user.id) {
+        const error = new Error('Listing not found for this account.')
+        error.statusCode = 404
+        error.code = 'LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      const documents = await db().listingDocument.findMany({
+        where: { listingId }, select: LISTING_DOCUMENT_SAFE_SELECT, orderBy: { createdAt: 'desc' },
+      })
+      return json(res, 200, { ok: true, documents })
+    }
+
+    return methodNotAllowed(res, ['POST', 'GET'])
+  }
+
+  const documentFileMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/documents\/([^/]+)\/file$/)
+  if (documentFileMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    const [, listingId, documentId] = documentFileMatch
+    const document = await db().listingDocument.findUnique({
+      where: { id: documentId },
+      select: { listingId: true, assetUrl: true, mimeType: true, listing: { select: { ownerId: true } } },
+    })
+    if (!document || document.listingId !== listingId) {
+      const error = new Error('Listing document not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_DOCUMENT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const isOwner = document.listing?.ownerId === context.user.id
+    const isStaff = context.roles.includes('ADMIN') || context.roles.includes('SUPPORT')
+    if (!isOwner && !isStaff) {
+      const error = new Error('This document is not available for this account.')
+      error.statusCode = 403
+      error.code = 'LISTING_DOCUMENT_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+    if (!document.assetUrl) {
+      const error = new Error('This document has been deleted under the retention policy.')
+      error.statusCode = 410
+      error.code = 'LISTING_DOCUMENT_RETENTION_DELETED'
+      error.expose = true
+      throw error
+    }
+    const buffer = await readListingDocument(document.assetUrl)
+    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    res.end(buffer)
+    return true
   }
 
   const submitMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/submit$/)

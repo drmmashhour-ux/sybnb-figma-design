@@ -493,6 +493,24 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               </small>
             </section>
 
+            {listing.division === 'STAYS' && listing.metadata?.country === 'CA' && (
+              <section style={styles.figmaTrustCard}>
+                <strong>{isAr ? '✓ إقامة سياحية مسجّلة في كيبيك' : '✓ Registered Quebec tourist accommodation'}</strong>
+                <small dir="ltr">
+                  {isAr ? 'رقم CITQ: ' : 'CITQ #: '}
+                  {typeof listing.metadata.citqRegistrationNumber === 'string' && listing.metadata.citqRegistrationNumber
+                    ? listing.metadata.citqRegistrationNumber
+                    : (isAr ? 'غير متوفر' : 'not available')}
+                </small>
+                {typeof listing.metadata.citqCertificateExpiresAt === 'string' && listing.metadata.citqCertificateExpiresAt && (
+                  <small dir="ltr">
+                    {isAr ? 'تنتهي الشهادة: ' : 'Certificate expires: '}
+                    {new Date(listing.metadata.citqCertificateExpiresAt).toISOString().slice(0, 10)}
+                  </small>
+                )}
+              </section>
+            )}
+
             <section style={styles.bookingSteps}>
               <h2>{detailCopy.howToBook}</h2>
               {detailCopy.stepRows.slice(0, 4).map((step, index) => (

@@ -418,6 +418,7 @@ function toListingSearchFilters(value: UnifiedSearchValue): ListingSearchFilters
   const band = value.priceBand && value.priceBand !== 'any' ? PRICE_BANDS[value.priceBand] : undefined
   const isStaysSearch = value.division === 'stays'
   return {
+    country: isStaysSearch ? value.country || undefined : undefined,
     governorate: value.governorate || undefined,
     city: value.city || undefined,
     area: value.area || undefined,

@@ -89,8 +89,8 @@ export const LOGO_ASSETS: Record<LogoKey, LogoAsset> = {
   srRide: {
     key: 'srRide',
     src: '/assets/logos/sr-ride.png',
-    label: 'SR Ride',
-    usage: 'SR ride app and future ride division.',
+    label: 'SYBNB Ride',
+    usage: 'SYBNB Ride app and future ride division (internal code: SR/SIR).',
   },
 }
 

@@ -112,6 +112,7 @@ export type PlatformDriverVehicle = {
   plate: string
   color: string | null
   category: string
+  country: string
   status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
   reviewNote?: string | null
   createdAt: string
@@ -1080,6 +1081,7 @@ export async function createAndApprovePrototypeListing(input: CreateListingInput
 }
 
 export type ListingSearchFilters = {
+  country?: string
   governorate?: string
   city?: string
   area?: string
@@ -1100,6 +1102,7 @@ export type ListingSearchFilters = {
 
 export async function fetchApprovedListings(division = 'STAYS', filters: ListingSearchFilters = {}) {
   const params = new URLSearchParams({ division })
+  if (filters.country) params.set('country', filters.country)
   if (filters.governorate) params.set('governorate', filters.governorate)
   if (filters.city) params.set('city', filters.city)
   if (filters.area) params.set('area', filters.area)
@@ -1149,11 +1152,32 @@ export async function fetchListingAvailability(listingId: string, from: string, 
   }
 }
 
+export type PlatformStayQuoteBreakdown = {
+  nightlySubtotalMinor: number
+  cleaningFeeMinor: number
+  guestServiceFeeMinor: number
+  refundableDepositMinor: number
+  lodgingTaxMinor: number
+  gstMinor: number
+  qstMinor: number
+  estimatedTaxMinor: number
+  collectedTaxMinor: number
+  remittedTaxMinor: number
+  totalMinor: number
+  currency: string
+  taxSource: { lodging: unknown; gst: unknown; qst: unknown } | null
+}
+
 export async function fetchListingQuote(listingId: string, checkIn: string, checkOut: string, currency?: 'USD') {
   const params = new URLSearchParams({ checkIn, checkOut, ...(currency ? { currency } : {}) })
-  return apiRequest<{ ok: true; totalMinor: number; nights: number; perNight: Array<{ date: string; priceMinor: number }>; currency: string }>(
-    `/api/listings/${listingId}/quote?${params.toString()}`,
-  )
+  return apiRequest<{
+    ok: true
+    totalMinor: number
+    nights: number
+    perNight: Array<{ date: string; priceMinor: number }>
+    currency: string
+    breakdown: PlatformStayQuoteBreakdown
+  }>(`/api/listings/${listingId}/quote?${params.toString()}`)
 }
 
 export type PlatformListingReview = {
@@ -1320,6 +1344,49 @@ export async function sendListingInquiryDocument(listingId: string, file: File) 
     body: { fileBase64, mimeType: file.type, originalFilename: file.name },
   })
   return response.document
+}
+
+// Second compliance-review correction pass: ADMIN_REVIEWED_TEST is NOT a legal "verified" status --
+// an admin looked at it, in test mode, nothing stronger. DIGITALLY_VERIFIED is reserved for a future
+// real verification integration; nothing sets it today.
+export type PlatformListingDocumentStatus =
+  | 'PENDING_REVIEW' | 'ADMIN_REVIEWED_TEST' | 'REJECTED' | 'EXPIRED' | 'DIGITAL_VERIFICATION_PENDING' | 'DIGITALLY_VERIFIED'
+
+export type PlatformListingDocument = {
+  id: string
+  listingId: string
+  type: 'CITQ_CERTIFICATE'
+  mimeType: string | null
+  status: PlatformListingDocumentStatus
+  reviewedById: string | null
+  reviewedAt: string | null
+  expiresAt: string | null
+  retentionDeleteAfter: string | null
+  legalHold: boolean
+  legalHoldReason: string | null
+  deletedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// Québec compliance review (item 1): a host uploads the actual CITQ registration-certificate file
+// against their listing (never just the free-text registration number/expiry date) for an admin to
+// manually review. Re-uploading resets the review to PENDING_REVIEW server-side.
+export async function uploadListingDocument(listingId: string, file: File, type: 'CITQ_CERTIFICATE' = 'CITQ_CERTIFICATE', mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{ ok: true; document: PlatformListingDocument }>(`/api/listings/${listingId}/documents`, {
+    method: 'POST', token: session.token, body: { type, fileBase64, mimeType: file.type },
+  })
+  return response.document
+}
+
+export async function fetchListingDocuments(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; documents: PlatformListingDocument[] }>(`/api/listings/${listingId}/documents`, {
+    token: session.token,
+  })
+  return response.documents
 }
 
 // <img src> can't send an Authorization header, and these documents are private to the thread's
@@ -1550,6 +1617,67 @@ export async function fetchPrototypeAdminAuditLog(limit = 50) {
   return response.auditLog
 }
 
+export type PlatformJurisdictionComplianceProfile = {
+  id: string
+  division: 'STR' | 'SR'
+  countryCode: string
+  regionCode: string
+  status: 'PENDING' | 'APPROVED' | 'BLOCKED'
+  tourismRequired: boolean
+  tourismSatisfied: boolean
+  tourismNotes: string | null
+  transportRequired: boolean
+  transportSatisfied: boolean
+  transportNotes: string | null
+  taxRequired: boolean
+  taxSatisfied: boolean
+  taxNotes: string | null
+  platformRequired: boolean
+  platformSatisfied: boolean
+  platformNotes: string | null
+  // CTQ Transportation System Operator fields (028) -- only meaningful for division 'SR'.
+  operatorRespondentName: string | null
+  operatorRespondentContact: string | null
+  operatorDispatcherName: string | null
+  operatorDispatcherContact: string | null
+  operatorInsuranceReference: string | null
+  operatorAuthorizationNumber: string | null
+  reviewedById: string | null
+  reviewedAt: string | null
+  reviewedBy?: { id: string; displayName: string } | null
+  createdAt: string
+  updatedAt: string
+}
+
+export async function fetchJurisdictionComplianceProfiles() {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; profiles: PlatformJurisdictionComplianceProfile[] }>(
+    '/api/admin/jurisdiction-compliance',
+    { token },
+  ))
+  return response.profiles
+}
+
+export async function updateJurisdictionComplianceProfile(
+  id: string,
+  patch: Partial<Pick<
+    PlatformJurisdictionComplianceProfile,
+    | 'status'
+    | 'tourismRequired' | 'tourismSatisfied' | 'tourismNotes'
+    | 'transportRequired' | 'transportSatisfied' | 'transportNotes'
+    | 'taxRequired' | 'taxSatisfied' | 'taxNotes'
+    | 'platformRequired' | 'platformSatisfied' | 'platformNotes'
+    | 'operatorRespondentName' | 'operatorRespondentContact'
+    | 'operatorDispatcherName' | 'operatorDispatcherContact'
+    | 'operatorInsuranceReference' | 'operatorAuthorizationNumber'
+  >>,
+) {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; profile: PlatformJurisdictionComplianceProfile }>(
+    `/api/admin/jurisdiction-compliance/${id}`,
+    { method: 'PATCH', token, body: patch },
+  ))
+  return response.profile
+}
+
 export async function fetchPrototypeAdminMetrics() {
   const response = await runAdminRequest((token) => apiRequest<{ ok: true; metrics: PlatformAdminMetrics }>('/api/admin/platform-metrics', {
     token,
@@ -1642,6 +1770,42 @@ export async function fetchIdDocumentBlobUrl(userId: string) {
   return URL.createObjectURL(blob)
 }
 
+// Same authenticated-blob pattern for a Québec listing certificate (e.g. CITQ registration) --
+// admin manually inspects this against the registration number/expiry the host entered before
+// approving it (jurisdiction-pricing-engine review, item 1: "validate its authenticity").
+export async function fetchListingDocumentBlobUrl(documentId: string) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await fetch(`${API_BASE_URL}/api/admin/listing-documents/${documentId}/file`, {
+    headers: { authorization: `Bearer ${session.token}` },
+  })
+  if (!response.ok) throw new Error(`Could not load listing document: ${response.status}`)
+  const blob = await response.blob()
+  return URL.createObjectURL(blob)
+}
+
+// CTQ-374 requires an authorized operator to maintain driver + vehicle registries and file
+// quarterly/annual reports -- this downloads that registry as CSV or JSON. Same authenticated-blob
+// pattern as fetchIdDocumentBlobUrl: the endpoint is admin/support-only, so a plain <a href> can't
+// carry the Authorization header.
+export async function downloadDriverRegistryExport(format: 'csv' | 'json', country?: string) {
+  const session = await ensurePrototypeAdminSession()
+  const params = new URLSearchParams({ format })
+  if (country) params.set('country', country)
+  const response = await fetch(`${API_BASE_URL}/api/admin/drivers/export?${params.toString()}`, {
+    headers: { authorization: `Bearer ${session.token}` },
+  })
+  if (!response.ok) throw new Error(`Could not export driver registry: ${response.status}`)
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `driver-vehicle-registry-${new Date().toISOString().slice(0, 10)}.${format}`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 async function runAdminRequest<T>(request: (token: string) => Promise<T>) {
   const session = await ensurePrototypeAdminSession()
 
@@ -1674,6 +1838,22 @@ export async function uploadIdDocumentForUser(userId: string, file: File) {
   return response.user
 }
 
+// Jurisdiction pricing engine (030): the itemized fare breakdown -- base/time/distance/dynamic-
+// pricing/regulatory-contribution/GST/QST. regulatoryContributionMinor/gstMinor/qstMinor are 0 for
+// every ride today (Syria has no such regime modeled; Quebec SR isn't live), not fabricated figures.
+export type PlatformSrQuoteBreakdown = {
+  baseFareMinor: number
+  timeChargeMinor: number
+  distanceChargeMinor: number
+  liveTrackingSurchargeMinor: number
+  dynamicPricingAdjustmentMinor: number
+  regulatoryContributionMinor: number
+  gstMinor: number
+  qstMinor: number
+  totalMinor: number
+  currency: string
+}
+
 export type PlatformSrQuote = {
   fareMinor: number
   currency: string
@@ -1681,6 +1861,11 @@ export type PlatformSrQuote = {
   estimated: boolean
   pickupCoords: { lat: number; lng: number } | null
   dropoffCoords: { lat: number; lng: number } | null
+  // Minutes, per vehicle-tier category, computed server-side from actual online/road-ready nearby
+  // drivers (server/lib/sr-eta.mjs). A category with no qualifying driver nearby is simply absent --
+  // never a fabricated number. null when pickupCoords couldn't be resolved at all.
+  etaByCategory: Record<string, number> | null
+  breakdown: PlatformSrQuoteBreakdown
 }
 
 export async function fetchSrQuote(input: {
@@ -1745,6 +1930,19 @@ export async function fetchPrototypeDriverOverview() {
   return response.overview
 }
 
+// SIR ETA (027): a road-ready driver pings this while online so the rider-facing quote can compute a
+// real per-tier ETA (server/lib/sr-eta.mjs). `online: false` (e.g. the driver toggling off, or the
+// app backgrounding) just flips the flag with no coords required.
+export async function updateDriverLocation(input: { lat: number; lng: number; online: true } | { online: false }) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; online: boolean }>('/api/driver/location', {
+    method: 'PATCH',
+    token: session.token,
+    body: input,
+  })
+  return response.online
+}
+
 export async function fetchPendingSrRides() {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; rides: PlatformRideRequest[] }>('/api/driver/rides/pending', {
@@ -1798,6 +1996,7 @@ export async function createDriverVehicle(input: {
   plate: string
   color?: string
   category: string
+  country?: string
 }) {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; vehicle: PlatformDriverVehicle }>('/api/driver/vehicles', {
@@ -1816,21 +2015,242 @@ export async function fetchDriverVehicles() {
   return response.vehicles
 }
 
+export type PlatformDriverDocumentType = 'LICENSE' | 'VEHICLE_REGISTRATION' | 'INSURANCE' | 'SAAQ_AUTHORIZED_DRIVER_PERMIT' | 'CRIMINAL_RECORD_CHECK'
+
 export type PlatformDriverDocument = {
   id: string
-  type: 'LICENSE' | 'VEHICLE_REGISTRATION' | 'INSURANCE'
+  type: PlatformDriverDocumentType
   status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
   createdAt: string
 }
 
-// Driver documents (licence / vehicle registration / insurance) with review status — used to reflect the
-// driver's road-ready readiness on the dashboard.
+// Driver documents (licence / vehicle registration / insurance / Quebec SAAQ permit / criminal record
+// check) with review status — used to reflect the driver's road-ready readiness on the dashboard.
 export async function fetchDriverDocuments() {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; documents: PlatformDriverDocument[] }>('/api/driver/documents', {
     token: session.token,
   })
   return response.documents
+}
+
+// One document per type -- re-uploading replaces the previous file and resets it to PENDING_REVIEW
+// (matches the server's upsert-on-(driverUserId,type) behavior).
+export async function uploadDriverDocument(type: PlatformDriverDocumentType, file: File) {
+  const session = await ensurePrototypeDriverSession()
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{ ok: true; document: PlatformDriverDocument }>('/api/driver/documents', {
+    method: 'POST',
+    token: session.token,
+    body: { type, fileBase64, mimeType: file.type || 'application/octet-stream' },
+  })
+  return response.document
+}
+
+// ---- Tax-compliance foundation (029): driver/host tax profiles ----
+// A profile is always returned REDACTED -- the server never sends a full SIN/TIN or payout
+// identifier back over the wire, only masked *Masked display strings. See server/lib/tax-profile.mjs.
+export type PlatformTaxSubjectType = 'DRIVER' | 'HOST'
+export type PlatformTaxIdentifierType = 'SIN' | 'TIN' | 'OTHER'
+export type PlatformTaxBusinessType = 'INDIVIDUAL' | 'BUSINESS'
+export type PlatformGstQstTreatment = 'HOST_REGISTERED' | 'PLATFORM_COLLECTS'
+
+export type PlatformTaxProfile = {
+  id: string
+  userId: string
+  subjectType: PlatformTaxSubjectType
+  legalFirstName: string
+  legalLastName: string
+  legalBusinessName: string | null
+  businessType: PlatformTaxBusinessType
+  dateOfBirth: string | null
+  addressLine1: string
+  addressLine2: string | null
+  city: string
+  region: string
+  postalCode: string
+  country: string
+  taxResidenceCountry: string
+  taxResidenceRegion: string | null
+  taxIdentifierType: PlatformTaxIdentifierType
+  taxIdentifierMasked: string | null
+  gstRegistered: boolean
+  gstNumber: string | null
+  qstRegistered: boolean
+  qstNumber: string | null
+  neqNumber: string | null
+  payoutAccountMasked: string | null
+  gstQstTreatment: PlatformGstQstTreatment | null
+  gstQstTreatmentEffectiveAt: string | null
+  consentRegulatoryReporting: boolean
+  certifiedAccurate: boolean
+  verificationStatus: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+  verificationSource: string | null
+  verifiedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type TaxProfileInput = {
+  legalFirstName: string
+  legalLastName: string
+  legalBusinessName?: string
+  businessType?: PlatformTaxBusinessType
+  dateOfBirth?: string
+  addressLine1: string
+  addressLine2?: string
+  city: string
+  region: string
+  postalCode: string
+  country: string
+  taxResidenceCountry: string
+  taxResidenceRegion?: string
+  taxIdentifierType: PlatformTaxIdentifierType
+  taxIdentifier: string
+  gstRegistered?: boolean
+  gstNumber?: string
+  qstRegistered?: boolean
+  qstNumber?: string
+  neqNumber?: string
+  payoutAccountIdentifier: string
+  consentRegulatoryReporting: boolean
+  certifiedAccurate: boolean
+}
+
+export async function fetchDriverTaxProfile() {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; taxProfile: PlatformTaxProfile | null }>('/api/tax-profile/DRIVER', { token: session.token })
+  return response.taxProfile
+}
+
+export async function updateDriverTaxProfile(input: TaxProfileInput) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; taxProfile: PlatformTaxProfile }>('/api/tax-profile/DRIVER', {
+    method: 'PUT', token: session.token, body: input,
+  })
+  return response.taxProfile
+}
+
+export async function fetchHostTaxProfile() {
+  const session = await ensurePrototypeHostSession()
+  const response = await apiRequest<{ ok: true; taxProfile: PlatformTaxProfile | null }>('/api/tax-profile/HOST', { token: session.token })
+  return response.taxProfile
+}
+
+export async function updateHostTaxProfile(input: TaxProfileInput) {
+  const session = await ensurePrototypeHostSession()
+  const response = await apiRequest<{ ok: true; taxProfile: PlatformTaxProfile }>('/api/tax-profile/HOST', {
+    method: 'PUT', token: session.token, body: input,
+  })
+  return response.taxProfile
+}
+
+// Explicit, never-inferred: which of the two GST/QST treatments (host-registered vs. platform-collects)
+// applies to this host's Quebec listings, effective from a given date.
+export async function recordHostGstQstTreatment(treatment: PlatformGstQstTreatment, effectiveAt?: string) {
+  const session = await ensurePrototypeHostSession()
+  const response = await apiRequest<{ ok: true; taxProfile: PlatformTaxProfile }>('/api/tax-profile/HOST/gst-qst-treatment', {
+    method: 'PUT', token: session.token, body: { treatment, effectiveAt },
+  })
+  return response.taxProfile
+}
+
+export type PlatformAdminTaxProfile = PlatformTaxProfile & {
+  user: { id: string; displayName: string; email: string | null }
+}
+
+export async function fetchAdminTaxProfiles(filters: { subjectType?: PlatformTaxSubjectType; status?: string } = {}) {
+  const params = new URLSearchParams()
+  if (filters.subjectType) params.set('subjectType', filters.subjectType)
+  if (filters.status) params.set('status', filters.status)
+  const query = params.toString()
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; taxProfiles: PlatformAdminTaxProfile[] }>(
+    `/api/admin/tax-profiles${query ? `?${query}` : ''}`,
+    { token },
+  ))
+  return response.taxProfiles
+}
+
+export async function verifyAdminTaxProfile(id: string, decision: 'APPROVED' | 'REJECTED', source?: string) {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; taxProfile: PlatformAdminTaxProfile }>(
+    `/api/admin/tax-profiles/${id}/verify`,
+    { method: 'PATCH', token, body: { decision, source } },
+  ))
+  return response.taxProfile
+}
+
+// ---- Tax-compliance foundation (029): admin compliance dashboard + feature flags ----
+export type PlatformComplianceFlag = {
+  id: string | null
+  key: 'RIDE_GOVERNMENT_REMITTANCE_ACTIVE' | 'STAY_TAX_PLATFORM_COLLECTION'
+  enabled: boolean
+  note: string | null
+  approvedById: string | null
+  approvedAt: string | null
+}
+
+export type PlatformComplianceDashboard = {
+  taxProfiles: {
+    totalDrivers: number
+    totalHosts: number
+    driversWithoutProfile: number
+    hostsWithoutProfile: number
+    driverPendingReview: number
+    driverRejected: number
+    driverApproved: number
+    hostPendingReview: number
+    hostRejected: number
+    hostApproved: number
+    hostsWithoutGstQstTreatmentDecision: number
+  }
+  driversMissingRequiredGstQst: { count: number; driverIds: string[] }
+  expiringCertificates: {
+    count: number
+    listings: Array<{
+      listingId: string
+      title: string
+      status: 'MISSING' | 'EXPIRED' | 'UNVERIFIED' | 'EXPIRING_SOON'
+      expiresAt: string | null
+      documentStatus: 'NOT_UPLOADED' | PlatformListingDocumentStatus
+      documentId: string | null
+      legalHold: boolean
+      legalHoldReason: string | null
+      retentionDeleteAfter: string | null
+      documentDeleted: boolean
+    }>
+    retentionPurgedJustNow: number
+  }
+  partXXFilingReadiness: {
+    recordsByStatus: Record<string, number>
+    recentFilings: Array<{ id: string; year: number; quarter: number; status: string; submittedAt: string | null; acceptedAt: string | null }>
+  }
+  complianceFlags: PlatformComplianceFlag[]
+  jurisdictionRegistrationStatus: Array<{ division: string; regionCode: string; status: string; transportSatisfied: boolean; tourismSatisfied: boolean; taxSatisfied: boolean }>
+  generatedAt: string
+}
+
+export async function fetchComplianceDashboard() {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; dashboard: PlatformComplianceDashboard }>('/api/admin/compliance-dashboard', { token }))
+  return response.dashboard
+}
+
+export async function setComplianceFlag(key: PlatformComplianceFlag['key'], enabled: boolean, note?: string) {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; flag: PlatformComplianceFlag }>(
+    `/api/admin/compliance-flags/${key}`,
+    { method: 'PATCH', token, body: { enabled, note } },
+  ))
+  return response.flag
+}
+
+// ---- Québec compliance review (item 1): admin approves/rejects an uploaded listing certificate
+// (e.g. CITQ registration) after manually checking it against the registration number/expiry the
+// host entered. ----
+export async function reviewListingDocument(documentId: string, decision: 'APPROVED' | 'REJECTED') {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; document: { id: string; listingId: string; status: string } }>(
+    `/api/admin/listing-documents/${documentId}`,
+    { method: 'PATCH', token, body: { decision } },
+  ))
+  return response.document
 }
 
 // ---- STR guest cancellation (bookings.mjs) ----

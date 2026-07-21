@@ -6,6 +6,7 @@ import {
   fetchListingQuote,
   fetchPrototypeListing,
   type PlatformListing,
+  type PlatformStayQuoteBreakdown,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
@@ -37,6 +38,21 @@ const copy = {
     nights: (n: number) => `${n} ${n === 1 ? 'ليلة' : 'ليالٍ'}`,
     priceBreakdown: 'تفاصيل السعر',
     stayAmount: 'قيمة الحجز',
+    nightlySubtotal: 'قيمة الإقامة (قبل التنظيف)',
+    cleaningFee: 'رسوم التنظيف',
+    guestServiceFee: 'رسوم خدمة الضيف',
+    guestServiceFeeNotCharged: 'لا تُحصَّل حالياً',
+    refundableDeposit: 'تأمين قابل للاسترداد',
+    refundableDepositNotApplicable: 'غير مطبَّق حالياً',
+    lodgingTax: 'ضريبة الإقامة في كيبيك (3.5%، تقديرية)',
+    gst: 'ضريبة السلع والخدمات الفيدرالية GST (5%، تقديرية)',
+    qst: 'ضريبة كيبيك على المبيعات QST (9.975%، تقديرية)',
+    taxIncludedHint: 'المعدلات المعروضة هي المعدلات الرسمية المنشورة (3.5% إقامة، 5% GST، 9.975% QST)، لكن SYBNB لا تُحصّلها أو تُحوّلها فعلياً بعد — وضع اختبار فقط.',
+    testModeBadge: 'وضع الاختبار',
+    taxDisclosureBanner: 'وضع الاختبار — تقدير ضريبي لأغراض إعلامية فقط. لا يُحوَّل ولا يُسدَّد أي مبلغ لأي جهة حكومية.',
+    collectedTax: 'الضريبة المحصَّلة فعلياً',
+    remittedTax: 'الضريبة المحوَّلة فعلياً للحكومة',
+    zeroTestMode: '0 (وضع الاختبار)',
     cancellationProtection: 'حماية الإلغاء',
     totalDue: 'الإجمالي المستحق',
     agreementTitle: 'اتفاقية الإيجار اليومي',
@@ -61,6 +77,21 @@ const copy = {
     nights: (n: number) => `${n} ${n === 1 ? 'night' : 'nights'}`,
     priceBreakdown: 'Price breakdown',
     stayAmount: 'Booking amount',
+    nightlySubtotal: 'Accommodation (before cleaning)',
+    cleaningFee: 'Cleaning fee',
+    guestServiceFee: 'Guest service fee',
+    guestServiceFeeNotCharged: 'Not charged today',
+    refundableDeposit: 'Refundable deposit',
+    refundableDepositNotApplicable: 'Not applicable today',
+    lodgingTax: 'Québec lodging tax (3.5%, estimated)',
+    gst: 'Federal GST (5%, estimated)',
+    qst: 'Québec QST (9.975%, estimated)',
+    taxIncludedHint: 'These are the real published rates (3.5% lodging, 5% GST, 9.975% QST), but SYBNB is not yet actually collecting or remitting them — test mode only.',
+    testModeBadge: 'TEST MODE',
+    taxDisclosureBanner: 'TEST MODE — Tax estimate for information only. No amount is transmitted or remitted to a government authority.',
+    collectedTax: 'Actually collected',
+    remittedTax: 'Actually remitted to government',
+    zeroTestMode: '0 (test mode)',
     cancellationProtection: 'Cancellation protection',
     totalDue: 'Total due',
     agreementTitle: 'Short-Term Rental Agreement',
@@ -73,6 +104,45 @@ const copy = {
     datesMissing: 'Choose check-in and check-out dates on the listing page first.',
     freeCancellation: 'Free cancellation',
   },
+  fr: {
+    back: "Retour à l'annonce",
+    loading: 'Chargement',
+    error: 'Impossible de charger les détails de la réservation',
+    title: 'Vérifiez votre réservation',
+    subtitle: 'Vérifiez les détails de votre séjour et le prix avant d\'envoyer la demande de réservation.',
+    tripSummary: 'Résumé du séjour',
+    checkIn: "Date d'arrivée",
+    checkOut: 'Date de départ',
+    nights: (n: number) => `${n} ${n === 1 ? 'nuit' : 'nuits'}`,
+    priceBreakdown: 'Détail du prix',
+    stayAmount: 'Montant de la réservation',
+    nightlySubtotal: "Hébergement (avant le ménage)",
+    cleaningFee: 'Frais de ménage',
+    guestServiceFee: 'Frais de service du client',
+    guestServiceFeeNotCharged: "Non facturés actuellement",
+    refundableDeposit: 'Dépôt remboursable',
+    refundableDepositNotApplicable: 'Non applicable actuellement',
+    lodgingTax: "Taxe sur l'hébergement du Québec (3,5%, estimée)",
+    gst: 'TPS fédérale (5%, estimée)',
+    qst: 'TVQ du Québec (9,975%, estimée)',
+    taxIncludedHint: "Il s'agit des taux officiels publiés (3,5% hébergement, 5% TPS, 9,975% TVQ), mais SYBNB ne les perçoit ni ne les remet encore réellement — mode test uniquement.",
+    testModeBadge: 'MODE TEST',
+    taxDisclosureBanner: "MODE TEST — Estimation fiscale fournie à titre informatif seulement. Aucun montant n'est transmis ou remis à une autorité gouvernementale.",
+    collectedTax: 'Réellement perçue',
+    remittedTax: 'Réellement remise au gouvernement',
+    zeroTestMode: '0 (mode test)',
+    cancellationProtection: "Protection d'annulation",
+    totalDue: 'Total dû',
+    agreementTitle: 'Entente de location à court terme',
+    agreementCopy: "J'accepte que mes renseignements soient exacts, que les règles de réservation et d'annulation s'appliquent, que le paiement se fasse uniquement à l'intérieur de SYBNB, qu'aucune entente hors plateforme ne soit permise, que les règles de séjour soient respectées, et que tout litige soit transmis à l'équipe SYBNB avant toute autre action.",
+    agreementRequired: "Vous devez accepter l'entente de location à court terme avant d'envoyer la demande de réservation.",
+    agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
+    agreementVersionLabel: '',
+    confirm: 'Confirmer et envoyer la demande de réservation',
+    saving: 'Envoi en cours',
+    datesMissing: "Choisissez d'abord les dates d'arrivée et de départ sur la page de l'annonce.",
+    freeCancellation: 'Annulation gratuite',
+  },
 }
 
 const DIVISION_IMAGES: Record<string, string> = {
@@ -80,7 +150,7 @@ const DIVISION_IMAGES: Record<string, string> = {
 }
 
 export function BookingReviewPage({ listingId, lang }: Props) {
-  const t = copy[lang === 'ar' ? 'ar' : 'en']
+  const t = copy[lang] ?? copy.en
   const isAr = lang === 'ar'
   const [listing, setListing] = useState<PlatformListing | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
@@ -88,6 +158,7 @@ export function BookingReviewPage({ listingId, lang }: Props) {
   const draft = useMemo(() => loadBookingDraft(listingId), [listingId])
   const [acceptedGuestAgreement, setAcceptedGuestAgreement] = useState(false)
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number } | null>(null)
+  const [stayBreakdown, setStayBreakdown] = useState<PlatformStayQuoteBreakdown | null>(null)
   const dateRange: DateRange = draft.dateRange || { checkIn: '', checkOut: '' }
   const cancellationProtection = draft.cancellationProtection ?? false
   const payCurrency = draft.payCurrency ?? 'SYP'
@@ -120,8 +191,10 @@ export function BookingReviewPage({ listingId, lang }: Props) {
     try {
       const response = await fetchListingQuote(listingId, dateRange.checkIn, dateRange.checkOut, payCurrency === 'USD' ? 'USD' : undefined)
       setStayQuote({ totalMinor: response.totalMinor, nights: response.nights })
+      setStayBreakdown(response.breakdown ?? null)
     } catch {
       setStayQuote(null)
+      setStayBreakdown(null)
     }
   }
 
@@ -213,9 +286,49 @@ export function BookingReviewPage({ listingId, lang }: Props) {
 
           <section style={styles.card}>
             <h2 style={styles.sectionTitle}>{t.priceBreakdown}</h2>
-            <Info label={t.stayAmount} value={moneyText(stayAmountMinor, payCurrency, lang)} />
+            {stayBreakdown ? (
+              <>
+                <Info label={t.nightlySubtotal} value={moneyText(stayBreakdown.nightlySubtotalMinor, payCurrency, lang)} />
+                {stayBreakdown.cleaningFeeMinor > 0 && (
+                  <Info label={t.cleaningFee} value={moneyText(stayBreakdown.cleaningFeeMinor, payCurrency, lang)} />
+                )}
+                <Info
+                  label={t.guestServiceFee}
+                  value={stayBreakdown.guestServiceFeeMinor > 0 ? moneyText(stayBreakdown.guestServiceFeeMinor, payCurrency, lang) : t.guestServiceFeeNotCharged}
+                />
+                {stayBreakdown.taxSource && (
+                  <>
+                    <p style={styles.taxDisclosureBanner}>{t.taxDisclosureBanner}</p>
+                    <div style={styles.testModeRow}>
+                      <span style={styles.testModeBadge}>{t.testModeBadge}</span>
+                      <Info label={t.lodgingTax} value={moneyText(stayBreakdown.lodgingTaxMinor, payCurrency, lang)} />
+                    </div>
+                    <div style={styles.testModeRow}>
+                      <span style={styles.testModeBadge}>{t.testModeBadge}</span>
+                      <Info label={t.gst} value={moneyText(stayBreakdown.gstMinor, payCurrency, lang)} />
+                    </div>
+                    <div style={styles.testModeRow}>
+                      <span style={styles.testModeBadge}>{t.testModeBadge}</span>
+                      <Info label={t.qst} value={moneyText(stayBreakdown.qstMinor, payCurrency, lang)} />
+                    </div>
+                    {/* Second correction pass: estimated / collected / remitted are three distinct
+                        figures, never conflated. Collected and remitted stay zero and visibly
+                        marked "test mode" while STAY_TAX_PLATFORM_COLLECTION is inactive. */}
+                    <Info label={t.collectedTax} value={t.zeroTestMode} />
+                    <Info label={t.remittedTax} value={t.zeroTestMode} />
+                  </>
+                )}
+                <Info
+                  label={t.refundableDeposit}
+                  value={stayBreakdown.refundableDepositMinor > 0 ? moneyText(stayBreakdown.refundableDepositMinor, payCurrency, lang) : t.refundableDepositNotApplicable}
+                />
+              </>
+            ) : (
+              <Info label={t.stayAmount} value={moneyText(stayAmountMinor, payCurrency, lang)} />
+            )}
             {protectionFeeMinor > 0 && <Info label={t.cancellationProtection} value={moneyText(protectionFeeMinor, payCurrency, lang)} />}
             <Info label={t.totalDue} value={moneyText(totalDueMinor, payCurrency, lang)} strong />
+            {stayBreakdown?.taxSource && <p style={styles.taxHint}>{t.taxIncludedHint}</p>}
           </section>
 
           <section style={styles.bottomActionBar}>
@@ -286,7 +399,7 @@ function clearBookingDraft(listingId: string) {
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '24px 16px 112px', display: 'grid', gap: 16, maxWidth: 720, margin: '0 auto' },
+  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '24px 16px 360px', display: 'grid', gap: 16, maxWidth: 720, margin: '0 auto' },
   flowNav: { display: 'flex', gap: 12, alignItems: 'center' },
   arrowButton: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
   titleBlock: { display: 'grid', gap: 6 },
@@ -300,9 +413,27 @@ const styles: Record<string, CSSProperties> = {
   info: { display: 'grid', gap: 4, color: '#9aa6ba' },
   infoStrong: { color: '#20d29b', fontSize: 18 },
   cancellationCutoff: { color: '#20d29b', fontStyle: 'normal', fontWeight: 800, fontSize: 13 },
+  taxHint: { color: '#9aa6ba', fontSize: 12, margin: '8px 0 0' },
+  testModeRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  testModeBadge: {
+    fontSize: 10, fontWeight: 800, letterSpacing: '.04em', color: '#1a1a1a', background: '#f5c451',
+    borderRadius: 4, padding: '2px 6px', textTransform: 'uppercase', flexShrink: 0,
+  },
+  taxDisclosureBanner: {
+    fontSize: 12, fontWeight: 700, color: '#1a1a1a', background: '#f5c451', borderRadius: 6,
+    padding: '8px 10px', margin: '4px 0',
+  },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
-  bottomActionBar: { position: 'sticky', bottom: 12, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12 },
+  // Fixed to the viewport bottom (not sticky within the page's grid flow) -- sticky positioning here
+  // caused this bar to pin partway up the page and overlap the price-breakdown card once that card
+  // grew tall enough (item 6 of the compliance-review localhost check: mobile appearance). Matches
+  // the same fixed-bar pattern already used on ListingDetailPage.tsx for the equivalent bug.
+  bottomActionBar: {
+    position: 'fixed', insetInline: 0, bottom: 0, zIndex: 30, maxWidth: 720, margin: '0 auto',
+    border: '1px solid #242a3b', borderRadius: '8px 8px 0 0', background: 'rgba(13,15,24,.96)',
+    boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12,
+  },
   agreementBox: { border: '1px solid rgba(229,184,11,.58)', borderRadius: 8, background: 'rgba(229,184,11,.08)', color: '#f7d45f', padding: 14, display: 'grid', gap: 12, gridTemplateColumns: '34px minmax(0, 1fr)', alignItems: 'start', lineHeight: 1.5 },
   agreementInput: { width: 28, height: 28, accentColor: '#20d29b', margin: 0 },
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 14px' },

@@ -78,7 +78,7 @@ const AD_SPONSORS = [
   { image: DIVISION_PHOTOS.cars, ar: 'عروض سيارات موثوقة', en: 'Trusted car offers' },
   { image: DIVISION_PHOTOS.marketplace, ar: 'متاجر وخدمات محلية', en: 'Local shops and services' },
   { image: DIVISION_PHOTOS['new-construction'], ar: 'مشاريع عقارية جديدة', en: 'New property projects' },
-  { image: DIVISION_PHOTOS.ride, ar: 'سير SR جاهز للتنقل', en: 'SR rides ready to move' },
+  { image: DIVISION_PHOTOS.ride, ar: 'SYBNB Ride جاهز للتنقل', en: 'SYBNB Ride ready to move' },
 ]
 
 export function LandingPage({ lang }: Props) {
@@ -128,8 +128,8 @@ export function LandingPage({ lang }: Props) {
           <h1>{isAr ? 'منصة سوريا الكاملة' : 'Syria Complete Platform'}</h1>
           <p>
             {isAr
-              ? 'كل ما تحتاجه في مكان واحد - عقارات، سيارات، خدمات، وسير.'
-              : 'Everything you need in one place: property, cars, services, and SR.'}
+              ? 'كل ما تحتاجه في مكان واحد - عقارات، سيارات، خدمات، وSYBNB Ride.'
+              : 'Everything you need in one place: property, cars, services, and SYBNB Ride.'}
           </p>
           <div className="landing-actions">
             <button className="landing-primary" onClick={() => navigate('/search-preview')}>

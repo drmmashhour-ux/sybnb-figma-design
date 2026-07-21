@@ -16,7 +16,7 @@ type GiftRedeemedSuccessProps = {
 const T = {
   ar: {
     title: 'تمت إضافة الهدية إلى محفظتك',
-    subtitle: 'الرصيد أصبح جاهزاً للاستخدام داخل SYBNB و SR.',
+    subtitle: 'الرصيد أصبح جاهزاً للاستخدام داخل SYBNB و SYBNB Ride.',
     amountAdded: 'المبلغ المضاف',
     newBalance: 'الرصيد الجديد',
     walletCreated: 'تم إنشاء محفظتك تلقائياً',
@@ -24,12 +24,12 @@ const T = {
     ref: 'رقم العملية',
     type: 'رصيد هدية',
     wallet: 'استخدام المحفظة',
-    ride: 'حجز رحلة سير',
+    ride: 'حجز رحلة SYBNB Ride',
     browse: 'تصفح SYBNB',
   },
   en: {
     title: 'Gift added to your wallet',
-    subtitle: 'Your credit is ready to use inside SYBNB and SR.',
+    subtitle: 'Your credit is ready to use inside SYBNB and SYBNB Ride.',
     amountAdded: 'Amount added',
     newBalance: 'New balance',
     walletCreated: 'Your wallet was created automatically',
@@ -37,7 +37,7 @@ const T = {
     ref: 'Reference',
     type: 'Gift credit',
     wallet: 'Use wallet',
-    ride: 'Book SR ride',
+    ride: 'Book a SYBNB Ride',
     browse: 'Browse SYBNB',
   },
 }

@@ -8,6 +8,8 @@ import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { assertRiderCanAfford, chargeRiderCancellationFee, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
 import { riderCancelOutcome } from '../lib/sr-cancellation.mjs'
 import { assertNotBlockedPair } from '../lib/user-blocks.mjs'
+import { computeCategoryEtas } from '../lib/sr-eta.mjs'
+import { savePricingSnapshot } from '../lib/jurisdiction-pricing.mjs'
 
 const DRIVER_ACTIVE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const SR_TRACKABLE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
@@ -124,7 +126,7 @@ export async function handleSrRides(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
-    const quote = quoteSrRide({
+    const quote = await quoteSrRide({
       pickup: body.pickup,
       dropoff: body.dropoff,
       category: body.category,
@@ -132,8 +134,14 @@ export async function handleSrRides(req, res, url, context) {
       pickupCoordsOverride: body.pickupCoords,
       dropoffCoordsOverride: body.dropoffCoords,
       currency: body.currency,
+      db: db(),
     })
-    return json(res, 200, { ok: true, quote })
+    // Real per-tier ETA (027) from actual online, road-ready, nearby drivers -- null/omitted per
+    // category when none qualify, never a placeholder number. Needs a resolved pickup point; when the
+    // rider hasn't granted GPS and the address didn't geocode, quote.pickupCoords is null and every
+    // category simply has no ETA.
+    const etaByCategory = await computeCategoryEtas(quote.pickupCoords)
+    return json(res, 200, { ok: true, quote: { ...quote, etaByCategory } })
   }
 
   if (url.pathname === '/api/sr/rides') {
@@ -149,7 +157,7 @@ export async function handleSrRides(req, res, url, context) {
     const category = String(body.category || 'SR Economy')
     const pickup = assertBoundedString(body.pickup, { fieldName: 'pickup', maxLength: 300 }) || ''
     const dropoff = assertBoundedString(body.dropoff, { fieldName: 'dropoff', maxLength: 300 }) || ''
-    const quote = quoteSrRide({
+    const quote = await quoteSrRide({
       pickup,
       dropoff,
       category,
@@ -157,6 +165,7 @@ export async function handleSrRides(req, res, url, context) {
       pickupCoordsOverride: body.pickupCoords,
       dropoffCoordsOverride: body.dropoffCoords,
       currency: body.currency,
+      db: db(),
     })
 
     // BALANCE GATE (016, cashless/Uber): a rider can't request a ride they can't pay for.
@@ -183,6 +192,12 @@ export async function handleSrRides(req, res, url, context) {
           distanceEstimated: quote.estimated,
         },
       },
+    })
+
+    // Immutable pricing snapshot (030): exactly which breakdown (base/distance/dynamic-pricing/
+    // regulatory/GST/QST) applied at the moment this ride was requested -- never recomputed later.
+    await savePricingSnapshot(db(), {
+      subjectType: 'SR_RIDE', subjectId: ride.id, country: 'SY', province: null, breakdown: quote.breakdown,
     })
 
     if (quote.pickupCoords || quote.dropoffCoords) {

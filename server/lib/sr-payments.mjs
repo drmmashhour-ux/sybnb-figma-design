@@ -1,28 +1,175 @@
 import { idempotencyKey } from './security.mjs'
 import { recordWalletEntry } from './finance-ledger.mjs'
+import { convertSypMinorToUsd } from './currency.mjs'
 
-// Platform keeps 15% of every SR ride; the driver keeps 85%. The commission is a finance/admin
-// figure only — it is derived here and recorded to the ledger, and never placed on any rider-facing
-// payload (see the ride handlers, which return the RideRequest row whose only money field is the
-// fare the rider actually pays).
-export const SR_ADMIN_COMMISSION_RATE = 0.15
+// SR commission policy (028): progressive, resets every calendar year, computed on the driver's
+// cumulative eligible fares -- not a flat rate. Finalized policy (2026-07-20):
+//   $0-$20,000            -> 12%
+//   $20,000.01-$40,000    -> 11%
+//   $40,000.01-$60,000    -> 10%
+//   above $60,000         -> 9%
+// Progressive like a tax bracket: only the slice of a driver's cumulative fare that falls inside a
+// tier is charged that tier's rate -- a driver crossing from tier 1 into tier 2 mid-ride pays 12%
+// on the portion under $20,000 and 11% on the rest of that same ride, not 11% on the whole ride.
+// Never retroactive: rides already settled keep the rate that applied when they were charged, even
+// if a later refund/fraud exclusion shifts the driver's running total for FUTURE rides.
+//
+// Thresholds are USD-denominated. SR fares today only ever resolve to SYP or USD (quoteSrRide in
+// sr-geocoding.mjs) -- Quebec/CAD isn't wired into fare quoting yet -- so a SYP fare is converted to
+// its USD equivalent via the platform's existing fixed SYP_PER_USD rate (currency.mjs, the same rate
+// guest-facing USD pricing already uses) purely to place it on the USD tier ladder. The driver and
+// platform are still paid in the ride's real currency; only the tier lookup happens in USD.
+//
+// The commission is a finance/admin figure only — it is derived here and recorded to the ledger,
+// and never placed on any rider-facing payload (see the ride handlers, which return the RideRequest
+// row whose only money field is the fare the rider actually pays).
+export const SR_COMMISSION_TIERS = [
+  { ratePercent: 12, minUsd: 0, maxUsd: 20000 },
+  { ratePercent: 11, minUsd: 20000, maxUsd: 40000 },
+  { ratePercent: 10, minUsd: 40000, maxUsd: 60000 },
+  { ratePercent: 9, minUsd: 60000, maxUsd: Infinity },
+]
+
+// No commission on tips, cancellation/show-up compensation, referral rewards, or driver bonuses --
+// those are separate 100%-to-driver flows elsewhere in this file that never call this function.
+// Government contributions and taxes (e.g. Québec's mandatory ride contribution, not yet
+// implemented -- Quebec SR isn't live) are likewise never part of the fare this function is given.
+
+function round2(value) {
+  return Math.round((value || 0) * 100) / 100
+}
+
+// Tax-bracket-style progressive split: given how much of the driver's annual threshold is already
+// used (priorYtdUsd) and this ride's USD-equivalent fare, returns the commission plus which tier(s)
+// it landed in (a ride can straddle a boundary and owe two different rates on two different slices).
+// tierTable defaults to the hardcoded SR_COMMISSION_TIERS -- callers that resolved a jurisdiction
+// override (server/lib/jurisdiction-pricing.mjs) pass their own table; this function itself stays
+// jurisdiction-agnostic and fully backward compatible with every existing call site/test.
+export function computeProgressiveCommissionUsd(priorYtdUsd, fareUsd, tierTable = SR_COMMISSION_TIERS) {
+  const prior = Math.max(0, priorYtdUsd || 0)
+  const fare = Math.max(0, fareUsd || 0)
+  if (fare <= 0) return { commissionUsd: 0, tiers: [] }
+
+  let remaining = fare
+  let cursor = prior
+  let commissionUsd = 0
+  const tiers = []
+
+  for (const tier of tierTable) {
+    if (remaining <= 0) break
+    if (cursor >= tier.maxUsd) continue // this driver is already past this tier for the year
+
+    const roomInTier = tier.maxUsd - Math.max(cursor, tier.minUsd)
+    const amountInTier = Math.min(remaining, roomInTier)
+    if (amountInTier <= 0) continue
+
+    const tierCommissionUsd = amountInTier * (tier.ratePercent / 100)
+    commissionUsd += tierCommissionUsd
+    tiers.push({
+      ratePercent: tier.ratePercent,
+      minUsd: tier.minUsd,
+      maxUsd: Number.isFinite(tier.maxUsd) ? tier.maxUsd : null,
+      amountUsd: round2(amountInTier),
+      commissionUsd: round2(tierCommissionUsd),
+    })
+    remaining -= amountInTier
+    cursor += amountInTier
+  }
+
+  return { commissionUsd, tiers }
+}
+
+// This driver's calendar-year eligible fare total so far, in USD, for placing a NEW ride on the
+// tier ladder. "Eligible" excludes: rides refunded via a resolved dispute (real, existing mechanism
+// -- see disputes.mjs), and rides an admin has flagged FRAUDULENT/CHARGEBACK (RideRequest.metadata,
+// see the admin commission-flag endpoint). Bounded to one driver's one-year ride volume, so an
+// in-memory filter after one query is simpler and plenty fast -- no need for JSON-path SQL filters.
+export async function driverYtdEligibleFareUsd(tx, driverId, { asOf = new Date(), excludeRideId } = {}) {
+  if (!driverId) return 0
+  const year = asOf.getUTCFullYear()
+  const yearStart = new Date(Date.UTC(year, 0, 1))
+  const yearEnd = new Date(Date.UTC(year + 1, 0, 1))
+
+  const rides = await tx.rideRequest.findMany({
+    where: {
+      driverId,
+      status: 'COMPLETED',
+      updatedAt: { gte: yearStart, lt: yearEnd },
+      ...(excludeRideId ? { id: { not: excludeRideId } } : {}),
+    },
+    select: { id: true, fareMinor: true, currency: true, metadata: true },
+  })
+  if (rides.length === 0) return 0
+
+  const refundedRides = await tx.dispute.findMany({
+    where: { rideId: { in: rides.map((r) => r.id) }, status: 'RESOLVED_REFUNDED' },
+    select: { rideId: true },
+  })
+  const refundedIds = new Set(refundedRides.map((d) => d.rideId))
+
+  let totalUsd = 0
+  for (const ride of rides) {
+    if (refundedIds.has(ride.id)) continue
+    const flag = ride.metadata?.commissionFlag
+    if (flag === 'FRAUDULENT' || flag === 'CHARGEBACK') continue
+    const fare = Math.max(0, Math.round(ride.fareMinor || 0))
+    totalUsd += ride.currency === 'USD' ? fare : convertSypMinorToUsd(fare)
+  }
+  return totalUsd
+}
+
+// Splits a whole-currency fare (see currency.mjs — amountMinor is whole units, not cents) into the
+// driver's earning and the platform's progressive commission. adminCommissionMinor is the exact
+// remainder of the fare so driverEarningMinor + adminCommissionMinor === fareMinor with no rounding
+// drift — this is the money-safety invariant "driver credit + platform commission == fare".
+//
+// priorYtdUsd is the driver's cumulative eligible fare for the calendar year BEFORE this ride (see
+// driverYtdEligibleFareUsd) -- the caller resolves it so this function stays a pure, testable split.
+// tierTable defaults to SR_COMMISSION_TIERS (see computeProgressiveCommissionUsd above).
+export function srRideFinanceSplit(fareMinor, { currency = 'SYP', priorYtdUsd = 0, tierTable = SR_COMMISSION_TIERS } = {}) {
+  const fare = Math.max(0, Math.round(fareMinor || 0))
+  const fareUsd = currency === 'USD' ? fare : convertSypMinorToUsd(fare)
+  const { commissionUsd, tiers } = computeProgressiveCommissionUsd(priorYtdUsd, fareUsd, tierTable)
+  const effectiveRate = fareUsd > 0 ? commissionUsd / fareUsd : 0
+
+  const adminCommissionMinor = Math.round(fare * effectiveRate)
+  const driverEarningMinor = fare - adminCommissionMinor
+
+  return {
+    fareMinor: fare,
+    driverEarningMinor,
+    adminCommissionMinor,
+    breakdown: {
+      commissionPolicy: 'sr_progressive_v1',
+      year: new Date().getUTCFullYear(),
+      currency,
+      fareUsd: round2(fareUsd),
+      priorYtdUsd: round2(priorYtdUsd),
+      commissionUsd: round2(commissionUsd),
+      effectiveRatePercent: round2(effectiveRate * 100),
+      tiers,
+    },
+  }
+}
+
+// Jurisdiction-config-aware (030): resolves an active JurisdictionCommissionPolicy for (country,
+// province, RIDE) via jurisdiction-pricing.mjs; falls back to the hardcoded SR_COMMISSION_TIERS
+// when nothing is active there -- which is every driver today (nothing is seeded active), so this
+// is a zero-behavior-change wiring today and a real per-jurisdiction override path once activated.
+export async function resolveSrCommissionTiers(db, { country, province, asOf = new Date() } = {}) {
+  const { resolveCommissionPolicy } = await import('./jurisdiction-pricing.mjs')
+  const policy = await resolveCommissionPolicy(db, { country, province, serviceType: 'RIDE', asOf })
+  if (policy && policy.policyType === 'PROGRESSIVE' && Array.isArray(policy.tiers) && policy.tiers.length) {
+    return policy.tiers
+  }
+  return SR_COMMISSION_TIERS
+}
 
 // A ride is "held" against the rider's wallet while a driver is committed to it. Reservation is
 // derived from ride state (see riderReservedMinor) — the source of truth is the ride's own status,
 // not a wallet RELEASE entry, because RELEASE credits the wallet and a payer-side hold must never
 // hand the rider money back on completion (the fare DEBIT is what settles the hold).
 export const SR_HELD_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
-
-// Splits a whole-currency fare (see currency.mjs — amountMinor is whole units, not cents) into the
-// driver's 85% and the platform's 15%. adminCommissionMinor is the exact remainder of the fare so
-// driverEarningMinor + adminCommissionMinor === fareMinor with no rounding drift — this is the
-// money-safety invariant "driver credit + platform commission == fare".
-export function srRideFinanceSplit(fareMinor) {
-  const fare = Math.max(0, Math.round(fareMinor || 0))
-  const driverEarningMinor = Math.round(fare * (1 - SR_ADMIN_COMMISSION_RATE))
-  const adminCommissionMinor = fare - driverEarningMinor
-  return { fareMinor: fare, driverEarningMinor, adminCommissionMinor }
-}
 
 // Same platform-account resolution the Stripe auto-approval path uses (payments.mjs firstAdminId):
 // SR commission is recorded as a CREDIT to the platform's ADMIN wallet, exactly like STR's
@@ -117,7 +264,28 @@ export async function chargeCompletedRide(tx, ride) {
     throw error
   }
 
-  const split = srRideFinanceSplit(fareMinor)
+  // Resolve the driver's calendar-year running total BEFORE this ride so the progressive tier
+  // applies correctly (see driverYtdEligibleFareUsd/computeProgressiveCommissionUsd doc comments).
+  const priorYtdUsd = await driverYtdEligibleFareUsd(tx, ride.driverId, { excludeRideId: ride.id })
+  // Jurisdiction-config-aware (030): the driver's own registered country/province decides which
+  // commission table applies -- falls back to SR_COMMISSION_TIERS when nothing is active for that
+  // jurisdiction (every driver today), so this is a zero-behavior-change wiring today.
+  const driverProfile = ride.driverId ? await tx.driverProfile.findUnique({ where: { userId: ride.driverId }, select: { country: true } }) : null
+  const tierTable = await resolveSrCommissionTiers(tx, { country: driverProfile?.country || 'SY', province: null })
+  const split = srRideFinanceSplit(fareMinor, { currency: ride.currency, priorYtdUsd, tierTable })
+
+  // Same breakdown metadata on all three settlement entries so any one of them is independently
+  // auditable (which tier(s) applied, the driver's prior YTD total, the effective rate) without
+  // needing to cross-reference the others.
+  const settlementMetadata = split.breakdown
+
+  // Immutable pricing snapshot (030): exactly what applied to THIS ride's settlement, never
+  // recomputed later even if SR_COMMISSION_TIERS or a jurisdiction override changes afterward.
+  const { savePricingSnapshot } = await import('./jurisdiction-pricing.mjs')
+  await savePricingSnapshot(tx, {
+    subjectType: 'SR_RIDE', subjectId: ride.id, country: driverProfile?.country || 'SY', province: null,
+    breakdown: settlementMetadata,
+  })
 
   // 1. DEBIT the rider the full fare. This is also what settles (releases) the match-time hold:
   //    the reservation drops out of riderReservedMinor once the ride leaves the held window, so
@@ -131,9 +299,11 @@ export async function chargeCompletedRide(tx, ride) {
     referenceId: ride.id,
     keyParts: ['sr-ride-fare', ride.id],
     note: 'SR ride fare charged to rider wallet on completion.',
+    metadata: settlementMetadata,
   })
 
-  // 2. CREDIT the driver their 85% earning (accrues in the driver wallet until admin payout).
+  // 2. CREDIT the driver their earning (fare minus the progressive commission), accrues in the
+  //    driver wallet until admin payout.
   if (ride.driverId) {
     await recordWalletEntry(tx, {
       userId: ride.driverId,
@@ -143,13 +313,14 @@ export async function chargeCompletedRide(tx, ride) {
       referenceType: 'sr_driver_earning',
       referenceId: ride.id,
       keyParts: ['sr-driver-earning', ride.id],
-      note: 'SR driver earning (85%) accrued on ride completion.',
+      note: `SR driver earning accrued on ride completion (${split.breakdown.effectiveRatePercent}% platform commission this ride).`,
+      metadata: settlementMetadata,
     })
   }
 
-  // 3. Record the 15% platform commission as a CREDIT to the platform admin wallet (same shape as
-  //    STR booking_admin_share). In production an ADMIN always exists; if none does, the commission
-  //    simply isn't recorded (matching approvePaymentProof's conditional admin credit).
+  // 3. Record the progressive platform commission as a CREDIT to the platform admin wallet (same
+  //    shape as STR booking_admin_share). In production an ADMIN always exists; if none does, the
+  //    commission simply isn't recorded (matching approvePaymentProof's conditional admin credit).
   const platformUserId = await resolvePlatformUserId(tx)
   if (platformUserId) {
     await recordWalletEntry(tx, {
@@ -160,7 +331,8 @@ export async function chargeCompletedRide(tx, ride) {
       referenceType: 'sr_admin_commission',
       referenceId: ride.id,
       keyParts: ['sr-admin-commission', ride.id],
-      note: 'SYBNB SR platform commission (15%) collected on ride completion.',
+      note: `SYBNB SR progressive platform commission (${split.breakdown.effectiveRatePercent}% effective) collected on ride completion.`,
+      metadata: settlementMetadata,
     })
   }
 

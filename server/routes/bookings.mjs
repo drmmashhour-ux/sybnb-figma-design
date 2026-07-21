@@ -10,7 +10,9 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { amountToRoundedUsd, stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
+import { getOperationalDocumentStatuses } from '../lib/listing-document-retention.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidPhone } from '../lib/validate.mjs'
+import { assertBookingWithinMontrealSeasonAndCap } from '../lib/quebec-str-rules.mjs'
 
 // Matches the frictionless-guest display name set at account creation (server/routes/auth.mjs
 // POST /api/auth/checkout-guest) -- only overwritten by the real name below if it's still exactly
@@ -492,6 +494,34 @@ export async function handleBookings(req, res, url, context) {
     throw error
   }
 
+  // Jurisdiction pricing engine (030): a Quebec STAYS listing's CITQ certificate can expire AFTER
+  // approval -- this re-checks at every new booking, not just at submission time
+  // (assertListingAttributes in listing-attributes.mjs only runs when the host submits for review).
+  // An already-approved listing with a since-expired certificate can no longer take new bookings.
+  if (listing.division === 'STAYS' && listing.metadata?.country === 'CA') {
+    const expiresAt = listing.metadata?.citqCertificateExpiresAt ? new Date(listing.metadata.citqCertificateExpiresAt) : null
+    if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+      const error = new Error('This listing’s Quebec tourist-accommodation registration (CITQ) certificate is missing or has expired. New bookings are blocked until the host renews it.')
+      error.statusCode = 403
+      error.code = 'CITQ_CERTIFICATE_EXPIRED'
+      error.expose = true
+      throw error
+    }
+    // Québec compliance review (item 1): an expiry date the host typed in is not proof -- the
+    // actual certificate file must be uploaded and admin-approved. A missing, still-pending, or
+    // rejected certificate blocks new bookings the same way an expired one does.
+    const certificateDoc = await db().listingDocument.findFirst({
+      where: { listingId: listing.id, type: 'CITQ_CERTIFICATE', isCurrent: true }, select: { status: true },
+    })
+    if (!getOperationalDocumentStatuses().includes(certificateDoc?.status)) {
+      const error = new Error('This listing’s Quebec tourist-accommodation registration (CITQ) certificate has not been reviewed by SYBNB yet. New bookings are blocked until an admin reviews the uploaded certificate.')
+      error.statusCode = 403
+      error.code = 'CITQ_CERTIFICATE_NOT_VERIFIED'
+      error.expose = true
+      throw error
+    }
+  }
+
   // SELF-REVIEW guard (root): a host cannot book their own listing — which would let them drive it to
   // COMPLETED and post a 5-star self-review to inflate their own rating.
   if (listing.ownerId === context.user.id) {
@@ -514,6 +544,8 @@ export async function handleBookings(req, res, url, context) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${listing.id}))`
 
     if (checkIn && checkOut) {
+      await assertBookingWithinMontrealSeasonAndCap(tx, listing, checkIn, checkOut)
+
       const [overlappingBooking, blockedDate] = await Promise.all([
         tx.booking.findFirst({
           where: {

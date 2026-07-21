@@ -7,9 +7,12 @@ import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { readDriverDocument } from '../lib/driver-document-storage.mjs'
+import { readListingDocument } from '../lib/listing-document-storage.mjs'
+import { getOperationalDocumentStatuses, setListingDocumentLegalHold } from '../lib/listing-document-retention.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
 import { assertBoundedString } from '../lib/validate.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { assertJurisdictionApproved, missingJurisdictionRequirements, resolveDriverJurisdiction, resolveListingJurisdiction } from '../lib/jurisdiction-compliance.mjs'
 
 const REVIEW_QUEUE_DEFAULT_LIMIT = 25
 const REVIEW_QUEUE_MAX_LIMIT = 100
@@ -749,6 +752,90 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, drivers, page, pageSize, total, pages: Math.ceil(total / pageSize) })
   }
 
+  // ---- FLEET (029): full driver + vehicle + document registry export, CSV or JSON. CTQ-374
+  // requires an authorized transportation-system operator to "maintain driver and vehicle
+  // registries with prescribed information" and file quarterly/annual activity reports -- this is
+  // that reporting capability. Not Quebec-only: works for any country/market. ----
+  if (url.pathname === '/api/admin/drivers/export') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const params = url.searchParams
+    const format = (params.get('format') || 'json').toLowerCase()
+    const countryFilter = params.get('country') // 'SY' | 'CA'
+
+    const drivers = await db().user.findMany({
+      where: {
+        roles: { some: { role: 'DRIVER' } },
+        ...(countryFilter ? { driverProfile: { country: countryFilter } } : {}),
+      },
+      select: {
+        id: true, displayName: true, email: true, status: true, idDocumentStatus: true, createdAt: true,
+        driverProfile: { select: { country: true, active: true, payoutMethod: true } },
+        driverVehicles: { select: { id: true, make: true, model: true, year: true, plate: true, category: true, country: true, status: true } },
+        driverDocuments: { select: { type: true, status: true, reviewedAt: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const rows = []
+    for (const d of drivers) {
+      const country = d.driverProfile?.country || 'SY'
+      const documents = Object.fromEntries((d.driverDocuments || []).map((doc) => [doc.type, doc.status]))
+      const base = {
+        driverId: d.id,
+        driverName: d.displayName,
+        driverEmail: d.email,
+        driverStatus: d.status,
+        driverIdVerification: d.idDocumentStatus || 'NONE',
+        country,
+        driverActive: d.driverProfile?.active ?? false,
+        payoutMethod: d.driverProfile?.payoutMethod || '',
+        driverCreatedAt: d.createdAt,
+        documents,
+      }
+      if (d.driverVehicles.length === 0) {
+        rows.push({ ...base, vehicleId: '', vehicleMake: '', vehicleModel: '', vehicleYear: '', vehiclePlate: '', vehicleCategory: '', vehicleCountry: '', vehicleStatus: '' })
+      } else {
+        for (const v of d.driverVehicles) {
+          rows.push({ ...base, vehicleId: v.id, vehicleMake: v.make, vehicleModel: v.model, vehicleYear: v.year, vehiclePlate: v.plate, vehicleCategory: v.category, vehicleCountry: v.country, vehicleStatus: v.status })
+        }
+      }
+    }
+
+    if (format === 'csv') {
+      const documentTypes = Array.from(new Set(rows.flatMap((r) => Object.keys(r.documents)))).sort()
+      const headers = [
+        'driverId', 'driverName', 'driverEmail', 'driverStatus', 'driverIdVerification', 'country',
+        'driverActive', 'payoutMethod', 'driverCreatedAt',
+        'vehicleId', 'vehicleMake', 'vehicleModel', 'vehicleYear', 'vehiclePlate', 'vehicleCategory', 'vehicleCountry', 'vehicleStatus',
+        ...documentTypes.map((t) => `doc_${t}`),
+      ]
+      const csvEscape = (value) => {
+        const s = value instanceof Date ? value.toISOString() : value === null || value === undefined ? '' : String(value)
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+      }
+      const lines = [headers.join(',')]
+      for (const r of rows) {
+        const line = [
+          r.driverId, r.driverName, r.driverEmail, r.driverStatus, r.driverIdVerification, r.country,
+          r.driverActive, r.payoutMethod, r.driverCreatedAt,
+          r.vehicleId, r.vehicleMake, r.vehicleModel, r.vehicleYear, r.vehiclePlate, r.vehicleCategory, r.vehicleCountry, r.vehicleStatus,
+          ...documentTypes.map((t) => r.documents[t] || ''),
+        ]
+        lines.push(line.map(csvEscape).join(','))
+      }
+      const csv = lines.join('\n')
+      res.writeHead(200, {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename="driver-vehicle-registry-${new Date().toISOString().slice(0, 10)}.csv"`,
+        'cache-control': 'no-store',
+      })
+      return res.end(csv)
+    }
+
+    return json(res, 200, { ok: true, generatedAt: new Date().toISOString(), count: rows.length, rows })
+  }
+
   // ---- FLEET (020): suspend / reinstate / remove a driver account (the fleet kill switch) ----
   const driverStatusMatch = url.pathname.match(/^\/api\/admin\/drivers\/([^/]+)\/status$/)
   if (driverStatusMatch) {
@@ -944,6 +1031,11 @@ export async function handleAdmin(req, res, url, context) {
     const result = await db().$transaction(async (tx) => {
       const before = await tx.driverDocument.findUnique({ where: { id: documentId }, select: { id: true, driverUserId: true, type: true, status: true } })
       if (!before || before.status !== 'PENDING_REVIEW') throw reviewStateError('DRIVER_DOCUMENT_NOT_REVIEWABLE')
+      // Jurisdiction gate (026): a driver document cannot go live in a market that isn't itself
+      // APPROVED, regardless of how complete the document is.
+      if (decision === 'APPROVED') {
+        await assertJurisdictionApproved(tx, resolveDriverJurisdiction(), { subject: 'Ride-hailing in this market' })
+      }
       const updated = await tx.driverDocument.updateMany({
         where: { id: documentId, status: 'PENDING_REVIEW' },
         data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED', reviewedById: context.user.id, reviewedAt: new Date() },
@@ -954,6 +1046,187 @@ export async function handleAdmin(req, res, url, context) {
       return after
     })
     return json(res, 200, { ok: true, document: result })
+  }
+
+  // ---- Québec compliance review (item 1): admin manually verifies an uploaded listing
+  // certificate (e.g. a CITQ registration) against the registration number/expiry the host
+  // entered. This is the closest engineering equivalent of "validate its authenticity" available
+  // without a live Québec registry API -- there is no such public API to check against. ----
+  const adminListingDocFileMatch = url.pathname.match(/^\/api\/admin\/listing-documents\/([^/]+)\/file$/)
+  if (adminListingDocFileMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const document = await db().listingDocument.findUnique({ where: { id: adminListingDocFileMatch[1] }, select: { assetUrl: true, mimeType: true } })
+    if (!document) {
+      const error = new Error('Listing document not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_DOCUMENT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (!document.assetUrl) {
+      const error = new Error('This document has been deleted under the retention policy.')
+      error.statusCode = 410
+      error.code = 'LISTING_DOCUMENT_RETENTION_DELETED'
+      error.expose = true
+      throw error
+    }
+    const buffer = await readListingDocument(document.assetUrl)
+    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    res.end(buffer)
+    return true
+  }
+
+  // Second compliance-review correction pass: manual review is NOT a legal "VERIFIED" -- the
+  // digital certificate has its own authenticity mechanism this platform doesn't check yet.
+  // ADMIN_REVIEWED_TEST records that an admin looked at it, in test mode, nothing stronger.
+  const listingDocReviewMatch = url.pathname.match(/^\/api\/admin\/listing-documents\/([^/]+)$/)
+  if (listingDocReviewMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const decision = normalizeDecision(body.decision || body.action)
+    const documentId = listingDocReviewMatch[1]
+    const result = await db().$transaction(async (tx) => {
+      const before = await tx.listingDocument.findUnique({ where: { id: documentId }, select: { id: true, listingId: true, type: true, status: true } })
+      if (!before || before.status !== 'PENDING_REVIEW') throw reviewStateError('LISTING_DOCUMENT_NOT_REVIEWABLE')
+      const nextStatus = decision === 'APPROVED' ? 'ADMIN_REVIEWED_TEST' : 'REJECTED'
+      const updated = await tx.listingDocument.updateMany({
+        where: { id: documentId, status: 'PENDING_REVIEW' },
+        data: { status: nextStatus, reviewedById: context.user.id, reviewedAt: new Date() },
+      })
+      if (updated.count === 0) throw reviewStateError('LISTING_DOCUMENT_NOT_REVIEWABLE')
+      const after = await tx.listingDocument.findUnique({ where: { id: documentId }, select: { id: true, listingId: true, type: true, status: true, reviewedById: true, reviewedAt: true } })
+      await tx.adminAuditLog.create({ data: { actorUserId: context.user.id, action: `LISTING_DOCUMENT_${nextStatus}`, entityType: 'listing_documents', entityId: documentId, before, after } })
+      return after
+    })
+    return json(res, 200, { ok: true, document: result })
+  }
+
+  // Legal hold: blocks the retention-purge job for this specific document row until explicitly
+  // cleared. Does NOT block a new upload -- a new version can always be uploaded alongside a held
+  // one (see server/routes/listings.mjs's versioned upload). Requires a recorded reason and admin
+  // (setListingDocumentLegalHold enforces this).
+  const listingDocLegalHoldMatch = url.pathname.match(/^\/api\/admin\/listing-documents\/([^/]+)\/legal-hold$/)
+  if (listingDocLegalHoldMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const documentId = listingDocLegalHoldMatch[1]
+    const before = await db().listingDocument.findUnique({ where: { id: documentId }, select: { id: true, legalHold: true, legalHoldReason: true } })
+    if (!before) {
+      const error = new Error('Listing document not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_DOCUMENT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const updated = await setListingDocumentLegalHold(db(), documentId, {
+      hold: body.hold === true, reason: typeof body.reason === 'string' ? body.reason : '', actorId: context.user.id,
+    })
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id, action: body.hold === true ? 'LISTING_DOCUMENT_LEGAL_HOLD_SET' : 'LISTING_DOCUMENT_LEGAL_HOLD_CLEARED',
+        entityType: 'listing_documents', entityId: documentId, before, after: { legalHold: updated.legalHold, legalHoldReason: updated.legalHoldReason },
+      },
+    })
+    return json(res, 200, { ok: true, document: updated })
+  }
+
+  // ---- JURISDICTION COMPLIANCE (026): the master go-live switch per (division, country, region) ----
+  if (url.pathname === '/api/admin/jurisdiction-compliance') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const profiles = await db().jurisdictionComplianceProfile.findMany({
+      orderBy: [{ countryCode: 'asc' }, { regionCode: 'asc' }, { division: 'asc' }],
+      include: { reviewedBy: { select: { id: true, displayName: true } } },
+    })
+    return json(res, 200, { ok: true, profiles })
+  }
+
+  const jurisdictionUpdateMatch = url.pathname.match(/^\/api\/admin\/jurisdiction-compliance\/([^/]+)$/)
+  if (jurisdictionUpdateMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const profileId = jurisdictionUpdateMatch[1]
+    const body = await readJson(req)
+
+    const data = {}
+    if (body.status !== undefined) {
+      const status = String(body.status || '').toUpperCase()
+      if (!['PENDING', 'APPROVED', 'BLOCKED'].includes(status)) {
+        const error = new Error('status must be PENDING, APPROVED, or BLOCKED.')
+        error.statusCode = 400
+        error.code = 'JURISDICTION_STATUS_INVALID'
+        error.expose = true
+        throw error
+      }
+      data.status = status
+    }
+    for (const category of ['tourism', 'transport', 'tax', 'platform']) {
+      if (body[`${category}Required`] !== undefined) data[`${category}Required`] = Boolean(body[`${category}Required`])
+      if (body[`${category}Satisfied`] !== undefined) data[`${category}Satisfied`] = Boolean(body[`${category}Satisfied`])
+      if (body[`${category}Notes`] !== undefined) {
+        data[`${category}Notes`] = body[`${category}Notes`] ? assertBoundedString(body[`${category}Notes`], { fieldName: `${category}Notes`, maxLength: 2000 }) : null
+      }
+    }
+    // CTQ Transportation System Operator fields (028) -- only meaningful for SR profiles, but harmless
+    // to accept generically like the rest of this endpoint.
+    for (const field of ['operatorRespondentName', 'operatorRespondentContact', 'operatorDispatcherName', 'operatorDispatcherContact', 'operatorInsuranceReference', 'operatorAuthorizationNumber']) {
+      if (body[field] !== undefined) {
+        data[field] = body[field] ? assertBoundedString(body[field], { fieldName: field, maxLength: 300 }) : null
+      }
+    }
+    if (Object.keys(data).length === 0) {
+      const error = new Error('Provide at least one field to update.')
+      error.statusCode = 400
+      error.code = 'JURISDICTION_UPDATE_EMPTY'
+      error.expose = true
+      throw error
+    }
+    // Any admin edit counts as a review action, not only a status flip — the reviewer/timestamp
+    // should reflect who last touched this market's compliance record.
+    data.reviewedById = context.user.id
+    data.reviewedAt = new Date()
+
+    const result = await db().$transaction(async (tx) => {
+      const before = await tx.jurisdictionComplianceProfile.findUnique({ where: { id: profileId } })
+      if (!before) {
+        const error = new Error('Jurisdiction compliance profile not found.')
+        error.statusCode = 404
+        error.code = 'JURISDICTION_PROFILE_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      // Mirrors the per-listing/per-driver rule (026): a market cannot be marked APPROVED while any
+      // requirement it marks as required is still unsatisfied — checked against the state this same
+      // request would produce, so an admin can satisfy the last requirement and approve in one call.
+      if (data.status === 'APPROVED') {
+        const merged = { ...before, ...data }
+        const missing = missingJurisdictionRequirements(merged)
+        if (missing.length) {
+          const error = new Error(`This market can't be approved yet — still needed: ${missing.join(', ')}.`)
+          error.statusCode = 400
+          error.code = 'JURISDICTION_REQUIREMENTS_INCOMPLETE'
+          error.expose = true
+          error.details = { missing }
+          throw error
+        }
+      }
+      const after = await tx.jurisdictionComplianceProfile.update({ where: { id: profileId }, data })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: `JURISDICTION_COMPLIANCE_${data.status || 'UPDATED'}`,
+          entityType: 'jurisdiction_compliance_profiles',
+          entityId: profileId,
+          before,
+          after,
+        },
+      })
+      return after
+    })
+    return json(res, 200, { ok: true, profile: result })
   }
 
   // ---- SR MONEY (016): driver Sham-Cash payout ----
@@ -1023,6 +1296,68 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, walletEntry: entry })
   }
 
+  // ---- SR commission (028): flag a completed ride's fare as fraudulent/chargeback so it drops out
+  // of the driver's calendar-year eligible-fare total for the progressive commission engine (see
+  // driverYtdEligibleFareUsd, sr-payments.mjs). Refunds already have a real mechanism (a dispute
+  // resolved RESOLVED_REFUNDED) -- this only covers the two cases nothing else models yet. Never
+  // retroactive: flagging a ride does not reverse the commission it was already charged, only
+  // excludes it from FUTURE rides' tier math, matching the policy's "progressive, not retroactive"
+  // rule. Stored in RideRequest.metadata (already a JSON column) -- no migration needed.
+  const srCommissionFlagMatch = url.pathname.match(/^\/api\/admin\/sr-rides\/([^/]+)\/commission-flag$/)
+  if (srCommissionFlagMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const flag = String(body.flag || '').toUpperCase()
+    if (!['FRAUDULENT', 'CHARGEBACK', 'NONE'].includes(flag)) {
+      const error = new Error('flag must be FRAUDULENT, CHARGEBACK, or NONE (to clear).')
+      error.statusCode = 400
+      error.code = 'SR_COMMISSION_FLAG_INVALID'
+      error.expose = true
+      throw error
+    }
+    const reason = body.reason ? assertBoundedString(body.reason, { fieldName: 'reason', maxLength: 500 }) : null
+
+    const ride = await db().rideRequest.findUnique({ where: { id: srCommissionFlagMatch[1] } })
+    if (!ride || ride.status !== 'COMPLETED') {
+      const error = new Error('Only a completed SR ride can be commission-flagged.')
+      error.statusCode = 404
+      error.code = 'SR_RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const before = { commissionFlag: ride.metadata?.commissionFlag || null }
+    const nextMetadata = { ...ride.metadata }
+    if (flag === 'NONE') {
+      delete nextMetadata.commissionFlag
+      delete nextMetadata.commissionFlagReason
+      delete nextMetadata.commissionFlagBy
+      delete nextMetadata.commissionFlagAt
+    } else {
+      nextMetadata.commissionFlag = flag
+      nextMetadata.commissionFlagReason = reason
+      nextMetadata.commissionFlagBy = context.user.id
+      nextMetadata.commissionFlagAt = new Date().toISOString()
+    }
+
+    const updated = await db().$transaction(async (tx) => {
+      const u = await tx.rideRequest.update({ where: { id: ride.id }, data: { metadata: nextMetadata } })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: `SR_RIDE_COMMISSION_FLAG_${flag}`,
+          entityType: 'ride_requests',
+          entityId: ride.id,
+          before,
+          after: { commissionFlag: flag === 'NONE' ? null : flag, reason },
+        },
+      })
+      return u
+    })
+    return json(res, 200, { ok: true, ride: updated })
+  }
+
   return false
 }
 
@@ -1089,6 +1424,24 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (model === 'listing') {
     const existing = await tx.listing.findUnique({ where: { id: entityId } })
     if (!existing || existing.status !== 'PENDING_REVIEW') throw reviewStateError('LISTING_NOT_REVIEWABLE')
+
+    // Jurisdiction gate (026): a STAYS listing cannot go live in a market that isn't itself
+    // APPROVED, regardless of how complete the listing's own documents are. Other divisions
+    // (CARS/RENTALS/BUY/MARKETPLACE/NEW_CONSTRUCTION) aren't in scope for this gate yet.
+    if (decision === 'APPROVED' && existing.division === 'STAYS') {
+      await assertJurisdictionApproved(tx, resolveListingJurisdiction(existing), { subject: 'Short-term rental in this market' })
+    }
+
+    // Québec compliance review (item 1): "prevent publication ... when registration is invalid" --
+    // a listing cannot go APPROVED unless its CITQ certificate FILE has itself been admin-approved
+    // (not just a self-entered expiry date). Uploading and reviewing the certificate can happen in
+    // either order relative to this listing review; both must be done before the listing goes live.
+    if (decision === 'APPROVED' && existing.division === 'STAYS' && existing.metadata?.country === 'CA') {
+      const certificateDoc = await tx.listingDocument.findFirst({
+        where: { listingId: existing.id, type: 'CITQ_CERTIFICATE', isCurrent: true }, select: { status: true },
+      })
+      if (!getOperationalDocumentStatuses().includes(certificateDoc?.status)) throw reviewStateError('CITQ_CERTIFICATE_NOT_VERIFIED')
+    }
 
     // The paid-plan expiry clock starts HERE, at approval — not at draft-create — so a seller never
     // loses paid days waiting in the review queue. Computed from the owner's current plan at the moment

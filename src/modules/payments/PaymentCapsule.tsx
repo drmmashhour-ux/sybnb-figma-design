@@ -1,6 +1,10 @@
 import type { Lang } from '../../engines/language/languageEngine'
+import type { CapsuleDecision } from '../../shared/capsules'
 
-type PaymentCapsuleStatus = 'locked' | 'ready' | 'proof' | 'admin' | 'confirmed'
+// This component already IS the Payment Capsule the spec doc describes (capsules/
+// SYBNB_REUSABLE_CAPSULES.md) -- its stage progression matches CapsuleDecision exactly, just
+// aliased so a status/decision change in one place stays consistent with the other capsules.
+type PaymentCapsuleStatus = CapsuleDecision
 
 type PaymentCapsuleProps = {
   lang: Lang

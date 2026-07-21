@@ -1,6 +1,9 @@
 import { idempotencyKey } from './security.mjs'
 import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
 import { rewardReferralIfQualifying } from './referrals.mjs'
+import { computeQuebecStayTaxesResolved, resolveGstQstResponsibility } from './quebec-stay-tax.mjs'
+import { STAY_TAX_PLATFORM_COLLECTION, isFeatureEnabled } from './compliance-feature-flags.mjs'
+import { savePricingSnapshot } from './jurisdiction-pricing.mjs'
 
 // S12: amounts are whole currency units (see currency.mjs), so the documented $10 fee is 10, not 1000.
 export const CANCELLATION_ADMIN_FEE_MINOR = 10
@@ -12,7 +15,14 @@ export const CANCELLATION_PROTECTION_RATE = 0.03
 // longer leaving obvious revenue on the table relative to what the market actually charges.
 export const STR_ADMIN_COMMISSION_RATE = 0.13
 export const STR_CLEANING_RATE = 0.05
-export const STR_TAX_RATE = 0.02
+// Tax-compliance foundation (030): there used to be an STR_TAX_RATE = 0.02 constant here, folded
+// into the rent/cleaning decomposition below as if it were a real 2% tax. It was never backed by
+// any jurisdiction's actual tax law -- Syria has no formal STR tax regime modeled, and Quebec's
+// real taxes (3.5% lodging + 5% GST + 9.975% QST) are computed separately by
+// quebec-stay-tax.mjs/jurisdiction-pricing.mjs and stamped onto the settlement's own ledger
+// entries. Removed. A listing with no explicit metadata.taxesMinor now correctly shows 0 tax
+// instead of an invented figure -- the rent/cleaning decomposition below no longer assumes any tax
+// exists by default.
 
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
@@ -57,7 +67,11 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     }
   }
 
-  const divisor = 1 + STR_CLEANING_RATE + STR_TAX_RATE
+  // Cleaning-only divisor now (no invented tax rate folded in). Any explicit metadata.taxesMinor
+  // (e.g. Quebec's real 3.5% lodging tax, set by the wizard) is still honored; when absent, the
+  // remainder after rent+cleaning is at most a rounding artifact of a cent or two, never a
+  // meaningful "tax" figure -- Math.max(0, ...) keeps it from ever going negative.
+  const divisor = 1 + STR_CLEANING_RATE
   const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
@@ -88,6 +102,7 @@ export async function recordWalletEntry(tx, {
   referenceId,
   keyParts,
   note,
+  metadata,
 }) {
   const normalizedAmount = Math.max(0, Math.round(amountMinor || 0))
   if (!userId || !normalizedAmount) return null
@@ -112,6 +127,9 @@ export async function recordWalletEntry(tx, {
       referenceId,
       idempotencyKey: key,
       note,
+      // SR commission (028): structured calculation context (e.g. progressive tier breakdown).
+      // Optional -- every other caller (STR, gifts, referrals) omits it and keeps the {} default.
+      ...(metadata !== undefined ? { metadata } : {}),
     },
   })
 
@@ -200,6 +218,44 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
     // the commission (adminShareMinor below) is still computed on the full rent regardless.
     const clampedFeeMinor = Math.max(0, Math.min(Math.round(paymentProcessingFeeMinor), split.hostGrossMinor))
     const hostNetMinor = split.hostGrossMinor - clampedFeeMinor
+
+    // Tax-compliance foundation (029): Quebec STAYS only. Computed and stamped onto the settlement's
+    // own wallet entries HERE, at approval time, so a Host Earnings and Tax Statement generated later
+    // reads the exact figures that applied on this booking -- never a live recompute against
+    // whatever the listing's metadata (price, host's tax-profile decision) happens to say by then.
+    const listingMetadata = existing.booking?.listing?.metadata || {}
+    let quebecTaxMetadata = null
+    if (listingMetadata.country === 'CA' && existing.booking?.listing?.division === 'STAYS') {
+      // Jurisdiction-config-aware (030): checks DB-configured, effective-dated, activation-gated
+      // rates first, falls back to the hardcoded 3.5%/5%/9.975% only when nothing is active --
+      // which is every booking today (nothing is seeded active), so this is a zero-behavior-change
+      // wiring today and a real override path the moment an admin activates a jurisdiction row.
+      const taxes = await computeQuebecStayTaxesResolved(tx, {
+        accommodationMinor: split.stayAmountMinor, country: 'CA', province: listingMetadata.governorate, municipality: listingMetadata.city,
+      })
+      const hostTaxProfile = existing.booking?.listing?.ownerId
+        ? await tx.taxProfile.findUnique({ where: { userId_subjectType: { userId: existing.booking.listing.ownerId, subjectType: 'HOST' } } })
+        : null
+      const platformCollectionActive = await isFeatureEnabled(tx, STAY_TAX_PLATFORM_COLLECTION)
+      const responsibility = resolveGstQstResponsibility(hostTaxProfile, { platformCollectionActive })
+      quebecTaxMetadata = {
+        taxRegime: 'quebec_stay_v1',
+        accommodationMinor: taxes.accommodationMinor,
+        lodgingTaxMinor: taxes.lodgingTaxMinor, // always platform-collected/reported (Revenu Québec digital-platform rule)
+        gstMinor: taxes.gstMinor,
+        qstMinor: taxes.qstMinor,
+        gstQstResponsibility: responsibility.responsibility, // 'HOST' | 'PLATFORM' | 'UNDETERMINED'
+        gstQstCollectedBySybnb: responsibility.collectedBySybnb,
+        rateSource: taxes.source,
+      }
+      // Immutable pricing snapshot (030): exactly what applied to THIS booking at settlement time,
+      // never recomputed later even if a rate row changes or gets activated/deactivated afterward.
+      await savePricingSnapshot(tx, {
+        subjectType: 'STR_BOOKING', subjectId: proof.bookingId, country: 'CA', province: listingMetadata.governorate,
+        breakdown: { ...quebecTaxMetadata, split },
+      })
+    }
+
     await recordWalletEntry(tx, {
       userId: existing.booking?.listing?.ownerId,
       type: 'HOLD',
@@ -212,6 +268,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
         clampedFeeMinor > 0
           ? `Host payout is protected until booking confirmation and completion. A ${proof.currency} ${clampedFeeMinor} card-processing fee (charged by the payment processor on this card payment) was already deducted from this amount.`
           : 'Host payout is protected until booking confirmation and completion.',
+      ...(quebecTaxMetadata ? { metadata: quebecTaxMetadata } : {}),
     })
     if (actorUserId) {
       await recordWalletEntry(tx, {
@@ -223,6 +280,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
         referenceId: proof.bookingId,
         keyParts: ['booking-admin-share', proof.bookingId, proof.id, actorUserId],
         note: 'SYBNB/admin share collected after verified guest payment.',
+        ...(quebecTaxMetadata ? { metadata: quebecTaxMetadata } : {}),
       })
       // The cancellation-protection fee (if purchased) is excluded from staySplitBaseMinor above,
       // so it never flows into adminShareMinor — record it as its own revenue entry here instead of

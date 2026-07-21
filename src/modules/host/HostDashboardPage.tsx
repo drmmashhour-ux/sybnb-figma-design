@@ -3,14 +3,17 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   decidePrototypeHostRequest,
+  fetchListingDocuments,
   fetchPrototypeHostOverview,
   markHostGuestCheckpoint,
   updatePrototypeHostInstantBook,
   renewPrototypeHostListing,
   updatePrototypeHostListingStatus,
+  uploadListingDocument,
   type HostDashboardMode,
   type PlatformHostOverview,
   type PlatformListing,
+  type PlatformListingDocument,
 } from '../../shared/api/platformApi'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
@@ -94,6 +97,7 @@ const copy = {
     steadyMonth: 'أداء مستقر هذا الشهر',
     needsAttentionMonth: 'الأداء يحتاج إلى تحسين',
     viewEarningsReport: 'عرض تقرير الأرباح',
+    taxProfileLink: 'الملف الضريبي',
     views: 'ظهور إعلانك',
     bookingsImpact: 'زيادة الحجوزات',
     slaMaintenance: 'الحفاظ على SLA',
@@ -207,6 +211,7 @@ const copy = {
     steadyMonth: 'Steady performance this month',
     needsAttentionMonth: 'Performance needs attention',
     viewEarningsReport: 'View earnings report',
+    taxProfileLink: 'Tax profile',
     views: 'Listing visibility',
     bookingsImpact: 'More bookings',
     slaMaintenance: 'SLA maintenance',
@@ -482,6 +487,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/earnings')}>
             {t.viewEarningsReport}
           </button>
+          <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/tax-profile')}>
+            {t.taxProfileLink}
+          </button>
         </div>
         <div style={styles.hostMetric}>
           <span>{t.qualityScore}</span>
@@ -652,6 +660,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                   </button>
                 )}
               </div>
+              {listing.division === 'STAYS' && listing.metadata?.country === 'CA' && (
+                <CitqCertificateUploadPanel isAr={isAr} listingId={listing.id} mode={mode} />
+              )}
               {calendarListingId === listing.id && (
                 <HostAvailabilityCalendar
                   lang={lang}
@@ -786,6 +797,72 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
     <div style={styles.info}>
       <span>{label}</span>
       <b dir={dir}>{value}</b>
+    </div>
+  )
+}
+
+// Québec compliance review (item 1): a self-entered expiry date is not proof -- the host uploads
+// the actual CITQ registration certificate here, and an admin manually reviews it (see
+// ComplianceDashboardPanel in AdminReviewPage.tsx) before the listing can take bookings.
+function CitqCertificateUploadPanel({ isAr, listingId, mode }: { isAr: boolean; listingId: string; mode: HostDashboardMode }) {
+  const [documents, setDocuments] = useState<PlatformListingDocument[]>([])
+  const [status, setStatus] = useState<'idle' | 'loading' | 'uploading' | 'error'>('idle')
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    void loadDocuments()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listingId])
+
+  async function loadDocuments() {
+    setStatus('loading')
+    try {
+      setDocuments(await fetchListingDocuments(listingId, mode))
+      setStatus('idle')
+    } catch {
+      setStatus('error')
+    }
+  }
+
+  async function onFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setStatus('uploading')
+    setMessage('')
+    try {
+      await uploadListingDocument(listingId, file, 'CITQ_CERTIFICATE', mode)
+      await loadDocuments()
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الشهادة.' : 'Could not upload the certificate.'))
+    }
+  }
+
+  const certificate = documents.find((d) => d.type === 'CITQ_CERTIFICATE')
+  // Second compliance-review correction pass: no public "Verified" wording anywhere -- manual admin
+  // review in test mode is not a legal verification. DIGITALLY_VERIFIED/DIGITAL_VERIFICATION_PENDING
+  // never appear yet (no code path sets them) but are covered for when a real integration exists.
+  const statusLabel = certificate
+    ? {
+        PENDING_REVIEW: isAr ? 'قيد المراجعة الإدارية' : 'Pending admin review',
+        ADMIN_REVIEWED_TEST: isAr ? 'راجعها المسؤول (وضع اختبار — ليست موثّقة قانونياً)' : 'Admin-reviewed (test mode — not a legal verification)',
+        REJECTED: isAr ? 'مرفوضة — الرجاء إعادة الرفع' : 'Rejected -- please re-upload',
+        EXPIRED: isAr ? 'منتهية الصلاحية — الرجاء إعادة الرفع' : 'Expired -- please re-upload',
+        DIGITAL_VERIFICATION_PENDING: isAr ? 'قيد التحقق الرقمي' : 'Digital verification pending',
+        DIGITALLY_VERIFIED: isAr ? 'موثّقة رقمياً' : 'Digitally verified',
+      }[certificate.status]
+    : (isAr ? 'لم تُرفع بعد' : 'Not uploaded yet')
+
+  return (
+    <div style={styles.info}>
+      <span>{isAr ? 'شهادة CITQ' : 'CITQ certificate'}</span>
+      <b>{statusLabel}</b>
+      <label style={{ ...styles.secondaryButton, display: 'inline-block', cursor: 'pointer', textAlign: 'center' }}>
+        {status === 'uploading' ? (isAr ? 'جار الرفع...' : 'Uploading...') : certificate ? (isAr ? 'استبدال الملف' : 'Replace file') : (isAr ? 'رفع الشهادة' : 'Upload certificate')}
+        <input accept="image/jpeg,image/png,application/pdf" disabled={status === 'uploading'} onChange={(event) => void onFileChange(event)} style={{ display: 'none' }} type="file" />
+      </label>
+      {message && <small style={{ color: '#ff6b6b' }}>{message}</small>}
     </div>
   )
 }

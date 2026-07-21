@@ -4,10 +4,16 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { deleteDriverDocument, readDriverDocument, saveDriverDocument } from '../lib/driver-document-storage.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
-import { chargeCompletedRide, srRideFinanceSplit } from '../lib/sr-payments.mjs'
+import { chargeCompletedRide } from '../lib/sr-payments.mjs'
 import { assertVehicleEligible } from '../lib/fleet.mjs'
+import { assertSyriaCoords } from '../lib/sr-geocoding.mjs'
+import { DRIVER_ONLINE_STALE_MS } from '../lib/sr-eta.mjs'
 
-const DRIVER_DOCUMENT_TYPES = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE']
+// SAAQ_AUTHORIZED_DRIVER_PERMIT and CRIMINAL_RECORD_CHECK (027) are Quebec-specific -- accepted here
+// regardless of country since requireRoadReadyDriver (server/lib/auth-context.mjs) only ever checks
+// LICENSE/VEHICLE_REGISTRATION for road-ready status; the extra two are informational until Quebec
+// SR is actually approved and a real road-ready rule is written for it.
+const DRIVER_DOCUMENT_TYPES = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE', 'SAAQ_AUTHORIZED_DRIVER_PERMIT', 'CRIMINAL_RECORD_CHECK']
 // SECURITY (015): the private assetUrl/storage key is NEVER returned in JSON — bytes stream only via /file.
 const DRIVER_DOCUMENT_SAFE_SELECT = {
   id: true, driverUserId: true, type: true, mimeType: true, status: true,
@@ -15,6 +21,37 @@ const DRIVER_DOCUMENT_SAFE_SELECT = {
 }
 
 export async function handleDriver(req, res, url, context) {
+  // SIR ETA (027): a road-ready driver pings this while "online" (app open, willing to accept rides)
+  // so the quote endpoint can compute a real per-tier ETA from actual nearby driver distance --
+  // never a fabricated wait-time number. `active` doubles as the online flag; `updated_at` (bumped
+  // in the same raw UPDATE) is the freshness signal a ping goes stale after DRIVER_ONLINE_STALE_MS.
+  if (url.pathname === '/api/driver/location') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    await requireRoadReadyDriver(context)
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['lat', 'lng', 'online'], 'driver location body')
+    const online = body.online !== false
+    // DriverProfile rows are never created elsewhere in the app today (payout-setup is the only
+    // other writer, and it only ever updates an existing row) -- upsert so a driver's first-ever
+    // "go online" doesn't silently no-op against a row that was never created.
+    await db().driverProfile.upsert({ where: { userId: context.user.id }, create: { userId: context.user.id }, update: {} })
+    if (online) {
+      const { lat, lng } = assertSyriaCoords(body.lat, body.lng, { fieldName: 'driver location' })
+      await db().$executeRaw`
+        UPDATE driver_profiles
+        SET active = true,
+            last_location_geo = ST_SetSRID(ST_MakePoint(${lng}::double precision, ${lat}::double precision), 4326),
+            updated_at = now()
+        WHERE user_id::text = ${context.user.id}
+      `
+      return json(res, 200, { ok: true, online: true, location: { lat, lng } })
+    }
+    await db().$executeRaw`
+      UPDATE driver_profiles SET active = false, updated_at = now() WHERE user_id::text = ${context.user.id}
+    `
+    return json(res, 200, { ok: true, online: false })
+  }
+
   if (url.pathname === '/api/driver/rides/pending') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     await requireRoadReadyDriver(context) // SECURITY (015): only fully-vetted drivers can see the rider pool
@@ -60,6 +97,21 @@ export async function handleDriver(req, res, url, context) {
     todayStart.setUTCHours(0, 0, 0, 0)
     const completedToday = completedRides.filter((ride) => ride.updatedAt >= todayStart)
 
+    // SR money (028): the commission is now progressive (see sr-payments.mjs) -- what a driver
+    // actually earned per ride depends on their cumulative total at the moment it was charged, so it
+    // can no longer be recomputed statelessly from fareMinor alone. The wallet ledger's
+    // sr_driver_earning CREDIT entries are the source of truth for what was actually paid; sum those
+    // instead. (Sums across whichever currencies the driver has been paid in, same simplification the
+    // prior stateless sum already made.)
+    const driverWallets = await db().wallet.findMany({ where: { userId: context.user.id }, select: { id: true } })
+    const walletIds = driverWallets.map((w) => w.id)
+    const [allTimeEarnings, todayEarnings] = walletIds.length
+      ? await Promise.all([
+          db().walletEntry.aggregate({ where: { walletId: { in: walletIds }, referenceType: 'sr_driver_earning' }, _sum: { amountMinor: true } }),
+          db().walletEntry.aggregate({ where: { walletId: { in: walletIds }, referenceType: 'sr_driver_earning', createdAt: { gte: todayStart } }, _sum: { amountMinor: true } }),
+        ])
+      : [{ _sum: { amountMinor: 0 } }, { _sum: { amountMinor: 0 } }]
+
     return json(res, 200, {
       ok: true,
       overview: {
@@ -74,10 +126,9 @@ export async function handleDriver(req, res, url, context) {
           assigned: rides.length,
           active: rides.filter((ride) => ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status)).length,
           completed: completedRides.length,
-          // SR money (016): driver earnings are the 85% NET (after the 15% platform commission), not the gross fare.
-          earningsMinor: completedRides.reduce((sum, ride) => sum + srRideFinanceSplit(ride.fareMinor).driverEarningMinor, 0),
+          earningsMinor: allTimeEarnings._sum.amountMinor || 0,
           todayCompletedCount: completedToday.length,
-          todayEarningsMinor: completedToday.reduce((sum, ride) => sum + srRideFinanceSplit(ride.fareMinor).driverEarningMinor, 0),
+          todayEarningsMinor: todayEarnings._sum.amountMinor || 0,
         },
         rides,
       },
@@ -198,7 +249,7 @@ export async function handleDriver(req, res, url, context) {
       assertNoUnknownFields(body, ['type', 'fileBase64', 'mimeType'], 'driver document body')
       const type = String(body.type || '')
       if (!DRIVER_DOCUMENT_TYPES.includes(type)) {
-        const error = new Error('type must be LICENSE, VEHICLE_REGISTRATION, or INSURANCE.')
+        const error = new Error(`type must be one of: ${DRIVER_DOCUMENT_TYPES.join(', ')}.`)
         error.statusCode = 400
         error.code = 'DRIVER_DOCUMENT_TYPE_INVALID'
         error.expose = true
@@ -271,13 +322,14 @@ export async function handleDriver(req, res, url, context) {
     if (req.method === 'POST') {
       requireAuth(context, ['DRIVER'])
       const body = await readJson(req)
-      assertNoUnknownFields(body, ['make', 'model', 'year', 'plate', 'color', 'category'], 'vehicle body')
+      assertNoUnknownFields(body, ['make', 'model', 'year', 'plate', 'color', 'category', 'country'], 'vehicle body')
       const make = assertBoundedString(body.make, { fieldName: 'make', maxLength: 60 })
       const model = assertBoundedString(body.model, { fieldName: 'model', maxLength: 60 })
       const plate = assertBoundedString(body.plate, { fieldName: 'plate', maxLength: 20 })
       const color = body.color ? assertBoundedString(body.color, { fieldName: 'color', maxLength: 30 }) : null
       const category = String(body.category || '')
       const year = Number(body.year)
+      const country = body.country === 'CA' ? 'CA' : 'SY'
       if (!make || !model || !plate) {
         const error = new Error('Vehicle make, model, and plate are required.')
         error.statusCode = 400
@@ -285,10 +337,11 @@ export async function handleDriver(req, res, url, context) {
         error.expose = true
         throw error
       }
-      // Uber-style age gate (server-side): rejects a car too old for its tier BEFORE it can be reviewed.
-      assertVehicleEligible({ category, year })
+      // Age gate (server-side): rejects a car too old for its tier/market BEFORE it can be reviewed --
+      // Quebec's SAAQ rule (uniform 10yr) differs from Syria's tiered 10/7/7 (server/lib/fleet.mjs).
+      assertVehicleEligible({ category, year }, new Date(), country)
       const vehicle = await db().driverVehicle.create({
-        data: { driverId: context.user.id, make, model, year, plate, color, category, status: 'PENDING_REVIEW' },
+        data: { driverId: context.user.id, make, model, year, plate, color, category, country, status: 'PENDING_REVIEW' },
       })
       return json(res, 201, { ok: true, vehicle })
     }

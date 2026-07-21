@@ -29,7 +29,7 @@ const copy = {
     title: 'حساب الإيجار اليومي',
     rentalsTitle: 'حساب الإيجار الشهري',
     buyTitle: 'حساب شراء العقار',
-    rideTitle: 'حساب SR Ride',
+    rideTitle: 'حساب SYBNB Ride',
     gateTitle: 'يرجى تسجيل الدخول للمتابعة',
     gateChip: 'طلب إيجار',
     buyGateChip: 'طلب شراء',
@@ -77,7 +77,7 @@ const copy = {
     policy: 'بعد فتح الحساب يعود العميل إلى تفاصيل الإعلان لإرسال الطلب. الدفع يأتي بعد إنشاء الطلب فقط.',
     rentalsPolicy: 'بعد فتح الحساب يعود العميل إلى صفحة الإيجار الشهري لمراجعة الاختيارات ومتابعة الطلب. الدفع يأتي بعد إنشاء الطلب فقط.',
     buyPolicy: 'بعد فتح الحساب يعود العميل إلى صفحة شراء العقار لمراجعة الاختيارات ومتابعة الطلب. الدفع يأتي بعد إنشاء الطلب فقط.',
-    ridePolicy: 'بعد فتح الحساب يعود العميل إلى SR Ride لإدخال نقطة الانطلاق والوجهة وطلب السائق.',
+    ridePolicy: 'بعد فتح الحساب يعود العميل إلى SYBNB Ride لإدخال نقطة الانطلاق والوجهة وطلب السائق.',
   },
   en: {
     back: 'Back',
@@ -85,7 +85,7 @@ const copy = {
     title: 'Short-Term Rental Account',
     rentalsTitle: 'Monthly Rental Account',
     buyTitle: 'Property Purchase Account',
-    rideTitle: 'SR Ride Account',
+    rideTitle: 'SYBNB Ride Account',
     gateTitle: 'Please sign in to continue',
     gateChip: 'Rental request',
     buyGateChip: 'Purchase request',
@@ -133,7 +133,7 @@ const copy = {
     policy: 'After opening the account, the guest returns to the stay details to send the booking request. Payment comes only after the booking request is created.',
     rentalsPolicy: 'After opening the account, the renter returns to the monthly rental page to review choices and continue the request. Payment comes only after the request is created.',
     buyPolicy: 'After opening the account, the buyer returns to the property purchase page to review choices and continue the request. Payment comes only after the request is created.',
-    ridePolicy: 'After opening the account, the client returns to SR Ride to enter pickup, destination, and request a driver.',
+    ridePolicy: 'After opening the account, the client returns to SYBNB Ride to enter pickup, destination, and request a driver.',
   },
 }
 

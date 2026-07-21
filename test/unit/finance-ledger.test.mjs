@@ -62,6 +62,30 @@ describe('bookingFinanceSplit: STAYS division invariant (rent + cleaning + tax r
     expect(split.hostGrossMinor).toBeGreaterThanOrEqual(0)
     expect(split.adminShareMinor).toBeGreaterThanOrEqual(0)
   })
+
+  // Tax-compliance foundation (030): a listing with no explicit metadata.taxesMinor used to have an
+  // invented 2% "tax" folded into the split (STR_TAX_RATE), never backed by any jurisdiction's real
+  // tax law. Removed -- an unconfigured booking now shows an honest ~0 tax, only ever a rounding
+  // remainder (at most a handful of minor units), never a meaningful fraction of the booking.
+  it('a listing with no explicit taxesMinor shows only a rounding-artifact tax, never an invented percentage', () => {
+    const booking = strBooking({ amountMinor: 1000000 })
+    const split = bookingFinanceSplit(booking, 1000000)
+
+    expect(split.taxesMinor).toBeLessThanOrEqual(2)
+    expect(split.taxesMinor).toBeGreaterThanOrEqual(0)
+  })
+
+  it('an explicit metadata.taxesMinor (e.g. Quebec real lodging tax) is always honored exactly, never overridden', () => {
+    const booking = strBooking({
+      amountMinor: 1000000,
+      listing: { division: 'STAYS', metadata: { rentMinor: 900000, cleaningFeeMinor: 50000, taxesMinor: 50000 } },
+    })
+    const split = bookingFinanceSplit(booking, 1000000)
+
+    expect(split.taxesMinor).toBe(50000)
+    expect(split.stayAmountMinor).toBe(900000)
+    expect(split.cleaningFeeMinor).toBe(50000)
+  })
 })
 
 describe('bookingFinanceSplit: non-STAYS divisions (e.g. RENTALS) use the direct-passthrough split', () => {

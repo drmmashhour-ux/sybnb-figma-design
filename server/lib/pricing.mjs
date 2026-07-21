@@ -1,5 +1,26 @@
 import { db } from './prisma.mjs'
 
+// Must match server/lib/finance-ledger.mjs's STR_CLEANING_RATE -- this is the same 5% cleaning-share
+// convention, duplicated here (rather than imported) so the pre-booking quote preview never has to
+// import the settlement module. Both are pure constants; if one changes, change the other.
+export const STR_CLEANING_RATE = 0.05
+
+function metadataNumber(metadata, key) {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+// Decomposes a single all-inclusive STAYS amount into rent/cleaning components, honoring any
+// explicit host-entered listing metadata override before falling back to the standard divisor --
+// the same math server/lib/finance-ledger.mjs's bookingFinanceSplit uses at settlement, so a guest's
+// pre-booking quote preview is never contradicted by what actually gets recorded after payment.
+export function splitStayAmountMinor(paidTotalMinor, listingMetadata) {
+  const divisor = 1 + STR_CLEANING_RATE
+  const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(paidTotalMinor / divisor)
+  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
+  return { rentMinor, cleaningFeeMinor }
+}
+
 function toISODate(date) {
   return new Date(date).toISOString().slice(0, 10)
 }

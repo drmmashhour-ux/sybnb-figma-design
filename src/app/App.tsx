@@ -9,6 +9,7 @@ import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
+const CapsulePreviewPage = lazyNamed(() => import('../modules/capsules/CapsulePreviewPage'), 'CapsulePreviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
 const BookingReviewPage = lazyNamed(() => import('../modules/bookings/BookingReviewPage'), 'BookingReviewPage')
@@ -16,6 +17,8 @@ const CompetitorsPage = lazyNamed(() => import('../modules/competitors/Competito
 const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLivePage'), 'DivisionLivePage')
 const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDashboardPage'), 'DriverDashboardPage')
 const DriverVehiclesPage = lazyNamed(() => import('../modules/driver/DriverVehiclesPage'), 'DriverVehiclesPage')
+const DriverTaxProfilePage = lazyNamed(() => import('../modules/driver/DriverTaxProfilePage'), 'DriverTaxProfilePage')
+const HostTaxProfilePage = lazyNamed(() => import('../modules/host/HostTaxProfilePage'), 'HostTaxProfilePage')
 const DisputesPage = lazyNamed(() => import('../modules/disputes/DisputesPage'), 'DisputesPage')
 const AdminDisputesPage = lazyNamed(() => import('../modules/disputes/AdminDisputesPage'), 'AdminDisputesPage')
 const SettingsPage = lazyNamed(() => import('../modules/account/SettingsPage'), 'SettingsPage')
@@ -117,10 +120,16 @@ export function App() {
           <HostInquiriesPage lang={lang} />
         ) : path === '/driver/vehicles' ? (
           <DriverVehiclesPage lang={lang} />
+        ) : path === '/driver/tax-profile' ? (
+          <DriverTaxProfilePage lang={lang} />
+        ) : path === '/host/tax-profile' ? (
+          <HostTaxProfilePage lang={lang} />
         ) : path === '/driver' ? (
           <DriverDashboardPage lang={lang} />
         ) : path === '/immocontact' ? (
           <ImmocontactPage lang={lang} />
+        ) : path === '/capsule-preview' ? (
+          <CapsulePreviewPage lang={lang} />
         ) : path === '/admin/disputes' ? (
           <AdminDisputesPage lang={lang} />
         ) : path === '/admin/reports' ? (

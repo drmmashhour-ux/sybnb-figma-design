@@ -2,19 +2,28 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang, Localized } from '../../engines/language/languageEngine'
 import {
+  downloadDriverRegistryExport,
   fetchAdminPayouts,
+  fetchComplianceDashboard,
   fetchIdDocumentBlobUrl,
+  fetchJurisdictionComplianceProfiles,
+  fetchListingDocumentBlobUrl,
+  setComplianceFlag,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
   getStoredStaffSession,
   lookupAdminUserByEmail,
   releaseAdminPayout,
+  reviewListingDocument,
   reviewPrototypePaymentProof,
   reviewPrototypeQueueEntity,
+  updateJurisdictionComplianceProfile,
   uploadIdDocumentForUser,
   type AdminPayout,
   type PlatformAdminAuditLog,
+  type PlatformComplianceDashboard,
   type PlatformIdDocumentReview,
+  type PlatformJurisdictionComplianceProfile,
   type PlatformListing,
   type PlatformPaymentProof,
   type PlatformReviewBooking,
@@ -82,7 +91,7 @@ const copy = {
 }
 
 type AdminFilter = 'all' | 'listings' | 'payments' | 'gifts' | 'bookings' | 'audit'
-type AdminCommandView = 'general' | 'audit' | 'aiBrain' | 'disputes' | 'hosts' | 'customers' | 'bookings' | 'finance'
+type AdminCommandView = 'general' | 'audit' | 'aiBrain' | 'disputes' | 'hosts' | 'customers' | 'bookings' | 'finance' | 'jurisdictions' | 'taxCompliance'
 type ShamCashApprovalPayload = {
   accountMinor: number | null
   expectedMinor: number
@@ -94,7 +103,8 @@ const SHAM_CASH_ACCOUNT_BALANCE_KEY = 'sybnb_v6_sham_cash_account_minor'
 // Must match server/lib/finance-ledger.mjs's STR_ADMIN_COMMISSION_RATE -- see that file's comment
 // for why 13% (still below Airbnb's ~17-19% combined take and Booking.com's ~15%+ commission).
 const STR_ADMIN_COMMISSION_RATE = 0.13
-const STR_TAX_RATE = 0.02
+// Tax-compliance foundation (030): removed STR_TAX_RATE (was 0.02, an invented placeholder never
+// backed by any jurisdiction's real tax law). See finance-ledger.mjs's matching comment.
 const STR_CLEANING_RATE = 0.05
 // Mirrors the Prisma ListingDivision enum -- every division funnels into this one shared queue.
 const REVIEW_QUEUE_DIVISIONS = ['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'] as const
@@ -124,6 +134,9 @@ export function AdminReviewPage({ lang }: Props) {
   const [queueDivision, setQueueDivision] = useState('')
   const [queueOffset, setQueueOffset] = useState(0)
   const [pagination, setPagination] = useState<PlatformReviewQueuePagination | null>(null)
+  const [jurisdictionProfiles, setJurisdictionProfiles] = useState<PlatformJurisdictionComplianceProfile[]>([])
+  const [complianceDashboard, setComplianceDashboard] = useState<PlatformComplianceDashboard | null>(null)
+  const [complianceDashboardState, setComplianceDashboardState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   const total = useMemo(() => {
     if (!queue) return 0
@@ -202,7 +215,56 @@ export function AdminReviewPage({ lang }: Props) {
   useEffect(() => {
     void loadQueue()
     void loadPayouts()
+    void loadJurisdictionProfiles()
+    void loadComplianceDashboard()
   }, [queueDivision, queueOffset])
+
+  async function loadJurisdictionProfiles() {
+    try {
+      const profiles = await fetchJurisdictionComplianceProfiles()
+      setJurisdictionProfiles(profiles)
+    } catch {
+      setJurisdictionProfiles([])
+    }
+  }
+
+  async function loadComplianceDashboard() {
+    setComplianceDashboardState('loading')
+    try {
+      const dashboard = await fetchComplianceDashboard()
+      setComplianceDashboard(dashboard)
+      setComplianceDashboardState('ready')
+    } catch {
+      setComplianceDashboardState('error')
+    }
+  }
+
+  async function onToggleComplianceFlag(key: PlatformComplianceDashboard['complianceFlags'][number]['key'], enabled: boolean) {
+    try {
+      await setComplianceFlag(key, enabled)
+      await loadComplianceDashboard()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function onReviewListingDocument(documentId: string, decision: 'APPROVED' | 'REJECTED') {
+    try {
+      await reviewListingDocument(documentId, decision)
+      await loadComplianceDashboard()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function updateJurisdictionProfile(id: string, patch: Parameters<typeof updateJurisdictionComplianceProfile>[1]) {
+    try {
+      const updated = await updateJurisdictionComplianceProfile(id, patch)
+      setJurisdictionProfiles((current) => current.map((profile) => (profile.id === updated.id ? updated : profile)))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
 
   async function loadQueue() {
     setStatus('loading')
@@ -325,6 +387,12 @@ export function AdminReviewPage({ lang }: Props) {
       queuePageSize={REVIEW_QUEUE_PAGE_SIZE}
       onNextQueuePage={goToNextQueuePage}
       onPreviousQueuePage={goToPreviousQueuePage}
+      jurisdictionProfiles={jurisdictionProfiles}
+      onUpdateJurisdictionProfile={updateJurisdictionProfile}
+      complianceDashboard={complianceDashboard}
+      complianceDashboardState={complianceDashboardState}
+      onReviewListingDocument={onReviewListingDocument}
+      onToggleComplianceFlag={onToggleComplianceFlag}
     />
   )
 }
@@ -526,6 +594,12 @@ function ShortRentAdminCommandDashboard({
   queuePageSize,
   onNextQueuePage,
   onPreviousQueuePage,
+  jurisdictionProfiles,
+  onUpdateJurisdictionProfile,
+  complianceDashboard,
+  complianceDashboardState,
+  onReviewListingDocument,
+  onToggleComplianceFlag,
 }: {
   auditLog: PlatformAdminAuditLog[]
   bookings: PlatformReviewBooking[]
@@ -553,6 +627,12 @@ function ShortRentAdminCommandDashboard({
   queuePageSize: number
   onNextQueuePage: () => void
   onPreviousQueuePage: () => void
+  jurisdictionProfiles: PlatformJurisdictionComplianceProfile[]
+  onUpdateJurisdictionProfile: (id: string, patch: Partial<PlatformJurisdictionComplianceProfile>) => void
+  complianceDashboard: PlatformComplianceDashboard | null
+  complianceDashboardState: 'idle' | 'loading' | 'ready' | 'error'
+  onReviewListingDocument: (documentId: string, decision: 'APPROVED' | 'REJECTED') => void
+  onToggleComplianceFlag: (key: PlatformComplianceDashboard['complianceFlags'][number]['key'], enabled: boolean) => void
 }) {
   const [activeCommandView, setActiveCommandView] = useState<AdminCommandView>('general')
   const [expandedCommandCategory, setExpandedCommandCategory] = useState('monitoring')
@@ -774,6 +854,18 @@ function ShortRentAdminCommandDashboard({
     { id: 'customers', label: isAr ? 'العملاء' : 'Customers', count: bookings.length, tone: 'blue' },
     { id: 'bookings', label: isAr ? 'الحجوزات' : 'Bookings', count: bookings.length, tone: 'blue' },
     { id: 'finance', label: isAr ? 'المالية' : 'Finance', count: pendingPayments, tone: shamCashReconciliation.isMatched ? 'green' : 'red' },
+    {
+      id: 'jurisdictions',
+      label: isAr ? 'الأسواق والامتثال' : 'Markets & compliance',
+      count: jurisdictionProfiles.filter((profile) => profile.status !== 'APPROVED').length,
+      tone: jurisdictionProfiles.some((profile) => profile.status === 'BLOCKED') ? 'red' : 'gold',
+    },
+    {
+      id: 'taxCompliance',
+      label: isAr ? 'الامتثال الضريبي' : 'Tax & compliance',
+      count: (complianceDashboard?.taxProfiles.driversWithoutProfile || 0) + (complianceDashboard?.taxProfiles.hostsWithoutProfile || 0),
+      tone: 'gold',
+    },
   ]
   const commandCategories: Array<{ id: string; label: string; subtitle: string; viewIds: AdminCommandView[] }> = [
     {
@@ -787,6 +879,12 @@ function ShortRentAdminCommandDashboard({
       label: isAr ? 'المالية والصرف' : 'Finance & payouts',
       subtitle: isAr ? 'مراجعة الدفعات ومطابقة شام كاش' : 'Payment review and Sham Cash reconciliation',
       viewIds: ['finance'],
+    },
+    {
+      id: 'compliance',
+      label: isAr ? 'الأسواق والامتثال' : 'Markets & compliance',
+      subtitle: isAr ? 'موافقة كل سوق قبل السماح لأي إعلان أو سائق بالعمل فيه' : 'Approve each market before any listing or driver there can go live',
+      viewIds: ['jurisdictions', 'taxCompliance'],
     },
     {
       id: 'monitoring',
@@ -1177,12 +1275,20 @@ function ShortRentAdminCommandDashboard({
                 <div>
                   <strong>{listingTitleText(listing, lang)}</strong>
                   <small>{divisionText(listing.division, lang)}</small>
+                  {listing.metadata?.country === 'CA' && <QuebecComplianceNote isAr={isAr} metadata={listing.metadata} />}
+                  {listing.division === 'STAYS' && (
+                    <JurisdictionStatusBadge isAr={isAr} profile={findListingJurisdictionProfile(listing, jurisdictionProfiles)} />
+                  )}
                 </div>
                 <span>{statusText(listing.status, lang)}</span>
                 <div style={commandStyles.managementRowActions}>
                   {listing.status === 'PENDING_REVIEW' && (
                     <>
-                      <button disabled={disabled} style={commandStyles.acceptButton} onClick={() => onListingDecision(listing.id, 'APPROVE')}>
+                      <button
+                        disabled={disabled || (listing.division === 'STAYS' && findListingJurisdictionProfile(listing, jurisdictionProfiles)?.status !== 'APPROVED')}
+                        style={commandStyles.acceptButton}
+                        onClick={() => onListingDecision(listing.id, 'APPROVE')}
+                      >
                         {isAr ? 'قبول' : 'Approve'}
                       </button>
                       <button disabled={disabled} style={commandStyles.rejectButton} onClick={() => onListingDecision(listing.id, 'REJECT')}>
@@ -1252,6 +1358,22 @@ function ShortRentAdminCommandDashboard({
               {aiReview.reasons.map((reason) => <p key={reason}>{reason}</p>)}
             </article>
           </div>
+        )}
+        {activeCommandView === 'jurisdictions' && (
+          <>
+            <JurisdictionCompliancePanel disabled={disabled} isAr={isAr} onUpdate={onUpdateJurisdictionProfile} profiles={jurisdictionProfiles} />
+            <DriverRegistryExportPanel isAr={isAr} />
+          </>
+        )}
+        {activeCommandView === 'taxCompliance' && (
+          <ComplianceDashboardPanel
+            dashboard={complianceDashboard}
+            disabled={disabled}
+            isAr={isAr}
+            onReviewListingDocument={onReviewListingDocument}
+            onToggleFlag={onToggleComplianceFlag}
+            state={complianceDashboardState}
+          />
         )}
       </section>
 
@@ -1420,6 +1542,518 @@ function FeeLine({ label, value, strong, danger }: { label: string; value: strin
 
 function AdminEmptyLine({ text }: { text: string }) {
   return <div style={commandStyles.emptyProofCard}>{text}</div>
+}
+
+// Quebec STR is admin-reviewed by hand, not auto-approved -- montreal.ca bylaw and borough rules
+// change block-by-block, so this surfaces the facts (CITQ #, insurance upload, borough) plus a
+// static reminder rather than trying to encode the legal judgment itself.
+function QuebecComplianceNote({ isAr, metadata }: { isAr: boolean; metadata: Record<string, unknown> }) {
+  const citq = typeof metadata.citqRegistrationNumber === 'string' ? metadata.citqRegistrationNumber.trim() : ''
+  const area = typeof metadata.areaLabel === 'string' ? metadata.areaLabel : typeof metadata.area === 'string' ? metadata.area : ''
+  const city = typeof metadata.cityLabel === 'string' ? metadata.cityLabel : typeof metadata.city === 'string' ? metadata.city : ''
+  const missingInsurance = Array.isArray(metadata.missingQuebecComplianceSlots) && metadata.missingQuebecComplianceSlots.length > 0
+  const residencyType = typeof metadata.residencyType === 'string' ? metadata.residencyType : ''
+  const isMontreal = city.toLowerCase().includes('montr') || metadata.city === 'montreal'
+  const isInvestmentProperty = residencyType === 'investment'
+
+  return (
+    <div style={commandStyles.quebecComplianceNote}>
+      <small style={commandStyles.quebecComplianceLine}>
+        {isAr ? `كيبيك · ${city}${area ? ` · ${area}` : ''}` : `Quebec · ${city}${area ? ` · ${area}` : ''}`}
+      </small>
+      <small style={commandStyles.quebecComplianceLine}>
+        {isAr ? `رقم CITQ: ${citq || 'غير مقدم'}` : `CITQ #: ${citq || 'not provided'}`}
+      </small>
+      <small style={commandStyles.quebecComplianceLine}>
+        {isAr
+          ? `نوع الملكية: ${residencyType === 'principal' ? 'سكني أساسي' : residencyType === 'investment' ? 'استثماري' : 'غير محدد'}`
+          : `Residency type: ${residencyType === 'principal' ? 'Principal residence' : residencyType === 'investment' ? 'Investment property' : 'Not specified'}`}
+      </small>
+      <small style={{ ...commandStyles.quebecComplianceLine, color: missingInsurance ? '#f87171' : '#34d399' }}>
+        {missingInsurance
+          ? (isAr ? 'إثبات التأمين ناقص' : 'Insurance proof missing')
+          : (isAr ? 'إثبات التأمين مرفوع' : 'Insurance proof uploaded')}
+      </small>
+      {isMontreal && isInvestmentProperty && (
+        <small style={{ ...commandStyles.quebecComplianceLine, color: '#f87171', fontWeight: 900 }}>
+          {isAr
+            ? '⚠ عقار استثماري في مونتريال — ممنوع تقريباً في كل مكان إلا شوارع محددة. راجع بدقة قبل القبول.'
+            : '⚠ Investment property in Montreal — banned almost everywhere except specific named streets. Review carefully before approving.'}
+        </small>
+      )}
+      <small style={commandStyles.quebecComplianceReminder}>
+        {isAr
+          ? 'تذكير: مونتريال تسمح بالإقامة الأساسية فقط من ١٠ يونيو إلى ١٠ سبتمبر في أغلب الأحياء (٩٠ يوماً كحد أقصى سنوياً)، وتمنعها كلياً في لاشين وسان لوران وسان ليونارد.'
+          : 'Reminder: Montreal permits principal-residence STR only June 10-Sept 10 in most boroughs (90-day/year max), and bans it outright in Lachine, Saint-Laurent, and Saint-Léonard.'}
+      </small>
+    </div>
+  )
+}
+
+// Mirrors server/lib/jurisdiction-compliance.mjs's resolveListingJurisdiction: metadata.country
+// defaults to 'SY' on legacy listings that predate the Quebec work, metadata.governorate only scopes
+// the region for Canada.
+function findListingJurisdictionProfile(listing: PlatformListing, profiles: PlatformJurisdictionComplianceProfile[]) {
+  const metadata = listing.metadata || {}
+  const countryCode = typeof metadata.country === 'string' && metadata.country ? metadata.country : 'SY'
+  const regionCode = countryCode === 'CA' && typeof metadata.governorate === 'string' ? metadata.governorate : ''
+  return profiles.find((profile) => profile.division === 'STR' && profile.countryCode === countryCode && profile.regionCode === regionCode) || null
+}
+
+const JURISDICTION_STATUS_TONE: Record<PlatformJurisdictionComplianceProfile['status'], string> = {
+  APPROVED: '#34d399',
+  PENDING: '#e6b80d',
+  BLOCKED: '#f87171',
+}
+
+function jurisdictionStatusLabel(status: PlatformJurisdictionComplianceProfile['status'] | undefined, isAr: boolean) {
+  if (status === 'APPROVED') return isAr ? 'السوق معتمد' : 'Market approved'
+  if (status === 'BLOCKED') return isAr ? 'السوق موقوف' : 'Market paused'
+  return isAr ? 'السوق قيد المراجعة' : 'Market pending review'
+}
+
+function JurisdictionStatusBadge({ isAr, profile }: { isAr: boolean; profile: PlatformJurisdictionComplianceProfile | null }) {
+  const status = profile?.status
+  if (status === 'APPROVED') return null // Nothing to flag once the market itself is cleared to go live.
+  return (
+    <small style={{ color: JURISDICTION_STATUS_TONE[status || 'BLOCKED'], fontWeight: 800 }}>
+      {jurisdictionStatusLabel(status, isAr)} · {profile ? `${profile.countryCode}${profile.regionCode ? '/' + profile.regionCode : ''}` : (isAr ? 'لم تتم مراجعته' : 'not reviewed')}
+    </small>
+  )
+}
+
+const JURISDICTION_DIVISION_LABEL: Record<'STR' | 'SR', { ar: string; en: string }> = {
+  STR: { ar: 'الإيجار القصير', en: 'Short-term rental' },
+  SR: { ar: 'خدمة الركوب', en: 'Ride-hailing' },
+}
+
+const JURISDICTION_REQUIREMENT_CATEGORIES = [
+  { key: 'tourism', label: 'Tourism accommodation registration', labelAr: 'تسجيل الإقامة السياحية' },
+  { key: 'transport', label: 'Transport / ride-hailing authorization', labelAr: 'ترخيص النقل / خدمة الركوب' },
+  { key: 'tax', label: 'Tax registration', labelAr: 'التسجيل الضريبي' },
+  { key: 'platform', label: 'Platform operator registration', labelAr: 'تسجيل مشغل المنصة' },
+] as const
+
+function jurisdictionMarketLabel(profile: PlatformJurisdictionComplianceProfile, isAr: boolean) {
+  const place = `${profile.countryCode}${profile.regionCode ? ' / ' + profile.regionCode : ''}`
+  const division = JURISDICTION_DIVISION_LABEL[profile.division][isAr ? 'ar' : 'en']
+  return `${division} · ${place}`
+}
+
+// The master go-live switch (026): nothing in a market can be approved -- a STR listing, an SR driver
+// document, even a ride an already-approved driver tries to claim -- unless its row here is APPROVED.
+// Every market starts PENDING (fail-closed); Syria was explicitly set to BLOCKED pending local legal
+// review. Approve is disabled client-side (and rejected server-side) while any required category is
+// unsatisfied, mirroring the same "cannot approve until required docs are complete" rule used for
+// individual listings and drivers.
+// CTQ Transportation System Operator fields (028) -- what the Commission des transports du Québec's
+// form CTQ-374 actually asks an operator to designate: a "répondant" (responsible contact), a
+// "répartiteur" (dispatcher), an insurance contract reference, and (once granted) the authorization
+// number itself. Filling these in is part of preparing the real application -- it does not itself
+// approve anything (the status buttons below still gate that, and still require every required/
+// satisfied checkbox above to be true).
+const OPERATOR_FIELDS: Array<{ key: keyof PlatformJurisdictionComplianceProfile; labelAr: string; label: string }> = [
+  { key: 'operatorRespondentName', labelAr: 'اسم المسؤول (Répondant)', label: "Respondent name (répondant)" },
+  { key: 'operatorRespondentContact', labelAr: 'وسيلة تواصل المسؤول', label: 'Respondent contact' },
+  { key: 'operatorDispatcherName', labelAr: 'اسم المُوزِّع (Répartiteur)', label: 'Dispatcher name (répartiteur)' },
+  { key: 'operatorDispatcherContact', labelAr: 'وسيلة تواصل المُوزِّع', label: 'Dispatcher contact' },
+  { key: 'operatorInsuranceReference', labelAr: 'رقم عقد التأمين', label: 'Insurance contract reference' },
+  { key: 'operatorAuthorizationNumber', labelAr: 'رقم ترخيص CTQ (بعد المنح)', label: 'CTQ authorization number (once granted)' },
+]
+
+function OperatorFieldsPanel({
+  disabled,
+  isAr,
+  onUpdate,
+  profile,
+}: {
+  disabled: boolean
+  isAr: boolean
+  onUpdate: (id: string, patch: Partial<PlatformJurisdictionComplianceProfile>) => void
+  profile: PlatformJurisdictionComplianceProfile
+}) {
+  return (
+    <div style={commandStyles.operatorFieldsPanel}>
+      <strong style={{ fontSize: 12, color: '#9aa6ba' }}>
+        {isAr ? 'بيانات مشغّل نظام النقل (CTQ-374)' : 'Transportation system operator details (CTQ-374)'}
+      </strong>
+      <div style={commandStyles.operatorFieldsGrid}>
+        {OPERATOR_FIELDS.map((field) => (
+          <label key={field.key} style={commandStyles.operatorFieldLabel}>
+            <span>{isAr ? field.labelAr : field.label}</span>
+            <input
+              defaultValue={(profile[field.key] as string | null) || ''}
+              disabled={disabled}
+              onBlur={(event) => onUpdate(profile.id, { [field.key]: event.target.value } as Partial<PlatformJurisdictionComplianceProfile>)}
+              style={commandStyles.operatorFieldInput}
+              type="text"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// FLEET (029): CTQ-374 requires an authorized operator to maintain driver + vehicle registries
+// and file quarterly/annual reports -- this is that reporting capability. Not Quebec-specific
+// (the country filter defaults to "all markets"), but it's exactly what's needed the day CTQ
+// authorization is granted.
+function DriverRegistryExportPanel({ isAr }: { isAr: boolean }) {
+  const [country, setCountry] = useState('')
+  const [pending, setPending] = useState<'csv' | 'json' | ''>('')
+  const [error, setError] = useState('')
+
+  async function handleExport(format: 'csv' | 'json') {
+    setPending(format)
+    setError('')
+    try {
+      await downloadDriverRegistryExport(format, country || undefined)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (isAr ? 'تعذّر التصدير.' : 'Export failed.'))
+    } finally {
+      setPending('')
+    }
+  }
+
+  return (
+    <div style={commandStyles.operatorFieldsPanel}>
+      <strong style={{ fontSize: 12, color: '#9aa6ba' }}>
+        {isAr ? 'تصدير سجل السائقين والمركبات (CTQ-374)' : 'Driver & vehicle registry export (CTQ-374)'}
+      </strong>
+      <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#7c8797' }}>
+        {isAr
+          ? 'يشمل حالة السائق والمركبة والوثائق لكل سائق -- للتقارير الفصلية/السنوية المطلوبة من مشغّل مرخّص.'
+          : 'Covers driver, vehicle, and document status per driver -- for the quarterly/annual reports a licensed operator must file.'}
+      </p>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select
+          onChange={(event) => setCountry(event.target.value)}
+          style={commandStyles.operatorFieldInput}
+          value={country}
+        >
+          <option value="">{isAr ? 'كل الأسواق' : 'All markets'}</option>
+          <option value="SY">{isAr ? 'سوريا' : 'Syria'}</option>
+          <option value="CA">{isAr ? 'كيبك (كندا)' : 'Quebec (Canada)'}</option>
+        </select>
+        <button disabled={pending !== ''} onClick={() => handleExport('csv')} style={commandStyles.acceptButton}>
+          {pending === 'csv' ? (isAr ? 'جارٍ...' : 'Exporting...') : isAr ? 'تصدير CSV' : 'Export CSV'}
+        </button>
+        <button disabled={pending !== ''} onClick={() => handleExport('json')} style={commandStyles.acceptButton}>
+          {pending === 'json' ? (isAr ? 'جارٍ...' : 'Exporting...') : isAr ? 'تصدير JSON' : 'Export JSON'}
+        </button>
+      </div>
+      {error && <div className="seller-inline-alert"><span>{error}</span></div>}
+    </div>
+  )
+}
+
+// Tax-compliance foundation (029) — admin compliance dashboard (item F): missing/invalid tax
+// profiles, GST/QST registration gaps, Part XX filing readiness, and the compliance feature flags
+// (ride government remittance, Stay tax platform collection) with their approval trail.
+function ComplianceDashboardPanel({
+  dashboard,
+  disabled,
+  isAr,
+  onReviewListingDocument,
+  onToggleFlag,
+  state,
+}: {
+  dashboard: PlatformComplianceDashboard | null
+  disabled: boolean
+  isAr: boolean
+  onReviewListingDocument: (documentId: string, decision: 'APPROVED' | 'REJECTED') => void
+  onToggleFlag: (key: PlatformComplianceDashboard['complianceFlags'][number]['key'], enabled: boolean) => void
+  state: 'idle' | 'loading' | 'ready' | 'error'
+}) {
+  if (state === 'loading' || state === 'idle') {
+    return <AdminEmptyLine text={isAr ? 'جارٍ تحميل لوحة الامتثال الضريبي...' : 'Loading tax compliance dashboard...'} />
+  }
+  if (state === 'error' || !dashboard) {
+    return <AdminEmptyLine text={isAr ? 'تعذر تحميل لوحة الامتثال الضريبي.' : 'Could not load the tax compliance dashboard.'} />
+  }
+
+  const flagLabels: Record<string, { label: string; hint: string }> = {
+    RIDE_GOVERNMENT_REMITTANCE_ACTIVE: {
+      label: isAr ? 'تحويل حكومي على أجرة الرحلات (Revenu Québec)' : 'Ride-fare government remittance (Revenu Québec)',
+      hint: isAr
+        ? 'لا يوجد برنامج حكومي محدد بعد. لا تُفعَّل إلا بعد أن تؤكد CTQ / Revenu Québec البرنامج والمعدل والجهة المسؤولة عن التحويل، وبعد مراجعة قانونية. التفعيل يتطلب موافقة إدارية مسجّلة.'
+        : 'No specific government program is confirmed yet. Do not activate until CTQ/Revenu Québec confirms the actual program, rate, and remitting party, and counsel has reviewed it. Enabling requires a recorded admin approval.',
+    },
+    STAY_TAX_PLATFORM_COLLECTION: {
+      label: isAr ? 'تحصيل SYBNB لضريبة GST/QST (الإقامة)' : 'SYBNB platform collection of GST/QST (Stay)',
+      hint: isAr
+        ? 'للمضيفين غير المسجّلين فقط، عند الاقتضاء القانوني. لا تُفعَّل دون موافقة مسجّلة.'
+        : 'For non-registered hosts only, where legally required. Do not enable without a recorded approval.',
+    },
+  }
+
+  return (
+    <div style={commandStyles.managementList}>
+      <div style={commandStyles.jurisdictionCard}>
+        <strong style={{ fontSize: 13, color: '#9aa6ba' }}>{isAr ? 'الملفات الضريبية' : 'Tax profiles'}</strong>
+        <div style={commandStyles.operatorFieldsGrid}>
+          <span>{isAr ? 'سائقون بلا ملف' : 'Drivers without profile'}: {dashboard.taxProfiles.driversWithoutProfile}</span>
+          <span>{isAr ? 'مضيفون بلا ملف' : 'Hosts without profile'}: {dashboard.taxProfiles.hostsWithoutProfile}</span>
+          <span>{isAr ? 'بانتظار مراجعة السائقين' : 'Driver pending review'}: {dashboard.taxProfiles.driverPendingReview}</span>
+          <span>{isAr ? 'بانتظار مراجعة المضيفين' : 'Host pending review'}: {dashboard.taxProfiles.hostPendingReview}</span>
+          <span>{isAr ? 'موثّق (سائقون)' : 'Approved (drivers)'}: {dashboard.taxProfiles.driverApproved}</span>
+          <span>{isAr ? 'موثّق (مضيفون)' : 'Approved (hosts)'}: {dashboard.taxProfiles.hostApproved}</span>
+          <span>{isAr ? 'مضيفون بلا قرار GST/QST' : 'Hosts without GST/QST decision'}: {dashboard.taxProfiles.hostsWithoutGstQstTreatmentDecision}</span>
+          <span>{isAr ? 'سائقو كيبك بلا تسجيل GST/QST مطلوب' : 'Quebec drivers missing required GST/QST'}: {dashboard.driversMissingRequiredGstQst.count}</span>
+        </div>
+      </div>
+
+      <div style={commandStyles.jurisdictionCard}>
+        <strong style={{ fontSize: 13, color: '#9aa6ba' }}>{isAr ? 'شهادات الإقامة السياحية' : 'Accommodation certificates'}</strong>
+        <small style={{ color: '#9aa6ba' }}>
+          {isAr
+            ? 'تاريخ الانتهاء وحده لا يكفي — يجب رفع الشهادة الفعلية ومراجعتها إداريًا. المراجعة اليدوية "ADMIN_REVIEWED_TEST" ليست توثيقاً قانونياً؛ سيتم تحصيل احتفاظ الشهادة لمدة سنة بعد انتهائها ثم حذفها تلقائياً ما لم يوجد حجز قانوني.'
+            : 'An expiry date alone is not enough -- the actual certificate must be uploaded and admin-reviewed. Manual review ("ADMIN_REVIEWED_TEST") is not a legal verification. Certificates are retained one year past expiry, then automatically queued for deletion unless a legal hold applies.'}
+        </small>
+        {dashboard.expiringCertificates.count === 0 ? (
+          <AdminEmptyLine text={isAr ? 'لا توجد شهادات ناقصة أو قريبة الانتهاء.' : 'No missing or expiring certificates.'} />
+        ) : (
+          dashboard.expiringCertificates.listings.map((item) => (
+            <ListingCertificateReviewRow
+              key={item.listingId}
+              disabled={disabled}
+              isAr={isAr}
+              item={item}
+              onReview={onReviewListingDocument}
+            />
+          ))
+        )}
+      </div>
+
+      <div style={commandStyles.jurisdictionCard}>
+        <strong style={{ fontSize: 13, color: '#9aa6ba' }}>{isAr ? 'جاهزية إيداع Part XX' : 'Part XX filing readiness'}</strong>
+        <div style={commandStyles.operatorFieldsGrid}>
+          {Object.entries(dashboard.partXXFilingReadiness.recordsByStatus).map(([status, count]) => (
+            <span key={status}>{status}: {count}</span>
+          ))}
+        </div>
+        {dashboard.partXXFilingReadiness.recentFilings.length === 0 ? (
+          <AdminEmptyLine text={isAr ? 'لا توجد إيداعات Part XX بعد.' : 'No Part XX filings yet.'} />
+        ) : (
+          dashboard.partXXFilingReadiness.recentFilings.map((filing) => (
+            <div key={filing.id} style={commandStyles.jurisdictionRequirementRow}>
+              <span>{filing.year} Q{filing.quarter}</span>
+              <em>{filing.status}</em>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div style={commandStyles.jurisdictionCard}>
+        <strong style={{ fontSize: 13, color: '#9aa6ba' }}>{isAr ? 'أسواق كيبك — الأسواق والامتثال' : 'Quebec markets — registration status'}</strong>
+        {dashboard.jurisdictionRegistrationStatus.map((j) => (
+          <div key={`${j.division}-${j.regionCode}`} style={commandStyles.jurisdictionRequirementRow}>
+            <span>{j.division} / {j.regionCode}</span>
+            <em>{j.status}</em>
+          </div>
+        ))}
+      </div>
+
+      <div style={commandStyles.jurisdictionCard}>
+        <strong style={{ fontSize: 13, color: '#9aa6ba' }}>{isAr ? 'مفاتيح الامتثال (تتطلب موافقة مسجّلة)' : 'Compliance feature flags (require recorded approval)'}</strong>
+        {dashboard.complianceFlags.map((flag) => {
+          const info = flagLabels[flag.key] || { label: flag.key, hint: '' }
+          return (
+            <div key={flag.key} style={commandStyles.jurisdictionRequirementRow}>
+              <label style={commandStyles.jurisdictionCheckboxLabel}>
+                <input
+                  checked={flag.enabled}
+                  disabled={disabled}
+                  onChange={(event) => onToggleFlag(flag.key, event.target.checked)}
+                  type="checkbox"
+                />
+                <span>{info.label}</span>
+              </label>
+              <small style={{ color: '#7c8797' }}>{info.hint}</small>
+              {flag.enabled && flag.approvedAt && (
+                <small style={{ color: '#7c8797' }}>{isAr ? 'فُعِّل في' : 'Enabled at'} {new Date(flag.approvedAt).toISOString().slice(0, 10)}</small>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// One certificate row: shows status, lets an admin view the uploaded file (authenticated blob,
+// same pattern as AdminIdDocumentLine) and approve/reject it. No documentId means nothing has been
+// uploaded yet -- there's nothing to review, only the host can fix that.
+function ListingCertificateReviewRow({
+  disabled,
+  isAr,
+  item,
+  onReview,
+}: {
+  disabled: boolean
+  isAr: boolean
+  item: PlatformComplianceDashboard['expiringCertificates']['listings'][number]
+  onReview: (documentId: string, decision: 'APPROVED' | 'REJECTED') => void
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle')
+
+  async function loadDocument() {
+    if (!item.documentId) return
+    setLoadState('loading')
+    try {
+      setBlobUrl(await fetchListingDocumentBlobUrl(item.documentId))
+      setLoadState('idle')
+    } catch {
+      setLoadState('error')
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [blobUrl])
+
+  const tone = item.status === 'MISSING' || item.status === 'EXPIRED' ? 'red' : 'gold'
+  const canReview = item.documentId && item.documentStatus === 'PENDING_REVIEW'
+
+  return (
+    <article style={commandStyles.managementRow}>
+      <div>
+        <strong>{item.title}</strong>
+        <em style={commandTone(tone)}>
+          {item.status}{item.expiresAt ? ` · ${item.expiresAt.slice(0, 10)}` : ''}
+        </em>
+      </div>
+      <span>{isAr ? 'حالة المستند' : 'Document'}: {item.documentStatus}</span>
+      {item.documentId ? (
+        blobUrl ? (
+          <a href={blobUrl} target="_blank" rel="noreferrer" style={commandStyles.blueButton}>
+            {isAr ? 'فتح الشهادة' : 'Open certificate'}
+          </a>
+        ) : (
+          <button style={commandStyles.secondaryCommand} disabled={loadState === 'loading'} onClick={() => void loadDocument()}>
+            {loadState === 'loading' ? (isAr ? 'جار التحميل...' : 'Loading...') : loadState === 'error' ? (isAr ? 'إعادة المحاولة' : 'Retry') : isAr ? 'عرض المستند' : 'View document'}
+          </button>
+        )
+      ) : (
+        <small style={{ color: '#7c8797' }}>{isAr ? 'لم يرفع المضيف الشهادة بعد' : 'Host has not uploaded a certificate yet'}</small>
+      )}
+      {canReview && (
+        <div style={commandStyles.managementRowActions}>
+          <button disabled={disabled} style={commandStyles.acceptButton} onClick={() => onReview(item.documentId as string, 'APPROVED')}>{isAr ? 'قبول' : 'Approve'}</button>
+          <button disabled={disabled} style={commandStyles.rejectButton} onClick={() => onReview(item.documentId as string, 'REJECTED')}>{isAr ? 'رفض' : 'Reject'}</button>
+        </div>
+      )}
+    </article>
+  )
+}
+
+function JurisdictionCompliancePanel({
+  disabled,
+  isAr,
+  onUpdate,
+  profiles,
+}: {
+  disabled: boolean
+  isAr: boolean
+  onUpdate: (id: string, patch: Partial<PlatformJurisdictionComplianceProfile>) => void
+  profiles: PlatformJurisdictionComplianceProfile[]
+}) {
+  if (!profiles.length) {
+    return <AdminEmptyLine text={isAr ? 'لا توجد ملفات امتثال أسواق بعد.' : 'No market compliance profiles yet.'} />
+  }
+
+  return (
+    <div style={commandStyles.managementList}>
+      {profiles.map((profile) => {
+        const categories = JURISDICTION_REQUIREMENT_CATEGORIES.map((category) => ({
+          ...category,
+          required: profile[`${category.key}Required` as const] as boolean,
+          satisfied: profile[`${category.key}Satisfied` as const] as boolean,
+          notes: profile[`${category.key}Notes` as const] as string | null,
+        }))
+        const missing = categories.filter((c) => c.required && !c.satisfied)
+        const canApprove = missing.length === 0
+
+        return (
+          <article key={profile.id} style={commandStyles.jurisdictionCard}>
+            <div style={commandStyles.jurisdictionCardHeader}>
+              <strong>{jurisdictionMarketLabel(profile, isAr)}</strong>
+              <em style={{ ...commandTone(profile.status === 'APPROVED' ? 'green' : profile.status === 'BLOCKED' ? 'red' : 'gold') }}>
+                {jurisdictionStatusLabel(profile.status, isAr)}
+              </em>
+            </div>
+            <div style={commandStyles.jurisdictionRequirements}>
+              {categories.map((category) => (
+                <div key={category.key} style={commandStyles.jurisdictionRequirementRow}>
+                  <label style={commandStyles.jurisdictionCheckboxLabel}>
+                    <input
+                      checked={category.required}
+                      disabled={disabled}
+                      onChange={(event) => onUpdate(profile.id, { [`${category.key}Required`]: event.target.checked } as Partial<PlatformJurisdictionComplianceProfile>)}
+                      type="checkbox"
+                    />
+                    <span>{isAr ? category.labelAr : category.label}</span>
+                  </label>
+                  <label style={commandStyles.jurisdictionCheckboxLabel}>
+                    <input
+                      checked={category.satisfied}
+                      disabled={disabled || !category.required}
+                      onChange={(event) => onUpdate(profile.id, { [`${category.key}Satisfied`]: event.target.checked } as Partial<PlatformJurisdictionComplianceProfile>)}
+                      type="checkbox"
+                    />
+                    <span>{isAr ? 'مستوفى' : 'Satisfied'}</span>
+                  </label>
+                  <textarea
+                    defaultValue={category.notes || ''}
+                    disabled={disabled}
+                    onBlur={(event) => onUpdate(profile.id, { [`${category.key}Notes`]: event.target.value } as Partial<PlatformJurisdictionComplianceProfile>)}
+                    placeholder={isAr ? 'ملاحظات...' : 'Notes...'}
+                    style={commandStyles.jurisdictionNotesInput}
+                  />
+                </div>
+              ))}
+            </div>
+            {profile.division === 'SR' && (
+              <OperatorFieldsPanel disabled={disabled} isAr={isAr} onUpdate={onUpdate} profile={profile} />
+            )}
+            {!canApprove && (
+              <div className="seller-inline-alert">
+                <strong>{isAr ? 'لا يمكن الاعتماد بعد' : "Can't approve yet"}</strong>
+                <span>{isAr ? `ناقص: ${missing.map((c) => c.labelAr).join('، ')}` : `Still needed: ${missing.map((c) => c.label).join(', ')}`}</span>
+              </div>
+            )}
+            <div style={commandStyles.jurisdictionActions}>
+              <button
+                disabled={disabled || profile.status === 'APPROVED' || !canApprove}
+                onClick={() => onUpdate(profile.id, { status: 'APPROVED' })}
+                style={commandStyles.acceptButton}
+              >
+                {isAr ? 'اعتماد السوق' : 'Approve market'}
+              </button>
+              <button
+                disabled={disabled || profile.status === 'PENDING'}
+                onClick={() => onUpdate(profile.id, { status: 'PENDING' })}
+                style={commandStyles.blueButton}
+              >
+                {isAr ? 'إعادة إلى قيد المراجعة' : 'Reset to pending'}
+              </button>
+              <button
+                disabled={disabled || profile.status === 'BLOCKED'}
+                onClick={() => onUpdate(profile.id, { status: 'BLOCKED' })}
+                style={commandStyles.rejectButton}
+              >
+                {isAr ? 'إيقاف السوق' : 'Block / pause market'}
+              </button>
+            </div>
+          </article>
+        )
+      })}
+    </div>
+  )
 }
 
 function AdminPaymentLine({
@@ -1776,7 +2410,7 @@ function shortBookingReference(booking: PlatformReviewBooking | undefined) {
 }
 
 function createShortRentLedger(totalMinor: number) {
-  const divisor = 1 + STR_CLEANING_RATE + STR_TAX_RATE
+  const divisor = 1 + STR_CLEANING_RATE
   const rentMinor = Math.round(totalMinor / divisor)
   const cleaningFeeMinor = Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = Math.max(0, totalMinor - rentMinor - cleaningFeeMinor)
@@ -2038,6 +2672,20 @@ const commandStyles: Record<string, CSSProperties> = {
   outboxPanel: { background: 'rgba(82,104,255,.08)', border: '1px solid rgba(82,104,255,.35)', borderRadius: 8, color: '#d9deea', display: 'grid', gap: 8, padding: 12 },
   payoutState: { border: '1px solid rgba(230,184,13,.45)', borderRadius: 999, color: '#e6b80d', fontSize: 12, fontWeight: 950, justifySelf: 'start', padding: '6px 10px' },
   managementList: { display: 'grid', gap: 10 },
+  quebecComplianceNote: { background: 'rgba(82,104,255,.08)', border: '1px solid rgba(82,104,255,.25)', borderRadius: 6, display: 'grid', gap: 3, marginTop: 6, padding: '6px 8px' },
+  quebecComplianceLine: { color: '#d9deea', fontSize: 11, fontWeight: 700 },
+  quebecComplianceReminder: { color: '#8e93a3', fontSize: 10.5, lineHeight: 1.4 },
+  jurisdictionCard: { background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 10, display: 'grid', gap: 12, padding: 16 },
+  jurisdictionCardHeader: { alignItems: 'center', display: 'flex', justifyContent: 'space-between' },
+  jurisdictionRequirements: { display: 'grid', gap: 8 },
+  jurisdictionRequirementRow: { alignItems: 'center', display: 'grid', gap: 10, gridTemplateColumns: 'minmax(160px, 1fr) auto minmax(160px, 2fr)' },
+  jurisdictionCheckboxLabel: { alignItems: 'center', color: '#d9deea', display: 'flex', fontSize: 12, fontWeight: 700, gap: 6, whiteSpace: 'nowrap' },
+  jurisdictionNotesInput: { background: '#11131d', border: '1px solid rgba(255,255,255,.12)', borderRadius: 6, color: '#f7f7fb', fontSize: 12, minHeight: 34, padding: '6px 8px', resize: 'vertical' },
+  jurisdictionActions: { display: 'flex', flexWrap: 'wrap', gap: 10 },
+  operatorFieldsPanel: { background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, display: 'grid', gap: 10, padding: 12 },
+  operatorFieldsGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' },
+  operatorFieldLabel: { color: '#9aa6ba', display: 'grid', fontSize: 11, fontWeight: 800, gap: 4 },
+  operatorFieldInput: { background: '#11131d', border: '1px solid rgba(255,255,255,.12)', borderRadius: 6, color: '#f7f7fb', fontSize: 12, minHeight: 34, padding: '6px 8px' },
   queuePagerRow: { alignItems: 'center', background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between', padding: '10px 12px' },
   queuePagerLabel: { alignItems: 'center', color: '#8e93a3', display: 'flex', fontSize: 12, fontWeight: 800, gap: 8 },
   queuePagerSelect: { background: '#11131d', border: '1px solid rgba(255,255,255,.12)', borderRadius: 6, color: '#f7f7fb', padding: '6px 8px' },
@@ -2132,7 +2780,7 @@ function auditActionText(action: string, lang: Lang) {
     REVIEW_APPROVED: { ar: 'تمت الموافقة في المراجعة', en: 'Review approved' },
     REVIEW_REJECTED: { ar: 'تم الرفض في المراجعة', en: 'Review rejected' },
     RIDE_REQUESTED: { ar: 'تم طلب رحلة', en: 'Ride requested' },
-    SR_DRIVER_ASSIGNED: { ar: 'تم تعيين سائق SR', en: 'SR driver assigned' },
+    SR_DRIVER_ASSIGNED: { ar: 'تم تعيين سائق SYBNB Ride', en: 'SYBNB Ride driver assigned' },
     UPDATE: { ar: 'تحديث', en: 'Update' },
     UPDATED: { ar: 'تم التحديث', en: 'Updated' },
   }

@@ -13,7 +13,7 @@ const copy = {
   ar: {
     back: 'العودة للوحة السائق',
     title: 'مركباتي',
-    subtitle: 'سجّل مركبتك لقبول رحلات SR. تخضع كل مركبة لمراجعة SYBNB وحد أقصى للعمر حسب الفئة.',
+    subtitle: 'سجّل مركبتك لقبول رحلات SYBNB Ride. تخضع كل مركبة لمراجعة SYBNB وحد أقصى للعمر حسب الفئة.',
     make: 'الصانع',
     model: 'الطراز',
     year: 'سنة الصنع',
@@ -32,11 +32,15 @@ const copy = {
     genericError: 'تعذر تسجيل المركبة، حاول مجددًا.',
     loadError: 'تعذر تحميل المركبات.',
     ageHint: 'الحد الأقصى للعمر: اقتصادية 10 سنوات، مريحة/دفع رباعي/XXL 7 سنوات.',
+    ageHintQuebec: 'كيبيك (SAAQ): الحد الأقصى ١٠ سنوات لكل الفئات. يشترط أيضاً قاعدة عجلات ٢٦١سم فأكثر ووزن أقل من ٣٥٠٠كغ — يُتحقق منها يدوياً حالياً.',
+    country: 'السوق',
+    countrySyria: 'سوريا',
+    countryQuebec: 'كيبيك، كندا',
   },
   en: {
     back: 'Back to driver dashboard',
     title: 'My vehicles',
-    subtitle: 'Register your vehicle to accept SR rides. Each vehicle is reviewed by SYBNB and has a max age per tier.',
+    subtitle: 'Register your vehicle to accept SYBNB Ride trips. Each vehicle is reviewed by SYBNB and has a max age per tier.',
     make: 'Make',
     model: 'Model',
     year: 'Model year',
@@ -55,10 +59,24 @@ const copy = {
     genericError: 'Could not register the vehicle. Please try again.',
     loadError: 'Could not load your vehicles.',
     ageHint: 'Max age: Economy 10 years, Comfort/SUV/XXL 7 years.',
+    ageHintQuebec: "Quebec (SAAQ): max age 10 years for every tier. Also requires wheelbase >=261cm and net weight <3,500kg -- checked manually today.",
+    country: 'Market',
+    countrySyria: 'Syria',
+    countryQuebec: 'Quebec, Canada',
   },
 }
 
 const CATEGORIES = ['SR Economy', 'SR Comfort', 'SR SUV', 'SR XXL'] as const
+
+// Display-only rebrand (SR/SIR is the internal code; customer-facing label is "SYBNB Ride" per the
+// Québec compliance review): the stored category value posted to the server and saved on
+// DriverVehicle must stay exactly as CATEGORIES above -- only the label shown to the driver changes.
+const CATEGORY_LABELS: Record<string, string> = {
+  'SR Economy': 'SYBNB Ride Economy',
+  'SR Comfort': 'SYBNB Ride Comfort',
+  'SR SUV': 'SYBNB Ride SUV',
+  'SR XXL': 'SYBNB Ride XXL',
+}
 
 function statusText(status: PlatformDriverVehicle['status'], t: typeof copy.en) {
   if (status === 'APPROVED') return t.statusApproved
@@ -78,7 +96,7 @@ export function DriverVehiclesPage({ lang }: { lang: Lang }) {
 
   const [vehicles, setVehicles] = useState<PlatformDriverVehicle[]>([])
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [form, setForm] = useState({ make: '', model: '', year: '', plate: '', color: '', category: CATEGORIES[0] as string })
+  const [form, setForm] = useState({ make: '', model: '', year: '', plate: '', color: '', category: CATEGORIES[0] as string, country: 'SY' })
   const [submitState, setSubmitState] = useState<'idle' | 'saving'>('idle')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -110,9 +128,10 @@ export function DriverVehiclesPage({ lang }: { lang: Lang }) {
         plate: form.plate.trim(),
         color: form.color.trim() || undefined,
         category: form.category,
+        country: form.country,
       })
       setSuccess(t.added)
-      setForm({ make: '', model: '', year: '', plate: '', color: '', category: form.category })
+      setForm({ make: '', model: '', year: '', plate: '', color: '', category: form.category, country: form.country })
       await loadVehicles()
     } catch (err) {
       // Surface the server message verbatim (incl. the age-limit rejection).
@@ -132,6 +151,12 @@ export function DriverVehiclesPage({ lang }: { lang: Lang }) {
       <p style={styles.subtitle}>{t.subtitle}</p>
 
       <form style={styles.card} onSubmit={onSubmit}>
+        <Field label={t.country}>
+          <select style={styles.input} value={form.country} onChange={set('country')}>
+            <option value="SY">{t.countrySyria}</option>
+            <option value="CA">{t.countryQuebec}</option>
+          </select>
+        </Field>
         <Field label={t.make}><input style={styles.input} value={form.make} onChange={set('make')} required /></Field>
         <Field label={t.model}><input style={styles.input} value={form.model} onChange={set('model')} required /></Field>
         <Field label={t.year}><input style={styles.input} type="number" inputMode="numeric" value={form.year} onChange={set('year')} required /></Field>
@@ -139,10 +164,10 @@ export function DriverVehiclesPage({ lang }: { lang: Lang }) {
         <Field label={t.color}><input style={styles.input} value={form.color} onChange={set('color')} /></Field>
         <Field label={t.category}>
           <select style={styles.input} value={form.category} onChange={set('category')}>
-            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c] || c}</option>)}
           </select>
         </Field>
-        <p style={styles.hint}>{t.ageHint}</p>
+        <p style={styles.hint}>{form.country === 'CA' ? t.ageHintQuebec : t.ageHint}</p>
         {error && <p style={styles.error} role="alert">{error}</p>}
         {success && <p style={styles.success}>{success}</p>}
         <button style={styles.primary} type="submit" disabled={submitState === 'saving'}>
@@ -160,7 +185,9 @@ export function DriverVehiclesPage({ lang }: { lang: Lang }) {
             <article key={v.id} style={styles.vehicle}>
               <div>
                 <strong>{v.make} {v.model} · {v.year}</strong>
-                <div style={styles.vehicleMeta}>{v.category} · {v.plate}{v.color ? ` · ${v.color}` : ''}</div>
+                <div style={styles.vehicleMeta}>
+                  {CATEGORY_LABELS[v.category] || v.category} · {v.plate}{v.color ? ` · ${v.color}` : ''} · {v.country === 'CA' ? t.countryQuebec : t.countrySyria}
+                </div>
                 {v.status === 'REJECTED' && v.reviewNote && <div style={styles.reviewNote}>{v.reviewNote}</div>}
               </div>
               <span style={{ ...styles.badge, color: statusColor(v.status), borderColor: statusColor(v.status) }}>
@@ -188,7 +215,7 @@ const styles: Record<string, CSSProperties> = {
   title: { fontSize: 24, margin: 0 },
   subtitle: { margin: 0, color: '#555', fontSize: 14, lineHeight: 1.5 },
   card: { display: 'flex', flexDirection: 'column', gap: 12, padding: 16, borderRadius: 14, border: '1px solid #e4e4ee', background: '#fff' },
-  sectionTitle: { fontSize: 16, margin: '0 0 4px' },
+  sectionTitle: { fontSize: 16, margin: '0 0 4px', color: '#111' },
   field: { display: 'flex', flexDirection: 'column', gap: 4 },
   fieldLabel: { fontSize: 13, color: '#444' },
   input: { padding: '10px 12px', borderRadius: 10, border: '1px solid #ccd', fontSize: 15, background: '#fafaff' },

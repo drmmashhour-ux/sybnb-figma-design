@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { text, type Lang } from '../../engines/language/languageEngine'
 import { visualFilterGroupsForDivision, type VisualFilterSelection } from '../../engines/filters'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { labelFor, getCity, getGovernorate } from '../../engines/search'
+import { getCanadianCity, getCanadianProvince, getCity, getGovernorate, labelFor, type CountryKey } from '../../engines/search'
 import { DateField, DateRangePicker, nightsBetween } from './DateRangePicker'
 import { LocationCascade } from './LocationCascade'
 
@@ -11,6 +11,7 @@ export type SearchDivision = 'stays' | 'rentals' | 'buy' | 'newConstruction' | '
 
 export type UnifiedSearchValue = {
   division: SearchDivision
+  country: CountryKey
   governorate: string
   city: string
   area: string
@@ -282,6 +283,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
   const [openCalendar, setOpenCalendar] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const [value, setValue] = useState<UnifiedSearchValue>(() => ({
+    country: 'SY',
     governorate: 'damascus',
     city: 'damascus-city',
     area: '',
@@ -325,10 +327,12 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     sessionStorage.setItem(SEARCH_DRAFT_KEY, JSON.stringify(value))
   }, [value])
 
-  const governorate = getGovernorate(value.governorate)
-  const city = getCity(value.governorate, value.city)
-  const area = city?.areas.find((item) => item.key === value.area)
   const isStay = value.division === 'stays'
+  const isCanada = isStay && value.country === 'CA'
+  const governorate = isCanada ? getCanadianProvince(value.governorate) : getGovernorate(value.governorate)
+  const city = isCanada ? getCanadianCity(value.governorate, value.city) : getCity(value.governorate, value.city)
+  const area = city?.areas.find((item) => item.key === value.area)
+  const placeLabel = (item?: { ar: string; en: string; fr?: string }) => (item ? (isCanada ? text(item as { ar: string; en: string; fr?: string }, lang) : labelFor(lang, item)) : '')
   const filterGroups = useMemo(() => visualFilterGroupsForDivision(value.division), [value.division])
   const filterSelection: VisualFilterSelection = {
     sort: value.sort,
@@ -354,9 +358,9 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
   const preview = useMemo(() => {
     const parts = [
       t[value.division],
-      governorate ? labelFor(lang, governorate) : '',
-      city ? labelFor(lang, city) : '',
-      area ? labelFor(lang, area) : '',
+      placeLabel(governorate),
+      placeLabel(city),
+      placeLabel(area),
       value.customPlaceName.trim() ? value.customPlaceName.trim() : '',
       isStay && value.checkIn ? value.checkIn : '',
       isStay && value.checkOut ? value.checkOut : '',
@@ -372,6 +376,15 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
 
   useEffect(() => {
     setOpenCalendar(value.division === 'stays')
+  }, [value.division])
+
+  // Canada only ever applies to STAYS search (see LocationCascade's allowCanada prop) -- switching
+  // away from stays while Quebec is selected would otherwise leave governorate/city values that
+  // don't resolve against the Syria dataset the other divisions use.
+  useEffect(() => {
+    if (value.division !== 'stays' && value.country === 'CA') {
+      update({ country: 'SY', governorate: 'damascus', city: 'damascus-city', area: '' })
+    }
   }, [value.division])
 
   useEffect(() => {
@@ -483,8 +496,9 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
       <div style={styles.form}>
         <LocationCascade
           lang={lang}
-          value={{ governorate: value.governorate, city: value.city, area: value.area }}
+          value={{ country: value.country, governorate: value.governorate, city: value.city, area: value.area }}
           onChange={(next) => update(next)}
+          allowCanada={isStay}
         />
         <div style={styles.depthNote}>{t.locationDepth}</div>
 

@@ -13,6 +13,7 @@ import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate } from '.
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
 import { generateListingDescriptionMessage } from '../lib/ai-insights.mjs'
+import { assertAvailabilityWithinSeason } from '../lib/quebec-str-rules.mjs'
 
 // SECURITY (S7/S10): the ONLY guest + payment-proof fields a host is allowed to receive.
 // A host must never see the guest's email, nor a proof's uploaded transfer screenshot (proofAssetUrl),
@@ -489,6 +490,7 @@ export async function handleHost(req, res, url, context) {
     if (req.method === 'PATCH') {
       const body = await readJson(req)
       const dates = normalizeAvailabilityDates(body.dates)
+      assertAvailabilityWithinSeason(existing.metadata, dates)
       const rows = await db().$transaction(
         dates.map((entry) =>
           db().listingAvailability.upsert({

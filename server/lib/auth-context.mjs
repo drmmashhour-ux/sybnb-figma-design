@@ -1,5 +1,7 @@
 import { db } from './prisma.mjs'
 import { verifySessionToken } from './security.mjs'
+import { assertJurisdictionApproved, resolveDriverJurisdiction } from './jurisdiction-compliance.mjs'
+import { assertDriverGstQstRegisteredForQuebec } from './tax-profile.mjs'
 
 export async function getAuthContext(req) {
   const header = req.headers.authorization || ''
@@ -73,6 +75,10 @@ export function requireVerifiedDriver(context) {
 // a real rider once their ID *and* license *and* vehicle registration are all APPROVED.
 export async function requireRoadReadyDriver(context) {
   requireVerifiedDriver(context)
+  // Jurisdiction gate (026): this re-checks on every claim/work action (not only at document-approval
+  // time), so an admin pausing SR in a market via the jurisdiction panel takes effect immediately for
+  // every driver already approved there — no need to individually re-review each driver's documents.
+  await assertJurisdictionApproved(db(), resolveDriverJurisdiction(), { subject: 'Ride-hailing in this market' })
   const approved = await db().driverDocument.findMany({
     where: {
       driverUserId: context.user.id,
@@ -89,4 +95,8 @@ export async function requireRoadReadyDriver(context) {
     error.expose = true
     throw error
   }
+  // Tax-compliance foundation (029): Revenu Québec requires a rideshare driver to be GST/QST
+  // registered before their first paid Quebec ride. A no-op for every driver today (Quebec SR isn't
+  // live -- see resolveDriverJurisdiction above), real the moment one is.
+  await assertDriverGstQstRegisteredForQuebec(db(), context.user.id)
 }
