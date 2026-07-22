@@ -69,6 +69,20 @@ Complete this roadmap one item at a time until the Syria-first launch is ready.
 - **v1.1** — C1 moved P0→P1 and rewritten (booking-first, no registration wall). C6 replaced/renamed (free listings; revenue on successful booking; no pre-publication charge). New backlog item L6 (optional premium plans). P0 set unchanged (8 items), re-sequenced.
 - **v1.0** — Initial roadmap from the STR Product & UX Launch Review.
 
+### Completion status
+- **C2 — COMPLETE.** Checkpoint commit `507d237e87dfdb652a5a06dbcad800a03a020a07`
+  (`fix(str-listings): upload real photos in stays room flow`).
+  - Real STAYS path verified end-to-end against the running backend: Accommodation → Room-Type
+    Listing → sequential `ListingMedia` upload (`POST /api/listings/:id/media`) → accommodation
+    submission; real image bytes reached the backend; media owner-protected while draft and publicly
+    served (200 image/png) after approval; cover selection verified via live data + tests.
+  - **Honest verification limits (not resolved by C2):** Arabic RTL manually verified, **English LTR
+    not switched live** (TEST-001); failed-upload retry automated-test verified, **not manually
+    re-triggered after the corrected integration** (TEST-002); the real image **render was not
+    visually confirmed in the split-origin dev environment** and is **not production-verified**
+    (DX-001). See `docs/engineering/TECHNICAL_DEBT_REGISTER.md`.
+  - Priorities/scope of all other roadmap items are unchanged; no technical debt was promoted to P0.
+
 ---
 
 ### P0 — Must be fixed before ANY public Syria launch
@@ -76,7 +90,7 @@ Complete this roadmap one item at a time until the Syria-first launch is ready.
 
 | # | ID | Description | Business impact | Effort | Depends on | Owner | Recommendation |
 |---|---|---|---|---|---|---|---|
-| 1 | **C2** | Real property-photo upload (currently a stub that marks slots "Added" with no file picker/bytes). | No photos = no bookings; a visual marketplace looks broken. | L | — | FE + BE | Real upload with preview, cover selection, count/size validation before publish. |
+| 1 | **C2** ✅ **COMPLETE** | Real property-photo upload (was a stub that marked slots "Added" with no file picker/bytes). | No photos = no bookings; a visual marketplace looks broken. | L | — | FE + BE | Real upload with preview, cover selection, count/size validation before publish. **Done — see Completion status below.** |
 | 2 | **C3** | Photo gallery + amenities list on the listing detail (today: 1 image, no amenities shown). | The two questions every guest asks before booking are unanswerable. | M | C2 | FE + UX | Multi-image gallery + explicit amenities section. |
 | 3 | **C5** | Remove fake "documents sent to admin" flag that feeds the trust score; stop showing "Verified host" without real ID processing. | Displaying verification that didn't happen is a trust/liability failure. | M | — | FE + BE | Real ID-upload step drives status; badge only when server-confirmed. |
 | 4 | **H10** | Delete dead fabricated data still in the admin bundle (`recentAdminUsers`, `todayStatBars`, `activityItems`). | Any reappearance of fake figures destroys data-integrity credibility. | S | — | FE | Delete outright; add a guard against reintroduction. |
