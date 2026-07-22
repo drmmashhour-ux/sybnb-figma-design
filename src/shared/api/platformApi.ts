@@ -980,21 +980,38 @@ export function blobToBase64(blob: Blob): Promise<string> {
   return readFileAsBase64(blob as File)
 }
 
+export type IdDocumentSubmission = {
+  id: string
+  idDocumentRef: string
+  idDocumentSubmittedAt: string
+  idDocumentStatus: string
+}
+
 // Previously this only ever sent the file's *name* to the server — the actual image was never
 // uploaded, so nothing (human or automated) could ever review what was actually submitted. This
 // now reads and sends the real file bytes.
-export async function submitGuestIdDocument(file: File) {
-  const session = await ensurePrototypeGuestSession()
+async function submitIdDocumentWithToken(file: File, token: string) {
   const fileBase64 = await readFileAsBase64(file)
-  const response = await apiRequest<{
-    ok: true
-    user: { id: string; idDocumentRef: string; idDocumentSubmittedAt: string; idDocumentStatus: string }
-  }>('/api/me/id-document', {
+  const response = await apiRequest<{ ok: true; user: IdDocumentSubmission }>('/api/me/id-document', {
     method: 'PATCH',
-    token: session.token,
+    token,
     body: { fileBase64, mimeType: file.type },
   })
   return response.user
+}
+
+export async function submitGuestIdDocument(file: File) {
+  const session = await ensurePrototypeGuestSession()
+  return submitIdDocumentWithToken(file, session.token)
+}
+
+// C5: the host dashboard's verification state and trust score read the server's idDocumentStatus,
+// so the host needs a real submission path of its own rather than the local "sent to admin" flag it
+// used to keep. Same endpoint and same admin review queue as the guest path — only the session
+// differs (a host/seller token instead of the guest one).
+export async function submitHostIdDocument(file: File, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  return submitIdDocumentWithToken(file, session.token)
 }
 
 export function getStoredGuestSession(): PlatformAuthSession | null {

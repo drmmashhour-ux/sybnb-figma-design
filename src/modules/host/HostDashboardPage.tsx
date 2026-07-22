@@ -8,6 +8,7 @@ import {
   markHostGuestCheckpoint,
   updatePrototypeHostInstantBook,
   renewPrototypeHostListing,
+  submitHostIdDocument,
   updatePrototypeHostListingStatus,
   uploadListingDocument,
   type HostDashboardMode,
@@ -20,6 +21,7 @@ import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/Vi
 import { divisionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { HostAvailabilityCalendar } from './HostAvailabilityCalendar'
+import { hostTrustScore, hostVerificationState } from './hostVerificationModel'
 
 type Props = {
   lang: Lang
@@ -92,6 +94,14 @@ const copy = {
     verifiedMarketplaceSeller: 'بائع موثوق',
     pendingVerification: 'التوثيق قيد المراجعة',
     notVerifiedYet: 'غير موثق بعد',
+    verificationRejected: 'تم رفض التوثيق',
+    idUploading: 'جارٍ رفع وثيقة الهوية...',
+    idUploadFailed: 'تعذر رفع وثيقة الهوية. حاول مجدداً.',
+    idNotSubmitted: 'لم تُرسل وثيقة هوية للمراجعة بعد.',
+    idInReview: 'تم استلام وثيقة الهوية وهي قيد مراجعة الإدارة.',
+    idApproved: 'وافقت الإدارة على وثيقة الهوية.',
+    idOnFile: 'وثيقة هويتك محفوظة لدى الإدارة. ارفع وثيقة جديدة لاستبدالها.',
+    idRejected: 'رفضت الإدارة وثيقة الهوية. ارفع وثيقة جديدة.',
     healthDegree: 'درجة الصحة',
     excellentMonth: 'أداء ممتاز هذا الشهر',
     steadyMonth: 'أداء مستقر هذا الشهر',
@@ -206,6 +216,14 @@ const copy = {
     verifiedMarketplaceSeller: 'Verified seller',
     pendingVerification: 'Verification in review',
     notVerifiedYet: 'Not verified yet',
+    verificationRejected: 'Verification rejected',
+    idUploading: 'Uploading ID document...',
+    idUploadFailed: 'Could not upload the ID document. Try again.',
+    idNotSubmitted: 'No ID document has been sent for review yet.',
+    idInReview: 'ID document received and awaiting admin review.',
+    idApproved: 'Admin has approved your ID document.',
+    idOnFile: 'Your ID document is on file with admin. Upload a new one to replace it.',
+    idRejected: 'Admin rejected your ID document. Upload a new one.',
     healthDegree: 'Health score',
     excellentMonth: 'Excellent performance this month',
     steadyMonth: 'Steady performance this month',
@@ -272,8 +290,10 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const [activeListingId, setActiveListingId] = useState('')
   const [calendarListingId, setCalendarListingId] = useState('')
   const [acceptedRequestTerms, setAcceptedRequestTerms] = useState<Record<string, boolean>>({})
-  const [hostDocumentFiles, setHostDocumentFiles] = useState<string[]>([])
-  const [hostDocumentsSent, setHostDocumentsSent] = useState(false)
+  // C5: the name of the ID document that was actually uploaded to the server in this session, and
+  // the state of that upload. Neither feeds the trust score — they only report what happened.
+  const [hostIdDocumentName, setHostIdDocumentName] = useState('')
+  const [idUploadStatus, setIdUploadStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
   const [inventoryFilters, setInventoryFilters] = useState<VisualFilterSelection>({
     propertyType: 'any',
     roomType: 'any',
@@ -304,18 +324,19 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const listingApprovalScore = visibleListings.length ? Math.round((approvedListingCount / visibleListings.length) * 100) : 0
   const requestConfirmationScore = visibleRequests.length ? Math.round((confirmedRequestCount / visibleRequests.length) * 100) : 100
   const responseScore = visibleRequests.length ? clamp(100 - requestedRequestCount * 12 + confirmedRequestCount * 4, 45, 100) : 100
-  const trustScore = clamp(
-    Math.round(listingApprovalScore * 0.45 + requestConfirmationScore * 0.35 + (hostDocumentsSent ? 20 : hostDocumentFiles.length ? 10 : 0)),
-    0,
-    100,
-  )
+  // C5: every term below is a server fact. The identity term is credited only for an admin-approved
+  // ID document — see hostVerificationModel.ts.
+  const idDocumentStatus = overview?.host.idDocumentStatus
+  const verificationState = hostVerificationState(idDocumentStatus)
+  const trustScore = hostTrustScore({ listingApprovalScore, requestConfirmationScore, idDocumentStatus })
   const healthScore = clamp(Math.round((trustScore + averageQualityScore + responseScore) / 3), 0, 100)
-  const isDocumentVerified = overview?.host.idDocumentStatus === 'APPROVED'
-  const verificationStatusText = isDocumentVerified
+  const verificationStatusText = verificationState === 'verified'
     ? providerCopy.verifiedLabel
-    : overview?.host.idDocumentStatus === 'PENDING_REVIEW'
+    : verificationState === 'inReview'
       ? t.pendingVerification
-      : t.notVerifiedYet
+      : verificationState === 'rejected'
+        ? t.verificationRejected
+        : t.notVerifiedYet
   const dashboardCurrency = visibleListings[0]?.currency || overview?.requests[0]?.currency || 'SYP'
   const activeListingsLabel = isAr
     ? `${visibleListings.length} ${providerCopy.activeUnit}`
@@ -324,27 +345,39 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const hostDocumentsCopy = getHostDocumentsCopy(isAr, focus)
     || (isAr
       ? {
-        title: 'مستندات المضيف والاستضافة',
-        help: 'ارفع الهوية، إثبات الملكية أو التفويض، صور العقار، وأي ترخيص مطلوب. الإدارة تراجعها قبل تفعيل الثقة والصرف.',
-        cta: 'رفع مستندات المضيف',
-        empty: 'لم يتم رفع مستندات بعد. أضف PDF أو PNG أو JPG.',
-        send: 'إرسال المستندات للإدارة',
-        sent: 'تم إرسال مستندات المضيف للإدارة',
+        title: 'توثيق هوية المضيف',
+        help: 'ارفع صورة هويتك. تُرسل الوثيقة فعلياً إلى الإدارة للمراجعة، ولا تظهر شارة "مضيف موثوق" إلا بعد موافقة الإدارة.',
+        cta: 'رفع وثيقة الهوية',
+        empty: 'لم يتم رفع وثيقة هوية بعد. أضف PDF أو PNG أو JPG.',
       }
       : {
-        title: 'Host and hosting documents',
-        help: 'Upload ID, ownership proof or authorization, property photos, and any required license. Admin reviews them before trust and payout are enabled.',
-        cta: 'Upload host documents',
-        empty: 'No host documents uploaded yet. Add PDF, PNG, or JPG.',
-        send: 'Send documents to admin',
-        sent: 'Host documents sent to admin',
+        title: 'Host identity verification',
+        help: 'Upload your ID document. It is sent to admin for review, and the "Verified host" badge appears only after admin approval.',
+        cta: 'Upload ID document',
+        empty: 'No ID document uploaded yet. Add PDF, PNG, or JPG.',
       })
 
-  function addHostDocumentFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
-    setHostDocumentFiles((current) => Array.from(new Set([...current, ...names])))
-    setHostDocumentsSent(false)
+  // C5: uploading is the whole action — there is no separate "send to admin" step to fake, because
+  // a successful upload IS the submission (it sets idDocumentStatus to PENDING_REVIEW server-side).
+  // The overview is reloaded afterwards so the badge and trust score re-read the server's answer
+  // rather than anything decided here.
+  async function uploadHostIdDocument(fileList: FileList | null) {
+    const file = Array.from(fileList || [])[0]
+    if (!file) return
+
+    setIdUploadStatus('uploading')
+    setMessage('')
+
+    try {
+      await submitHostIdDocument(file, mode)
+      setHostIdDocumentName(file.name)
+      setIdUploadStatus('submitted')
+      await loadOverview()
+    } catch (error) {
+      setHostIdDocumentName('')
+      setIdUploadStatus('error')
+      setMessage(error instanceof Error ? error.message : t.idUploadFailed)
+    }
   }
 
   async function loadOverview() {
@@ -563,23 +596,33 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         </div>
       </section>
 
+      {/* The picker's file list is session-scoped, so after a reload it is empty even when a
+          document is on file. The empty text therefore says what the server knows rather than
+          "nothing uploaded yet", which would contradict the status line directly below it. */}
       <section style={styles.documentsPanel}>
         <PaymentProofUpload
-          cta={hostDocumentsCopy.cta}
-          emptyText={hostDocumentsCopy.empty}
-          files={hostDocumentFiles}
+          cta={idUploadStatus === 'uploading' ? t.idUploading : hostDocumentsCopy.cta}
+          disabled={idUploadStatus === 'uploading'}
+          emptyText={verificationState === 'unverified' ? hostDocumentsCopy.empty : t.idOnFile}
+          files={hostIdDocumentName ? [hostIdDocumentName] : []}
           help={hostDocumentsCopy.help}
           lang={lang}
-          onAddFiles={addHostDocumentFiles}
+          onAddFiles={(files) => void uploadHostIdDocument(files)}
           title={hostDocumentsCopy.title}
         />
-        <button
-          disabled={!hostDocumentFiles.length}
-          style={hostDocumentsSent ? styles.primaryButton : styles.secondaryButton}
-          onClick={() => setHostDocumentsSent(true)}
-        >
-          {hostDocumentsSent ? hostDocumentsCopy.sent : hostDocumentsCopy.send}
-        </button>
+        {/* Reports only what the server has actually recorded. There is no client-side control
+            here that can claim a review happened. */}
+        <p style={styles.documentsStatus}>
+          {idUploadStatus === 'error'
+            ? `✕ ${t.idUploadFailed}`
+            : verificationState === 'verified'
+              ? `✓ ${t.idApproved}`
+              : verificationState === 'inReview'
+                ? `◷ ${t.idInReview}`
+                : verificationState === 'rejected'
+                  ? `✕ ${t.idRejected}`
+                  : t.idNotSubmitted}
+        </p>
       </section>
 
       <section style={styles.filtersPanel}>
@@ -937,62 +980,56 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
   }
 }
 
+// C5: this panel now uploads exactly one thing — the provider's identity document, to
+// PATCH /api/me/id-document — so the copy describes that and nothing else. It previously promised
+// ownership deeds, permits, inspections and photo sets that the panel never uploaded anywhere; the
+// files picked there only ever became a list of names in local component state. Listing-scoped
+// documents have their own real endpoint (POST /api/listings/:id/documents, used by the listing
+// document panel below) and are out of C5's scope.
 function getHostDocumentsCopy(isAr: boolean, focus?: ProviderFocus) {
   if (focus === 'cars') {
     return isAr
       ? {
-          title: 'مستندات بائع المركبات',
-          help: 'ارفع رخصة المعرض أو الوكيل، ملكية المركبة، صور السيارة، الفحص الفني، وأي تفويض مطلوب قبل نشر المركبة.',
-          cta: 'رفع مستندات المركبة',
-          empty: 'لم يتم رفع مستندات المركبة بعد. أضف PDF أو PNG أو JPG.',
-          send: 'إرسال مستندات المركبة للإدارة',
-          sent: 'تم إرسال مستندات المركبة للإدارة',
+          title: 'توثيق هوية بائع المركبات',
+          help: 'ارفع صورة هويتك. تُرسل الوثيقة فعلياً إلى الإدارة للمراجعة، ولا تظهر شارة "بائع موثوق" إلا بعد موافقة الإدارة.',
+          cta: 'رفع وثيقة الهوية',
+          empty: 'لم يتم رفع وثيقة هوية بعد. أضف PDF أو PNG أو JPG.',
         }
       : {
-          title: 'Vehicle seller documents',
-          help: 'Upload dealer/agent license, vehicle ownership, car photos, inspection files, and any required authorization before publishing.',
-          cta: 'Upload vehicle documents',
-          empty: 'No vehicle documents uploaded yet. Add PDF, PNG, or JPG.',
-          send: 'Send vehicle documents to admin',
-          sent: 'Vehicle documents sent to admin',
+          title: 'Vehicle seller identity verification',
+          help: 'Upload your ID document. It is sent to admin for review, and the verified badge appears only after admin approval.',
+          cta: 'Upload ID document',
+          empty: 'No ID document uploaded yet. Add PDF, PNG, or JPG.',
         }
   }
   if (focus === 'newConstruction') {
     return isAr
       ? {
-          title: 'مستندات المطور والمشروع',
-          help: 'ارفع رخصة المطور، سند الأرض أو الملكية، رخص البناء، المخططات، صور المشروع، وجدول الوحدات قبل نشر المشروع.',
-          cta: 'رفع مستندات المشروع',
-          empty: 'لم يتم رفع مستندات المشروع بعد. أضف PDF أو PNG أو JPG.',
-          send: 'إرسال مستندات المشروع للإدارة',
-          sent: 'تم إرسال مستندات المشروع للإدارة',
+          title: 'توثيق هوية المطور',
+          help: 'ارفع صورة هويتك. تُرسل الوثيقة فعلياً إلى الإدارة للمراجعة، ولا تظهر شارة "مطور موثوق" إلا بعد موافقة الإدارة.',
+          cta: 'رفع وثيقة الهوية',
+          empty: 'لم يتم رفع وثيقة هوية بعد. أضف PDF أو PNG أو JPG.',
         }
       : {
-          title: 'Developer and project documents',
-          help: 'Upload developer license, land/ownership deed, building permits, plans, project photos, and unit schedule before publishing.',
-          cta: 'Upload project documents',
-          empty: 'No project documents uploaded yet. Add PDF, PNG, or JPG.',
-          send: 'Send project documents to admin',
-          sent: 'Project documents sent to admin',
+          title: 'Developer identity verification',
+          help: 'Upload your ID document. It is sent to admin for review, and the verified badge appears only after admin approval.',
+          cta: 'Upload ID document',
+          empty: 'No ID document uploaded yet. Add PDF, PNG, or JPG.',
         }
   }
   if (focus === 'marketplace') {
     return isAr
       ? {
-          title: 'مستندات بائع السوق',
-          help: 'ارفع هوية البائع، صور المنتج، فاتورة أو إثبات الملكية، وأي تفويض مطلوب قبل نشر المنتج.',
-          cta: 'رفع مستندات المنتج',
-          empty: 'لم يتم رفع مستندات المنتج بعد. أضف PDF أو PNG أو JPG.',
-          send: 'إرسال مستندات المنتج للإدارة',
-          sent: 'تم إرسال مستندات المنتج للإدارة',
+          title: 'توثيق هوية بائع السوق',
+          help: 'ارفع صورة هويتك. تُرسل الوثيقة فعلياً إلى الإدارة للمراجعة، ولا تظهر شارة "بائع موثوق" إلا بعد موافقة الإدارة.',
+          cta: 'رفع وثيقة الهوية',
+          empty: 'لم يتم رفع وثيقة هوية بعد. أضف PDF أو PNG أو JPG.',
         }
       : {
-          title: 'Marketplace seller documents',
-          help: 'Upload seller ID, product photos, invoice/ownership proof, and any required authorization before publishing.',
-          cta: 'Upload product documents',
-          empty: 'No product documents uploaded yet. Add PDF, PNG, or JPG.',
-          send: 'Send product documents to admin',
-          sent: 'Product documents sent to admin',
+          title: 'Marketplace seller identity verification',
+          help: 'Upload your ID document. It is sent to admin for review, and the verified badge appears only after admin approval.',
+          cta: 'Upload ID document',
+          empty: 'No ID document uploaded yet. Add PDF, PNG, or JPG.',
         }
   }
   return null
@@ -1069,6 +1106,7 @@ const styles: Record<string, CSSProperties> = {
   trackFill: { display: 'block', height: '100%', borderRadius: 999, background: '#e5b80b' },
   healthScore: { justifySelf: 'end', width: 128, height: 128, borderRadius: 999, border: '12px solid #20d29b', display: 'grid', placeItems: 'center', alignContent: 'center', textAlign: 'center', color: '#fff' },
   documentsPanel: { border: '1px solid rgba(32,210,155,.45)', borderRadius: 8, background: '#101722', padding: 16, display: 'grid', gap: 12 },
+  documentsStatus: { margin: 0, color: '#8d92a2', fontSize: 14, lineHeight: 1.5 },
   aiPanel: { border: '1px solid rgba(229,184,11,.9)', borderRadius: 8, background: '#101016', padding: 32, display: 'grid', gap: 20 },
   aiTitle: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#e5b80b', fontSize: 22 },
   aiSuggestion: { border: '1px solid #151722', borderRadius: 8, background: '#090a0f', minHeight: 116, padding: 22, display: 'grid', gap: 18, gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center' },
