@@ -17,6 +17,8 @@ import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
 import { selectCoverUrl } from '../seller/listingPhotos'
+import { ListingGallery } from './ListingGallery'
+import { listingAmenities } from './listingAmenities'
 import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
@@ -451,20 +453,24 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             >
               →
             </button>
-            <div style={styles.media}>
-              <img
-                src={listingImage(listing)}
-                alt={title}
-                style={styles.mediaImage}
-                onError={(event) => {
-                  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                  if (event.currentTarget.src.endsWith(fallback)) return
-                  event.currentTarget.src = fallback
-                }}
-              />
-              <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
-              {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
-            </div>
+            <ListingGallery
+              lang={lang}
+              // CARS / NEW_CONSTRUCTION / MARKETPLACE keep their stock-image behavior (S3 scope) — pass
+              // no media so the gallery shows only the division fallback; STAYS/property use real media.
+              media={
+                listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION' || listing.division === 'MARKETPLACE'
+                  ? undefined
+                  : listing.media
+              }
+              fallback={DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'}
+              alt={title}
+              badges={
+                <>
+                  <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
+                  {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
+                </>
+              }
+            />
           </section>
 
           <section style={styles.detailBody}>
@@ -522,6 +528,27 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               ))}
               {listing.instantBookEnabled && <p style={styles.instantBookNote}>⚡ {t.instantBookExplain}</p>}
             </section>
+
+            {listing.division === 'STAYS' && (() => {
+              // C3: always-visible amenities section (not buried in a tab), resolved from existing
+              // metadata.visualFilters via the existing filter definitions. Rendered only when the
+              // listing actually has amenities (no false "no amenities" claim).
+              const amenities = listingAmenities(listing.metadata, lang)
+              if (amenities.length === 0) return null
+              return (
+                <section style={styles.amenities}>
+                  <h2>{isAr ? 'المرافق' : 'Amenities'}</h2>
+                  <ul className="listing-amenities" dir={isAr ? 'rtl' : 'ltr'}>
+                    {amenities.map((amenity) => (
+                      <li key={amenity.id}>
+                        {amenity.iconSrc && <img src={amenity.iconSrc} alt="" loading="lazy" aria-hidden="true" />}
+                        <span>{amenity.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )
+            })()}
           </section>
 
           {activeTab === 'terms' && (
@@ -890,6 +917,7 @@ const styles: Record<string, CSSProperties> = {
   tabPanel: { display: 'grid', gap: 14 },
   figmaTrustCard: { border: '1px solid #232635', borderRadius: 18, background: '#151620', padding: 18, display: 'grid', gap: 14 },
   trustPills: { display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' },
+  amenities: { display: 'grid', gap: 10 },
   bookingSteps: { display: 'grid', gap: 10 },
   bookingStep: { display: 'grid', gridTemplateColumns: '38px minmax(0, 1fr)', alignItems: 'center', gap: 10, color: '#9aa6ba' },
   instantBookNote: { border: '1px solid rgba(213,169,21,.35)', borderRadius: 8, background: 'rgba(213,169,21,.08)', color: '#d5a915', padding: 12, fontWeight: 700 },
