@@ -16,6 +16,7 @@ import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSn
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
+import { selectCoverUrl } from '../seller/listingPhotos'
 import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
@@ -755,12 +756,14 @@ function toISODate(date: Date) {
 }
 
 function listingImage(listing: PlatformListing) {
+  // CARS / NEW_CONSTRUCTION / MARKETPLACE display work is roadmap item S3 — left untouched here.
   if (listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION' || listing.division === 'MARKETPLACE') {
     return DIVISION_IMAGES[listing.division]
   }
-  const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
-  if (typeof mediaUrl === 'string') return mediaUrl
-  return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+  // C2: show the REAL cover (the first uploaded photo, i.e. lowest sortOrder) instead of stock art;
+  // fall back to the division image only when the listing has no real photos yet.
+  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+  return selectCoverUrl(listing.media, fallback)
 }
 
 function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir?: 'ltr' | 'rtl' }) {

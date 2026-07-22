@@ -7,9 +7,13 @@ import {
   addAccommodationRoomType,
   createAccommodation,
   createAndSubmitPrototypeListing,
+  uploadListingPhoto,
+  blobToBase64,
   generateListingDescription,
   submitAccommodation,
 } from '../../shared/api/platformApi'
+import { ListingPhotoUploader, type PhotoDraft } from './ListingPhotoUploader'
+import { uploadPhotosSequentially, meetsMinimumPhotos, type PhotoItem } from './listingPhotos'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import {
@@ -407,6 +411,12 @@ export function SellerListingWizard({ lang }: Props) {
   )
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [submitError, setSubmitError] = useState('')
+  // C2 — real STR property photos (independent of plan payment). STAYS uses the accommodation flow:
+  // photos attach to the room-type Listing created by addAccommodationRoomType. roomTypeListingId is
+  // retained so a retry after a partial upload failure reuses the same room-type listing and only
+  // re-uploads the not-yet-uploaded photos.
+  const [photoDrafts, setPhotoDrafts] = useState<PhotoDraft[]>([])
+  const [roomTypeListingId, setRoomTypeListingId] = useState<string | null>(null)
   const [descriptionAiState, setDescriptionAiState] = useState<'idle' | 'generating' | 'error'>('idle')
   const [descriptionAiError, setDescriptionAiError] = useState('')
   // Set once the accommodation shell + first STAYS room type are created; every following room
@@ -818,65 +828,100 @@ export function SellerListingWizard({ lang }: Props) {
 
       try {
         if (isMultiRoomFlow) {
-          if (!accommodationId) {
-            const accommodation = await createAccommodation({
-              titleAr: title || (isAr ? 'عقار SYBNB جديد' : 'New SYBNB property'),
-              titleEn: title,
-              description,
-              governorate,
-              city,
-              area,
-              address,
-              metadata: {
-                country,
-                citqRegistrationNumber: isQuebecStr ? citqRegistrationNumber.trim() : undefined,
-        citqCertificateExpiresAt: isQuebecStr ? citqCertificateExpiresAt : undefined,
-                residencyType: isQuebecStr ? residencyType : undefined,
-                uploadedDocumentFiles,
-                governorateLabel: selectedGovernorateLabel,
-                cityLabel: selectedCityLabel,
-                areaLabel: selectedAreaLabel,
-                availabilityCalendar,
-                mapLocation,
-                listingPlan: selectedListingPlan.id,
-                listingPlanPriceUsd: selectedListingPlan.priceUsd,
-                listingPlanPaymentMethod,
-                listingPlanPaymentConfirmed,
-                allowedMediaSlots: allowedMediaSlots.map((slot) => slot.id),
-                selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
-                uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
-                missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
-                quebecComplianceSlots: quebecComplianceSlots.map((slot) => slot.id),
-                missingQuebecComplianceSlots: missingQuebecComplianceSlots.map((slot) => slot.id),
-              },
-            })
-            await addAccommodationRoomType(accommodation.id, {
-              titleAr: title || (isAr ? 'نوع غرفة جديد' : 'New room type'),
-              titleEn: title,
-              description,
-              priceMinor: toMinor(price),
-              currency: 'USD',
-              instantBookEnabled,
-              metadata: roomTypeMetadata,
-            })
-            setAccommodationId(accommodation.id)
-          } else {
-            await addAccommodationRoomType(accommodationId, {
-              titleAr: title || (isAr ? 'نوع غرفة جديد' : 'New room type'),
-              titleEn: title,
-              description,
-              priceMinor: toMinor(price),
-              currency: 'USD',
-              instantBookEnabled,
-              metadata: roomTypeMetadata,
-            })
+          // C2: real property photos are required and attach to the room-type Listing created below.
+          if (!meetsMinimumPhotos(photoDrafts.length)) {
+            setSubmitState('error')
+            setSubmitError(isAr ? 'أضف صورة واحدة على الأقل حتى يرى الضيوف مكانك.' : 'Add at least one photo so guests can see your place.')
+            return
           }
+
+          // Create the room-type Listing once; on a retry after a partial upload failure, reuse the
+          // same room-type listing id so photos aren't re-created and a duplicate room isn't added.
+          let roomListingId = roomTypeListingId
+          if (!roomListingId) {
+            let accId = accommodationId
+            if (!accId) {
+              const accommodation = await createAccommodation({
+                titleAr: title || (isAr ? 'عقار SYBNB جديد' : 'New SYBNB property'),
+                titleEn: title,
+                description,
+                governorate,
+                city,
+                area,
+                address,
+                metadata: {
+                  country,
+                  citqRegistrationNumber: isQuebecStr ? citqRegistrationNumber.trim() : undefined,
+                  citqCertificateExpiresAt: isQuebecStr ? citqCertificateExpiresAt : undefined,
+                  residencyType: isQuebecStr ? residencyType : undefined,
+                  uploadedDocumentFiles,
+                  governorateLabel: selectedGovernorateLabel,
+                  cityLabel: selectedCityLabel,
+                  areaLabel: selectedAreaLabel,
+                  availabilityCalendar,
+                  mapLocation,
+                  listingPlan: selectedListingPlan.id,
+                  listingPlanPriceUsd: selectedListingPlan.priceUsd,
+                  listingPlanPaymentMethod,
+                  listingPlanPaymentConfirmed,
+                  allowedMediaSlots: allowedMediaSlots.map((slot) => slot.id),
+                  selectedOfferProofSlots: activeOfferProofSlots.map((slot) => slot.id),
+                  uploadedOfferProofSlots: uploadedAdFiles.filter((id) => id.startsWith(OFFER_PROOF_PREFIX)),
+                  missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
+                  quebecComplianceSlots: quebecComplianceSlots.map((slot) => slot.id),
+                  missingQuebecComplianceSlots: missingQuebecComplianceSlots.map((slot) => slot.id),
+                },
+              })
+              accId = accommodation.id
+              setAccommodationId(accId)
+            }
+            const roomListing = await addAccommodationRoomType(accId, {
+              titleAr: title || (isAr ? 'نوع غرفة جديد' : 'New room type'),
+              titleEn: title,
+              description,
+              priceMinor: toMinor(price),
+              currency: 'USD',
+              instantBookEnabled,
+              metadata: roomTypeMetadata,
+            })
+            roomListingId = roomListing.id
+            setRoomTypeListingId(roomListingId)
+          }
+
+          // Upload the real photos SEQUENTIALLY to the room-type Listing via the existing /media API.
+          // Never advance/submit until every photo is server-confirmed; a failure is retryable.
+          const io = {
+            encodePhoto: async (photoItem: PhotoItem) => {
+              const draft = photoDrafts.find((p) => p.item.id === photoItem.id)
+              if (!draft) throw new Error('Missing photo data')
+              return { fileBase64: await blobToBase64(draft.blob), mimeType: photoItem.mimeType }
+            },
+            uploadPhoto: async (listingId: string, encoded: { fileBase64: string; mimeType: string }) =>
+              uploadListingPhoto(listingId, encoded),
+          }
+          const result = await uploadPhotosSequentially(photoDrafts.map((p) => p.item), io, roomListingId)
+          setPhotoDrafts((prev) =>
+            prev.map((p) => {
+              const updated = result.items.find((i) => i.id === p.item.id)
+              return updated ? { ...p, item: updated } : p
+            }),
+          )
+          if (!result.ok) {
+            setSubmitState('error')
+            setSubmitError(
+              isAr
+                ? 'تعذّر رفع بعض الصور. اضغط الحفظ مرة أخرى لإعادة المحاولة للصور المتعثرة فقط.'
+                : 'Some photos failed to upload. Press Save again to retry only the failed ones.',
+            )
+            return
+          }
+          setRoomTypeListingId(null) // this room type is complete; a new room type starts fresh
           setSubmitState('idle')
           setRoomTypeStage('prompt')
           return
         }
 
-        await createAndSubmitPrototypeListing({
+        const listingInput = {
           division,
           titleAr: title || 'إعلان SYBNB جديد',
           titleEn: title,
@@ -929,7 +974,11 @@ export function SellerListingWizard({ lang }: Props) {
             availabilityCalendar,
             mapLocation,
           },
-        })
+        }
+
+        // Non-STAYS divisions (and the STAYS advertising variant) publish a single listing; the STAYS
+        // property flow is handled above via the accommodation/room-type path (C2 photos attach there).
+        await createAndSubmitPrototypeListing(listingInput)
         clearDraft()
         navigate('/sell/submitted')
       } catch (error) {
@@ -953,6 +1002,11 @@ export function SellerListingWizard({ lang }: Props) {
     setBathrooms('1')
     setSelectedType(PROPERTY_TYPES[0].en)
     setVisualFilters({ propertyType: 'apartment', roomType: 'doubleRoom', bedType: 'queenBed', amenities: ['wifi', 'kitchen'] })
+    // C2: keep the selected images (no re-selection needed, per the prompt copy) but reset their
+    // upload state so they re-upload as THIS new room type's own ListingMedia — each room type manages
+    // its own media; no shared galleries or cross-room synchronization.
+    setPhotoDrafts((prev) => prev.map((p) => ({ ...p, item: { ...p.item, status: 'selected', mediaUrl: undefined, error: undefined } })))
+    setRoomTypeListingId(null)
     setRoomTypeStage('idle')
     setStepIndex(0)
   }
@@ -1792,6 +1846,17 @@ export function SellerListingWizard({ lang }: Props) {
 
           {activeStep.id === 'media' && (
             <div className="seller-wizard-section">
+              {isMultiRoomFlow && (
+                // C2: real property photos for the STAYS room-type Listing — rendered independently of
+                // the plan-payment lock below, so photos are never behind a payment gate (removing the
+                // gate itself is roadmap C6).
+                <ListingPhotoUploader
+                  lang={lang}
+                  photos={photoDrafts}
+                  onChange={setPhotoDrafts}
+                  busy={submitState === 'submitting'}
+                />
+              )}
               {!isAdvertisingFlow && !listingPlanPaymentConfirmed ? (
                 <div className="seller-host-plan-lock">
                   <span>{isAr ? 'الرفع مقفل' : 'Uploads locked'}</span>

@@ -45,9 +45,12 @@ For every roadmap item:
 8. API tests.
 9. Security tests.
 10. Production build.
-11. Stop.
-12. Wait for approval.
-13. Local checkpoint commit.
+11. **Manual end-to-end browser verification of the real user workflow** (launch-critical features).
+    Automated tests validate logic in isolation; they do NOT prove the feature is wired into the path
+    the real application executes. Drive the actual flow in a browser before considering it done.
+12. Stop.
+13. Wait for approval.
+14. Local checkpoint commit.
 
 Never push.
 Never merge.
@@ -78,3 +81,8 @@ before the checkpoint commit.
 # 7. Completion rule
 
 STR is considered launch-ready only when every P0 and P1 roadmap item is completed and approved.
+
+**No launch-critical feature is considered complete until it passes BOTH automated tests AND a manual
+end-to-end browser verification of the real user workflow.** (Established after C2: automated unit/API
+tests all passed while the feature was wired into a code path the real STAYS flow never executed; only
+the manual browser walkthrough caught it.)

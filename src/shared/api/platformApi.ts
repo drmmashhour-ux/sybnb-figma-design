@@ -651,6 +651,43 @@ export async function createAndSubmitPrototypeListing(input: CreateListingInput)
   return submitted.listing
 }
 
+// C2 — Real Property Photo Upload. Pattern A splits the STAYS create/submit so real photos can be
+// uploaded to the existing /media endpoint in between: create draft -> upload each photo -> submit.
+// These are thin wrappers over the SAME endpoints and session as createAndSubmitPrototypeListing; no
+// new server routes or schema. Photo upload is intentionally independent of any plan-payment state.
+export async function createDraftPrototypeListing(input: CreateListingInput): Promise<PlatformListing> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const created = await apiRequest<{ ok: true; listing: PlatformListing }>('/api/listings', {
+    method: 'POST',
+    token: session.token,
+    body: { division: 'STAYS', ...input },
+  })
+  return created.listing
+}
+
+export async function uploadListingPhoto(
+  listingId: string,
+  photo: { fileBase64: string; mimeType: string },
+): Promise<{ url: string }> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const res = await apiRequest<{ ok: true; media: { url: string } }>(`/api/listings/${listingId}/media`, {
+    method: 'POST',
+    token: session.token,
+    body: { fileBase64: photo.fileBase64, mimeType: photo.mimeType },
+  })
+  return res.media
+}
+
+export async function submitPrototypeListing(listingId: string): Promise<PlatformListing> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const submitted = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}/submit`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  sessionStorage.setItem(LAST_SUBMITTED_LISTING_KEY, JSON.stringify(submitted.listing))
+  return submitted.listing
+}
+
 // Facebook-style marketplace quick-list: create a free MARKETPLACE (goods) listing, attach the photo
 // (required for goods), and submit it for review — all in one call. Uses the seller/host session.
 export async function createAndSubmitMarketplaceListing(input: {
@@ -935,6 +972,12 @@ function readFileAsBase64(file: File): Promise<string> {
     }
     reader.readAsDataURL(file)
   })
+}
+
+// C2: encode a (compressed) image Blob to bare base64 for the /media endpoint — same strip-the-prefix
+// logic as readFileAsBase64, but accepts the canvas-produced Blob from the photo uploader.
+export function blobToBase64(blob: Blob): Promise<string> {
+  return readFileAsBase64(blob as File)
 }
 
 // Previously this only ever sent the file's *name* to the server — the actual image was never

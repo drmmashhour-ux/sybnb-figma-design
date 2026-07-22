@@ -8874,3 +8874,53 @@ button.division-triad-item:hover {
     flex-direction: column;
   }
 }
+
+/* C2 — Real Property Photo Uploader (mobile-first, RTL-aware via logical properties). */
+.listing-photo-uploader { margin-block: 16px; }
+.listing-photo-uploader .lpu-head { display: flex; flex-direction: column; gap: 4px; margin-block-end: 10px; }
+.listing-photo-uploader .lpu-head strong { font-size: 16px; }
+.listing-photo-uploader .lpu-head span { font-size: 13px; opacity: .75; }
+.listing-photo-uploader .lpu-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+.listing-photo-uploader .lpu-cell {
+  position: relative; margin: 0; border-radius: 12px; overflow: hidden;
+  aspect-ratio: 4 / 3; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+}
+.listing-photo-uploader .lpu-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.listing-photo-uploader .lpu-cell .lpu-noimg { width: 100%; height: 100%; }
+.listing-photo-uploader .lpu-cover-badge {
+  position: absolute; inset-block-start: 8px; inset-inline-start: 8px;
+  background: #d5a915; color: #1a1a1a; font-size: 11px; font-weight: 800;
+  padding: 3px 8px; border-radius: 999px;
+}
+.listing-photo-uploader .lpu-status {
+  position: absolute; inset-block-start: 8px; inset-inline-end: 8px;
+  font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  background: rgba(0,0,0,.6); color: #fff;
+}
+.listing-photo-uploader .lpu-status.ok { background: #1f7a4d; }
+.listing-photo-uploader .lpu-status.err { background: #b23636; }
+.listing-photo-uploader .lpu-cell figcaption {
+  position: absolute; inset-block-end: 0; inset-inline: 0; display: flex; gap: 6px;
+  padding: 6px; background: linear-gradient(transparent, rgba(0,0,0,.65));
+}
+.listing-photo-uploader .lpu-cell figcaption button {
+  flex: 1; min-height: 36px; font-size: 12px; border: 0; border-radius: 8px;
+  background: rgba(255,255,255,.92); color: #1a1a1a; font-weight: 700; touch-action: manipulation;
+}
+.listing-photo-uploader .lpu-add {
+  aspect-ratio: 4 / 3; border: 2px dashed rgba(255,255,255,.3); border-radius: 12px;
+  background: transparent; color: inherit; font-size: 14px; font-weight: 700;
+  display: grid; place-items: center; touch-action: manipulation; min-height: 100px;
+}
+.listing-photo-uploader .lpu-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block-start: 10px; font-size: 13px; }
+.listing-photo-uploader .lpu-min { color: #d5a915; }
+.listing-photo-uploader .lpu-notice { color: #e88; }
+.listing-photo-uploader .lpu-retry {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block-start: 10px;
+  padding: 10px 12px; border-radius: 10px; background: rgba(178,54,54,.15); border: 1px solid rgba(178,54,54,.4);
+  font-size: 13px;
+}
+.listing-photo-uploader .lpu-retry button { min-height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: #d5a915; color: #1a1a1a; font-weight: 800; touch-action: manipulation; }
