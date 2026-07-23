@@ -17,7 +17,8 @@ import {
   readListingMedia,
   saveListingMedia,
 } from '../lib/listing-media-storage.mjs'
-import { deleteListingDocument, readListingDocument, saveListingDocument } from '../lib/listing-document-storage.mjs'
+import { LISTING_DOCUMENT_CATEGORY, deleteListingDocument, readListingDocument, saveListingDocument } from '../lib/listing-document-storage.mjs'
+import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
 import { retentionDeleteAfter } from '../lib/listing-document-retention.mjs'
 
 // Québec compliance review (item 1): real certificate types a host can upload against a listing.
@@ -706,7 +707,13 @@ export async function handleListings(req, res, url, context) {
       throw error
     }
     const buffer = await readListingDocument(document.assetUrl)
-    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    // STG-12 / SYB-004: forced download. Previously served with a bare content-type, so a PDF
+    // rendered inline in the host's authenticated, same-origin session.
+    res.writeHead(200, privateDocumentDownloadHeaders({
+      mimeType: document.mimeType || 'application/octet-stream',
+      category: LISTING_DOCUMENT_CATEGORY,
+      byteLength: buffer.length,
+    }))
     res.end(buffer)
     return true
   }

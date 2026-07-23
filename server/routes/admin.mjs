@@ -9,7 +9,7 @@ import { ID_DOCUMENT_CATEGORY, deleteIdDocument, readIdDocument, saveIdDocument 
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
 import { recordStaffDocumentAccess } from '../lib/document-access-audit.mjs'
 import { readDriverDocument } from '../lib/driver-document-storage.mjs'
-import { readListingDocument } from '../lib/listing-document-storage.mjs'
+import { LISTING_DOCUMENT_CATEGORY, readListingDocument } from '../lib/listing-document-storage.mjs'
 import { getOperationalDocumentStatuses, setListingDocumentLegalHold } from '../lib/listing-document-retention.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
 import { assertBoundedString } from '../lib/validate.mjs'
@@ -1033,7 +1033,15 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
     const buffer = await readDriverDocument(document.assetUrl)
-    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    // STG-12 / SYB-004: forced download. This is the admin-surface handler; the Ride module's own
+    // route (driver.mjs) is frozen and intentionally unchanged. The helper's category allowlist has
+    // no 'driver' entry and the helper itself is frozen, so this uses the generic category — the
+    // protection is the `attachment` disposition, not the filename label.
+    res.writeHead(200, privateDocumentDownloadHeaders({
+      mimeType: document.mimeType || 'application/octet-stream',
+      category: 'document',
+      byteLength: buffer.length,
+    }))
     res.end(buffer)
     return true
   }
@@ -1089,7 +1097,12 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
     const buffer = await readListingDocument(document.assetUrl)
-    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    // STG-12 / SYB-004: forced download for the staff review path, matching the host-facing route.
+    res.writeHead(200, privateDocumentDownloadHeaders({
+      mimeType: document.mimeType || 'application/octet-stream',
+      category: LISTING_DOCUMENT_CATEGORY,
+      byteLength: buffer.length,
+    }))
     res.end(buffer)
     return true
   }

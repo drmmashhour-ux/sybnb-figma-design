@@ -33,8 +33,26 @@ unprovisioned: only the two test buckets exist, only test credentials are inject
 production provisioning have not been performed. The external-verification launch gates
 (`SYBNB_EXTERNAL_VERIFICATION_LAUNCH_GATES.md`, EV-01…EV-07) all remain OPEN.
 
-**Findings closed by this implementation:** STG-12 (private documents forced to attachment
-disposition) · STG-24 (staff private-document access audited at the approved boundary).
+~~**Findings closed by this implementation:** STG-12 (private documents forced to attachment
+disposition) · STG-24 (staff private-document access audited at the approved boundary).~~
+
+> **CORRECTION — 2026-07-23 (owner decision SYB-004, Wave 0).** The struck-through claim above was
+> **inaccurate as written** and is retained rather than deleted so the record shows what was believed
+> and when. Neither finding was closed by this implementation:
+>
+> - **STG-12 — PARTIALLY CLOSED.** Forced download was implemented on the **identity-document path
+>   only** (2 routes) while nine routes serve stored private documents. Four further unfrozen routes
+>   were remediated on 2026-07-23 under SYB-004, bringing coverage to **6 of 9**. The three remaining
+>   routes — `driver.mjs` and `quebec-driver-onboarding.mjs` (×2) — **still render inline** and are
+>   intentionally deferred behind the Ride and Québec freezes. No unfreeze is authorized; changing them
+>   requires a separate Architecture Change Request and explicit owner approval.
+> - **STG-24 — NOT CLOSED, and not corrected here.** Staff document-view auditing covers a small
+>   subset of routes. This is tracked separately as **SYB-005**, which is **undecided**. This
+>   correction deliberately does not alter it.
+>
+> Route-by-route status: `docs/security/STR_STORAGE_THREAT_MODEL.md`, *STG-12 — corrected
+> implementation status*. Origin: independent review finding **SYB-004 (Critical)**, confirmed at
+> runtime by **E2E-06**.
 
 **Findings deliberately left open** — recorded in `STR_STORAGE_THREAT_MODEL.md` and
 `SYBNB_PERSISTENT_OBJECT_STORAGE_IMPLEMENTATION_PLAN.md`, and not resolved here:

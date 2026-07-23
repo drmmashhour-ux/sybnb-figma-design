@@ -36,10 +36,66 @@ classification changed, the original wording is retained beside it.
 
 | Finding | Status after implementation |
 |---|---|
-| **STG-12** — inline rendering of private PDFs | **CLOSED.** Private documents are served with `Content-Disposition: attachment` and a sanitised, server-derived filename built from a category allowlist plus the stored MIME type — no code path admits caller input, the storage key, or a user id. `nosniff`, `private, no-store` and `Content-Length` are set. Approved listing media is deliberately excluded from forced download |
+| **STG-12** — inline rendering of private PDFs | ~~**CLOSED.**~~ **PARTIALLY CLOSED — 6 of 9 private-document routes.** The original wording is retained struck through above because it was wrong, not merely imprecise: forced download was implemented on the identity-document path only and recorded as closed for all class B/C responses. **Corrected 2026-07-23 under owner decision SYB-004 (Wave 0).** Full route-by-route status in *STG-12 — corrected implementation status* below |
 | **STG-24** — staff document-view auditing | **CLOSED at the approved boundary.** Staff reads emit `STAFF_DOCUMENT_ACCESSED` via `server/lib/document-access-audit.mjs` recording actor, roles, entity reference, category, result and timestamp. Tested to contain no document bytes, storage key, bucket, endpoint or credential. Worker self-access is intentionally not audited. **Two gaps remain recorded:** no purpose/case-reference column exists, and audit failure is non-blocking with no alert routing (depends on STG-22) |
 | **STG-11** — malicious upload content | **OPEN, unchanged.** Signature validation was added on both paths, but signature validation ≠ malware scanning ≠ deep structural validation ≠ safe document content. Deep parsing, antivirus, sandboxing and content disarm remain future hardening |
 | **STG-14** — orphaned objects | **OPEN, unchanged.** Object→metadata ordering with cleanup on metadata failure is implemented, so a dangling reference is prevented; the process-crash window still orphans objects. Reconciliation remains future hardening |
+
+#### STG-12 — corrected implementation status (2026-07-23)
+
+**Why this correction exists.** This document recorded STG-12 as CLOSED on 2026-07-22 when
+`privateDocumentDownloadHeaders()` had two call sites against nine routes that serve a stored private
+document. The control was real, but the claim was general and the implementation was not. Independent
+review raised it as **SYB-004 (Critical)**; live testing confirmed the exact split (**E2E-06**). The
+error was in this document, not only in the code: a security record that overstates a control is worse
+than a recorded gap, because it stops anyone looking.
+
+**Current state — 6 of 9 routes forced to download.**
+
+**1. Protected — identity-document paths** *(implemented 2026-07-22, Phase 3)*
+
+| Route | File |
+|---|---|
+| `GET /api/me/id-document/file` | `server/routes/me.mjs:212` |
+| `GET /api/admin/id-document/:userId/file` | `server/routes/admin.mjs:402` |
+
+**2. Protected — remaining unfrozen private-document routes** *(implemented 2026-07-23, SYB-004 Wave 0)*
+
+| Route | File |
+|---|---|
+| `GET /api/listings/:id/documents/:docId/file` | `server/routes/listings.mjs` |
+| `GET /api/listings/:id/thread/documents/:docId/file` | `server/routes/messages.mjs` |
+| `GET /api/admin/listing-documents/:docId/file` | `server/routes/admin.mjs` |
+| `GET /api/admin/driver-documents/:docId/file` | `server/routes/admin.mjs` |
+
+All six serve `Content-Disposition: attachment` with a server-derived filename built from a category
+allowlist plus the stored MIME type — no code path admits caller input, the storage key, or a user id —
+together with `nosniff`, `private, no-store` and `Content-Length`. Covered by
+`test/api/private-document-forced-download.test.mjs` and `test/api/private-document-object-storage.test.mjs`.
+
+**3. Still unprotected — frozen platform boundaries, intentionally deferred**
+
+| Route | File | Boundary |
+|---|---|---|
+| driver document file | `server/routes/driver.mjs:314` | Ride |
+| Québec onboarding document files (×2) | `server/routes/quebec-driver-onboarding.mjs:195, :441` | Québec |
+
+These three **still render inline** and remain an **OPEN** part of STG-12. No boundary unfreeze was
+authorized under SYB-004; changing them requires a separate Architecture Change Request and explicit
+owner approval. They are additionally affected by the unrelated ephemeral-storage defect recorded below.
+
+**Scope note.** `GET /api/admin/driver-documents/:id/file` is an *admin-surface* handler over
+driver-domain data and was remediated because it lives in `server/routes/admin.mjs`, a Platform/Admin
+module. The Ride module's own route (`driver.mjs`) was not touched. Because the helper's category
+allowlist has no `driver` entry — and the helper is frozen — that route serves the generic
+`sybnb-document.pdf` filename; the protection is the `attachment` disposition, not the label.
+
+**Approved listing media** is deliberately excluded from forced download and is unaffected by this
+correction.
+
+**Related finding, not corrected here.** **STG-24** (staff document-view auditing) is recorded CLOSED in
+the row above and is subject to the same class of overstatement. It is tracked separately as **SYB-005**
+and is **undecided**; nothing in this correction alters it.
 
 **Approved allowlists, enforced against both the declared MIME type and the actual file signature:**
 media `image/jpeg` · `image/png` · `image/webp`; documents `application/pdf` · `image/jpeg` ·
@@ -280,6 +336,10 @@ ACCEPTED RESIDUAL RISK · FUTURE HARDENING.
 **Residual risk** Low after mitigation.
 **Severity** Medium · **Likelihood** Low · **Priority** P2 · **Owner** Engineering · **Classification** CLOSED-BETA BLOCKER
 *Note: this is a **pre-existing** condition, not introduced by the R2 migration. It is recorded here because this workstream is the right time to fix it.*
+**Status (2026-07-23): PARTIALLY CLOSED — 6 of 9 routes.** The three frozen Ride/Québec routes still
+render inline. See *STG-12 — corrected implementation status* near the top of this document. The
+"Required Phase 1 mitigation" above — forced download on **all** class B/C responses — is therefore
+**not yet fully met**.
 
 ### STG-13 — Partial failure between object write and metadata write
 **Category** Integrity · **Asset** All · **Actor** Application runtime; network
@@ -565,7 +625,7 @@ another. The strictest applicable classification governs.*
 5. Preserve authorization, key-shape validation and row binding unchanged.
 6. Enforce object → database → cleanup ordering in all six modules.
 7. Legal-hold check before any object deletion.
-8. **`Content-Disposition: attachment` on all class B/C file responses (STG-12).**
+8. **`Content-Disposition: attachment` on all class B/C file responses (STG-12).** — **partially met as of 2026-07-23: 6 of 9 routes; the three frozen Ride/Québec routes remain outstanding.**
 9. **Audit record for every staff read of a class C object (STG-24).**
 10. Sensitive-logging controls on every storage error path.
 11. Full test suite per §5, including the mandatory cross-instance durability test against real R2.

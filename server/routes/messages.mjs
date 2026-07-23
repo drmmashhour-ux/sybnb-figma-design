@@ -4,7 +4,8 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isBookingViewable } from './bookings.mjs'
 import { assertNotBlockedPair } from '../lib/user-blocks.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
-import { readThreadDocument, saveThreadDocument } from '../lib/thread-document-storage.mjs'
+import { THREAD_DOCUMENT_CATEGORY, readThreadDocument, saveThreadDocument } from '../lib/thread-document-storage.mjs'
+import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
 
 const THREAD_DOCUMENT_SELECT = { id: true, mimeType: true, originalFilename: true, createdAt: true, uploaderUserId: true }
 
@@ -240,7 +241,13 @@ export async function handleMessages(req, res, url, context) {
     }
 
     const buffer = await readThreadDocument(document.assetUrl)
-    res.writeHead(200, { 'content-type': document.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    // STG-12 / SYB-004: forced download. The sharpest case of the four — these bytes are uploaded by
+    // an arbitrary counterparty and were rendering inline in the recipient's authenticated session.
+    res.writeHead(200, privateDocumentDownloadHeaders({
+      mimeType: document.mimeType || 'application/octet-stream',
+      category: THREAD_DOCUMENT_CATEGORY,
+      byteLength: buffer.length,
+    }))
     res.end(buffer)
     return true
   }
