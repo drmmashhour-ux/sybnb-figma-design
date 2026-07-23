@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { validateProductionConfig } from '../../server/lib/env.mjs'
 
@@ -49,6 +50,35 @@ function setValidBaseline() {
   process.env.STORAGE_BUCKET_MEDIA = 'sybnb-production-media'
   process.env.STORAGE_BUCKET_DOCUMENTS = 'sybnb-production-documents'
 }
+
+describe('SYB-018 — .env.production.example documents every production-required variable', () => {
+  // SYB-018 was exactly a drift between the validator and the committed template: the template omitted
+  // STORAGE_* and UPSTASH_* while validateProductionConfig required them, so an operator following the
+  // template would ship a deployment that fails to boot (or silently loses uploads). This test binds
+  // the two together — REQUIRED_KEYS above is the validator's contract; the template must document each.
+  const template = readFileSync(new URL('../../.env.production.example', import.meta.url), 'utf8')
+
+  // A key counts as "documented" whether active (KEY=) or a commented alternative/guard (# KEY=),
+  // since SMTP_HOST is an alternative to Resend and DISABLE_RATE_LIMIT is a must-not-set guard.
+  const documents = (key) => new RegExp(`^\\s*#?\\s*${key}=`, 'm').test(template)
+
+  for (const key of REQUIRED_KEYS) {
+    it(`documents ${key}`, () => {
+      expect(documents(key), `${key} is required in production but missing from .env.production.example`).toBe(true)
+    })
+  }
+
+  it('sets STORAGE_DRIVER to s3 in the production template (placeholder guidance, not local)', () => {
+    expect(/^\s*STORAGE_DRIVER="s3"/m.test(template)).toBe(true)
+  })
+
+  it('carries no obviously-real secret values (placeholders only)', () => {
+    // Guard against a real key being pasted into the committed template. Placeholders use replace_me /
+    // <...> / example hosts; a real Resend key (re_ + long) or R2 secret would trip this.
+    expect(template).not.toMatch(/re_[A-Za-z0-9]{20,}/)
+    expect(template).not.toMatch(/sk-ant-[A-Za-z0-9]{20,}/)
+  })
+})
 
 describe('validateProductionConfig: pre-existing checks still pass with a valid baseline', () => {
   const snapshot = {}
