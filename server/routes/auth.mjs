@@ -6,7 +6,7 @@ import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerifi
 import { consumePhoneVerificationCode, hasRecentlyVerifiedPhone, sendPhoneVerificationCode } from '../lib/phone-verification.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { attachReferralOnRegister, generateUniqueReferralCode } from '../lib/referrals.mjs'
-import { checkRateLimit } from '../lib/rate-limit.mjs'
+import { checkRateLimit, clientIp } from '../lib/rate-limit.mjs'
 import { createHash } from 'node:crypto'
 
 const NAME_FIELD_MAX_LENGTH = 120
@@ -17,6 +17,16 @@ const NAME_FIELD_MAX_LENGTH = 120
 // same distributed limiter (Upstash in prod, in-memory in dev/test). failMode 'closed' matches the
 // other pre-auth OTP rules. Overridable via RATE_LIMIT_AUTH_EMAIL_CODE_SEND_PER_EMAIL_MAX/_WINDOW_MS.
 const EMAIL_CODE_SEND_PER_EMAIL = { name: 'AUTH_EMAIL_CODE_SEND_PER_EMAIL', max: 3, windowMs: 15 * 60 * 1000 }
+
+// SYB-007: /api/auth/checkout-guest silently creates a real isolated device account on first use and
+// was previously unthrottled — a script could mint unlimited accounts (and pin inventory via SYB-002).
+// Per-IP limit only; the account-creation logic itself is unchanged. Generous default so an ordinary
+// guest (one device account, persisted locally, created once) never hits it; overridable via
+// RATE_LIMIT_AUTH_CHECKOUT_GUEST_PER_IP_MAX/_WINDOW_MS. failMode 'open' (availability-aware): this is
+// the universal frictionless-guest entry point, so a limiter-store outage must degrade to
+// "temporarily unlimited" rather than block every new guest — matching the public-browsing class in
+// docs/security/SYBNB_V6_RATE_LIMIT_POLICY.md, not the fail-closed pre-auth OTP class.
+const CHECKOUT_GUEST_PER_IP = { name: 'AUTH_CHECKOUT_GUEST_PER_IP', max: 30, windowMs: 15 * 60 * 1000 }
 
 // The rate-limit key holds only a one-way SHA-256 hash of the normalized email — never the raw
 // address — so no PII sits in the (potentially shared/Upstash) rate-limit store.
@@ -198,6 +208,27 @@ export async function handleAuth(req, res, url, context) {
 
   if (url.pathname === '/api/auth/checkout-guest') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+
+    // SYB-007: throttle silent device-account creation per IP before any work. Runs ahead of body
+    // parsing so a flood cannot force account creation; validation errors below keep their own codes.
+    const perIp = await checkRateLimit({
+      bucketKey: `ip:${clientIp(req)}`,
+      name: CHECKOUT_GUEST_PER_IP.name,
+      defaultMax: CHECKOUT_GUEST_PER_IP.max,
+      defaultWindowMs: CHECKOUT_GUEST_PER_IP.windowMs,
+      failMode: 'open',
+    })
+    if (!perIp.allowed) {
+      res.setHeader('retry-after', String(perIp.retryAfterSeconds))
+      return json(res, 429, {
+        ok: false,
+        error: {
+          code: 'RATE_LIMITED',
+          message: `Too many guest sessions started from this network. Try again in ${perIp.retryAfterSeconds} seconds.`,
+        },
+      })
+    }
+
     const body = await readJson(req)
     assertNoUnknownFields(body, ['source', 'deviceId'], 'checkout guest body')
 
