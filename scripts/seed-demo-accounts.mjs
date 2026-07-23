@@ -76,14 +76,25 @@ export async function seedDemoAccounts({ password }) {
   }
 
   const host = await upsertDemoUser({ email: DEMO_HOST_EMAIL, displayName: 'Demo Host', referralCode: 'DEMOHOST1', roles: ['HOST', 'GUEST'], passwordHash })
-  const hasListing = await db().listing.findFirst({ where: { ownerId: host.id } })
-  if (!hasListing) {
-    await db().listing.create({
-      data: { ownerId: host.id, division: 'STAYS', status: 'APPROVED', titleAr: 'شقة تجريبية للمراجعة', titleEn: 'Reviewer Demo Apartment', description: 'A demo stay for store review.', priceMinor: 40, currency: 'USD', instantBookEnabled: true },
-    })
+
+  // SYB-006: the demo host's listing is a real APPROVED, instant-bookable STAYS row — it appears in the
+  // live public catalogue and a guest can book it. In production that is fabricated inventory polluting
+  // real search results, so it is gated OFF in production. The demo ACCOUNTS above remain (store
+  // reviewers still need to sign in); only the published listing is withheld. A controlled store-review
+  // environment can opt back in explicitly with ALLOW_DEMO_LISTING=1.
+  const allowDemoListing = process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEMO_LISTING === '1'
+  let listingSeeded = false
+  if (allowDemoListing) {
+    const hasListing = await db().listing.findFirst({ where: { ownerId: host.id } })
+    if (!hasListing) {
+      await db().listing.create({
+        data: { ownerId: host.id, division: 'STAYS', status: 'APPROVED', titleAr: 'شقة تجريبية للمراجعة', titleEn: 'Reviewer Demo Apartment', description: 'A demo stay for store review.', priceMinor: 40, currency: 'USD', instantBookEnabled: true },
+      })
+    }
+    listingSeeded = true
   }
 
-  return { customerId: customer.id, driverId: driver.id, hostId: host.id }
+  return { customerId: customer.id, driverId: driver.id, hostId: host.id, listingSeeded }
 }
 
 // CLI entrypoint: `DEMO_ACCOUNT_PASSWORD=... node scripts/seed-demo-accounts.mjs`

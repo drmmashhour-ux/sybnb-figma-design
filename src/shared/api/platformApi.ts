@@ -1182,8 +1182,11 @@ export async function fetchApprovedListings(division = 'STAYS', filters: Listing
   try {
     const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
     return response.listings
-  } catch {
-    return fallbackApprovedListings(division)
+  } catch (error) {
+    // SYB-006: never substitute fabricated "SYBNB Verified Provider" inventory on an API failure.
+    // The error propagates so every caller can show a truthful failed state (all four already do),
+    // distinct from a real empty result set — inventory shown to a user is always real or absent.
+    throw error
   }
 }
 
@@ -1519,8 +1522,9 @@ export async function fetchPrototypeListing(listingId: string) {
     const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`)
     return response.listing
   } catch (error) {
-    const fallbackListing = FALLBACK_APPROVED_LISTINGS.find((listing) => listing.id === listingId)
-    if (fallbackListing) return fallbackListing
+    // SYB-006: do not serve a fabricated listing detail on an API failure. The caller pages
+    // (ListingDetailPage, BookingReviewPage, SellerSubmittedPage) already surface a truthful error
+    // state; a listing a user sees is always the real server record or an honest failure.
     throw error
   }
 }
@@ -2502,9 +2506,9 @@ export async function createPrototypeBooking(input: {
     })
     return response.booking
   } catch (error) {
-    if (input.listingId.startsWith('fallback-')) {
-      return createLocalFallbackBooking(input)
-    }
+    // SYB-006: a booking is only ever a real server record. The former fabricated-booking fallback
+    // (for 'fallback-' sample listings) is removed — no fabricated listing can reach this path now
+    // that inventory is never fabricated, and a failed booking must surface truthfully.
     throw error
   }
 }

@@ -10,9 +10,9 @@ import {
   syrianLocalWalletRecipient,
 } from '../../engines/payments/syrianLocalWallet'
 import {
-  createLocalFallbackPaymentProof,
   createStripeCheckoutSession,
   fetchStripePaymentStatus,
+  submitPrototypeLocalWalletProof,
   type PlatformPaymentProof,
 } from '../../shared/api/platformApi'
 import { moneyText } from '../../shared/i18n/display'
@@ -51,6 +51,8 @@ const copy = {
     qrPayload: 'محتوى QR',
     confirmedTitle: 'تم تأكيد الحجز',
     confirmedBody: 'تم تأكيد الحجز. احتفظ برقم المرجع وتابع رحلتك.',
+    submittedTitle: 'تم إرسال إثبات الدفع',
+    submittedBody: 'استلمنا إثبات الدفع وهو قيد المراجعة من قِبل الفريق. سيتم تأكيد الحجز بعد الموافقة.',
     bookingReference: 'رقم مرجع الحجز',
     paymentReference: 'رقم مرجع الدفع',
     followTrip: 'العودة للرئيسية',
@@ -79,6 +81,8 @@ const copy = {
     qrPayload: 'QR payload',
     confirmedTitle: 'Booking confirmed',
     confirmedBody: 'The booking is confirmed. Keep the reference number and continue your trip.',
+    submittedTitle: 'Payment proof submitted',
+    submittedBody: 'We received your payment proof and it is under review by our team. The booking is confirmed once the proof is approved. Keep the reference number.',
     bookingReference: 'Booking reference',
     paymentReference: 'Payment reference',
     followTrip: 'Back home',
@@ -158,43 +162,38 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     window.sessionStorage.setItem(
       CONFIRMED_PAYMENT_STORAGE_KEY,
       JSON.stringify({
-        confirmedAt: new Date().toISOString(),
+        submittedAt: new Date().toISOString(),
         bookingId,
         amountMinor: paymentProof.amountMinor,
         currency: paymentProof.currency,
         transactionReference: paymentProof.providerRef,
         paymentProofId: paymentProof.id,
-        status: 'APPROVED',
+        // SYB-006: record the proof's real server status, never a hardcoded APPROVED.
+        status: paymentProof.status,
       }),
     )
   }, [bookingId, paymentProof])
 
-  function createLocalProof(provider: 'stripe_test' | 'syrian_local_wallet') {
-    const proofAmount = provider === 'stripe_test' ? cardAmountDue : walletAmountDue
-    const proofCurrency = provider === 'stripe_test' ? cardCurrency : walletCurrency
-
-    return createLocalFallbackPaymentProof({
-      bookingId,
-      provider,
-      amountMinor: proofAmount,
-      currency: proofCurrency,
-      providerRef: provider === 'stripe_test' ? `STRIPE-TEST-${Date.now().toString().slice(-8)}` : transactionReference,
-      proofAssetUrl: provider === 'stripe_test' ? 'local-stripe-test' : 'local-sham-cash-confirmed',
-    })
-  }
-
-  function confirmWalletPayment() {
+  // SYB-006: submit a REAL payment proof to the server instead of minting an APPROVED proof in the
+  // browser. The server records it as PENDING_ADMIN_REVIEW; the booking is confirmed only when an
+  // admin approves it. The UI below reflects that true state rather than claiming instant confirmation.
+  async function confirmWalletPayment() {
     setPaymentState('wallet')
     setPaymentError('')
 
     try {
-      const proof = createLocalProof('syrian_local_wallet')
-      setPaymentProof({ ...proof, status: 'APPROVED', reviewedAt: new Date().toISOString(), reviewedById: 'local-wallet-test' })
+      const proof = await submitPrototypeLocalWalletProof({
+        bookingId,
+        amountMinor: walletAmountDue,
+        currency: walletCurrency,
+        providerRef: transactionReference,
+        proofAssetUrl: 'sham-cash-transfer',
+      })
+      setPaymentProof(proof)
+      setPaymentState('idle')
     } catch (error) {
       setPaymentState('error')
       setPaymentError(error instanceof Error ? error.message : t.apiError)
-    } finally {
-      setPaymentState('idle')
     }
   }
 
@@ -209,18 +208,8 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         return
       }
 
-      if (bookingId.startsWith('fallback-booking-')) {
-        setPaymentProof(createLocalProof('stripe_test'))
-        return
-      }
-
       throw new Error(t.cardUnavailable)
     } catch (error) {
-      if (bookingId.startsWith('fallback-booking-')) {
-        setPaymentProof(createLocalProof('stripe_test'))
-        return
-      }
-
       setPaymentState('error')
       setPaymentError(error instanceof Error ? error.message : t.apiError)
     } finally {
@@ -228,7 +217,10 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     }
   }
 
-  const isConfirmed = Boolean(paymentProof)
+  // SYB-006: a submitted proof is not the same as a confirmed booking. "submitted" means the proof is
+  // recorded and awaiting admin review; only an APPROVED proof means the booking is actually confirmed.
+  const isSubmitted = Boolean(paymentProof)
+  const isApproved = paymentProof?.status === 'APPROVED'
 
   return (
     <main className="wallet-page" dir={isAr ? 'rtl' : 'ltr'} style={{ '--accent': '#19d7ff' } as CSSVars}>
@@ -238,7 +230,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         </button>
         <button
           style={flowStyles.arrow}
-          disabled={!isConfirmed}
+          disabled={!isSubmitted}
           onClick={() => {
             if (paymentProof) window.location.hash = `/payment/receipt/${paymentProof.id}`
           }}
@@ -264,15 +256,15 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         amountLabel={moneyText(paymentProof?.amountMinor ?? walletAmountDue, paymentProof?.currency ?? walletCurrency, lang)}
         destinationCode={paymentProof?.providerRef || transactionReference}
         followCode={bookingId}
-        proofCount={isConfirmed ? 1 : 0}
-        status={isConfirmed ? 'confirmed' : 'ready'}
+        proofCount={isSubmitted ? 1 : 0}
+        status={isApproved ? 'confirmed' : isSubmitted ? 'admin' : 'ready'}
       />
 
-      {isConfirmed ? (
+      {isSubmitted ? (
         <section className="wallet-card wallet-approved-banner">
           <div>
-            <strong>{t.confirmedTitle}</strong>
-            <p>{t.confirmedBody}</p>
+            <strong>{isApproved ? t.confirmedTitle : t.submittedTitle}</strong>
+            <p>{isApproved ? t.confirmedBody : t.submittedBody}</p>
           </div>
           <div className="wallet-stat">
             <span>{t.bookingReference}</span>
