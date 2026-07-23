@@ -5,7 +5,9 @@ import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOL
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
-import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
+import { ID_DOCUMENT_CATEGORY, deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
+import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
+import { recordStaffDocumentAccess } from '../lib/document-access-audit.mjs'
 import { readDriverDocument } from '../lib/driver-document-storage.mjs'
 import { readListingDocument } from '../lib/listing-document-storage.mjs'
 import { getOperationalDocumentStatuses, setListingDocumentLegalHold } from '../lib/listing-document-retention.mjs'
@@ -383,10 +385,25 @@ export async function handleAdmin(req, res, url, context) {
     }
 
     const buffer = await readIdDocument(targetUser.idDocumentRef)
-    res.writeHead(200, {
-      'content-type': targetUser.idDocumentMimeType || 'application/octet-stream',
-      'cache-control': 'private, no-store',
+
+    // STG-24: staff access to identity evidence must leave a trace. Previously only admin
+    // *decisions* were audited, so a support agent could open someone's passport and leave no
+    // record. Metadata only — actor, role, subject record, result. Never the bytes, the storage key,
+    // the bucket, or any credential.
+    await recordStaffDocumentAccess({
+      actorUserId: context.user.id,
+      actorRoles: context.roles,
+      documentCategory: ID_DOCUMENT_CATEGORY,
+      entityType: 'users',
+      entityId: idDocumentFileMatch[1],
+      result: 'ALLOWED',
     })
+
+    res.writeHead(200, privateDocumentDownloadHeaders({
+      mimeType: targetUser.idDocumentMimeType || 'application/octet-stream',
+      category: ID_DOCUMENT_CATEGORY,
+      byteLength: buffer.length,
+    }))
     res.end(buffer)
     return true
   }

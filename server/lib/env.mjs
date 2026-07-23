@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { safePositiveInt } from './rate-limit.mjs'
 import { isMailerConfigured } from './mailer.mjs'
+import { validateStorageConfig } from './object-storage.mjs'
 
 export function loadEnv(path = '.env') {
   const file = resolve(process.cwd(), path)
@@ -64,6 +65,19 @@ export function validateProductionConfig() {
   // (resend needs RESEND_API_KEY; smtp needs SMTP_HOST). Provider choice is an operational decision.
   if (!isMailerConfigured()) {
     problems.push('An email provider must be configured in production (set EMAIL_PROVIDER=resend with RESEND_API_KEY, or configure SMTP_HOST) — otherwise verification emails silently fail.')
+  }
+
+  // Persistent object storage (ADR-0010): the local filesystem driver is dev/test-only. On this
+  // deployment target instances are replaced freely, so a production process writing uploads to
+  // local disk loses every photo and identity document while still reporting success. Fail loudly
+  // at boot rather than degrade silently — same posture as the Upstash Redis check above.
+  try {
+    // Validate against NODE_ENV=production explicitly rather than whatever is ambient: this
+    // function's contract is "these are the production rules", and it is exercised directly by
+    // test/unit/env-production-config.test.mjs, which necessarily runs under NODE_ENV=test.
+    validateStorageConfig({ ...process.env, NODE_ENV: 'production' })
+  } catch (error) {
+    problems.push(error.message)
   }
 
   // A typo'd RATE_LIMIT_<NAME>_MAX/_WINDOW_MS (non-numeric, zero, negative, non-integer) would

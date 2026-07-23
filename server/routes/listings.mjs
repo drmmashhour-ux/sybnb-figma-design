@@ -484,7 +484,9 @@ export async function handleListings(req, res, url, context) {
     }
     const buffer = await readListingMedia(storageKey)
     res.writeHead(200, {
+      // Derived from the stored key, never from a caller-supplied value.
       'content-type': mimeForKey(storageKey),
+      'content-length': buffer.length,
       'cache-control': isPublic ? 'public, max-age=3600' : 'private, no-store',
     })
     res.end(buffer)
@@ -516,9 +518,18 @@ export async function handleListings(req, res, url, context) {
       }
       const body = await readJson(req)
       const { storageKey } = await saveListingMedia(body.fileBase64, body.mimeType)
-      const media = await db().listingMedia.create({
-        data: { listingId, url: mediaServeUrl(listingId, storageKey), kind: 'photo', sortOrder: count },
-      })
+      // Object first, database second. If the row fails to write, delete the object we just stored:
+      // an orphaned object costs storage, but a row pointing at nothing is a broken photo shown to a
+      // guest. Never report success unless both halves completed.
+      let media
+      try {
+        media = await db().listingMedia.create({
+          data: { listingId, url: mediaServeUrl(listingId, storageKey), kind: 'photo', sortOrder: count },
+        })
+      } catch (error) {
+        await deleteListingMedia(storageKey)
+        throw error
+      }
       return json(res, 201, { ok: true, media })
     }
 

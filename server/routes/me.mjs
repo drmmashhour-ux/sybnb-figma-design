@@ -3,7 +3,8 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
-import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
+import { ID_DOCUMENT_CATEGORY, deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
+import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
 
 // A booking still owing something to the counterparty, or a ride still in flight, blocks account closure.
 const ACTIVE_BOOKING_STATUSES = ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED']
@@ -153,21 +154,35 @@ export async function handleMe(req, res, url, context) {
       throw error
     }
 
+    // Ordering: object first, metadata second, cleanup third. If the row update fails, the object we
+    // just wrote is deleted — an orphan costs storage, but a user record pointing at bytes that were
+    // never committed is a verification that cannot be reviewed. Success is reported only when both
+    // halves completed.
+    //
+    // Honest limit: this is not a distributed transaction. If the process dies between the object
+    // write and the row update, the object is orphaned. Automated orphan reconciliation remains
+    // deferred (STG-14).
     const storageKey = await saveIdDocument(fileBase64, mimeType)
     const previous = await db().user.findUnique({ where: { id: context.user.id }, select: { idDocumentRef: true } })
 
-    const user = await db().user.update({
-      where: { id: context.user.id },
-      data: {
-        idDocumentRef: storageKey,
-        idDocumentMimeType: mimeType,
-        idDocumentSubmittedAt: new Date(),
-        idDocumentStatus: 'PENDING_REVIEW',
-        idDocumentReviewedById: null,
-        idDocumentReviewedAt: null,
-      },
-      select: { id: true, idDocumentRef: true, idDocumentSubmittedAt: true, idDocumentStatus: true },
-    })
+    let user
+    try {
+      user = await db().user.update({
+        where: { id: context.user.id },
+        data: {
+          idDocumentRef: storageKey,
+          idDocumentMimeType: mimeType,
+          idDocumentSubmittedAt: new Date(),
+          idDocumentStatus: 'PENDING_REVIEW',
+          idDocumentReviewedById: null,
+          idDocumentReviewedAt: null,
+        },
+        select: { id: true, idDocumentRef: true, idDocumentSubmittedAt: true, idDocumentStatus: true },
+      })
+    } catch (error) {
+      await deleteIdDocument(storageKey)
+      throw error
+    }
 
     // Replacing a previous submission (e.g. after a rejection) — remove the old file now that the
     // new one is safely written and the DB row points at the new one.
@@ -191,10 +206,14 @@ export async function handleMe(req, res, url, context) {
     }
 
     const buffer = await readIdDocument(context.user.idDocumentRef)
-    res.writeHead(200, {
-      'content-type': context.user.idDocumentMimeType || 'application/octet-stream',
-      'cache-control': 'private, no-store',
-    })
+    // Forced download, never inline rendering (STG-12): a hostile PDF must not be rendered in the
+    // holder's authenticated, same-origin session. Worker self-access is deliberately not audited —
+    // reading your own document is ordinary self-service, not staff oversight.
+    res.writeHead(200, privateDocumentDownloadHeaders({
+      mimeType: context.user.idDocumentMimeType || 'application/octet-stream',
+      category: ID_DOCUMENT_CATEGORY,
+      byteLength: buffer.length,
+    }))
     res.end(buffer)
     return true
   }

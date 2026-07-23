@@ -1,15 +1,24 @@
-import { randomUUID } from 'crypto'
-import { mkdir, readFile, writeFile } from 'fs/promises'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import { DOCUMENT_SIGNATURE_TYPES, assertContentMatchesDeclaredType } from './content-signature.mjs'
+import {
+  BUCKET_CLASSES,
+  assertSafeObjectKey,
+  buildObjectKey,
+  deleteObject,
+  getObject,
+  putObject,
+} from './object-storage.mjs'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const STORAGE_DIR = path.join(__dirname, '..', 'uploads', 'thread-documents')
-
-// Same pattern as id-document-storage.mjs / driver-document-storage.mjs: real file bytes (base64
-// in the JSON body, matching this server's hand-rolled JSON-only request handling), written to a
-// private, non-web-servable directory keyed by a random id, not the uploader's id or filename, so
-// a guessed URL can't be used to enumerate other threads' documents.
+// Message-thread attachments — private documents.
+//
+// Bytes now go to the private DOCUMENTS bucket in durable object storage (Cloudflare R2, EU
+// jurisdiction) instead of the local filesystem, which is per-instance and ephemeral on this
+// deployment target. See ADR-0010. The module interface, error codes, size ceiling and — critically —
+// the authorization performed by the route layer are unchanged. No object is public; a storage key
+// alone grants nothing.
+//
+// SECURITY NOTE: the signature check proves what a file *is*, not that it is *safe*.
+//   PDF signature validation ≠ malware scanning ≠ safe internal document structure.
+// Deep parsing, antivirus, sandboxing and content-disarm remain future hardening (STG-11).
 export const ALLOWED_THREAD_DOCUMENT_TYPES = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -18,47 +27,58 @@ export const ALLOWED_THREAD_DOCUMENT_TYPES = {
 
 export const MAX_THREAD_DOCUMENT_BYTES = 8 * 1024 * 1024 // 8MB
 
+/** Server-chosen category, used only to build a safe download filename. Never caller-supplied. */
+export const THREAD_DOCUMENT_CATEGORY = 'thread'
+
+function docError(message, code) {
+  const error = new Error(message)
+  error.statusCode = 400
+  error.code = code
+  error.expose = true
+  return error
+}
+
+/** Returns the bare storage key (string) — callers persist this verbatim on assetUrl. */
 export async function saveThreadDocument(base64Data, mimeType) {
   const extension = ALLOWED_THREAD_DOCUMENT_TYPES[mimeType]
   if (!extension) {
-    const error = new Error('Document must be a JPEG, PNG, or PDF file.')
-    error.statusCode = 400
-    error.code = 'THREAD_DOCUMENT_TYPE_INVALID'
-    error.expose = true
-    throw error
+    throw docError('Document must be a JPEG, PNG, or PDF file.', 'THREAD_DOCUMENT_TYPE_INVALID')
   }
 
-  const buffer = Buffer.from(base64Data, 'base64')
-  if (!buffer.length) {
-    const error = new Error('Document file is empty.')
-    error.statusCode = 400
-    error.code = 'THREAD_DOCUMENT_EMPTY'
-    error.expose = true
-    throw error
-  }
+  const buffer = Buffer.from(base64Data || '', 'base64')
+  if (!buffer.length) throw docError('Document file is empty.', 'THREAD_DOCUMENT_EMPTY')
   if (buffer.length > MAX_THREAD_DOCUMENT_BYTES) {
-    const error = new Error('Document file must be smaller than 8MB.')
-    error.statusCode = 400
-    error.code = 'THREAD_DOCUMENT_TOO_LARGE'
-    error.expose = true
-    throw error
+    throw docError('Document must be smaller than 8MB.', 'THREAD_DOCUMENT_TOO_LARGE')
   }
 
-  await mkdir(STORAGE_DIR, { recursive: true })
-  const storageKey = `${randomUUID()}.${extension}`
-  await writeFile(path.join(STORAGE_DIR, storageKey), buffer)
+  // The declared mimeType is attacker-controlled request data — confirm the bytes agree first.
+  try {
+    assertContentMatchesDeclaredType(buffer, mimeType, DOCUMENT_SIGNATURE_TYPES)
+  } catch (error) {
+    throw docError(error.message, 'THREAD_DOCUMENT_CONTENT_INVALID')
+  }
+
+  const storageKey = buildObjectKey(extension)
+  await putObject({ bucketClass: BUCKET_CLASSES.DOCUMENTS, key: storageKey, body: buffer, contentType: mimeType })
   return storageKey
 }
 
 export async function readThreadDocument(storageKey) {
-  // storageKey always comes from randomUUID() at write time, but re-validate the shape before
-  // touching the filesystem so a malformed/tampered value can never be used for path traversal.
-  if (!/^[a-f0-9-]{36}\.(jpg|png|pdf)$/.test(storageKey || '')) {
-    const error = new Error('Invalid document reference.')
-    error.statusCode = 400
-    error.code = 'THREAD_DOCUMENT_REF_INVALID'
-    error.expose = true
-    throw error
+  try {
+    assertSafeObjectKey(storageKey)
+  } catch {
+    throw docError('Invalid document reference.', 'THREAD_DOCUMENT_REF_INVALID')
   }
-  return readFile(path.join(STORAGE_DIR, storageKey))
+  return getObject({ bucketClass: BUCKET_CLASSES.DOCUMENTS, key: storageKey })
+}
+
+export async function deleteThreadDocument(storageKey) {
+  try {
+    assertSafeObjectKey(storageKey)
+  } catch {
+    return
+  }
+  // Idempotent: the database reference is cleared before this runs, so a failure leaves an orphaned
+  // object rather than a record pointing at bytes that are gone.
+  await deleteObject({ bucketClass: BUCKET_CLASSES.DOCUMENTS, key: storageKey }).catch(() => {})
 }

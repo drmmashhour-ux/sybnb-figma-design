@@ -52,7 +52,10 @@ async function driveToAdminReview(userId) {
   }
 }
 
-const FAKE_PDF_BASE64 = Buffer.from('SYNTHETIC TEST DOCUMENT - NOT A REAL CERTIFICATE').toString('base64')
+// Carries a real %PDF signature: uploads declared as application/pdf are now validated against the
+// actual file signature (server/lib/content-signature.mjs), so plain text declared as a PDF is
+// correctly rejected. Still entirely synthetic — no real certificate content.
+const FAKE_PDF_BASE64 = Buffer.from('%PDF-1.7\nSYNTHETIC TEST DOCUMENT - NOT A REAL CERTIFICATE').toString('base64')
 
 describe('Driver document versioning', () => {
   let app

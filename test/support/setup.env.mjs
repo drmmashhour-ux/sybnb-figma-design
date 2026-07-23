@@ -10,8 +10,23 @@ import '../../scripts/require-test-env.mjs'
 // from the same empty state" — which is what proves repeatability rather than merely hoping for
 // it. resetTestDatabase() re-validates the safety guard itself; this is not this file's only
 // protection.
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { resetTestDatabase } from './resetTestDatabase.mjs'
 import { seedApprovedJurisdictions } from './seedApprovedJurisdictions.mjs'
+
+// Object storage (ADR-0010): pin the suite to the local filesystem driver in a throwaway temp
+// directory, unconditionally. Assigned here rather than read from .env.test so that the suite is
+// runnable with just `npm ci` and — more importantly — so a real STORAGE_S3_* credential sitting in
+// a developer's shell can never be picked up and used to read or write a live R2 bucket. The driver
+// itself refuses `s3` under NODE_ENV=test as well (server/lib/object-storage.mjs); this is the
+// belt to that braces.
+process.env.STORAGE_DRIVER = 'local'
+process.env.STORAGE_LOCAL_DIR = mkdtempSync(path.join(tmpdir(), 'sybnb-test-objects-'))
+delete process.env.STORAGE_S3_ENDPOINT
+delete process.env.STORAGE_S3_ACCESS_KEY_ID
+delete process.env.STORAGE_S3_SECRET_ACCESS_KEY
 
 await resetTestDatabase()
 // Jurisdiction compliance (026) fail-closes STR/SR by default -- every existing test fixture

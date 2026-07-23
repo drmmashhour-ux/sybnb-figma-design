@@ -12,6 +12,15 @@ const REQUIRED_KEYS = [
   'EMAIL_PROVIDER',
   'RESEND_API_KEY',
   'SMTP_HOST',
+  // Persistent object storage (ADR-0010) — a production deployment without durable object storage
+  // silently loses every uploaded photo and identity document, so these are part of the baseline.
+  'STORAGE_DRIVER',
+  'STORAGE_S3_ENDPOINT',
+  'STORAGE_S3_REGION',
+  'STORAGE_S3_ACCESS_KEY_ID',
+  'STORAGE_S3_SECRET_ACCESS_KEY',
+  'STORAGE_BUCKET_MEDIA',
+  'STORAGE_BUCKET_DOCUMENTS',
 ]
 
 function setValidBaseline() {
@@ -29,6 +38,16 @@ function setValidBaseline() {
   process.env.EMAIL_PROVIDER = 'resend'
   process.env.RESEND_API_KEY = 're_placeholder_key'
   delete process.env.SMTP_HOST
+  // Persistent object storage (ADR-0010, 2026-07-22): production must use the S3/R2 driver against
+  // production-named buckets. The local filesystem driver is dev/test-only — on this deployment
+  // target it loses every uploaded object at instance replacement.
+  process.env.STORAGE_DRIVER = 's3'
+  process.env.STORAGE_S3_ENDPOINT = 'https://placeholder.eu.r2.cloudflarestorage.com'
+  process.env.STORAGE_S3_REGION = 'auto'
+  process.env.STORAGE_S3_ACCESS_KEY_ID = 'a'.repeat(32)
+  process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'b'.repeat(64)
+  process.env.STORAGE_BUCKET_MEDIA = 'sybnb-production-media'
+  process.env.STORAGE_BUCKET_DOCUMENTS = 'sybnb-production-documents'
 }
 
 describe('validateProductionConfig: pre-existing checks still pass with a valid baseline', () => {
@@ -103,6 +122,32 @@ describe('validateProductionConfig: pre-existing checks still pass with a valid 
     it('throws when UPSTASH_REDIS_REST_TOKEN is missing', () => {
       delete process.env.UPSTASH_REDIS_REST_TOKEN
       expect(() => validateProductionConfig()).toThrow(/UPSTASH_REDIS_REST_TOKEN/)
+    })
+
+    it('storage: throws when STORAGE_DRIVER is the local filesystem driver', () => {
+      // The defect ADR-0010 exists to fix: local disk is not durable on this deployment target, so a
+      // production process using it loses every upload while still reporting success.
+      process.env.STORAGE_DRIVER = 'local'
+      expect(() => validateProductionConfig()).toThrow(/STORAGE_DRIVER|local/i)
+    })
+
+    it('storage: throws when a required storage value is missing', () => {
+      for (const key of [
+        'STORAGE_S3_ENDPOINT',
+        'STORAGE_S3_ACCESS_KEY_ID',
+        'STORAGE_S3_SECRET_ACCESS_KEY',
+        'STORAGE_BUCKET_MEDIA',
+        'STORAGE_BUCKET_DOCUMENTS',
+      ]) {
+        setValidBaseline()
+        delete process.env[key]
+        expect(() => validateProductionConfig()).toThrow(new RegExp(key))
+      }
+    })
+
+    it('storage: throws when a bucket name looks non-production', () => {
+      process.env.STORAGE_BUCKET_DOCUMENTS = 'sybnb-test-documents'
+      expect(() => validateProductionConfig()).toThrow(/test/i)
     })
 
     it('does not throw when both Upstash vars are set alongside an otherwise-valid baseline', () => {

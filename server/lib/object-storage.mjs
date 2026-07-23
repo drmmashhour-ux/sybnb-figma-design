@@ -1,0 +1,314 @@
+import { randomUUID } from 'crypto'
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises'
+import { existsSync } from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+// The one governed storage service. Every upload subsystem routes its bytes through here, so there
+// is a single place where the byte destination, the key rules, and the environment guards live.
+//
+// Why this exists: the six storage modules wrote to the local filesystem while the deployment target
+// replaces instances freely, so uploaded photos and identity documents did not survive a cold start,
+// a deploy, or a request landing on a different instance. Nothing about *authorization* changes —
+// route code keeps enforcing exactly what it enforced before; only the byte destination moves.
+//
+// Two drivers behind one interface:
+//   local — filesystem. Development and automated tests ONLY. Never production, never staging.
+//   s3    — S3-compatible (Cloudflare R2, EU jurisdiction). Staging, production, and verification.
+//
+// See docs/architecture/ADR/ADR-0010-PERSISTENT_OBJECT_STORAGE.md.
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const DEFAULT_LOCAL_DIR = path.join(__dirname, '..', 'uploads')
+
+export const BUCKET_CLASSES = {
+  // Public *to end users* only after the owning listing is APPROVED — and that decision is made by
+  // the route, not here. The bucket itself is private in both cases.
+  MEDIA: 'media',
+  DOCUMENTS: 'documents',
+}
+
+const BUCKET_ENV_VAR = {
+  [BUCKET_CLASSES.MEDIA]: 'STORAGE_BUCKET_MEDIA',
+  [BUCKET_CLASSES.DOCUMENTS]: 'STORAGE_BUCKET_DOCUMENTS',
+}
+
+// Union of every subsystem's allowlist (listing media: jpg/png/webp; documents: jpg/png/pdf).
+// Deliberately no SVG anywhere — SVG carries script content, so it is excluded structurally rather
+// than filtered later.
+const ALLOWED_EXTENSIONS = new Set(['jpg', 'png', 'webp', 'pdf'])
+
+// <uuid>.<ext> and nothing else. Matched against the whole string, so a separator, a traversal
+// segment, whitespace, or a null byte cannot pass.
+const OBJECT_KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|pdf)$/
+
+// Bucket names that must never appear in a production deployment. A production instance pointed at a
+// test bucket would look healthy and serve nothing.
+const NON_PRODUCTION_BUCKET_MARKERS = ['test', 'staging', 'dev', 'local']
+
+function storageError(message, code, statusCode = 500) {
+  const error = new Error(message)
+  error.code = code
+  error.statusCode = statusCode
+  error.expose = statusCode < 500
+  return error
+}
+
+export function resolveStorageDriver(env = process.env) {
+  const driver = env.STORAGE_DRIVER
+  if (driver !== 'local' && driver !== 's3') {
+    // No inference and no default. A storage backend chosen implicitly is how the original defect
+    // reached production unnoticed.
+    throw storageError(
+      `STORAGE_DRIVER must be set explicitly to "local" or "s3" (received ${driver ? `"${driver}"` : 'no value'}).`,
+      'STORAGE_DRIVER_INVALID',
+    )
+  }
+  return driver
+}
+
+// Called at boot by validateProductionConfig(), and directly by the tests. Throws with a message
+// naming the offending variable so a misconfigured deployment fails loudly instead of degrading.
+export function validateStorageConfig(env = process.env) {
+  const driver = resolveStorageDriver(env)
+  const nodeEnv = env.NODE_ENV
+
+  if (nodeEnv === 'test' && driver !== 'local') {
+    // Same posture as server/lib/test-db-guard.mjs: a stray credential in a developer's shell must
+    // never let the suite touch a real bucket.
+    throw storageError(
+      'NODE_ENV=test requires STORAGE_DRIVER="local" — the test suite must never reach a real bucket.',
+      'STORAGE_TEST_DRIVER_INVALID',
+    )
+  }
+
+  if (nodeEnv === 'production') {
+    if (driver !== 's3') {
+      throw storageError(
+        'NODE_ENV=production requires STORAGE_DRIVER="s3" — local filesystem storage is not durable on this deployment target.',
+        'STORAGE_PRODUCTION_DRIVER_INVALID',
+      )
+    }
+
+    for (const key of [
+      'STORAGE_S3_ENDPOINT',
+      'STORAGE_S3_ACCESS_KEY_ID',
+      'STORAGE_S3_SECRET_ACCESS_KEY',
+      'STORAGE_BUCKET_MEDIA',
+      'STORAGE_BUCKET_DOCUMENTS',
+    ]) {
+      if (!env[key]) throw storageError(`${key} must be set in production.`, 'STORAGE_CONFIG_MISSING')
+    }
+
+    for (const key of ['STORAGE_BUCKET_MEDIA', 'STORAGE_BUCKET_DOCUMENTS']) {
+      const bucket = String(env[key]).toLowerCase()
+      const marker = NON_PRODUCTION_BUCKET_MARKERS.find((m) => bucket.includes(m))
+      if (marker) {
+        throw storageError(
+          `${key} looks like a non-production bucket (contains "${marker}") while NODE_ENV=production.`,
+          'STORAGE_BUCKET_ENVIRONMENT_MISMATCH',
+        )
+      }
+    }
+  }
+
+  return { driver }
+}
+
+export function assertSafeObjectKey(key) {
+  if (typeof key !== 'string' || !OBJECT_KEY_RE.test(key)) {
+    // Keys are always generated by buildObjectKey(), but re-validate before every I/O call so a
+    // tampered or malformed value can never be used for traversal or to address another namespace.
+    throw storageError('Invalid object reference.', 'STORAGE_OBJECT_KEY_INVALID', 400)
+  }
+  return key
+}
+
+// The second argument accepts (and deliberately ignores) an original filename, so callers can pass
+// what they have without it ever influencing storage identity.
+export function buildObjectKey(extension, _options = {}) {
+  const ext = String(extension || '').toLowerCase()
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    throw storageError(`Unsupported object extension "${extension}".`, 'STORAGE_EXTENSION_INVALID', 400)
+  }
+  return `${randomUUID()}.${ext}`
+}
+
+export function resolveBucketName(bucketClass, env = process.env) {
+  const varName = BUCKET_ENV_VAR[bucketClass]
+  if (!varName) throw storageError(`Unknown bucket class "${bucketClass}".`, 'STORAGE_BUCKET_CLASS_INVALID')
+  const bucket = env[varName]
+  if (!bucket) throw storageError(`${varName} is not configured.`, 'STORAGE_CONFIG_MISSING')
+  return bucket
+}
+
+// ---- local driver (development and automated tests only) ----
+
+function localPathFor(bucketClass, key, env) {
+  if (!BUCKET_ENV_VAR[bucketClass]) {
+    throw storageError(`Unknown bucket class "${bucketClass}".`, 'STORAGE_BUCKET_CLASS_INVALID')
+  }
+  const root = env.STORAGE_LOCAL_DIR || DEFAULT_LOCAL_DIR
+  // Bucket classes are separate directories, mirroring the separate buckets used on S3, so a key
+  // stored as a document is not readable as media.
+  return path.join(root, bucketClass, key)
+}
+
+const localDriver = {
+  async put({ bucketClass, key, body, env }) {
+    const target = localPathFor(bucketClass, key, env)
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(target, body)
+  },
+  async get({ bucketClass, key, env }) {
+    const target = localPathFor(bucketClass, key, env)
+    if (!existsSync(target)) throw storageError('Object not found.', 'STORAGE_OBJECT_NOT_FOUND', 404)
+    return readFile(target)
+  },
+  async remove({ bucketClass, key, env }) {
+    await unlink(localPathFor(bucketClass, key, env)).catch(() => {})
+  },
+  async exists({ bucketClass, key, env }) {
+    return existsSync(localPathFor(bucketClass, key, env))
+  },
+}
+
+// ---- s3 driver (Cloudflare R2, EU jurisdiction) ----
+
+// Lazily constructed and cached. Import of this module must never require credentials — the unit
+// suite imports it with the local driver configured and no S3 values present at all.
+let cachedS3 = null
+let cachedS3Signature = ''
+
+async function getS3Client(env) {
+  const signature = [env.STORAGE_S3_ENDPOINT, env.STORAGE_S3_REGION, env.STORAGE_S3_ACCESS_KEY_ID].join('|')
+  if (cachedS3 && cachedS3Signature === signature) return cachedS3
+
+  for (const key of ['STORAGE_S3_ENDPOINT', 'STORAGE_S3_ACCESS_KEY_ID', 'STORAGE_S3_SECRET_ACCESS_KEY']) {
+    if (!env[key]) throw storageError(`${key} is not configured.`, 'STORAGE_CONFIG_MISSING')
+  }
+
+  const { S3Client } = await import('@aws-sdk/client-s3')
+  cachedS3 = new S3Client({
+    // Endpoint is environment-controlled only. No route accepts an endpoint, bucket, or credential
+    // from a request — see ADR-0010 §9 (SSRF).
+    endpoint: env.STORAGE_S3_ENDPOINT,
+    region: env.STORAGE_S3_REGION || 'auto',
+    credentials: {
+      accessKeyId: env.STORAGE_S3_ACCESS_KEY_ID,
+      secretAccessKey: env.STORAGE_S3_SECRET_ACCESS_KEY,
+    },
+    forcePathStyle: true,
+  })
+  cachedS3Signature = signature
+  return cachedS3
+}
+
+// Never let a provider error carry the endpoint, bucket, or credential into a response or a log.
+function wrapS3Error(error, bucketClass) {
+  const status = error?.$metadata?.httpStatusCode
+  if (status === 404 || error?.name === 'NoSuchKey' || error?.name === 'NotFound') {
+    return storageError('Object not found.', 'STORAGE_OBJECT_NOT_FOUND', 404)
+  }
+  return storageError(`Storage operation failed for the ${bucketClass} store.`, 'STORAGE_UNAVAILABLE', 503)
+}
+
+const s3Driver = {
+  async put({ bucketClass, key, body, contentType, env }) {
+    const { PutObjectCommand } = await import('@aws-sdk/client-s3')
+    const client = await getS3Client(env)
+    try {
+      await client.send(new PutObjectCommand({
+        Bucket: resolveBucketName(bucketClass, env),
+        Key: `${bucketClass}/${key}`,
+        Body: body,
+        ContentType: contentType,
+      }))
+    } catch (error) {
+      throw wrapS3Error(error, bucketClass)
+    }
+  },
+  async get({ bucketClass, key, env }) {
+    const { GetObjectCommand } = await import('@aws-sdk/client-s3')
+    const client = await getS3Client(env)
+    try {
+      const response = await client.send(new GetObjectCommand({
+        Bucket: resolveBucketName(bucketClass, env),
+        Key: `${bucketClass}/${key}`,
+      }))
+      return Buffer.from(await response.Body.transformToByteArray())
+    } catch (error) {
+      throw wrapS3Error(error, bucketClass)
+    }
+  },
+  async remove({ bucketClass, key, env }) {
+    const { DeleteObjectCommand } = await import('@aws-sdk/client-s3')
+    const client = await getS3Client(env)
+    try {
+      await client.send(new DeleteObjectCommand({
+        Bucket: resolveBucketName(bucketClass, env),
+        Key: `${bucketClass}/${key}`,
+      }))
+    } catch (error) {
+      // A failed delete leaves an orphaned object, which costs storage. A failed delete that took
+      // the request down with it would be worse — the reference is already gone by this point.
+      if (error?.$metadata?.httpStatusCode === 404) return
+      throw wrapS3Error(error, bucketClass)
+    }
+  },
+  async exists({ bucketClass, key, env }) {
+    const { HeadObjectCommand } = await import('@aws-sdk/client-s3')
+    const client = await getS3Client(env)
+    try {
+      await client.send(new HeadObjectCommand({
+        Bucket: resolveBucketName(bucketClass, env),
+        Key: `${bucketClass}/${key}`,
+      }))
+      return true
+    } catch (error) {
+      if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NotFound') return false
+      throw wrapS3Error(error, bucketClass)
+    }
+  },
+}
+
+function driverFor(env) {
+  const driver = resolveStorageDriver(env)
+  if (driver === 's3' && env.NODE_ENV === 'test') {
+    // Enforced at use time, not only at boot: validateProductionConfig() runs solely in production,
+    // so without this a stray STORAGE_S3_* credential in a developer's shell could let the suite
+    // read or write a real bucket. Mirrors server/lib/test-db-guard.mjs.
+    throw storageError(
+      'NODE_ENV=test requires STORAGE_DRIVER="local" — the test suite must never reach a real bucket.',
+      'STORAGE_TEST_DRIVER_INVALID',
+    )
+  }
+  return driver === 's3' ? s3Driver : localDriver
+}
+
+// ---- public interface ----
+
+export async function putObject({ bucketClass, key, body, contentType, env = process.env }) {
+  assertSafeObjectKey(key)
+  if (!Buffer.isBuffer(body) || body.length === 0) {
+    // A zero-byte object would be indistinguishable from a successful upload at read time.
+    throw storageError('Refusing to store an empty object.', 'STORAGE_OBJECT_EMPTY', 400)
+  }
+  await driverFor(env).put({ bucketClass, key, body, contentType, env })
+  return { key, bucketClass }
+}
+
+export async function getObject({ bucketClass, key, env = process.env }) {
+  assertSafeObjectKey(key)
+  return driverFor(env).get({ bucketClass, key, env })
+}
+
+export async function deleteObject({ bucketClass, key, env = process.env }) {
+  assertSafeObjectKey(key)
+  return driverFor(env).remove({ bucketClass, key, env })
+}
+
+export async function objectExists({ bucketClass, key, env = process.env }) {
+  assertSafeObjectKey(key)
+  return driverFor(env).exists({ bucketClass, key, env })
+}
