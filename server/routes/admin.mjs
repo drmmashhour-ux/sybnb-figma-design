@@ -1033,6 +1033,17 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
     const buffer = await readDriverDocument(document.assetUrl)
+
+    // STG-24 / SYB-005: this route is staff-only, so every read here is staff access by definition.
+    await recordStaffDocumentAccess({
+      actorUserId: context.user.id,
+      actorRoles: context.roles,
+      documentCategory: 'driver',
+      entityType: 'driver_documents',
+      entityId: adminDriverDocFileMatch[1],
+      result: 'ALLOWED',
+    })
+
     // STG-12 / SYB-004: forced download. This is the admin-surface handler; the Ride module's own
     // route (driver.mjs) is frozen and intentionally unchanged. The helper's category allowlist has
     // no 'driver' entry and the helper itself is frozen, so this uses the generic category — the
@@ -1097,6 +1108,17 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
     const buffer = await readListingDocument(document.assetUrl)
+
+    // STG-24 / SYB-005: staff-only review route — every read is staff access by definition.
+    await recordStaffDocumentAccess({
+      actorUserId: context.user.id,
+      actorRoles: context.roles,
+      documentCategory: LISTING_DOCUMENT_CATEGORY,
+      entityType: 'listing_documents',
+      entityId: adminListingDocFileMatch[1],
+      result: 'ALLOWED',
+    })
+
     // STG-12 / SYB-004: forced download for the staff review path, matching the host-facing route.
     res.writeHead(200, privateDocumentDownloadHeaders({
       mimeType: document.mimeType || 'application/octet-stream',

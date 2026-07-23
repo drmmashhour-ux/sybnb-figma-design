@@ -6,6 +6,7 @@ import { assertNotBlockedPair } from '../lib/user-blocks.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { THREAD_DOCUMENT_CATEGORY, readThreadDocument, saveThreadDocument } from '../lib/thread-document-storage.mjs'
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
+import { recordStaffDocumentAccess } from '../lib/document-access-audit.mjs'
 
 const THREAD_DOCUMENT_SELECT = { id: true, mimeType: true, originalFilename: true, createdAt: true, uploaderUserId: true }
 
@@ -241,6 +242,21 @@ export async function handleMessages(req, res, url, context) {
     }
 
     const buffer = await readThreadDocument(document.assetUrl)
+
+    // STG-24 / SYB-005: staff reading a private conversation attachment is oversight access and must
+    // leave a trace. The two participants reading their own thread are not — auditing those would add
+    // volume without adding oversight value, and would misrepresent ordinary use as staff review.
+    if (isStaff && !isParticipant) {
+      await recordStaffDocumentAccess({
+        actorUserId: context.user.id,
+        actorRoles: context.roles,
+        documentCategory: THREAD_DOCUMENT_CATEGORY,
+        entityType: 'thread_documents',
+        entityId: document.id,
+        result: 'ALLOWED',
+      })
+    }
+
     // STG-12 / SYB-004: forced download. The sharpest case of the four — these bytes are uploaded by
     // an arbitrary counterparty and were rendering inline in the recipient's authenticated session.
     res.writeHead(200, privateDocumentDownloadHeaders({

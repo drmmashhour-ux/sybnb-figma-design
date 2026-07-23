@@ -37,7 +37,7 @@ classification changed, the original wording is retained beside it.
 | Finding | Status after implementation |
 |---|---|
 | **STG-12** — inline rendering of private PDFs | ~~**CLOSED.**~~ **PARTIALLY CLOSED — 6 of 9 private-document routes.** The original wording is retained struck through above because it was wrong, not merely imprecise: forced download was implemented on the identity-document path only and recorded as closed for all class B/C responses. **Corrected 2026-07-23 under owner decision SYB-004 (Wave 0).** Full route-by-route status in *STG-12 — corrected implementation status* below |
-| **STG-24** — staff document-view auditing | **CLOSED at the approved boundary.** Staff reads emit `STAFF_DOCUMENT_ACCESSED` via `server/lib/document-access-audit.mjs` recording actor, roles, entity reference, category, result and timestamp. Tested to contain no document bytes, storage key, bucket, endpoint or credential. Worker self-access is intentionally not audited. **Two gaps remain recorded:** no purpose/case-reference column exists, and audit failure is non-blocking with no alert routing (depends on STG-22) |
+| **STG-24** — staff document-view auditing | ~~**CLOSED at the approved boundary.**~~ **PARTIALLY REMEDIATED — 5 of 8 staff-reachable routes. NOT fully closed.** The original wording is retained struck through because it was wrong: when written, `recordStaffDocumentAccess()` had **one** call site covering the identity-document route, while eight staff-reachable routes serve stored private documents. **Corrected 2026-07-23 under owner decision SYB-005 (Wave 0, scoped).** Route-by-route status and the four remaining open items in *STG-24 — corrected implementation status* below |
 | **STG-11** — malicious upload content | **OPEN, unchanged.** Signature validation was added on both paths, but signature validation ≠ malware scanning ≠ deep structural validation ≠ safe document content. Deep parsing, antivirus, sandboxing and content disarm remain future hardening |
 | **STG-14** — orphaned objects | **OPEN, unchanged.** Object→metadata ordering with cleanup on metadata failure is implemented, so a dangling reference is prevented; the process-crash window still orphans objects. Reconciliation remains future hardening |
 
@@ -93,9 +93,70 @@ allowlist has no `driver` entry — and the helper is frozen — that route serv
 **Approved listing media** is deliberately excluded from forced download and is unaffected by this
 correction.
 
-**Related finding, not corrected here.** **STG-24** (staff document-view auditing) is recorded CLOSED in
-the row above and is subject to the same class of overstatement. It is tracked separately as **SYB-005**
-and is **undecided**; nothing in this correction alters it.
+**Related finding.** **STG-24** was subject to the same class of overstatement in the row above. It was
+tracked separately as **SYB-005** and has since been decided and partially remediated — see the next
+subsection.
+
+#### STG-24 — corrected implementation status (2026-07-23)
+
+**Status: PARTIALLY REMEDIATED. STG-24 is NOT fully closed.**
+
+**Why this correction exists.** This document recorded STG-24 as CLOSED on 2026-07-22 when
+`recordStaffDocumentAccess()` had **one** call site (`server/routes/admin.mjs:393`, identity documents)
+against eight staff-reachable private-document routes. The row disclosed two gaps but not the one that
+mattered most — coverage. Independent review raised it as **SYB-005 (Critical)**; live testing measured
+audit-row deltas of zero on four routes (**E2E-07**).
+
+**Coverage: 1 of 8 → 5 of 8 staff-reachable routes.**
+
+**1. Previously audited** *(2026-07-22, Phase 3)*
+
+| Route | File |
+|---|---|
+| `GET /api/admin/id-document/:userId/file` | `server/routes/admin.mjs:393` |
+
+**2. Newly audited — unfrozen routes** *(2026-07-23, SYB-005 scoped remediation)*
+
+| Route | File | Actor rule |
+|---|---|---|
+| `GET /api/admin/driver-documents/:docId/file` | `admin.mjs` | staff-only route — always audited |
+| `GET /api/admin/listing-documents/:docId/file` | `admin.mjs` | staff-only route — always audited |
+| `GET /api/listings/:id/documents/:docId/file` | `listings.mjs` | audited only when `isStaff && !isOwner` |
+| `GET /api/listings/:id/thread/documents/:docId/file` | `messages.mjs` | audited only when `isStaff && !isParticipant` |
+
+**Actor boundary.** An event is emitted only when access is granted *by virtue of a staff capacity*.
+Ordinary host, participant, owner and self-service reads are not audited — and holding a staff role does
+not reclassify them, which is why the two dual-actor routes test `!isOwner` / `!isParticipant` rather
+than the staff role alone. Regression coverage:
+`test/api/staff-document-access-audit.test.mjs` (13 tests, both directions asserted on every route).
+
+**3. Still unaudited — frozen platform boundaries, intentionally deferred**
+
+| Route | File | Boundary |
+|---|---|---|
+| driver document file | `server/routes/driver.mjs:314` | Ride |
+| Québec onboarding document file | `server/routes/quebec-driver-onboarding.mjs:195` | Québec |
+| Québec vehicle document file | `server/routes/quebec-driver-onboarding.mjs:441` | Québec |
+
+Staff reads on these three leave **no trace**. They remain an **OPEN** part of STG-24. Remediation
+requires a **separate Architecture Change Request, explicit owner approval, and a boundary unfreeze**.
+
+**4. Not audited by design** — `GET /api/me/id-document/file` is caller-scoped self-service; staff
+cannot reach another person's document through it. Its exclusion is correct, not a gap.
+
+**Open items — none of these is resolved by this remediation**
+
+| Item | Status | Why deferred |
+|---|---|---|
+| Three frozen Ride/Québec routes | **OPEN** | Boundary freeze; requires an Architecture Change Request |
+| `AdminAuditLog.ipHash` origin attribution | **OPEN** | Declared at `prisma/schema.prisma:1057` with **no writer anywhere in `server/`**. Affects every audit event, not only document access. Needs a privacy-preserving hashing policy, trusted-proxy-header handling, salt/key management, rotation, retention and test behaviour. A partial writer added only to document-access events would create inconsistent audit semantics. **No schema change authorized** |
+| Purpose / case-reference capture | **OPEN** | `AdminAuditLog` has no column for *why* a staff member opened a document. Schema decision, deferred |
+| Audit-failure alert routing | **OPEN** | Audit writes are non-blocking by design so a logging failure cannot deny a legitimately authorized read; there is no alerting to route failures to (depends on STG-22) |
+| `AdminAuditLog` vs a dedicated document-access log | **OPEN — separate architecture decision** | Staff *views* are higher-volume and differently shaped from admin *decisions*. Recorded for later owner review; the existing mechanism is reused here so coverage improves without redesign |
+
+**Explicitly excluded from SYB-005.** The driver CSV export (**E2E-14**) is unaudited and is the widest
+PII egress on the platform. It sits in the separate runtime register and requires its own owner
+decision; it is **not** part of this remediation.
 
 **Approved allowlists, enforced against both the declared MIME type and the actual file signature:**
 media `image/jpeg` · `image/png` · `image/webp`; documents `application/pdf` · `image/jpeg` ·
@@ -462,6 +523,11 @@ Exact rules: implementation plan §15. Not implemented.
 **Required test** Staff access to a class C document produces an audit record; access after role removal is denied.
 **Residual risk** Medium — technical auditing does not by itself prevent misuse; policy and review are also required. Cross-border access is tracked as **EV-07**, not resolved here.
 **Severity** High · **Likelihood** Medium · **Priority** P1 · **Owner** Engineering + Owner · **Classification** CLOSED-BETA BLOCKER
+**Status (2026-07-23): PARTIALLY REMEDIATED — 5 of 8 staff-reachable routes.** The three frozen
+Ride/Québec routes still leave no record; `ipHash` origin attribution, purpose/case-reference capture,
+and audit-failure alert routing all remain OPEN. See *STG-24 — corrected implementation status* near
+the top of this document. The "Required Phase 1 mitigation" above — an audit record for **every** staff
+class C read — is therefore **not yet fully met**.
 
 ### STG-25 — Real personal data used in testing
 **Category** Privacy · **Asset** Class C · **Actor** Developer; automated tests
@@ -626,7 +692,7 @@ another. The strictest applicable classification governs.*
 6. Enforce object → database → cleanup ordering in all six modules.
 7. Legal-hold check before any object deletion.
 8. **`Content-Disposition: attachment` on all class B/C file responses (STG-12).** — **partially met as of 2026-07-23: 6 of 9 routes; the three frozen Ride/Québec routes remain outstanding.**
-9. **Audit record for every staff read of a class C object (STG-24).**
+9. **Audit record for every staff read of a class C object (STG-24).** — **partially met as of 2026-07-23: 5 of 8 staff-reachable routes; the three frozen Ride/Québec routes remain outstanding.**
 10. Sensitive-logging controls on every storage error path.
 11. Full test suite per §5, including the mandatory cross-instance durability test against real R2.
 12. No user input may reach endpoint, bucket, or credential selection.

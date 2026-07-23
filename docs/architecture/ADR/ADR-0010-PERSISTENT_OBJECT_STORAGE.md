@@ -46,13 +46,20 @@ disposition) · STG-24 (staff private-document access audited at the approved bo
 >   routes — `driver.mjs` and `quebec-driver-onboarding.mjs` (×2) — **still render inline** and are
 >   intentionally deferred behind the Ride and Québec freezes. No unfreeze is authorized; changing them
 >   requires a separate Architecture Change Request and explicit owner approval.
-> - **STG-24 — NOT CLOSED, and not corrected here.** Staff document-view auditing covers a small
->   subset of routes. This is tracked separately as **SYB-005**, which is **undecided**. This
->   correction deliberately does not alter it.
+> - **STG-24 — NOT CLOSED. PARTIALLY REMEDIATED.** When this ADR was written, staff document-view
+>   auditing had **one** call site covering the identity-document route, against eight staff-reachable
+>   routes. Four unfrozen routes were audited on 2026-07-23 under **SYB-005 (scoped accept)**, bringing
+>   coverage to **5 of 8**. The three frozen Ride/Québec routes still leave **no record** and require a
+>   separate Architecture Change Request, explicit owner approval and a boundary unfreeze. **Four
+>   further items remain OPEN and are not resolved by that remediation:** `AdminAuditLog.ipHash` origin
+>   attribution (declared, no writer anywhere in `server/`), purpose/case-reference capture,
+>   audit-failure alert routing, and the `AdminAuditLog`-versus-dedicated-access-log question — the last
+>   deferred as a separate architecture decision.
 >
-> Route-by-route status: `docs/security/STR_STORAGE_THREAT_MODEL.md`, *STG-12 — corrected
-> implementation status*. Origin: independent review finding **SYB-004 (Critical)**, confirmed at
-> runtime by **E2E-06**.
+> Route-by-route status for both findings: `docs/security/STR_STORAGE_THREAT_MODEL.md`, *STG-12 —
+> corrected implementation status* and *STG-24 — corrected implementation status*. Origin:
+> independent review findings **SYB-004** and **SYB-005** (both Critical), confirmed at
+> runtime by **E2E-06** and **E2E-07** respectively.
 
 **Findings deliberately left open** — recorded in `STR_STORAGE_THREAT_MODEL.md` and
 `SYBNB_PERSISTENT_OBJECT_STORAGE_IMPLEMENTATION_PLAN.md`, and not resolved here:

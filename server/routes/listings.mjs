@@ -19,6 +19,7 @@ import {
 } from '../lib/listing-media-storage.mjs'
 import { LISTING_DOCUMENT_CATEGORY, deleteListingDocument, readListingDocument, saveListingDocument } from '../lib/listing-document-storage.mjs'
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
+import { recordStaffDocumentAccess } from '../lib/document-access-audit.mjs'
 import { retentionDeleteAfter } from '../lib/listing-document-retention.mjs'
 
 // Québec compliance review (item 1): real certificate types a host can upload against a listing.
@@ -707,6 +708,21 @@ export async function handleListings(req, res, url, context) {
       throw error
     }
     const buffer = await readListingDocument(document.assetUrl)
+
+    // STG-24 / SYB-005: this route serves both the owning host and staff. Audit only the staff case
+    // — a host reading their own certificate is ordinary self-service, and holding a staff role does
+    // not reclassify it. `!isOwner` is what keeps that distinction honest.
+    if (isStaff && !isOwner) {
+      await recordStaffDocumentAccess({
+        actorUserId: context.user.id,
+        actorRoles: context.roles,
+        documentCategory: LISTING_DOCUMENT_CATEGORY,
+        entityType: 'listing_documents',
+        entityId: documentId,
+        result: 'ALLOWED',
+      })
+    }
+
     // STG-12 / SYB-004: forced download. Previously served with a bare content-type, so a PDF
     // rendered inline in the host's authenticated, same-origin session.
     res.writeHead(200, privateDocumentDownloadHeaders({

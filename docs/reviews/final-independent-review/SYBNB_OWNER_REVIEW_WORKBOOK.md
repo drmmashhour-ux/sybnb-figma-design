@@ -112,7 +112,48 @@ Twelve. All twelve block closed beta. **Two are missing subsystems rather than d
 **Recommended decision.** Apply to the remaining staff read paths; correct the committed documents.
 **Alternatives.** (a) as recommended · (b) correct documents only · (c) accept.
 **Dependencies.** As SYB-004.
-**Final owner decision:** ________________  **Owner notes:** ________________
+
+**Final owner decision:** **ACCEPTED — SCOPED REMEDIATION AUTHORIZED. Remediation and validation complete 2026-07-23.** *(Owner Decision Session 01, 2026-07-23.)*
+
+**Scope of the approval.**
+> Scoped accept. Add staff document-access auditing to the four **unfrozen** staff-reachable routes, reusing the existing `recordStaffDocumentAccess()` mechanism and the existing `AdminAuditLog` model. Correct the overstated STG-24 documentation. **No Québec/Ride unfreeze.** No audit-architecture redesign, no schema change, no `ipHash` work, no new access-log table.
+
+**Actor boundary (owner-specified).**
+> Emit `STAFF_DOCUMENT_ACCESSED` only when the actor acts in an authorized **staff** capacity. Ordinary host, participant, owner and self-service reads are **not** staff access, even on a route that supports multiple actor types. Authorization behaviour preserved unchanged.
+
+**Result.** Staff-read audit coverage increased from **1 of 8** to **5 of 8** staff-reachable routes.
+
+| Route | File | Actor rule | Status |
+|---|---|---|---|
+| `GET /api/admin/id-document/:userId/file` | `admin.mjs` | staff-only | Audited (2026-07-22) |
+| `GET /api/admin/driver-documents/:docId/file` | `admin.mjs` | staff-only | Audited — SYB-005 (2026-07-23) |
+| `GET /api/admin/listing-documents/:docId/file` | `admin.mjs` | staff-only | Audited — SYB-005 (2026-07-23) |
+| `GET /api/listings/:id/documents/:docId/file` | `listings.mjs` | `isStaff && !isOwner` | Audited — SYB-005 (2026-07-23) |
+| `GET /api/listings/:id/thread/documents/:docId/file` | `messages.mjs` | `isStaff && !isParticipant` | Audited — SYB-005 (2026-07-23) |
+| `GET /api/me/id-document/file` | `me.mjs` | self-service | Excluded by design (not staff-reachable) |
+
+**Remaining routes — 3, frozen Québec/Ride, intentionally deferred.** Staff reads leave no trace.
+
+| Route | File | Boundary |
+|---|---|---|
+| driver document file | `server/routes/driver.mjs:314` | Ride |
+| Québec onboarding document file | `server/routes/quebec-driver-onboarding.mjs:195` | Québec |
+| Québec vehicle document file | `server/routes/quebec-driver-onboarding.mjs:441` | Québec |
+
+**Requirement before any work on the remaining routes.** A **separate Architecture Change Request, explicit owner approval, and an explicit boundary unfreeze.**
+
+**Explicit open items preserved (none resolved by this remediation).**
+> - **Three frozen Ride/Québec routes** — OPEN; require an Architecture Change Request.
+> - **`AdminAuditLog.ipHash`** — OPEN as a separate security/auditability item. Declared at `prisma/schema.prisma:1057`, no writer anywhere in `server/`. Deferred by owner decision: it affects every audit event, needs a privacy-preserving hashing policy plus trusted-proxy/salt/rotation/retention/test decisions, and a document-access-only writer would create inconsistent audit semantics. **No schema change and no request-origin change authorized.**
+> - **Purpose / case-reference field** — OPEN; schema decision deferred.
+> - **Audit-failure alert routing** — OPEN; non-blocking by design, depends on STG-22.
+> - **Long-term audit storage architecture** (`AdminAuditLog` vs a dedicated document-access log) — OPEN; recorded as a separate architecture decision for later owner review. The existing mechanism is reused here so coverage improves without redesign.
+
+**Excluded by owner decision.** The driver CSV export (**E2E-14**) is **not** part of SYB-005; it remains in the separate runtime register and requires its own owner decision.
+
+**Validation.** TypeScript (`tsc --noEmit`) · unit (301) · API (486 across 63 files, +13) · security (21) · production build — **all gates passed**. Regression coverage: `test/api/staff-document-access-audit.test.mjs`, 13 tests — authorized staff emits the event with the correct document and actor reference; denied access emits no successful-access event; ordinary non-staff and staff-self reads emit nothing; authorization behaviour unchanged; all four unfrozen routes covered; frozen routes neither modified nor asserted as remediated.
+
+**Documents corrected.** `docs/security/STR_STORAGE_THREAT_MODEL.md` (STG-24 status row struck through, dedicated *STG-24 — corrected implementation status* subsection, deep-dive entry annotated, requirement #9 marked partial) and `docs/architecture/ADR/ADR-0010-PERSISTENT_OBJECT_STORAGE.md` (the earlier "undecided" note updated to PARTIALLY REMEDIATED). STG-24 is **not** recorded as fully closed anywhere.
 
 ### SYB-006 — Fabricated data reaches real users
 **Summary.** Three independent paths: `confirmWalletPayment()` mints an `APPROVED` proof and receipt entirely in the browser with no server call; `fetchApprovedListings` returns 14 fabricated listings owned by "SYBNB Verified Provider" on any API error; the demo seed publishes a real, instant-bookable listing.
