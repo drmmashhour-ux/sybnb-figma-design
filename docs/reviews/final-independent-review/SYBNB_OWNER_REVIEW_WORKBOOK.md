@@ -1,7 +1,7 @@
 # SYBNB — Owner Review Workbook
 
 **Baseline:** `8a4eba7` · **Review package:** commit `6e8b8f2`, branch `review/sybnb-final-independent-review`
-**Date:** 2026-07-23 · **Status:** awaiting owner decisions
+**Date:** 2026-07-23 · **Status:** **OWNER DECISION SESSION 01 COMPLETE — 12/12 Critical findings decided · 4/4 cross-cutting decisions decided. Implementation remains deferred.**
 
 **Derived solely from the completed review package.** No finding has been re-prioritised, re-severitised,
 merged, split, or dropped. Severity and launch impact are carried verbatim from the consolidated review
@@ -31,7 +31,30 @@ Twelve. All twelve block closed beta. **Two are missing subsystems rather than d
 **Recommended decision.** Render an availability-aware picker; enforce `disabledDates` before quote and before continue.
 **Alternatives.** (a) as recommended · (b) ship read-only fixed-date listings · (c) defer.
 **Dependencies.** None. Roadmap item C4.
-**Final owner decision:** ________________  **Owner notes:** ________________
+
+**Final owner decision:** **ACCEPTED — verdict CONFIRMED WITH CLARIFICATION. UX redesign authorized; implementation deferred.** *(Owner Decision Session 01, 2026-07-23.)*
+
+**Clarification (now part of the permanent record).**
+> The defect is **not** that every booking is forced to tomorrow+2. The real flow is: search → optional search-calendar selection → listing page → booking review. The listing page has **no governed mechanism** to select, modify, validate, or visualize dates, yet the review page instructs the user to change dates there. That contradiction is the core defect. Dates reach the listing page pre-filled from the search bar via `loadSearchDatesDraft()`; the hardcoded default applies only when no search/booking draft exists. Verified at `32b2152`: 0 pickers, 0 `setDateRange()` calls; availability is fetched and expanded into `disabledDates` (`loadAvailability` line 268–281) but never read, and `disabledDates=` is passed by zero callers app-wide.
+
+**Approved remediation objective.** Restore a truthful booking journey — the user must never be instructed to perform an action the interface cannot perform.
+
+**Approved UX principles (owner-stated).** The listing page must support governed date selection that: uses authoritative availability; displays unavailable dates truthfully; preserves search-selected dates; permits governed modification; updates pricing and availability consistently; remains accessible and mobile-friendly; never fabricates availability.
+
+**Boundaries (owner-stated).**
+> - **Search** remains authoritative for the initial context; the listing page may preserve, modify, or clear dates but must **not** silently ignore a change.
+> - **Server** remains authoritative for availability; the listing page must never infer, cache indefinitely, or fabricate blocked dates, and every displayed availability state must indicate freshness.
+> - **Booking Review** copy must remain consistent with actual interface capability — never instruct impossible actions.
+
+**Planning artifact produced 2026-07-23 (design only, nothing implemented).**
+> `docs/reviews/final-independent-review/syb-001/SYB_001_LISTING_DATE_SELECTION_DESIGN.md` — current flow, corrected flow, search→listing handoff, date-selection UX, availability-refresh strategy, pricing-refresh strategy, accessibility, mobile, stale-data handling, error handling, source-of-truth boundaries.
+
+**Key design findings.**
+> - **This is largely a wiring exercise.** Server-authoritative availability *and* server-computed pricing already exist and react to `dateRange`; the shared `DateRangePicker` already implements `disabledDates` blocking and Clear. What is missing is rendering the picker on the listing page and consuming the already-computed blocked set. This lowers the risk profile below "new component."
+> - **Availability freshness is a gap.** `loadAvailability()` fetches a 180-day window once on mount and never re-fetches; the API returns no `generatedAt`. Design recommends an additive server `generatedAt` field, re-fetch on picker-open and before Continue, and a visible freshness indicator.
+> - **E2E-12 (server accepts past/invalid dates) is the server half of this client-side finding** and should likely be scoped into the same implementation; fixing either half alone leaves the other open.
+
+**Implementation deferred.** No code, UI, booking-flow, React, or API change was made. Open before build: whether E2E-12 is scoped in, freshness threshold/cadence, mobile presentation (inline vs bottom-sheet), and accessibility scope (operable+labelled vs full grid semantics).
 
 ### SYB-002 — `PAYMENT_PENDING` bookings hold inventory permanently
 **Summary.** Bookings are created `PAYMENT_PENDING` and occupy availability. They never expire (no scheduler exists), the guest cannot cancel them, the host cannot see them, and no admin release action exists.
@@ -41,7 +64,46 @@ Twelve. All twelve block closed beta. **Two are missing subsystems rather than d
 **Recommended decision.** Expiry window + guest cancel + host visibility + admin release.
 **Alternatives.** (a) as recommended · (b) admin release only · (c) make pending bookings non-blocking for availability.
 **Dependencies.** Requires the scheduler (SYB-021). **Requires a business rule from you: the expiry window.**
-**Final owner decision:** ________________  **Owner notes:** ________________
+
+**Final owner decision:** **ACCEPTED — SEQUENCED REMEDIATION AUTHORIZED. Planning and policy design authorized; implementation NOT yet authorized.** *(Owner Decision Session 01, 2026-07-23.)*
+
+**Required outcome (owner-specified).**
+> Every `PAYMENT_PENDING` booking must eventually reach one governed outcome: (1) payment proof approved → `REQUESTED`/`CONFIRMED`; (2) admin manual release → governed released state; (3) automatic expiry under an approved policy → inventory restored. No abandoned hold may remain indefinitely. The verified forward transition on approved proof does **not** resolve the abandoned-hold defect.
+
+**Dependencies (owner-recorded).**
+> - **SYB-021 scheduler** — pulled forward as a required dependency of this programme.
+> - **Owner-approved payment-method expiry policy** — no window value is approved yet.
+> - **Confirmation of the governed terminal state** — see S-1 below.
+> - **Separate authorization for development-data cleanup** — the six existing dev holds.
+
+**Phasing (owner-specified).** Phase A: host visibility (read-only) + admin manual release. Phase B: payment-method-aware expiry policy matrix (returned for approval before build). Phase C: scheduler (SYB-021) — no cron until policy + execution design approved.
+
+**Planning artifacts produced 2026-07-23 (design only, nothing implemented).**
+> - `docs/reviews/final-independent-review/syb-002/SYB_002_HOLD_EXPIRY_POLICY_OPTIONS.md`
+> - `docs/reviews/final-independent-review/syb-002/SYB_002_STATE_AND_SCHEDULER_DESIGN.md`
+> - `docs/reviews/final-independent-review/syb-002/SYB_002_EXISTING_DEV_HOLD_INVENTORY.md`
+
+**Key findings from planning (feeding the owner's approval decisions).**
+> - **State model — smallest change is NO schema change.** `CANCELLED` already releases inventory (outside the occupying triad `REQUESTED/PAYMENT_PENDING/CONFIRMED`); `Booking.metadata` (Json) already exists to carry the release discriminator, reason, prior state and policy version. Recommended over adding an `EXPIRED` enum value, which would require a migration and the withheld schema-change approval. → **owner decision S-1**.
+> - **Expiry clock** — recommend stamping `metadata.hold.expiresAt` at creation vs computing at sweep. → **owner decision S-2**.
+> - **Eligibility must be proof-state aware, not age-only.** A hold with a `PENDING_ADMIN_REVIEW`/`APPROVED` proof must never be swept — it is a paid booking awaiting review, not an abandoned hold.
+> - **Dev-hold count is 6, not 4.** The E2E register recorded four; live read-only enumeration found **six** across five listings (two arrived during E2E validation — the finding demonstrating itself). Of the six, **four are genuinely abandoned (no proof); two carry `syrian_local_wallet` proofs in `PENDING_ADMIN_REVIEW` and must be routed to admin review, not released.** The frozen E2E register is not edited; the reconciliation lives in the inventory doc.
+> - **Notification coupling** — every guest-facing expiry warning depends on **SYB-003** (no notification mechanism exists); this is cross-cutting **X-1**.
+
+**Open owner decisions before implementation.** S-1 (terminal state), S-2 (expiry clock), the full policy matrix (all window/extension/notification values), the SYB-021 trigger mechanism (Vercel Cron vs external vs request-driven), the past-dated fast-path rule, and separate authorization for cleaning the six dev holds.
+
+**Do not mark REMEDIATED until:** host visibility exists · admin recovery exists · approved automatic expiry operates · inventory is restored safely · all tests and validation gates pass. **None of these is done** — this decision authorized planning only. No code, schema, cron, or dev-record change was made.
+
+**Approved design decisions (Owner Decision Session 01, 2026-07-23) — planning package accepted.**
+> - **S-1 — State model.** APPROVED: reuse the existing `CANCELLED` booking state with governed `metadata`. **No new booking lifecycle enum.** Metadata must distinguish (a) user cancellation, (b) administrative release, (c) abandoned payment-hold expiry.
+> - **S-2 — Eligibility clock.** APPROVED: **timestamp-based eligibility evaluated at scheduler execution — do NOT persist an expiry timestamp.** Eligibility computed from creation timestamp + payment status + payment-proof status + current policy version. *(This supersedes the planning doc's recommended "stamp `metadata.hold.expiresAt` at creation"; expiry is now computed at sweep, and the eligibility predicate remains proof-state aware.)*
+> - **Policy matrix.** APPROVED as payment-method-specific categories. **No hardcoded durations — all windows remain configurable.** No specific duration value is approved.
+> - **Host visibility.** APPROVED, read-only: hosts may see `PAYMENT_PENDING`, hold creation time, payment-pending label, expiry information, current status. Hosts may **not** release holds, approve payments, or modify holds.
+> - **Administrator release.** APPROVED, requiring: confirmation · reason · actor · role · timestamp · booking reference · prior state · resulting state · policy version.
+> - **Notifications.** Inventory release must **not** depend on notifications; notification failure must never prevent inventory restoration; delivery is best-effort and separately auditable. *(Resolves X-1 for this finding: expiry proceeds without SYB-003; notification is decoupled.)*
+> - **Development data.** Do **not** modify the dev database; do **not** release any booking. Retain the four abandoned holds and the two `PENDING_ADMIN_REVIEW` bookings. Await explicit owner cleanup authorization later.
+>
+> Implementation remains **NOT authorized**. Still open before build: the concrete configurable duration values per method, the SYB-021 trigger mechanism (Vercel Cron vs external vs request-driven), and the past-dated fast-path rule.
 
 ### SYB-003 — No notification mechanism of any kind
 **Summary.** A platform-wide grep returns one hit, a mislabelled button. Outbound email is limited to verification codes and host insights. The payment model is manual admin review with no asynchronous signalling to anyone.
@@ -51,7 +113,35 @@ Twelve. All twelve block closed beta. **Two are missing subsystems rather than d
 **Recommended decision.** Minimum viable transactional email for booking and payment state changes.
 **Alternatives.** (a) as recommended · (b) full notification centre · (c) operate the beta manually via WhatsApp with named staff and stated hours.
 **Dependencies.** Uses the already-configured Resend mailer. **Scope is your decision.**
-**Final owner decision:** ________________  **Owner notes:** ________________
+
+**Final owner decision:** **ACCEPTED — Narrow Transactional Notification Strategy approved. Implementation deferred; design document authorized and produced.** *(Owner Decision Session 01, 2026-07-23.)*
+
+**Objective (owner-specified).** Inform users of important **already-completed** state changes. **NOT** a notification platform.
+
+**Approved scope.** Transactional notifications only: booking submitted/confirmed/cancelled · payment proof received/approved/rejected · reservation cancelled · manual payout initiated/completed · important account actions. **Excluded:** notification centre · activity feed · preferences · push framework · multi-channel orchestration.
+
+**Technology boundary.** Reuse the existing mailer; introduce **no** new notification infrastructure for the beta. The verification-email capability may be extended for transactional events.
+
+**Operational boundary.** Manual staff communication may supplement automated email but must **never replace authoritative application state**.
+
+**Notification principles (owner-specified).** Every notification represents an already-completed authoritative event. Notifications must **never** create state, approve/reject actions, change workflow, modify bookings, release inventory, or release payouts — informational only.
+
+**Confirms prior decisions.**
+> - **SYB-002** — inventory release remains independent of notification delivery; notification failure must never block inventory restoration.
+> - **SYB-011** — manual payout remains valid; transactional emails may support it but are **not** the authoritative payout record.
+
+**Planning artifact produced 2026-07-23 (design only, nothing implemented).**
+> `docs/reviews/final-independent-review/syb-003/SYB_003_TRANSACTIONAL_NOTIFICATION_DESIGN.md` — event catalogue, triggering authoritative workflow, templates, retry strategy, failure handling, audit strategy, delivery-status model, localization, accessibility, source-of-truth boundaries.
+
+**Key design findings.**
+> - **Extension, not new infrastructure.** The mailer already unifies Resend + SMTP behind `deliver({to,subject,text})` (`mailer.mjs:142`) with an existing transactional-style sender (`sendHostInsightEmail`); transactional email follows the same subject+text, AR/EN pattern.
+> - **Recipient constraint (verified).** A guest may be an anonymous device account with **no email** (SYB-010); the design degrades gracefully with a `NO_CHANNEL` delivery status and never fabricates a channel. Guest-side reachability is genuinely bounded by SYB-010.
+> - **Emit after commit, outside the transaction**, keyed for idempotency — so a mail failure cannot roll back or block the authoritative state change (SYB-002 principle).
+> - **Recommended beta storage (N-1):** annotate delivery status via `metadata`/audit — no schema change — rather than a `NotificationLog` table.
+
+**Open owner decisions before implementation.** N-1 (delivery-status storage) · guest reachability (bounded by SYB-010) · retry count/backoff · plain-text vs minimal HTML · which events ship in the first cut.
+
+**Implementation deferred.** No code, schema, UI, notification centre, or push was created.
 
 ### SYB-004 — STG-12 recorded CLOSED; forced download on 2 of 9 routes
 **Summary.** `privateDocumentDownloadHeaders()` has exactly two call sites against nine private-document serve routes. Four private-document paths still render inline, including thread attachments uploaded by an arbitrary counterparty.
@@ -250,7 +340,19 @@ Critical findings and all 4 cross-cutting decisions have owner decisions.
 **Recommended decision.** Execute the already-approved isolation plan.
 **Alternatives.** (a) execute as approved · (b) hide navigation only · (c) accept.
 **Dependencies.** The approved isolation plan. Execution only.
-**Final owner decision:** ________________  **Owner notes:** ________________
+
+**Final owner decision:** **ACCEPTED — full three-layer isolation model approved (execution of the previously approved Division Isolation Plan, not a redesign). Implementation deferred.** *(Owner Decision Session 01, 2026-07-23.)*
+
+**Approved isolation layers (owner-specified).**
+> - **Layer 1 — Navigation.** STR (`stays`) remains `active`; all other divisions display **Soon / قريباً** with non-clickable cards. *(Mechanism already exists: `DivisionStatus = 'active' | 'soon'` and `LandingPage.tsx:208` already renders `'soon'` as a disabled card — a status flip, no new navigation code.)*
+> - **Layer 2 — Route protection.** Prevent direct navigation into gated divisions (e.g. a direct `#/ride` hash URL); the user receives a governed closed-beta response instead.
+> - **Layer 3 — API protection.** **Required and authoritative.** The API is the enforcement layer of record; navigation alone is insufficient because a bypassed SPA still reaches division endpoints. Verified at `32b2152`: no route or API gate keyed on division status exists today.
+
+**Ride (SR).** Existing SR test infrastructure (12 API test files) may remain available **only** within the approved development/test environment. Ride must **not** be exposed in the closed beta; **Ride internals must not be modified**. The gate forcing SR available in test must keep those 12 files passing.
+
+**Frozen modules.** Isolation applies **only** at navigation, routing, and API entry — never inside frozen module internals.
+
+**Implementation deferred.** No code, schema, or config change was made. Execution of an already-approved plan; no new design required before build.
 
 ### SYB-009 — `SUPPORT` exempt from staff sign-in step-up
 **Summary.** `STAFF_ROLES_REQUIRING_OTP` contains ADMIN, HOST, DRIVER, SELLER — not SUPPORT. A support-only account signs in with password alone, yet can read any user's identity document, upload one onto any account, look up any user by email, read the audit log, and export the driver registry.
@@ -291,7 +393,24 @@ Critical findings and all 4 cross-cutting decisions have owner decisions.
 **Recommended decision.** Define scope before closed beta.
 **Alternatives.** (a) wire the orphaned pages and add a trips list · (b) remove the dead routes and rely on the booking-lookup link · (c) defer.
 **Dependencies.** **Scope is your decision.**
-**Final owner decision:** ________________  **Owner notes:** ________________
+
+**Final owner decision:** **ACCEPTED — Honest Closed Beta Guest Surface approved (option b). Implementation deferred.** *(Owner Decision Session 01, 2026-07-23.)*
+
+**Closed beta (owner-specified).** Do **not** build a full guest account subsystem; do **not** expose unfinished guest account pages. The official guest self-service entry point remains **booking lookup (`/track`)**, supported by transactional email (SYB-003) and manual support.
+
+**Dead routes.** `/account` and `/dashboard` must **not** silently render the marketing landing page (verified at `32b2152`: `App.tsx:102-103` renders `<LandingPage>` for both). Replace with a governed closed-beta response, or remove those routes from the beta. Users must never be presented with misleading navigation.
+
+**Public launch (deferred to a separate owner decision).** Authenticated guest accounts · guest dashboard · trip history · booking management · saved payment methods · profile management · notification centre · guest preferences · loyalty.
+
+**Relationship to prior decisions.**
+> - **SYB-002** — payment holds remain authoritative without a guest dashboard.
+> - **SYB-003** — transactional emails remain the primary communication mechanism (and bound guest reachability, since an anonymous guest may have no email).
+> - **SYB-011** — manual payout communication remains valid.
+> - **SYB-008** — closed beta remains limited to the approved STR scope.
+
+**Verified.** `GuestAccountPage` (imported by 0 files) and the guest `DashboardPage` (App.tsx imports only Host/Driver dashboards) are orphaned dead code; `/track` (`App.tsx:157` → `TripLookupPage`, confirmation + phone) is the only guest booking view. Wiring the orphaned pages risks exposing unfinished surfaces — the approved minimal option avoids touching them.
+
+**Implementation deferred.** No code, routing, UI, schema, or API change was made.
 
 ### SYB-011 — No payout write path and no withdrawal rail
 **Summary.** `User.payoutMethod` is read by admin but has no write path anywhere. No withdrawal endpoint exists. "RELEASED" is an internal ledger credit; account closure requires a zero balance.
@@ -301,7 +420,31 @@ Critical findings and all 4 cross-cutting decisions have owner decisions.
 **Recommended decision.** Resolve before accepting real bookings.
 **Alternatives.** (a) payout capture + withdrawal path · (b) manual off-platform payout with a documented process and written disclosure to beta hosts · (c) defer.
 **Dependencies.** **Requires a payout-rail decision from you.** Roadmap item H3.
-**Final owner decision:** ________________  **Owner notes:** ________________
+
+**Final owner decision:** **ACCEPTED — Manual Beta Payout Strategy approved. Implementation deferred; two design documents authorized and produced.** *(Owner Decision Session 01, 2026-07-23.)*
+
+**Closed beta (owner-specified).** Manual host payouts approved. Hosts must receive **written disclosure before onboarding**, stating: payouts are performed manually · expected payout timing · approved payout methods · review requirements · support process.
+
+**Host payout registration.** Planning approved — design a governed workflow for a host to register a payout destination. **Planning does not authorize implementation.**
+
+**Public launch.** Production payout infrastructure remains **deferred**. A future separate owner decision governs payment provider · KYC · AML · payout rails · reconciliation · tax reporting · compliance.
+
+**Account closure.** **Do not modify current closure behaviour.** Instead a separate design covers payout states: pending · initiated · completed · failed · disputed · abandoned account · retention · audit.
+
+**Ride boundary.** Do **not** reuse the frozen Ride payout implementation; Ride remains independently frozen.
+
+**Planning artifacts produced 2026-07-23 (design only, nothing implemented).**
+> - `docs/reviews/final-independent-review/syb-011/SYB_011_HOST_PAYOUT_REGISTRATION_DESIGN.md` — manual-payout disclosure spec + governed registration workflow (write path to the existing `User.payoutMethod` `Json?` column; no schema change anticipated; no money rail).
+> - `docs/reviews/final-independent-review/syb-011/SYB_011_ACCOUNT_CLOSURE_PAYOUT_STATE_DESIGN.md` — payout lifecycle states and how they *would* interact with closure; current closure behaviour left unchanged.
+
+**Key design findings.**
+> - **`User.payoutMethod` already exists as `Json?`** with a documented shape (`{ type: 'sham_cash', phone, receiverName }`), surfaced only to admin payout reminders. Registration is a governed write path to an existing column — **no schema change anticipated**.
+> - **The E2E-11 trap is real and left as-is by instruction.** A host with *released* earnings has a non-zero `cachedBalanceMinor` and no withdrawal rail, so closure guardrail 1 (`me.mjs:23`, `WALLET_NOT_EMPTY`) makes the account unclosable. The closure design defines the payout-state model a *future* authorized change would use to resolve it; it changes nothing now.
+> - **Recommended beta storage (P-1):** annotate payout state without a schema change (like SYB-002), rather than a dedicated `Payout` table.
+
+**Open owner decisions before implementation.** Approved payout-method set · payout SLA figure · disclosure copy/version · whether registration ships in the beta or is collected manually · P-1 (state storage) · P-2 (closure with pending payout: pay-before-close vs close-with-retained-obligation) · abandoned-balance/escheatment policy (legal input).
+
+**Implementation deferred.** No code, schema, API, UI, or payout rail was created.
 
 ### SYB-018 — Production template omits every required storage and Redis variable
 **Summary.** `.env.production.example` contains none of the seven `STORAGE_*` variables and neither `UPSTASH_*` variable that `validateProductionConfig()` requires. A deployment built from the documented template cannot boot.
@@ -447,10 +590,24 @@ Four decisions that are not attached to a single finding.
 
 | # | Decision | Why it is yours | Decision | Notes |
 |---|---|---|---|---|
-| **X-1** | Does the closed beta open before or after SYB-003 (notifications) and SYB-011 (payouts)? | Determines whether the beta is manually operated | ______ | ______ |
-| **X-2** | Do committed documents get corrected in place, or by appended errata? | Sets the governance precedent for how error is recorded (affects SYB-004, SYB-005, SYB-030) | ______ | ______ |
-| **X-3** | Does Validation Wave 1 execute now, given SYB-014 blocks closed beta? | Requires authorising the first Cloudflare connection | ______ | ______ |
-| **X-4** | Is SYB-012 formally accepted while Ride and Québec stay frozen? | Converts a live defect into a recorded accepted risk with a named trigger | ______ | ______ |
+| **X-1** | Does the closed beta open before or after SYB-003 (notifications) and SYB-011 (payouts)? | Determines whether the beta is manually operated | **ACCEPT — open as a managed operational beta** | See X-1 detail below |
+| **X-2** | Do committed documents get corrected in place, or by appended errata? | Sets the governance precedent for how error is recorded (affects SYB-004, SYB-005, SYB-030) | **RATIFY — strike-through + dated correction is the standard** | See X-2 detail below |
+| **X-3** | Does Validation Wave 1 execute now, given SYB-014 blocks closed beta? | Requires authorising the first Cloudflare connection | **ACCEPT — execute before the beta opens; success is a beta gate** | See X-3 detail below |
+| **X-4** | Is SYB-012 formally accepted while Ride and Québec stay frozen? | Converts a live defect into a recorded accepted risk with a named trigger | **ACCEPT — accepted while frozen, with an enforced unfreeze gate** | See X-4 detail below |
+
+*(All four decided in Owner Decision Session 01, 2026-07-23.)*
+
+### X-1 — ACCEPT: Closed Beta opens as a managed operational beta
+**Required before the first participant:** named operations owner · published support channel · response hours · response SLA · manual payout schedule · beta participant disclosure · known limitations. This confirms the manual-operation posture implied by SYB-003 (narrow transactional email + manual support), SYB-011 (manual payout + written disclosure), SYB-010 (booking-lookup + manual support), and SYB-008 (STR-only scope).
+
+### X-2 — RATIFY: strike-through + dated correction is the programme correction standard
+Strike-through of the inaccurate text **plus** a dated correction note (preserving what was believed and when) is the ratified method. The existing corrections in **SYB-004** and **SYB-005** (threat model + ADR-0010) are **ratified as-is**. The same method has now been **applied to SYB-030** — the stale §16.1 of `docs/product/SYBNB_FULL_PLATFORM_LAUNCH_READINESS_REVIEW.md` (2026-07-23). **Existing corrected documents are NOT to be converted into separate errata.**
+
+### X-3 — ACCEPT: Validation Wave 1 must execute before the closed beta opens
+**Requirements:** synthetic data only · test credentials · test bucket · isolated validation harness · **no production data · no production buckets**. **Successful validation is a beta gate.** Verified state at `32b2152`: the S3 driver has never executed against R2 — the suite pins `STORAGE_DRIVER = 'local'` (`setup.env.mjs:25`) and `object-storage.mjs` refuses `s3` under `NODE_ENV=test`; plan at `docs/product/STORAGE_VALIDATION_WAVE_1_PLAN.md`. Resolves the SYB-014 block only on success.
+
+### X-4 — ACCEPT: Ride and Québec remain frozen; local document storage accepted only while frozen
+**Formal governance rule:** *No Ride or Québec unfreeze is permitted until its document storage is migrated to governed object storage and owner approval is granted.* Verified: `driver-document-storage.mjs` and `quebec-document-storage.mjs` still `writeFile` to `server/uploads/*` (ephemeral). Registered as SYB-012; contained by freeze, not by a control — the gate makes the dependency explicit and enforced at any future unfreeze decision.
 
 ---
 
