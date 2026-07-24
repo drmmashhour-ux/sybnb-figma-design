@@ -8,6 +8,7 @@ import {
   type PlatformAdminMetrics,
   type PlatformReviewQueue,
 } from '../../shared/api/platformApi'
+import { AdminHostingCalendar } from './AdminHostingCalendar'
 
 type Props = {
   lang: Lang
@@ -285,18 +286,9 @@ export function OperationsCalendarPage({ lang }: Props) {
         </div>
       </section>
 
-      <section className="operations-signals">
-        <div>
-          <p>{t.ai}</p>
-          <h2>{t.signals}</h2>
-          <span>{t.aiText}</span>
-        </div>
-        <div>
-          <Signal label={t.maintenance} value={lang === 'ar' ? 'تنظيف بعد كل خروج' : 'Clean after checkout'} />
-          <Signal label={t.messages} value={lang === 'ar' ? 'توحيد IMMOContact' : 'Unify IMMOContact'} />
-          <Signal label={t.payments} value={lang === 'ar' ? 'تذكير إثبات الدفع' : 'Payment proof reminder'} />
-        </div>
-      </section>
+      {/* AD1 (part 2): the real cross-host "Hosting" booked-vs-vacant view replaces the old "Coming soon"
+          placeholder. It reads /api/admin/hosting-calendar — the single availability source. */}
+      <AdminHostingCalendar lang={lang} />
 
       <section className="operations-automation">
         <article>
@@ -324,15 +316,6 @@ export function OperationsCalendarPage({ lang }: Props) {
 
 function openEvent(href: string) {
   window.location.hash = href
-}
-
-function Signal({ label, value }: { label: string; value: string }) {
-  return (
-    <article>
-      <strong>{label}</strong>
-      <span>{value}</span>
-    </article>
-  )
 }
 
 function TaskFact({ label, value }: { label: string; value: string }) {
