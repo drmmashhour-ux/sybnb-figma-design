@@ -43,8 +43,11 @@ export function offlineMapStorageKey(listingId: string) {
 export function listingMapTarget(listing: PlatformListing, title: string, lang: Lang): GoogleMapTarget {
   const metadata = listing.metadata || {}
   const location = listing.location || {}
-  const lat = numberFrom(location.lat ?? location.latitude ?? location.geoLat ?? metadata.lat ?? metadata.latitude ?? metadata.geoLat)
-  const lng = numberFrom(location.lng ?? location.lon ?? location.longitude ?? location.geoLng ?? metadata.lng ?? metadata.lon ?? metadata.longitude ?? metadata.geoLng)
+  // H8 — pre-booking, the only coordinate source is the server-blurred approximate area (the exact pin is
+  // never on a public listing response). Prefer it; the location/metadata fallbacks are for legacy shapes.
+  const approx = listing.approximateLocation
+  const lat = numberFrom(approx?.latitude ?? location.lat ?? location.latitude ?? location.geoLat ?? metadata.lat ?? metadata.latitude ?? metadata.geoLat)
+  const lng = numberFrom(approx?.longitude ?? location.lng ?? location.lon ?? location.longitude ?? location.geoLng ?? metadata.lng ?? metadata.lon ?? metadata.longitude ?? metadata.geoLng)
   const addressParts = [
     stringFrom(location.addressAr ?? metadata.addressAr),
     stringFrom(location.address ?? metadata.address),

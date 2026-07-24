@@ -45,6 +45,9 @@ export type PlatformListing = {
   media?: Array<Record<string, unknown>>
   location?: Record<string, unknown> | null
   accommodation?: { id: string; titleAr: string; titleEn: string | null } | null
+  // H8 — blurred approximate area attached on the pre-booking detail fetch (never exact coords/address).
+  approximateLocation?: PlatformApproximateLocation
+
   hasActiveOffer?: boolean
   offerNightsCount?: number
   cheapestOfferMinor?: number | null
@@ -1546,10 +1549,23 @@ export async function updateHostListingAvailability(
   return response.availability
 }
 
+// H8 — the pre-booking listing detail carries only the APPROXIMATE (blurred) area; the exact pin/address are
+// never on this response (revealed only through the guest's own confirmed booking in My Trips).
+export type PlatformApproximateLocation = {
+  approximate: true
+  latitude: number | null
+  longitude: number | null
+  radiusMeters: number | null
+  governorate: string | null
+  city: string | null
+  area: string | null
+}
+
 export async function fetchPrototypeListing(listingId: string) {
   try {
-    const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`)
-    return response.listing
+    const response = await apiRequest<{ ok: true; listing: PlatformListing; approximateLocation?: PlatformApproximateLocation }>(`/api/listings/${listingId}`)
+    // Attach the blurred area so the map can center on it without any exact source.
+    return { ...response.listing, approximateLocation: response.approximateLocation } as PlatformListing
   } catch (error) {
     // SYB-006: do not serve a fabricated listing detail on an API failure. The caller pages
     // (ListingDetailPage, BookingReviewPage, SellerSubmittedPage) already surface a truthful error

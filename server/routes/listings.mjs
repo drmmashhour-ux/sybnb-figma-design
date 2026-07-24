@@ -7,6 +7,7 @@ import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pri
 import { computeQuebecStayTaxesResolved } from '../lib/quebec-stay-tax.mjs'
 import { resolveStayTaxLine, STAY_TAX_LINE_STATUS } from '../lib/stay-tax-line.mjs'
 import { resolveListingJurisdiction } from '../lib/jurisdiction-compliance.mjs'
+import { approximateLocation } from '../lib/listing-location.mjs'
 import { stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
@@ -402,7 +403,9 @@ export async function handleListings(req, res, url, context) {
     const listing = await db().listing.findFirst({
       where: { id: detailMatch[1], status: 'APPROVED' },
       include: {
-        location: true,
+        // H8 (location-R7): the exact `location` relation (geo/addressLine/street) is deliberately NOT
+        // included on this public surface. The accommodation's exact pin/address are selected only to
+        // COMPUTE the blurred approximate below and are stripped before the response is sent.
         media: true,
         owner: {
           select: {
@@ -413,7 +416,7 @@ export async function handleListings(req, res, url, context) {
           },
         },
         accommodation: {
-          select: { id: true, titleAr: true, titleEn: true },
+          select: { id: true, titleAr: true, titleEn: true, metadata: true, address: true, governorate: true, city: true, area: true },
         },
       },
     })
@@ -430,7 +433,15 @@ export async function handleListings(req, res, url, context) {
     // Verification badge: the listing owner's identity document has been admin-approved. Surfaced on
     // the public detail so a buyer can see "verified seller" before contacting them.
     const sellerVerified = listing.owner?.idDocumentStatus === 'APPROVED'
-    return json(res, 200, { ok: true, listing, sellerVerified })
+
+    // H8 (location-R7): compute the blurred APPROXIMATE area from the host pin, then STRIP the exact
+    // accommodation pin/address off the response so a pre-booking guest can never read them. The exact
+    // location is revealed only through the guest's own confirmed booking (see server/routes/me.mjs).
+    const approximate = approximateLocation(listing.accommodation, listing.metadata)
+    if (listing.accommodation) {
+      listing.accommodation = { id: listing.accommodation.id, titleAr: listing.accommodation.titleAr, titleEn: listing.accommodation.titleEn }
+    }
+    return json(res, 200, { ok: true, listing, sellerVerified, approximateLocation: approximate })
   }
 
   const availabilityMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/availability$/)

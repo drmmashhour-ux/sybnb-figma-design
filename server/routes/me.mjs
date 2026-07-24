@@ -6,6 +6,7 @@ import { expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 import { ID_DOCUMENT_CATEGORY, deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
 import { maskPayoutMethod, normalizePayoutMethod } from '../lib/host-payout.mjs'
+import { approximateLocation, exactLocation, bookingRevealsExactLocation } from '../lib/listing-location.mjs'
 
 // A booking still owing something to the counterparty, or a ride still in flight, blocks account closure.
 const ACTIVE_BOOKING_STATUSES = ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED']
@@ -251,7 +252,12 @@ export async function handleMe(req, res, url, context) {
   const [bookings, listings, payments, rides, wallet, sentGifts, claimedGifts, sellerProfile, referralsMade] = await Promise.all([
     db().booking.findMany({
       where: { guestId: context.user.id },
-      include: { listing: true, payments: true },
+      include: {
+        // H8: the accommodation's exact pin/address are fetched to reveal them ONLY on this guest's own
+        // CONFIRMED bookings; they are stripped off any non-confirmed booking before the response is sent.
+        listing: { include: { accommodation: { select: { id: true, metadata: true, address: true, governorate: true, city: true, area: true } } } },
+        payments: true,
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
     }),
@@ -293,6 +299,20 @@ export async function handleMe(req, res, url, context) {
     }),
   ])
 
+  // H8 (location-R7): reveal the EXACT pin + street address only on this guest's own confirmed/completed
+  // bookings; every other booking carries the blurred approximate area. Either way the raw accommodation
+  // pin/address is stripped so the exact location is never leaked through a non-confirmed booking.
+  const bookingsWithLocation = bookings.map((booking) => {
+    const accommodation = booking.listing?.accommodation || null
+    const location = bookingRevealsExactLocation(booking.status)
+      ? exactLocation(accommodation)
+      : approximateLocation(accommodation, booking.listing?.metadata || {})
+    if (booking.listing?.accommodation) {
+      booking.listing.accommodation = { id: booking.listing.accommodation.id }
+    }
+    return { ...booking, location }
+  })
+
   return json(res, 200, {
     ok: true,
     overview: {
@@ -306,7 +326,7 @@ export async function handleMe(req, res, url, context) {
         idDocumentStatus: context.user.idDocumentStatus,
         referralCode: context.user.referralCode,
       },
-      bookings,
+      bookings: bookingsWithLocation,
       listings,
       payments,
       rides,
