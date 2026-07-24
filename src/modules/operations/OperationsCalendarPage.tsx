@@ -9,6 +9,7 @@ import {
   type PlatformReviewQueue,
 } from '../../shared/api/platformApi'
 import { AdminHostingCalendar } from './AdminHostingCalendar'
+import { AdminDailyReport } from './AdminDailyReport'
 
 type Props = {
   lang: Lang
@@ -190,6 +191,9 @@ export function OperationsCalendarPage({ lang }: Props) {
           </article>
         ))}
       </section>
+
+      {/* AD3 (part 2): the advisory AI daily report — figures from records, narrative phrases them. */}
+      <AdminDailyReport lang={lang} />
 
       <section className="operations-layout">
         <div className="operations-calendar-card">

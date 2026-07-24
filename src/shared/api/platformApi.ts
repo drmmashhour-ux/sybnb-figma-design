@@ -1811,6 +1811,27 @@ export type PlatformAdminHosting = {
   listingCount: number
   listings: PlatformAdminHostingRow[]
 }
+// AD3 — the AI daily report: authoritative figures compiled from records + a narrative that only phrases
+// them (AI when configured, else a deterministic template). No client recompute.
+export type PlatformAdminDailyReport = {
+  generatedAt: string
+  source: string
+  facts: {
+    newBookings24h: number
+    pendingListingReviews: number
+    pendingPaymentProofs: number
+    pendingReviewsTotal: number
+    payoutsPendingHoldCount: number
+    payoutsPendingHoldMinor: number
+    openDisputes: number
+  }
+  narrative: { messageAr: string | null; messageEn: string | null; model: string | null; source: string }
+}
+export async function fetchAdminDailyReport() {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; report: PlatformAdminDailyReport }>('/api/admin/daily-report', { token }))
+  return response.report
+}
+
 export async function fetchAdminHostingCalendar(range?: { from?: string; to?: string }) {
   const params = new URLSearchParams()
   if (range?.from) params.set('from', range.from)
