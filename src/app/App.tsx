@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState, type ComponentType } from 'react'
 import { findDivisionByRoute, gatedDivisionForPath } from '../engines/navigation/divisions'
 import { ClosedBetaDivisionNotice } from '../modules/beta/ClosedBetaDivisionNotice'
+import { GuestBetaSurface } from '../modules/beta/GuestBetaSurface'
 import type { Lang } from '../engines/language/languageEngine'
 import { getInitialLanguage, persistLanguage, text } from '../engines/language/languageEngine'
 import { AppShell } from '../shared/layout/AppShell'
@@ -107,7 +108,10 @@ export function App() {
         ) : guestAccountMatch ? (
           guestAccountMatch[1] ? <ListingDetailPage listingId={guestAccountMatch[1]} lang={lang} /> : <SearchPreviewPage lang={lang} initialDivision="stays" entry="stays" />
         ) : path === '/dashboard' || path === '/account' ? (
-          <LandingPage lang={lang} />
+          // SYB-010: these routes previously rendered the landing page silently, and the real guest
+          // account pages are unfinished orphans. Show the honest closed-beta guest surface instead,
+          // pointing at /track — the official self-service flow — never a misleading destination.
+          <GuestBetaSurface lang={lang} />
         ) : path === '/host' ||
           path === '/host/seller' ||
           path === '/host/stays' ||
