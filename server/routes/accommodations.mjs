@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes } from '../lib/listing-attributes.mjs'
+import { assertContractConsentAccepted, recordHostContractConsent } from '../lib/host-consent.mjs'
 
 // Lets a hotel-like host (Studio/Suite/Double-Queen room types under one physical property)
 // share one location + one set of seller documents/photos across multiple STAYS Listing rows,
@@ -109,6 +110,7 @@ export async function handleAccommodations(req, res, url, context) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['HOST', 'SELLER'])
     const accommodationId = submitMatch[1]
+    const body = await readJson(req)
 
     const accommodation = await db().accommodation.findFirst({
       where: { id: accommodationId, ownerId: context.user.id },
@@ -136,6 +138,11 @@ export async function handleAccommodations(req, res, url, context) {
         assertListingAttributes(listing.division, listing.metadata)
       }
     }
+
+    // M6: publishing STAYS accommodation room types requires the host to accept the current commission
+    // contract (hard block) — accommodations are STR. Re-affirms + audits consent on each publish.
+    assertContractConsentAccepted(body)
+    await recordHostContractConsent(db(), { userId: context.user.id, action: 'publish', entityId: accommodationId })
 
     const [updatedAccommodation] = await db().$transaction([
       db().accommodation.update({

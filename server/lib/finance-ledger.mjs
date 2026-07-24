@@ -29,6 +29,13 @@ function metadataNumber(metadata, key) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }
 
+// M2 — the single STR commission helper. Commission is a percentage of the accommodation + cleaning base;
+// tax is pass-through and is NEVER part of the base. host_payout = (accommodation + cleaning) − commission.
+export function platformFee(accommodationMinor, cleaningFeeMinor, commissionRate) {
+  const base = Math.max(0, Math.round(accommodationMinor || 0)) + Math.max(0, Math.round(cleaningFeeMinor || 0))
+  return Math.round(base * commissionRate)
+}
+
 // M1 — single-source STR commission rate. Resolves the active STR-scoped JurisdictionCommissionPolicy
 // (serviceType STAY) for the listing's jurisdiction; falls back to STR_ADMIN_COMMISSION_RATE when none is
 // active — mirroring the RIDE wiring (resolveSrCommissionTiers): DB policy if active, else fallback, so
@@ -133,7 +140,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   const cleaningFeeMinor = explicitCleaningFeeMinor || Math.round(rentMinor * STR_CLEANING_RATE)
   const extraFeesMinor = explicitExtraFeesMinor
   const taxesMinor = explicitLodgingTaxMinor || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor - extraFeesMinor)
-  const adminCommissionMinor = Math.round(rentMinor * commissionRate)
+  const adminCommissionMinor = platformFee(rentMinor, cleaningFeeMinor, commissionRate)
   const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor + extraFeesMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 

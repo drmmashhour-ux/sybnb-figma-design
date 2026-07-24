@@ -628,7 +628,10 @@ export async function fetchPrototypeContracts() {
   return apiRequest<PlatformContracts>('/api/contracts')
 }
 
-export async function createAndSubmitPrototypeListing(input: CreateListingInput) {
+// M6: a STAYS publish carries the host's commission-contract consent (acceptContract + contractVersion).
+export type HostContractConsent = { acceptContract: boolean; contractVersion: string }
+
+export async function createAndSubmitPrototypeListing(input: CreateListingInput, consent?: HostContractConsent) {
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
   const created = await apiRequest<{ ok: true; listing: PlatformListing }>('/api/listings', {
     method: 'POST',
@@ -644,6 +647,7 @@ export async function createAndSubmitPrototypeListing(input: CreateListingInput)
     {
       method: 'PATCH',
       token: session.token,
+      body: consent ? { acceptContract: consent.acceptContract, contractVersion: consent.contractVersion } : undefined,
     },
   )
 
@@ -795,13 +799,14 @@ export async function addAccommodationRoomType(accommodationId: string, input: A
   return response.listing
 }
 
-export async function submitAccommodation(accommodationId: string) {
+export async function submitAccommodation(accommodationId: string, consent?: HostContractConsent) {
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
   const response = await apiRequest<{ ok: true; accommodation: PlatformAccommodation }>(
     `/api/accommodations/${accommodationId}/submit`,
     {
       method: 'PATCH',
       token: session.token,
+      body: consent ? { acceptContract: consent.acceptContract, contractVersion: consent.contractVersion } : undefined,
     },
   )
   return response.accommodation
@@ -2711,10 +2716,11 @@ export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host
 // M1: the effective STR commission rate for host-facing copy (server single source; never a guest body).
 export async function fetchHostCommissionRate(mode: HostDashboardMode = 'host') {
   const session = await getHostDashboardSession(mode)
-  const response = await apiRequest<{ ok: true; platformFeePct: number }>('/api/host/commission-rate', {
+  const response = await apiRequest<{ ok: true; platformFeePct: number; contractVersion: string }>('/api/host/commission-rate', {
     token: session.token,
   })
-  return response.platformFeePct
+  // M6: the client echoes contractVersion back on publish/accept so the server enforces current-version consent.
+  return { platformFeePct: response.platformFeePct, contractVersion: response.contractVersion }
 }
 
 export type PlatformHostInsight = {
@@ -2761,7 +2767,8 @@ export async function decidePrototypeHostRequest(
   bookingId: string,
   decision: 'CONFIRM' | 'CANCEL',
   mode: HostDashboardMode = 'host',
-  options: { acceptedTerms?: boolean; termsVersion?: string } = {},
+  // M6: acceptContract + contractVersion carry the host's commission-contract consent for a STAYS confirm.
+  options: { acceptedTerms?: boolean; termsVersion?: string; acceptContract?: boolean; contractVersion?: string } = {},
 ) {
   const session = await getHostDashboardSession(mode)
   const response = await apiRequest<{ ok: true; booking: PlatformBooking & { listing?: PlatformListing } }>(

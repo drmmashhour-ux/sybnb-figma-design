@@ -22,6 +22,7 @@ import { LISTING_DOCUMENT_CATEGORY, deleteListingDocument, readListingDocument, 
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
 import { recordStaffDocumentAccess } from '../lib/document-access-audit.mjs'
 import { retentionDeleteAfter } from '../lib/listing-document-retention.mjs'
+import { assertContractConsentAccepted, recordHostContractConsent } from '../lib/host-consent.mjs'
 
 // FIX A / A-2: a listing is guest-visible only if it is in the active jurisdiction (Syria, fail-closed)
 // and is not a demo/synthetic listing. Used by EVERY guest-facing single-listing fetch (detail + quote)
@@ -773,6 +774,7 @@ export async function handleListings(req, res, url, context) {
   if (submitMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['SELLER', 'HOST'])
+    const body = await readJson(req)
     const existing = await db().listing.findFirst({
       where: { id: submitMatch[1], ownerId: context.user.id },
     })
@@ -818,6 +820,13 @@ export async function handleListings(req, res, url, context) {
     }
     // (c) All required structured attributes for the division must be present and well-formed.
     assertListingAttributes(existing.division, existing.metadata)
+
+    // M6: a STAYS (STR) host must review + accept the current commission contract to publish. Hard block
+    // (403) if the request doesn't accept the current version; each publish re-affirms + audits consent.
+    if (existing.division === 'STAYS') {
+      assertContractConsentAccepted(body)
+      await recordHostContractConsent(db(), { userId: context.user.id, action: 'publish', entityId: existing.id })
+    }
 
     const listing = await db().listing.update({
       where: { id: existing.id },

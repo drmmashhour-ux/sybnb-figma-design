@@ -27,7 +27,8 @@ export function strAdminShareMinor(paidTotalMinor: number, commissionRate: numbe
   const rentMinor = Math.round(paidTotalMinor / divisor)
   const cleaningFeeMinor = Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = Math.max(0, paidTotalMinor - rentMinor - cleaningFeeMinor)
-  const adminCommissionMinor = Math.round(rentMinor * commissionRate)
+  // M2: commission base = accommodation + cleaning (tax excluded).
+  const adminCommissionMinor = Math.round((rentMinor + cleaningFeeMinor) * commissionRate)
   return taxesMinor + adminCommissionMinor
 }
 

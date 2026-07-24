@@ -27,6 +27,12 @@ describe('R7b — platformFeePct present only on authenticated host/admin, absen
   })
 
   afterAll(async () => {
+    // The booking-body test may create a booking that references the listing (FK) — remove it first.
+    const bookingIds = (await db().booking.findMany({ where: { listingId }, select: { id: true } })).map((b) => b.id)
+    if (bookingIds.length) {
+      await db().paymentProof.deleteMany({ where: { bookingId: { in: bookingIds } } })
+      await db().booking.deleteMany({ where: { id: { in: bookingIds } } })
+    }
     await db().listing.deleteMany({ where: { id: listingId } })
     await cleanupTestUsers()
   })
@@ -43,10 +49,20 @@ describe('R7b — platformFeePct present only on authenticated host/admin, absen
     expect(JSON.stringify(res.body)).not.toContain('platformFeePct')
   })
 
-  it('guest quote body contains no platformFeePct', async () => {
+  it('guest quote body contains no platformFeePct nor commission (R7b)', async () => {
     const res = await request(app).get(`/api/listings/${listingId}/quote?checkIn=2026-09-01&checkOut=2026-09-03`)
     expect(res.status).toBe(200)
-    expect(JSON.stringify(res.body)).not.toContain('platformFeePct')
+    const body = JSON.stringify(res.body)
+    expect(body).not.toContain('platformFeePct')
+    expect(body).not.toMatch(/commission|adminCommission|hostPayout/i)
+  })
+
+  it('guest booking-creation body exposes no commission (R7b)', async () => {
+    const isoDay = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+    const res = await request(app).post('/api/bookings').set('authorization', `Bearer ${guest.token}`)
+      .send({ listingId, checkIn: isoDay(20), checkOut: isoDay(22) })
+    // Whatever the outcome, the guest-facing body must never carry commission/host-payout.
+    expect(JSON.stringify(res.body)).not.toMatch(/commission|adminCommission|hostPayout|platformFee/i)
   })
 
   it('authenticated host earnings exposes platformFeePct (a number)', async () => {

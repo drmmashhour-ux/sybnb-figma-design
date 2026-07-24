@@ -81,9 +81,10 @@ describe('M1 — a non-13% commission policy flows through all 3 restructured ma
     const statement = await buildStayStatement(db(), { hostId: host.user.id, periodType: 'custom', periodStart: new Date('2020-01-01'), periodEnd: new Date(Date.now() + 86400000) })
     const line = statement.lines.find((l) => l.bookingId === booking.id)
     expect(line, 'booking present in stay statement').toBeTruthy()
-    // Commission recorded at approval time from the ZZ 20% policy.
+    // Commission recorded at approval time from the ZZ 20% policy (M2 base = accommodation + cleaning).
     const rent = Math.round(AMOUNT / 1.05)
-    expect(line.commissionMinor).toBe(Math.round(rent * 0.20))
-    expect(line.commissionMinor).not.toBe(Math.round(rent * 0.13))
+    const cleaning = Math.round(rent * 0.05)
+    expect(line.commissionMinor).toBe(Math.round((rent + cleaning) * 0.20))
+    expect(line.commissionMinor).not.toBe(Math.round((rent + cleaning) * 0.13))
   })
 })

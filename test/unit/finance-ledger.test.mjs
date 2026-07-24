@@ -35,11 +35,12 @@ describe('bookingFinanceSplit: STAYS division invariant (rent + cleaning + tax r
     expect(split.hostGrossMinor + split.adminShareMinor).toBe(split.paidTotalMinor)
   })
 
-  it('admin commission is exactly STR_ADMIN_COMMISSION_RATE of the rent component', () => {
+  it('admin commission is STR_ADMIN_COMMISSION_RATE of the accommodation + cleaning base (M2)', () => {
     const booking = strBooking()
     const split = bookingFinanceSplit(booking, booking.amountMinor)
 
-    expect(split.adminCommissionMinor).toBe(Math.round(split.stayAmountMinor * STR_ADMIN_COMMISSION_RATE))
+    // M2: commission base = accommodation + cleaning (tax excluded, never commissioned).
+    expect(split.adminCommissionMinor).toBe(Math.round((split.stayAmountMinor + split.cleaningFeeMinor) * STR_ADMIN_COMMISSION_RATE))
   })
 
   it('excludes a purchased cancellation-protection fee from the rent/cleaning/tax split, tracking it separately', () => {
@@ -103,7 +104,7 @@ describe('bookingFinanceSplit: STAYS division invariant (rent + cleaning + tax r
     expect(split.stayAmountMinor).toBe(100) // 120 - 20, not round(120/1.05)=114
     expect(split.cleaningFeeMinor).toBe(20)
     expect(split.stayAmountMinor + split.cleaningFeeMinor + split.taxesMinor + split.extraFeesMinor).toBe(split.paidTotalMinor)
-    expect(split.adminCommissionMinor).toBe(Math.round(100 * STR_ADMIN_COMMISSION_RATE))
+    expect(split.adminCommissionMinor).toBe(Math.round((100 + 20) * STR_ADMIN_COMMISSION_RATE))
   })
 
   it('host gross + admin share still reconstructs the paid amount exactly when a cleaning fee is declared', () => {

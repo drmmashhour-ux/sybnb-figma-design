@@ -11,6 +11,7 @@ import {
   resolveStrCommissionRate,
   strCommissionRateForBooking,
 } from '../lib/finance-ledger.mjs'
+import { assertContractConsentAccepted, recordHostContractConsent, STR_HOST_CONTRACT_VERSION } from '../lib/host-consent.mjs'
 import { completeExpiredBookings, releaseAbandonedHolds } from '../lib/booking-lifecycle.mjs'
 import { expectedHoldExpiryAt } from '../lib/booking-hold-policy.mjs'
 import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate } from '../lib/listing-lifecycle.mjs'
@@ -101,7 +102,9 @@ export async function handleHost(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['HOST', 'SELLER'])
     const platformFeePct = await resolveStrCommissionRate(db(), { country: 'SY' })
-    return json(res, 200, { ok: true, platformFeePct })
+    // M6: the client echoes contractVersion back on publish/accept so the server can enforce current-version
+    // consent (and the client can show whether re-consent is due).
+    return json(res, 200, { ok: true, platformFeePct, contractVersion: STR_HOST_CONTRACT_VERSION })
   }
 
   if (url.pathname === '/api/host/overview') {
@@ -299,6 +302,11 @@ export async function handleHost(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // M6: a STAYS (STR) host must review + accept the CURRENT commission contract to confirm a booking.
+    // Hard block (403) if the request doesn't accept the current version.
+    if (canConfirm && existing.listing?.division === 'STAYS') {
+      assertContractConsentAccepted(body)
+    }
 
     const booking = await db().$transaction(async (tx) => {
       // SECURITY (S4): claim the transition atomically on the status we validated above. Without this, a
@@ -314,6 +322,18 @@ export async function handleHost(req, res, url, context) {
         error.code = 'HOST_BOOKING_CONFLICT'
         error.expose = true
         throw error
+      }
+
+      // M6: on confirming a STAYS booking, re-affirm + audit the host's contract consent and FREEZE the
+      // booking's terms (commission rate + contract/base version) so a later policy re-version can't
+      // retroactively restate this booking. Snapshot lives on booking.metadata (no migration).
+      if (canConfirm && existing.listing?.division === 'STAYS') {
+        const commissionRate = await strCommissionRateForBooking(tx, existing)
+        const acceptedAt = await recordHostContractConsent(tx, { userId: context.user.id, action: 'accept', entityId: existing.id })
+        await tx.booking.update({
+          where: { id: existing.id },
+          data: { metadata: { ...(existing.metadata || {}), termsSnapshot: { commissionRate, baseVersion: STR_HOST_CONTRACT_VERSION, acceptedAt } } },
+        })
       }
 
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')

@@ -37,8 +37,9 @@ describe('M1 — STR commission rate resolves from JurisdictionCommissionPolicy 
     const at20 = bookingFinanceSplit(booking, 10_500, 0.20)
     const at13 = bookingFinanceSplit(booking, 10_500, 0.13)
     expect(at20.adminCommissionMinor).toBeGreaterThan(at13.adminCommissionMinor)
-    expect(at13.adminCommissionMinor).toBe(Math.round(at13.stayAmountMinor * 0.13))
-    expect(at20.adminCommissionMinor).toBe(Math.round(at20.stayAmountMinor * 0.20))
+    // M2: commission base = accommodation + cleaning.
+    expect(at13.adminCommissionMinor).toBe(Math.round((at13.stayAmountMinor + at13.cleaningFeeMinor) * 0.13))
+    expect(at20.adminCommissionMinor).toBe(Math.round((at20.stayAmountMinor + at20.cleaningFeeMinor) * 0.20))
   })
 
   it('strCommissionRateForBooking reads the listing jurisdiction (defaults Syria)', async () => {

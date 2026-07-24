@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   decidePrototypeHostRequest,
+  fetchHostCommissionRate,
   fetchListingDocuments,
   fetchPrototypeHostOverview,
   markHostGuestCheckpoint,
@@ -290,6 +291,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const [activeListingId, setActiveListingId] = useState('')
   const [calendarListingId, setCalendarListingId] = useState('')
   const [acceptedRequestTerms, setAcceptedRequestTerms] = useState<Record<string, boolean>>({})
+  // M6: the current commission rate + contract version, for the accept-time preview + consent (STAYS).
+  const [platformFeePct, setPlatformFeePct] = useState<number | null>(null)
+  const [contractVersion, setContractVersion] = useState<string | null>(null)
   // C5: the name of the ID document that was actually uploaded to the server in this session, and
   // the state of that upload. Neither feeds the trust score — they only report what happened.
   const [hostIdDocumentName, setHostIdDocumentName] = useState('')
@@ -304,6 +308,13 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
 
   useEffect(() => {
     void loadOverview()
+  }, [mode])
+
+  // M6: fetch the current commission rate + contract version for the accept-time preview + consent.
+  useEffect(() => {
+    let active = true
+    void fetchHostCommissionRate(mode).then((r) => { if (active) { setPlatformFeePct(r.platformFeePct); setContractVersion(r.contractVersion) } }).catch(() => {})
+    return () => { active = false }
   }, [mode])
 
   const visibleListings = useMemo(
@@ -408,6 +419,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
       const booking = await decidePrototypeHostRequest(bookingId, decision, mode, {
         acceptedTerms: decision === 'CONFIRM' ? true : undefined,
         termsVersion: 'SYBNB_HOST_BOOKING_RULES_V1',
+        // M6: the STAYS booking-accept commission-contract consent.
+        acceptContract: decision === 'CONFIRM' ? true : undefined,
+        contractVersion: contractVersion || undefined,
       })
       const nextStatus = booking.status || (decision === 'CONFIRM' ? 'CONFIRMED' : 'CANCELLED')
       setOverview((current) => current ? {
@@ -779,6 +793,19 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                         <span>
                           <strong>{t.termsTitle}</strong>
                           <small>{t.termsCopy}</small>
+                          {platformFeePct != null && (() => {
+                            // M6: live "gross − commission = your payout" preview (commission on rent + cleaning,
+                            // same rate as the split; Syria has no tax so amountMinor == rent + cleaning).
+                            const commission = Math.round(request.amountMinor * platformFeePct)
+                            const payout = request.amountMinor - commission
+                            return (
+                              <small>
+                                {isAr
+                                  ? `الإجمالي ${moneyText(request.amountMinor, request.currency, lang)} − العمولة ${moneyText(commission, request.currency, lang)} = مستحقاتك ${moneyText(payout, request.currency, lang)}.`
+                                  : `Gross ${moneyText(request.amountMinor, request.currency, lang)} − commission ${moneyText(commission, request.currency, lang)} = your payout ${moneyText(payout, request.currency, lang)}.`}
+                              </small>
+                            )
+                          })()}
                         </span>
                       </label>
                       <button

@@ -347,9 +347,12 @@ export function SellerListingWizard({ lang }: Props) {
   // M1: the STR commission rate for the host's payout note, fetched from the server single source (never
   // hardcoded). Best-effort — if the lookup fails, the note simply omits the number rather than guessing.
   const [platformFeePct, setPlatformFeePct] = useState<number | null>(null)
+  // M6: the current commission contract version + the host's acceptance of it (required to publish a STAYS listing).
+  const [contractVersion, setContractVersion] = useState<string | null>(null)
+  const [contractAccepted, setContractAccepted] = useState(false)
   useEffect(() => {
     let active = true
-    void fetchHostCommissionRate().then((rate) => { if (active) setPlatformFeePct(rate) }).catch(() => {})
+    void fetchHostCommissionRate().then((r) => { if (active) { setPlatformFeePct(r.platformFeePct); setContractVersion(r.contractVersion) } }).catch(() => {})
     return () => { active = false }
   }, [])
   const commissionLabel = platformFeePct != null ? `${+(platformFeePct * 100).toFixed(2)}%` : null
@@ -988,7 +991,9 @@ export function SellerListingWizard({ lang }: Props) {
 
         // Non-STAYS divisions (and the STAYS advertising variant) publish a single listing; the STAYS
         // property flow is handled above via the accommodation/room-type path (C2 photos attach there).
-        await createAndSubmitPrototypeListing(listingInput)
+        // M6: a STAYS publish must carry the host's accepted commission contract.
+        const consent = division === 'STAYS' && contractAccepted && contractVersion ? { acceptContract: true as const, contractVersion } : undefined
+        await createAndSubmitPrototypeListing(listingInput, consent)
         clearDraft()
         navigate('/sell/submitted')
       } catch (error) {
@@ -1023,10 +1028,16 @@ export function SellerListingWizard({ lang }: Props) {
 
   async function finishAccommodation() {
     if (!accommodationId) return
+    // M6: publishing a STAYS accommodation requires the host to have accepted the current commission contract.
+    if (!contractAccepted || !contractVersion) {
+      setSubmitState('error')
+      setSubmitError(isAr ? 'يرجى الموافقة على عقد العمولة قبل النشر.' : 'Please accept the commission contract before publishing.')
+      return
+    }
     setSubmitState('submitting')
     setSubmitError('')
     try {
-      await submitAccommodation(accommodationId)
+      await submitAccommodation(accommodationId, { acceptContract: true, contractVersion })
       clearDraft()
       navigate('/sell/submitted')
     } catch (error) {
@@ -1546,8 +1557,33 @@ export function SellerListingWizard({ lang }: Props) {
               {division === 'STAYS' && (
                 <div className="seller-wide-field seller-money-note">
                   {isAr
-                    ? `تخصم SYBNB عمولة خدمة${commissionLabel ? ` ${commissionLabel}` : ''} من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.`
-                    : `SYBNB deducts ${commissionLabel ? `a ${commissionLabel}` : 'a'} service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.`}
+                    ? `تخصم SYBNB عمولة خدمة${commissionLabel ? ` ${commissionLabel}` : ''} من قيمة الإيجار ورسوم التنظيف (لا تشمل الضريبة) من مستحقاتك عند كل حجز مكتمل.`
+                    : `SYBNB deducts ${commissionLabel ? `a ${commissionLabel}` : 'a'} service commission from the rent plus cleaning fee (not the tax) from your payout on every completed booking.`}
+                </div>
+              )}
+              {division === 'STAYS' && (
+                <div className="seller-wide-field seller-money-note">
+                  {(() => {
+                    // M6: live "gross − commission = your payout" preview using the SAME rate applied to the split.
+                    const grossBase = (Number(price) || 0) + (Number(cleaningFee) || 0)
+                    const commission = platformFeePct != null ? Math.round(grossBase * platformFeePct * 100) / 100 : null
+                    const payout = commission != null ? Math.round((grossBase - commission) * 100) / 100 : null
+                    return commission != null ? (
+                      <p style={{ margin: '0 0 8px' }}>
+                        {isAr
+                          ? `على أساس هذا السعر: الإجمالي ${grossBase} − العمولة ${commission} = مستحقاتك ${payout}.`
+                          : `For this price: gross ${grossBase} − commission ${commission} = your payout ${payout}.`}
+                      </p>
+                    ) : null
+                  })()}
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <input type="checkbox" checked={contractAccepted} onChange={(event) => setContractAccepted(event.target.checked)} />
+                    <span>
+                      {isAr
+                        ? 'أوافق على عقد العمولة الحالي: تُحتسب العمولة على الإيجار + رسوم التنظيف (لا تشمل الضريبة). مطلوبة قبل النشر.'
+                        : 'I accept the current commission contract: commission is on rent + cleaning (tax excluded). Required before publishing.'}
+                    </span>
+                  </label>
                 </div>
               )}
               {division === 'STAYS' && (

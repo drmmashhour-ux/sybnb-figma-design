@@ -2436,7 +2436,8 @@ function createShortRentLedger(totalMinor: number, listingMetadata: Record<strin
     : Math.round(totalMinor / divisor)
   const cleaningFeeMinor = explicitCleaningFeeMinor || Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = Math.max(0, totalMinor - rentMinor - cleaningFeeMinor)
-  const adminCommissionMinor = Math.round(rentMinor * commissionRate)
+  // M2: commission base = accommodation + cleaning (tax excluded).
+  const adminCommissionMinor = Math.round((rentMinor + cleaningFeeMinor) * commissionRate)
   const hostPayoutMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
   return {
     adminCommissionMinor,
