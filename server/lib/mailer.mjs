@@ -147,6 +147,12 @@ async function deliver({ to, subject, text }) {
   return getSmtpTransporter().sendMail({ from: fromAddress(), to, subject, text })
 }
 
+// SYB-003 — transactional email primitive. Reuses the same deliver() path (Resend or SMTP) as every
+// other mail. Throws like deliver() on a mailer error; the notifications layer wraps it best-effort.
+export async function sendTransactionalEmail({ to, subject, text }) {
+  return deliver({ to, subject, text })
+}
+
 // Best-effort — the caller decides what to do on failure (record emailError, never fabricate
 // emailSentAt unless this actually resolves).
 export async function sendHostInsightEmail(user, insight) {

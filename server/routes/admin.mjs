@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { recordPayoutTransition } from '../lib/host-payout.mjs'
+import { notify } from '../lib/notifications.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
@@ -267,8 +268,9 @@ export async function handleAdmin(req, res, url, context) {
     const hostOwner = booking.listing?.owner
     const methodType = hostOwner?.payoutMethod && typeof hostOwner.payoutMethod === 'object' ? hostOwner.payoutMethod.type : null
 
+    const transition = String(body.transition || '').toUpperCase()
     const entry = await recordPayoutTransition(db(), {
-      transition: String(body.transition || '').toUpperCase(),
+      transition,
       actorUserId: context.user.id,
       actorRoles: context.roles,
       entityId: booking.id,
@@ -278,6 +280,19 @@ export async function handleAdmin(req, res, url, context) {
       reason: body.reason,
       reconciliationNote: body.reconciliationNote,
     })
+
+    // SYB-003: notify the host on the states they care about, best-effort AFTER the record commits.
+    if ((transition === 'INITIATED' || transition === 'COMPLETED') && hostOwner?.id) {
+      const hostUser = await db().user.findUnique({ where: { id: hostOwner.id }, select: { email: true, locale: true } })
+      await notify({
+        event: transition === 'INITIATED' ? 'PAYOUT_INITIATED' : 'PAYOUT_COMPLETED',
+        to: hostUser?.email,
+        locale: hostUser?.locale,
+        data: { ref: entry.after.reference || booking.id.slice(0, 12).toUpperCase() },
+        entityId: booking.id,
+        recipientRef: hostOwner.id,
+      })
+    }
     return json(res, 201, { ok: true, transition: entry.after.transition, recordedAt: entry.createdAt })
   }
 

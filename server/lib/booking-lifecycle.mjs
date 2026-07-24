@@ -2,6 +2,7 @@ import { db } from './prisma.mjs'
 import {
   ACTIVE_PROOF_STATUSES, HOLD_POLICY_VERSION, evaluateHoldEligibility, resolvePaymentMethod,
 } from './booking-hold-policy.mjs'
+import { notify } from './notifications.mjs'
 
 export const PAYOUT_HOLD_DAYS = 14
 
@@ -71,6 +72,22 @@ async function releaseHold(booking, { kind, reason, releasedBy, method }) {
     })
   } catch {
     /* non-blocking: the release already committed */
+  }
+
+  // SYB-003: best-effort notification AFTER the release committed. notify() never throws, so a mailer
+  // outage cannot affect the already-restored inventory (owner rule: release is independent of delivery).
+  try {
+    const guest = await db().user.findUnique({ where: { id: booking.guestId }, select: { email: true, locale: true } })
+    await notify({
+      event: 'PAYMENT_HOLD_EXPIRED',
+      to: guest?.email,
+      locale: guest?.locale,
+      data: { ref: booking.id.slice(0, 12).toUpperCase() },
+      entityId: booking.id,
+      recipientRef: booking.guestId,
+    })
+  } catch {
+    /* delivery is best-effort */
   }
   return true
 }
