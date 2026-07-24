@@ -1,7 +1,30 @@
 # SYBNB — Owner Review Workbook
 
 **Baseline:** `8a4eba7` · **Review package:** commit `6e8b8f2`, branch `review/sybnb-final-independent-review`
-**Date:** 2026-07-23 · **Status:** **OWNER DECISION SESSION 01 COMPLETE — 12/12 Critical findings decided · 4/4 cross-cutting decisions decided. Implementation remains deferred.**
+**Date:** 2026-07-23 · **Status:** **OWNER DECISION SESSION 01 COMPLETE — 12/12 Critical + 4/4 cross-cutting decided. CLOSED-BETA IMPLEMENTATION COMPLETE (final HEAD `9c83344`).**
+
+### Implementation status (2026-07-23) — closed-beta wave
+
+| Finding | Status | Commit |
+|---|---|---|
+| SYB-009 SUPPORT OTP | **IMPLEMENTED** | `bc7bfff` |
+| SYB-007 checkout-guest rate limit | **IMPLEMENTED** | `64c075b` |
+| SYB-018 production env template | **IMPLEMENTED** | `fb0c135` |
+| SYB-006 fabricated data removed | **IMPLEMENTED** | `9e768f8` |
+| SYB-004 forced download (6/9) | **IMPLEMENTED** | `b65ab36` |
+| SYB-005 staff-read audit (5/8) | **IMPLEMENTED** | `32b2152` |
+| SYB-002 payment-hold release | **IMPLEMENTED** | `e96eda0` |
+| SYB-001 listing date selection | **IMPLEMENTED** | `faa8fdb` |
+| SYB-008 STR-only isolation | **IMPLEMENTED** | `9c52903` |
+| SYB-011 manual host payouts | **IMPLEMENTED** | `c1612c8` |
+| SYB-003 transactional notifications | **IMPLEMENTED** | `7a5b6e0` |
+| SYB-010 honest guest surface | **IMPLEMENTED** | `823265c` |
+| X-3 Validation Wave 1 (default/EEUR) | **PASSED 20/20** | `2b0d3d7` |
+
+**Verdict:** READY FOR OWNER CLOSED-BETA REVIEW (see `SYBNB_FINAL_IMPLEMENTATION_REPORT.md`). Storage
+proven against the **default/EEUR** endpoint — formal EU-jurisdiction validation or an ADR-0010 revision
+remains a **public-launch** requirement, and the test token must be rotated. 925 automated tests pass;
+nothing pushed/merged/deployed.
 
 **Derived solely from the completed review package.** No finding has been re-prioritised, re-severitised,
 merged, split, or dropped. Severity and launch impact are carried verbatim from the consolidated review
