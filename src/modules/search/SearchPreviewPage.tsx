@@ -5,6 +5,7 @@ import { DivisionTriad } from '../../shared/layout/DivisionTriad'
 import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
+import { selectCoverUrl } from '../seller/listingPhotos'
 import { SearchStateCard } from './SearchStates'
 import { UnifiedSearchBar } from './UnifiedSearchBar'
 import type { SearchDivision, UnifiedSearchValue } from './UnifiedSearchBar'
@@ -293,7 +294,18 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             {listings.map((listing) => (
               <article key={listing.id} className="search-result-card">
                 <div className="search-result-media">
-                  <img src={listingImage(listing)} alt="" loading="lazy" />
+                  <img
+                    src={listingImage(listing)}
+                    alt=""
+                    loading="lazy"
+                    onError={(event) => {
+                      // FIX B: a broken/missing image degrades to the division placeholder instead of a
+                      // broken-image icon. Null the handler first so a failing fallback can't loop.
+                      const img = event.currentTarget
+                      img.onerror = null
+                      img.src = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+                    }}
+                  />
                   {(listing.instantBookEnabled || listing.owner?.idDocumentStatus === 'APPROVED' || listing.hasActiveOffer) && (
                     <div className="search-result-badges">
                       {listing.instantBookEnabled && <span className="search-result-badge badge-instant">{t.instantBookBadge}</span>}
@@ -347,9 +359,10 @@ function listingImage(listing: PlatformListing) {
   if (listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION' || listing.division === 'MARKETPLACE') {
     return DIVISION_IMAGES[listing.division]
   }
-  const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
-  if (typeof mediaUrl === 'string') return mediaUrl
-  return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+  // FIX B: derive the REAL cover (lowest sortOrder) the same way the listing detail hero does, instead
+  // of an ad-hoc "first media item" pick; fall back to the division image when there is no real photo.
+  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+  return selectCoverUrl(listing.media, fallback)
 }
 
 function StayFeeDisclosure({ listing, lang }: { listing: PlatformListing; lang: Lang }) {
