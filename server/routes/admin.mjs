@@ -17,6 +17,8 @@ import { idempotencyKey } from '../lib/security.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertJurisdictionApproved, missingJurisdictionRequirements, resolveDriverJurisdiction, resolveListingJurisdiction } from '../lib/jurisdiction-compliance.mjs'
+import { compileAdminDailyReport, dailyReportTemplateNarrative } from '../lib/admin-daily-report.mjs'
+import { generateDailyReportMessage, isAnthropicConfigured } from '../lib/ai-insights.mjs'
 
 // AD1 date helpers — same date-only semantics as the guest availability endpoint (server/routes/listings.mjs)
 // so the admin hosting calendar reads the single availability source identically.
@@ -183,6 +185,28 @@ export async function handleAdmin(req, res, url, context) {
       blockedDates: blockedByListing.get(listing.id) || [],
     }))
     return json(res, 200, { ok: true, hosting: { from: adminIsoDate(from), to: adminIsoDate(to), listingCount: rows.length, listings: rows } })
+  }
+
+  // AD3 — the AI daily report. Every FIGURE is a real record count/aggregate compiled in the data layer
+  // (compileAdminDailyReport); the model is only allowed to PHRASE those facts and can never produce a
+  // number. The authoritative `facts` are always returned from the records; the `narrative` is best-effort
+  // AI phrasing when configured, otherwise a deterministic template over the same facts. Advisory + admin-
+  // reviewed (this endpoint takes no action). Admin-only.
+  if (url.pathname === '/api/admin/daily-report') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const report = await compileAdminDailyReport(db())
+    let narrative = { messageAr: dailyReportTemplateNarrative(report.facts, 'ar'), messageEn: dailyReportTemplateNarrative(report.facts, 'en'), model: null, source: 'template' }
+    if (isAnthropicConfigured()) {
+      try {
+        const ai = await generateDailyReportMessage(report.facts)
+        narrative = { ...ai, source: 'ai' }
+      } catch {
+        // AI phrasing is presentation-only and best-effort — never block the report or its real numbers.
+      }
+    }
+    // `facts` are the authoritative numbers (from records); `narrative` only restates them.
+    return json(res, 200, { ok: true, report: { ...report, narrative } })
   }
 
   if (url.pathname === '/api/admin/payouts') {
