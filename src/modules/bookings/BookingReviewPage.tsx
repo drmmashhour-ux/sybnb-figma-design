@@ -10,7 +10,7 @@ import {
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
-import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
+import { dropPastDates, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
 type Props = {
@@ -159,7 +159,8 @@ export function BookingReviewPage({ listingId, lang }: Props) {
   const [acceptedGuestAgreement, setAcceptedGuestAgreement] = useState(false)
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number } | null>(null)
   const [stayBreakdown, setStayBreakdown] = useState<PlatformStayQuoteBreakdown | null>(null)
-  const dateRange: DateRange = draft.dateRange || { checkIn: '', checkOut: '' }
+  // FIX MINOR: drop any persisted past range so the review header never shows dates earlier than today.
+  const dateRange: DateRange = dropPastDates(draft.dateRange)
   const cancellationProtection = draft.cancellationProtection ?? false
   const payCurrency = draft.payCurrency ?? 'SYP'
 

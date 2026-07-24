@@ -19,7 +19,7 @@ import { BlockButton } from '../safety/BlockButton'
 import { selectCoverUrl } from '../seller/listingPhotos'
 import { ListingGallery } from './ListingGallery'
 import { listingAmenities } from './listingAmenities'
-import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
+import { DateField, DateRangePicker, dropPastDates, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
@@ -212,7 +212,8 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [offlineMapReady, setOfflineMapReady] = useState(false)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
   const [dateRange, setDateRange] = useState<DateRange>(
-    bookingDraft.dateRange || loadSearchDatesDraft() || defaultStayDateRange(),
+    // FIX MINOR: normalize any persisted past range so the header never shows dates earlier than today.
+    dropPastDates(bookingDraft.dateRange || loadSearchDatesDraft() || defaultStayDateRange()),
   )
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
   // SYB-001: the listing page now owns a governed date-range control. The picker opens over the

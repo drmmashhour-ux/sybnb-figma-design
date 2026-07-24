@@ -95,6 +95,15 @@ export function isDateSelectable(iso: string, { todayIso, disabledDates }: { tod
   return true
 }
 
+// FIX MINOR — normalize a (possibly persisted) range against today: drop a check-in/check-out earlier
+// than today so a stale draft never shows a past range in the header. A check-out only survives if the
+// check-in survives and it is still after it. Defaults to today's local ISO day.
+export function dropPastDates(range: DateRange | undefined, todayIsoValue: string = toISO(new Date())): DateRange {
+  const checkIn = range?.checkIn && range.checkIn >= todayIsoValue ? range.checkIn : ''
+  const checkOut = checkIn && range?.checkOut && range.checkOut > checkIn ? range.checkOut : ''
+  return { checkIn, checkOut }
+}
+
 export function formatDateForLang(value: string, lang: Lang) {
   const date = fromISO(value)
   if (!date) return T[lang === 'ar' ? 'ar' : 'en'].unset
