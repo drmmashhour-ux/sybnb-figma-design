@@ -2758,6 +2758,7 @@ export type PlatformHostPaymentRow = {
 }
 
 export type PlatformHostPayments = {
+  hostName: string | null
   rows: PlatformHostPaymentRow[]
   totals: { releasedMinor: number; pendingMinor: number; commissionMinor: number; currency: string }
 }

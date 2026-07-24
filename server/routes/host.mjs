@@ -144,7 +144,10 @@ export async function handleHost(req, res, url, context) {
       },
       { releasedMinor: 0, pendingMinor: 0, commissionMinor: 0 },
     )
-    return json(res, 200, { ok: true, payments: { rows, totals: { ...totals, currency: rows[0]?.currency || 'USD' } } })
+    // H7: the printable payroll statement header shows the host's name — include it here so the statement
+    // reuses this one endpoint (fetchHostPayments) rather than a second round-trip.
+    const hostName = (await db().user.findUnique({ where: { id: context.user.id }, select: { displayName: true } }))?.displayName || null
+    return json(res, 200, { ok: true, payments: { hostName, rows, totals: { ...totals, currency: rows[0]?.currency || 'USD' } } })
   }
 
   // M1: lightweight authenticated lookup of the effective STR commission rate, for host onboarding copy

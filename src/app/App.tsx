@@ -32,6 +32,7 @@ const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostPaymentsTimeline = lazyNamed(() => import('../modules/host/HostPaymentsTimeline'), 'HostPaymentsTimeline')
+const HostPayrollStatement = lazyNamed(() => import('../modules/host/HostPayrollStatement'), 'HostPayrollStatement')
 const HostInsightsPanel = lazyNamed(() => import('../modules/host/HostInsightsPanel'), 'HostInsightsPanel')
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
@@ -128,6 +129,8 @@ export function App() {
           <HostEarningsPage lang={lang} />
         ) : path === '/host/payments' ? (
           <HostPaymentsTimeline lang={lang} />
+        ) : path === '/host/payroll' ? (
+          <HostPayrollStatement lang={lang} />
         ) : path === '/host/insights' ? (
           <HostInsightsPanel lang={lang} />
         ) : path === '/host/inquiries' ? (

@@ -46,7 +46,8 @@ describe('FIX 1 — print receipt isolation', () => {
 
   it('lays the receipt out isolated on white for print', () => {
     // Positioned at the top-left, full width, forced light so dark inline styles print legibly.
-    expect(block).toMatch(/#receipt-print\s*\{[^}]*position:\s*absolute/)
+    // The print root may be a selector list shared with the H7 statement (#receipt-print, #statement-print).
+    expect(block).toMatch(/#receipt-print[^{]*\{[^}]*position:\s*absolute/)
     expect(block).toMatch(/#receipt-print[^}]*background:\s*#fff/i)
     expect(block).toMatch(/@page\s*\{\s*margin/)
   })

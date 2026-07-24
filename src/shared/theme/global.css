@@ -8966,14 +8966,18 @@ button.division-triad-item:hover {
    correctly because the receipt keeps its own dir. */
 @media print {
   body * { visibility: hidden; }
-  #receipt-print, #receipt-print * { visibility: visible; }
-  #receipt-print, #receipt-print * {
+  /* FIX 1 print isolation, shared by the payment receipt (#receipt-print) and the H7 bi-weekly payroll
+     statement (#statement-print): only the chosen document prints, black-on-white, RTL preserved. */
+  #receipt-print, #receipt-print *,
+  #statement-print, #statement-print * { visibility: visible; }
+  #receipt-print, #receipt-print *,
+  #statement-print, #statement-print * {
     background: #fff !important;
     color: #000 !important;
     box-shadow: none !important;
     border-color: #999 !important;
   }
-  #receipt-print {
+  #receipt-print, #statement-print {
     position: absolute;
     left: 0;
     top: 0;
@@ -8981,7 +8985,10 @@ button.division-triad-item:hover {
     margin: 0;
     padding: 16px;
   }
-  /* Hide the app-shell chrome, but never the receipt's own <header> letterhead inside #receipt-print. */
-  header:not(#receipt-print *), nav:not(#receipt-print *), footer:not(#receipt-print *), .no-print { display: none !important; }
+  /* Hide the app-shell chrome, but never the document's own <header> letterhead inside the print root. */
+  header:not(#receipt-print *):not(#statement-print *),
+  nav:not(#receipt-print *):not(#statement-print *),
+  footer:not(#receipt-print *):not(#statement-print *),
+  .no-print { display: none !important; }
   @page { margin: 12mm; }
 }
