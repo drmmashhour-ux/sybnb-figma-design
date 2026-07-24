@@ -209,6 +209,78 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, report: { ...report, narrative } })
   }
 
+  // AD4 — the per-host payments ledger + tax-slip source. The admin picks a host (+ date range) and gets that
+  // host's ledger read from the FROZEN M5 Payout/Payment records (no recompute): per booking gross,
+  // commission, card fee, net payout, dates, status, release date, plus period totals. It also surfaces the
+  // PLATFORM revenue from this host — commission (from the Payment records) and the separately-ledgered
+  // seller plan fee ($19/$49) — kept as two distinct lines. Admin-only; commission/plan-fee never appear on
+  // any guest surface (R7). Reuses the same frozen records the host sees in H6, just admin-scoped by hostId.
+  if (url.pathname === '/api/admin/host-ledger') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const hostId = url.searchParams.get('hostId')
+    if (!hostId) {
+      const error = new Error('hostId is required.')
+      error.statusCode = 400
+      error.code = 'HOST_LEDGER_HOST_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const from = adminParseDateOnly(url.searchParams.get('from')) || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+    const to = adminParseDateOnly(url.searchParams.get('to')) || new Date()
+    const host = await db().user.findUnique({ where: { id: hostId }, select: { displayName: true } })
+    const [payouts, planFees] = await Promise.all([
+      db().payout.findMany({
+        where: { hostId, createdAt: { gte: from, lte: to } },
+        include: { booking: { select: { id: true, checkIn: true, checkOut: true, listing: { select: { titleAr: true } }, payment: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+      // The host's own plan-fee contributions ($19/$49) — a SEPARATE admin-revenue stream from commission.
+      db().paymentProof.aggregate({ where: { userId: hostId, provider: 'seller_plan', status: 'APPROVED', createdAt: { gte: from, lte: to } }, _sum: { amountMinor: true }, _count: { _all: true } }),
+    ])
+    const rows = payouts.map((payout) => {
+      const payment = payout.booking?.payment || null
+      return {
+        bookingId: payout.bookingId,
+        listingTitle: payout.booking?.listing?.titleAr || null,
+        checkIn: payout.booking?.checkIn || null,
+        checkOut: payout.booking?.checkOut || null,
+        paymentDate: payment?.settledAt || null,
+        releaseDate: payout.releaseDate || null,
+        grossMinor: payment?.grossMinor ?? null,
+        commissionMinor: payment?.commissionAmountMinor ?? null,
+        hostPayoutMinor: payment?.hostPayoutMinor ?? payout.amountMinor,
+        netPayoutMinor: payout.amountMinor,
+        currency: payout.currency,
+        payoutStatus: payout.status,
+      }
+    })
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.grossMinor += row.grossMinor || 0
+        acc.commissionMinor += row.commissionMinor || 0
+        acc.cardFeeMinor += Math.max(0, (row.hostPayoutMinor || 0) - row.netPayoutMinor)
+        acc.netMinor += row.netPayoutMinor
+        return acc
+      },
+      { grossMinor: 0, commissionMinor: 0, cardFeeMinor: 0, netMinor: 0 },
+    )
+    return json(res, 200, {
+      ok: true,
+      ledger: {
+        hostId,
+        hostName: host?.displayName || null,
+        from: adminIsoDate(from),
+        to: adminIsoDate(to),
+        rows,
+        totals: { ...totals, currency: rows[0]?.currency || 'USD' },
+        // Platform revenue FROM this host, two distinct lines (never conflated).
+        revenue: { commissionMinor: totals.commissionMinor, planFeeMinor: planFees._sum.amountMinor || 0, planFeeCount: planFees._count._all },
+      },
+    })
+  }
+
   if (url.pathname === '/api/admin/payouts') {
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()

@@ -1832,6 +1832,38 @@ export async function fetchAdminDailyReport() {
   return response.report
 }
 
+// AD4 — the per-host payments ledger + tax-slip source. Read from the frozen M5 records (no recompute).
+export type PlatformAdminHostLedgerRow = {
+  bookingId: string
+  listingTitle: string | null
+  checkIn: string | null
+  checkOut: string | null
+  paymentDate: string | null
+  releaseDate: string | null
+  grossMinor: number | null
+  commissionMinor: number | null
+  hostPayoutMinor: number
+  netPayoutMinor: number
+  currency: string
+  payoutStatus: string
+}
+export type PlatformAdminHostLedger = {
+  hostId: string
+  hostName: string | null
+  from: string
+  to: string
+  rows: PlatformAdminHostLedgerRow[]
+  totals: { grossMinor: number; commissionMinor: number; cardFeeMinor: number; netMinor: number; currency: string }
+  revenue: { commissionMinor: number; planFeeMinor: number; planFeeCount: number }
+}
+export async function fetchAdminHostLedger(hostId: string, range?: { from?: string; to?: string }) {
+  const params = new URLSearchParams({ hostId })
+  if (range?.from) params.set('from', range.from)
+  if (range?.to) params.set('to', range.to)
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; ledger: PlatformAdminHostLedger }>(`/api/admin/host-ledger?${params.toString()}`, { token }))
+  return response.ledger
+}
+
 export async function fetchAdminHostingCalendar(range?: { from?: string; to?: string }) {
   const params = new URLSearchParams()
   if (range?.from) params.set('from', range.from)

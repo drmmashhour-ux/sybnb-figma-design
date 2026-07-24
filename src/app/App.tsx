@@ -11,6 +11,7 @@ import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
+const AdminHostLedgerPage = lazyNamed(() => import('../modules/admin/AdminHostLedgerPage'), 'AdminHostLedgerPage')
 const CapsulePreviewPage = lazyNamed(() => import('../modules/capsules/CapsulePreviewPage'), 'CapsulePreviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
@@ -157,6 +158,8 @@ export function App() {
           <SettingsPage lang={lang} />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
+        ) : path === '/admin/host-ledger' ? (
+          <AdminHostLedgerPage lang={lang} />
         ) : path === '/ai-brain' ? (
           <AiBrainPage lang={lang} />
         ) : path === '/competitors' ? (
