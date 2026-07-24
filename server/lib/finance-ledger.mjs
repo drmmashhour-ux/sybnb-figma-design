@@ -4,6 +4,8 @@ import { rewardReferralIfQualifying } from './referrals.mjs'
 import { computeQuebecStayTaxesResolved, resolveGstQstResponsibility } from './quebec-stay-tax.mjs'
 import { STAY_TAX_PLATFORM_COLLECTION, isFeatureEnabled } from './compliance-feature-flags.mjs'
 import { savePricingSnapshot } from './jurisdiction-pricing.mjs'
+import { assertRealSettlementReference } from './payment-gateway.mjs'
+import { STR_HOST_CONTRACT_VERSION, latestHostContractConsent } from './host-consent.mjs'
 
 // S12: amounts are whole currency units (see currency.mjs), so the documented $10 fee is 10, not 1000.
 export const CANCELLATION_ADMIN_FEE_MINOR = 10
@@ -233,6 +235,11 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
     throw error
   }
 
+  // M3-A: a booking may be marked paid/CONFIRMED ONLY with a REAL settlement reference — a Stripe captured
+  // charge/payment_intent id (never the cs_ Checkout Session id) or an admin-approved manual proof (Sham
+  // Cash). A proof with no real settlement reference can never confirm a booking.
+  assertRealSettlementReference(existing)
+
   // Re-check status in the WHERE clause: two concurrent approvals of the same proof (two admin
   // tabs, or an admin racing Stripe's own auto-approval) would otherwise both pass the read-check
   // above under READ COMMITTED and both apply their side effects (duplicate wallet HOLD/CREDIT
@@ -258,9 +265,16 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
   const proof = await tx.paymentProof.findUnique({ where: { id: proofId } })
 
   if (proof.bookingId) {
-    // Instant Book listings skip the manual host-confirmation step: payment approval
-    // is enough to confirm the stay outright, same as Airbnb's Instant Book.
-    const nextStatus = existing.booking?.listing?.instantBookEnabled ? 'CONFIRMED' : 'REQUESTED'
+    // Instant Book listings skip the manual host-confirmation step: payment approval is enough to confirm
+    // the stay outright, same as Airbnb's Instant Book. BUT (M6/M3-A) auto-confirm is only safe on the
+    // host's CURRENT-version contract consent: if the commission contract was bumped since the host last
+    // consented (e.g. the M2 base change v1->v2), we must NOT auto-confirm at the new, un-consented terms.
+    // In that case degrade to REQUESTED so the host re-accepts the current terms via the host-accept gate
+    // (which records fresh consent + freezes the snapshot). Never silently change host economics.
+    const instantBook = existing.booking?.listing?.instantBookEnabled === true
+    const hostId = existing.booking?.listing?.ownerId
+    const hostConsent = instantBook && hostId ? await latestHostContractConsent(tx, hostId) : null
+    const nextStatus = instantBook && hostConsent?.version === STR_HOST_CONTRACT_VERSION ? 'CONFIRMED' : 'REQUESTED'
 
     // SECURITY (S3): claim the booking ONLY if it is still PAYMENT_PENDING. Otherwise a SECOND payment
     // proof (the bookingId is not unique) approved on an already-CONFIRMED/COMPLETED booking would re-run
@@ -280,6 +294,17 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
 
     const commissionRate = await strCommissionRateForBooking(tx, existing.booking)
     const split = bookingFinanceSplit(existing.booking, proof.amountMinor, commissionRate)
+
+    // M3-A/M6: an instant-book listing auto-confirms on payment (there is no host-accept step; its
+    // publish-time contract consent covers the booking). Freeze the terms snapshot here so an
+    // instant-booked stay carries the same frozen {commissionRate, baseVersion} as one confirmed through
+    // the host-accept gate — a Stripe (or any) payment never confirms a booking with unfrozen terms.
+    if (nextStatus === 'CONFIRMED') {
+      await tx.booking.update({
+        where: { id: proof.bookingId },
+        data: { metadata: { ...(existing.booking?.metadata || {}), termsSnapshot: { commissionRate, baseVersion: STR_HOST_CONTRACT_VERSION, acceptedAt: new Date().toISOString() } } },
+      })
+    }
     // Card-processing fee comes out of the HOST's share, never the platform's commission --
     // the commission (adminShareMinor below) is still computed on the full rent regardless.
     const clampedFeeMinor = Math.max(0, Math.min(Math.round(paymentProcessingFeeMinor), split.hostGrossMinor))

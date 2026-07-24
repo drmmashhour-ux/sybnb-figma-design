@@ -2,6 +2,7 @@ import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE } from '../lib/finance-ledger.mjs'
+import { assertStripeLivemodeForProduction } from '../lib/payment-gateway.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isAllowedOrigin } from '../lib/allowed-origins.mjs'
 
@@ -194,11 +195,18 @@ export async function finalizeStripeSession(session) {
   const bookingId = session.metadata?.bookingId
   if (!bookingId || session.payment_status !== 'paid') return null
 
+  // M3-A: reject a TEST-mode settlement in production via Stripe's livemode flag (never string-matching).
+  assertStripeLivemodeForProduction(session)
+  // M3-A: the REAL settlement reference is the captured payment_intent id (pi_…), never the cs_ session id.
+  // No captured payment_intent means no real settlement — do not confirm the booking.
+  const settlementRef = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null
+  if (!settlementRef) return null
+
   const paymentProcessingFeeMinor = await fetchStripeCardFeeMinor(session)
 
   return db().$transaction(async (tx) => {
     const existingProof = await tx.paymentProof.findFirst({
-      where: { provider: 'stripe', providerRef: session.id },
+      where: { provider: 'stripe', providerRef: settlementRef },
     })
     if (existingProof) return existingProof
 
@@ -213,8 +221,10 @@ export async function finalizeStripeSession(session) {
         status: 'PENDING_ADMIN_REVIEW',
         amountMinor: Number(session.metadata?.bookingTotalMinor || booking.amountMinor),
         currency: booking.currency,
-        providerRef: session.id,
-        proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
+        // M3-A: the settlement reference is the captured payment_intent id (a real capture), not the
+        // cs_ Checkout Session id. The session id is retained in proofAssetUrl for traceability.
+        providerRef: settlementRef,
+        proofAssetUrl: `stripe://checkout_sessions/${session.id}`,
       },
     })
 

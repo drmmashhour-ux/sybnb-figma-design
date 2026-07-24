@@ -2,6 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { approvePaymentProof } from '../../server/lib/finance-ledger.mjs'
+import { recordHostContractConsent } from '../../server/lib/host-consent.mjs'
 import { createSessionToken } from '../../server/lib/security.mjs'
 import {
   approveDriverForRides,
@@ -207,6 +208,9 @@ describe('Consumer protection: country config + dispute/refund', () => {
         // (otherwise it lands in REQUESTED, which is not disputable).
         data: { ownerId: hostRes.body.user.id, division: 'STAYS', titleAr: 'اختبار النزاع', priceMinor: 100_00, currency: 'USD', status: 'APPROVED', instantBookEnabled: true },
       })
+      // M6/M3-A: instant-book auto-confirm requires the host's current-version contract consent (the host
+      // would have accepted it at publish). Record it so approvePaymentProof confirms rather than degrading.
+      await recordHostContractConsent(db(), { userId: hostRes.body.user.id, action: 'publish' })
       const checkIn = new Date()
       checkIn.setUTCDate(checkIn.getUTCDate() + 30) // well before the free-cancellation cutoff → a plain cancel would fully refund
       const booking = await db().booking.create({
