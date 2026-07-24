@@ -1,7 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
+import { completeExpiredBookings, releaseAbandonedHolds } from '../lib/booking-lifecycle.mjs'
 import { expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 import { ID_DOCUMENT_CATEGORY, deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
@@ -224,6 +224,8 @@ export async function handleMe(req, res, url, context) {
   requireAuth(context)
 
   await completeExpiredBookings({ guestId: context.user.id })
+  // SYB-002: opportunistically release this guest's own abandoned holds on their overview read.
+  await releaseAbandonedHolds({ guestId: context.user.id })
   // Same lazy-expiry pattern for wallet gifts: a gift this user sent that lapsed unclaimed is expired and
   // refunded to them before their sent-gift list is read, so their reserved money is returned on access.
   await expireAndRefundSenderGifts(db(), context.user.id)

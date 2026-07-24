@@ -8,7 +8,8 @@ import {
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
-import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
+import { completeExpiredBookings, releaseAbandonedHolds } from '../lib/booking-lifecycle.mjs'
+import { expectedHoldExpiryAt } from '../lib/booking-hold-policy.mjs'
 import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
@@ -91,17 +92,19 @@ export async function handleHost(req, res, url, context) {
     requireAuth(context, ['HOST', 'SELLER'])
 
     await completeExpiredBookings({ listing: { ownerId: context.user.id } })
+    // SYB-002: opportunistically release this host's abandoned holds before rendering, mirroring the
+    // completeExpiredBookings pattern (no scheduler in this deployment). Restores inventory silently.
+    await releaseAbandonedHolds({ listing: { ownerId: context.user.id } })
     await expireOldListings({ ownerId: context.user.id })
 
     const listings = await db().listing.findMany({
       where: { ownerId: context.user.id },
       include: {
         bookings: {
-          where: {
-            status: {
-              not: 'PAYMENT_PENDING',
-            },
-          },
+          // SYB-002: PAYMENT_PENDING holds are now VISIBLE to the host (read-only) so an unpaid hold
+          // is not invisible while it occupies availability. The host still cannot approve, cancel, or
+          // release them — those remain guest/admin/system actions.
+          where: {},
           include: {
             // SECURITY (S10): never expose the guest's email to the host — contact stays on-platform.
             guest: {
@@ -135,6 +138,11 @@ export async function handleHost(req, res, url, context) {
     const requests = listings.flatMap((listing) =>
       listing.bookings.map((booking) => ({
         ...booking,
+        // SYB-002: read-only hold metadata for the host. A PAYMENT_PENDING booking is an unpaid hold;
+        // show its creation time (already on the row) and the computed expected expiry so the host can
+        // see why dates are occupied and until when. Non-pending bookings carry neither flag.
+        isPaymentPendingHold: booking.status === 'PAYMENT_PENDING',
+        holdExpiresAt: booking.status === 'PAYMENT_PENDING' ? expectedHoldExpiryAt(booking) : null,
         listing: {
           id: listing.id,
           division: listing.division,
@@ -154,6 +162,7 @@ export async function handleHost(req, res, url, context) {
       requests: requests.length,
       requested: requests.filter((booking) => booking.status === 'REQUESTED').length,
       confirmed: requests.filter((booking) => booking.status === 'CONFIRMED').length,
+      pendingHolds: requests.filter((booking) => booking.status === 'PAYMENT_PENDING').length,
       revenueMinor: requests
         .filter((booking) => booking.status === 'CONFIRMED')
         .reduce((sum, booking) => sum + booking.amountMinor, 0),

@@ -1,7 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
-import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
+import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
@@ -12,7 +12,7 @@ import { readDriverDocument } from '../lib/driver-document-storage.mjs'
 import { LISTING_DOCUMENT_CATEGORY, readListingDocument } from '../lib/listing-document-storage.mjs'
 import { getOperationalDocumentStatuses, setListingDocumentLegalHold } from '../lib/listing-document-retention.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
-import { assertBoundedString } from '../lib/validate.mjs'
+import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertJurisdictionApproved, missingJurisdictionRequirements, resolveDriverJurisdiction, resolveListingJurisdiction } from '../lib/jurisdiction-compliance.mjs'
 
@@ -241,10 +241,44 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, walletEntry: entry })
   }
 
+  // SYB-002 — admin manual release of an abandoned PAYMENT_PENDING hold, with a required reason.
+  const holdReleaseMatch = url.pathname.match(/^\/api\/admin\/bookings\/([^/]+)\/release-hold$/)
+  if (holdReleaseMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['reason'], 'hold release body')
+
+    const result = await adminReleaseHold({
+      bookingId: holdReleaseMatch[1],
+      adminUserId: context.user.id,
+      reason: body.reason,
+    })
+    if (!result.released) {
+      const status = result.code === 'BOOKING_NOT_FOUND' ? 404
+        : result.code === 'HOLD_RELEASE_REASON_REQUIRED' ? 400
+          : 409
+      const error = new Error(
+        result.code === 'HOLD_RELEASE_REASON_REQUIRED' ? 'A reason is required to release a hold.'
+          : result.code === 'HOLD_HAS_PROOF_UNDER_REVIEW' ? 'This hold has a payment proof under review — review the proof instead of releasing it.'
+            : result.code === 'BOOKING_NOT_A_HOLD' ? 'This booking is not an abandoned payment hold.'
+              : result.code === 'BOOKING_NOT_FOUND' ? 'Booking not found.'
+                : 'This hold was already moved and cannot be released.',
+      )
+      error.statusCode = status
+      error.code = result.code
+      error.expose = true
+      throw error
+    }
+    return json(res, 200, { ok: true, released: true })
+  }
+
   if (url.pathname === '/api/admin/review-queue') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()
+    // SYB-002: opportunistic abandoned-hold sweep on the admin queue read path (no scheduler exists).
+    await releaseAbandonedHolds()
 
     const limit = parseReviewQueueLimit(url.searchParams.get('limit'))
     const offset = parseReviewQueueOffset(url.searchParams.get('offset'))
