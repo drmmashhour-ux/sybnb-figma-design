@@ -1795,6 +1795,31 @@ export async function fetchPrototypeAdminMetrics() {
   return response.metrics
 }
 
+// AD1 — the admin "Hosting" calendar: what's booked/blocked across ALL hosts, from the same single
+// availability source as the guest picker / host calendar / booking guard (H4/H5).
+export type PlatformAdminHostingRow = {
+  listingId: string
+  title: string
+  hostId: string | null
+  hostName: string | null
+  bookedRanges: Array<{ checkIn: string; checkOut: string; status: string }>
+  blockedDates: string[]
+}
+export type PlatformAdminHosting = {
+  from: string
+  to: string
+  listingCount: number
+  listings: PlatformAdminHostingRow[]
+}
+export async function fetchAdminHostingCalendar(range?: { from?: string; to?: string }) {
+  const params = new URLSearchParams()
+  if (range?.from) params.set('from', range.from)
+  if (range?.to) params.set('to', range.to)
+  const qs = params.toString()
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; hosting: PlatformAdminHosting }>(`/api/admin/hosting-calendar${qs ? `?${qs}` : ''}`, { token }))
+  return response.hosting
+}
+
 export type PlatformRevenueByCurrency = {
   currency: string
   totalRevenueMinor: number

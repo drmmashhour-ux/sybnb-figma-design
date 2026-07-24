@@ -18,6 +18,17 @@ import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertJurisdictionApproved, missingJurisdictionRequirements, resolveDriverJurisdiction, resolveListingJurisdiction } from '../lib/jurisdiction-compliance.mjs'
 
+// AD1 date helpers — same date-only semantics as the guest availability endpoint (server/routes/listings.mjs)
+// so the admin hosting calendar reads the single availability source identically.
+function adminParseDateOnly(value) {
+  if (!value) return null
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+function adminIsoDate(value) {
+  return new Date(value).toISOString().slice(0, 10)
+}
+
 const REVIEW_QUEUE_DEFAULT_LIMIT = 25
 const REVIEW_QUEUE_MAX_LIMIT = 100
 const REVIEW_QUEUE_IN_MEMORY_PAGE_CAP = 2000
@@ -124,6 +135,54 @@ export async function handleAdmin(req, res, url, context) {
       read: insights.filter((insight) => insight.readAt).length,
     }
     return json(res, 200, { ok: true, insights, totals })
+  }
+
+  // AD1 — grouped admin calendars. The "Hosting" group shows what is BOOKED across ALL hosts, read from the
+  // SAME single availability source as the guest picker / host calendar / booking overlap guard (H4/H5):
+  // ListingAvailability status BLOCKED + active Booking rows in the {REQUESTED, PAYMENT_PENDING, CONFIRMED}
+  // set. No divergent path — a date booked/blocked here is the same date those surfaces treat as unavailable.
+  if (url.pathname === '/api/admin/hosting-calendar') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const from = adminParseDateOnly(url.searchParams.get('from')) || new Date()
+    const to = adminParseDateOnly(url.searchParams.get('to')) || new Date(from.getTime() + 90 * 24 * 60 * 60 * 1000)
+
+    const listings = await db().listing.findMany({
+      where: { division: 'STAYS', status: 'APPROVED' },
+      select: { id: true, titleAr: true, titleEn: true, owner: { select: { id: true, displayName: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    })
+    const listingIds = listings.map((listing) => listing.id)
+    const [bookings, blockedRows] = await Promise.all([
+      db().booking.findMany({
+        where: { listingId: { in: listingIds }, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] }, checkIn: { not: null, lte: to }, checkOut: { gt: from } },
+        select: { listingId: true, checkIn: true, checkOut: true, status: true },
+      }),
+      db().listingAvailability.findMany({
+        where: { listingId: { in: listingIds }, status: 'BLOCKED', date: { gte: from, lte: to } },
+        select: { listingId: true, date: true },
+      }),
+    ])
+    const bookedByListing = new Map()
+    for (const b of bookings) {
+      if (!bookedByListing.has(b.listingId)) bookedByListing.set(b.listingId, [])
+      bookedByListing.get(b.listingId).push({ checkIn: adminIsoDate(b.checkIn), checkOut: adminIsoDate(b.checkOut), status: b.status })
+    }
+    const blockedByListing = new Map()
+    for (const row of blockedRows) {
+      if (!blockedByListing.has(row.listingId)) blockedByListing.set(row.listingId, [])
+      blockedByListing.get(row.listingId).push(adminIsoDate(row.date))
+    }
+    const rows = listings.map((listing) => ({
+      listingId: listing.id,
+      title: listing.titleAr,
+      hostId: listing.owner?.id || null,
+      hostName: listing.owner?.displayName || null,
+      bookedRanges: bookedByListing.get(listing.id) || [],
+      blockedDates: blockedByListing.get(listing.id) || [],
+    }))
+    return json(res, 200, { ok: true, hosting: { from: adminIsoDate(from), to: adminIsoDate(to), listingCount: rows.length, listings: rows } })
   }
 
   if (url.pathname === '/api/admin/payouts') {
