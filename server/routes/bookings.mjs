@@ -479,6 +479,21 @@ export async function handleBookings(req, res, url, context) {
     throw error
   }
 
+  // FIX 3: reject a check-in in the past before any hold/"awaiting payment proof" state is created.
+  // Generic booking-validity guard, division-agnostic and placed before/separate from the CITQ block
+  // below (it touches no Quebec compliance logic). Date-only comparison so a booking for today is allowed.
+  if (body.checkIn) {
+    const todayIso = new Date().toISOString().slice(0, 10)
+    const checkInIso = String(body.checkIn).slice(0, 10)
+    if (checkInIso < todayIso) {
+      const error = new Error('Check-in date cannot be in the past.')
+      error.statusCode = 400
+      error.code = 'BOOKING_DATE_IN_PAST'
+      error.expose = true
+      throw error
+    }
+  }
+
   const listing = await db().listing.findFirst({
     where: {
       id: body.listingId,
