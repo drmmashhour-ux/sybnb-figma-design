@@ -23,6 +23,22 @@ import { privateDocumentDownloadHeaders } from '../lib/private-document-download
 import { recordStaffDocumentAccess } from '../lib/document-access-audit.mjs'
 import { retentionDeleteAfter } from '../lib/listing-document-retention.mjs'
 
+// FIX A / A-2: a listing is guest-visible only if it is in the active jurisdiction (Syria, fail-closed)
+// and is not a demo/synthetic listing. Used by EVERY guest-facing single-listing fetch (detail + quote)
+// so a synthetic/non-Syria listing can never render on any guest surface — mirroring the /api/listings
+// search filter (owner.isDemo + metadata.sybnbDataMode + jurisdiction). Requires owner.isDemo to be
+// included on the fetched listing. Unknown/missing metadata.country defaults to Syria (matches the list).
+const GUEST_ACTIVE_JURISDICTION = 'SY'
+function isGuestVisibleListing(listing) {
+  if (!listing) return false
+  if (listing.owner?.isDemo) return false
+  const meta = listing.metadata || {}
+  if (meta.sybnbDataMode === 'sample') return false
+  const country = typeof meta.country === 'string' && meta.country ? meta.country : GUEST_ACTIVE_JURISDICTION
+  if (country !== GUEST_ACTIVE_JURISDICTION) return false
+  return true
+}
+
 // Québec compliance review (item 1): real certificate types a host can upload against a listing.
 const LISTING_DOCUMENT_TYPES = ['CITQ_CERTIFICATE']
 const LISTING_DOCUMENT_SAFE_SELECT = {
@@ -369,6 +385,7 @@ export async function handleListings(req, res, url, context) {
             id: true,
             displayName: true,
             idDocumentStatus: true,
+            isDemo: true,
           },
         },
         accommodation: {
@@ -376,7 +393,10 @@ export async function handleListings(req, res, url, context) {
         },
       },
     })
-    if (!listing) {
+    // FIX A-2: a by-id fetch must be as fail-closed as the search list — a demo/synthetic or non-Syria
+    // listing must never render on a guest surface (as APPROVED or otherwise). Treat it as not found so
+    // its existence isn't even revealed.
+    if (!listing || !isGuestVisibleListing(listing)) {
       const error = new Error('Listing not found.')
       error.statusCode = 404
       error.code = 'LISTING_NOT_FOUND'
