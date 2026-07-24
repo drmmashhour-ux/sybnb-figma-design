@@ -1232,9 +1232,33 @@ export type PlatformStayQuoteBreakdown = {
   estimatedTaxMinor: number
   collectedTaxMinor: number
   remittedTaxMinor: number
+  // M8 — jurisdiction-driven pass-through tax line (separate from the Québec disclosure fields above and
+  // from totalMinor). PENDING_CONFIRMATION => the guest sees "tax treatment pending confirmation", never a
+  // silent zero, until a counsel-confirmed rate is activated.
+  taxLine: PlatformStayTaxLine
   totalMinor: number
   currency: string
   taxSource: { lodging: unknown; gst: unknown; qst: unknown } | null
+}
+
+// Multi-component: a jurisdiction's tax is a list of components (e.g. GST + QST), each with its own name,
+// rate and taxable base, each shown as its own guest-facing line. amountMinor is their sum (null while
+// PENDING_CONFIRMATION). Every component is pass-through — never part of the commission base.
+export type PlatformStayTaxComponent = {
+  name: string
+  taxType: string
+  rateParts: number
+  calculationBase: string
+  amountMinor: number
+  currency: string
+  jurisdictionTaxRateId: string
+}
+
+export type PlatformStayTaxLine = {
+  status: 'RESOLVED' | 'PENDING_CONFIRMATION' | 'NONE'
+  amountMinor: number | null
+  currency: string
+  components: PlatformStayTaxComponent[]
 }
 
 export async function fetchListingQuote(listingId: string, checkIn: string, checkOut: string, currency?: 'USD') {

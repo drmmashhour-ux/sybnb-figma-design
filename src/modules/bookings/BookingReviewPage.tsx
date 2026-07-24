@@ -53,6 +53,8 @@ const copy = {
     collectedTax: 'الضريبة المحصَّلة فعلياً',
     remittedTax: 'الضريبة المحوَّلة فعلياً للحكومة',
     zeroTestMode: '0 (وضع الاختبار)',
+    taxLineLabel: 'الضريبة',
+    taxPending: 'معالجة الضريبة قيد التأكيد — لا تُحصَّل حتى تأكيد المستشار القانوني',
     cancellationProtection: 'حماية الإلغاء',
     totalDue: 'الإجمالي المستحق',
     agreementTitle: 'اتفاقية الإيجار اليومي',
@@ -92,6 +94,8 @@ const copy = {
     collectedTax: 'Actually collected',
     remittedTax: 'Actually remitted to government',
     zeroTestMode: '0 (test mode)',
+    taxLineLabel: 'Tax',
+    taxPending: 'Tax treatment pending confirmation — not charged until confirmed by legal counsel',
     cancellationProtection: 'Cancellation protection',
     totalDue: 'Total due',
     agreementTitle: 'Short-Term Rental Agreement',
@@ -131,6 +135,8 @@ const copy = {
     collectedTax: 'Réellement perçue',
     remittedTax: 'Réellement remise au gouvernement',
     zeroTestMode: '0 (mode test)',
+    taxLineLabel: 'Taxe',
+    taxPending: "Traitement fiscal en attente de confirmation — non facturé jusqu'à confirmation par le conseiller juridique",
     cancellationProtection: "Protection d'annulation",
     totalDue: 'Total dû',
     agreementTitle: 'Entente de location à court terme',
@@ -328,6 +334,20 @@ export function BookingReviewPage({ listingId, lang }: Props) {
                     <Info label={t.remittedTax} value={t.zeroTestMode} />
                   </>
                 )}
+                {/* M8 — jurisdiction tax capsule for non-Québec markets. PENDING_CONFIRMATION (Syria today)
+                    shows an explicit "pending confirmation" line, never a silent $0. A RESOLVED capsule is
+                    MULTI-COMPONENT: each component (e.g. GST, QST) renders as its own line. Every line is
+                    pass-through — separate from totalMinor and never in the commission base. */}
+                {stayBreakdown.taxLine?.status === 'PENDING_CONFIRMATION' && (
+                  <Info label={t.taxLineLabel} value={t.taxPending} />
+                )}
+                {stayBreakdown.taxLine?.status === 'RESOLVED' && stayBreakdown.taxLine.components.map((c) => (
+                  <Info
+                    key={c.jurisdictionTaxRateId}
+                    label={`${t.taxLineLabel} — ${c.name} (${(c.rateParts / 10000).toFixed(3).replace(/\.?0+$/, '')}%)`}
+                    value={moneyText(c.amountMinor, payCurrency, lang)}
+                  />
+                ))}
                 <Info
                   label={t.refundableDeposit}
                   value={stayBreakdown.refundableDepositMinor > 0 ? moneyText(stayBreakdown.refundableDepositMinor, payCurrency, lang) : t.refundableDepositNotApplicable}

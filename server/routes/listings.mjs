@@ -5,6 +5,8 @@ import { assertNoUnknownFields } from '../lib/validate.mjs'
 import { assertDivisionActiveForBeta } from '../lib/closed-beta-gate.mjs'
 import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pricing.mjs'
 import { computeQuebecStayTaxesResolved } from '../lib/quebec-stay-tax.mjs'
+import { resolveStayTaxLine, STAY_TAX_LINE_STATUS } from '../lib/stay-tax-line.mjs'
+import { resolveListingJurisdiction } from '../lib/jurisdiction-compliance.mjs'
 import { stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
@@ -141,6 +143,24 @@ export async function handleListings(req, res, url, context) {
     // are never conflated into one number.
     const estimatedTaxMinor = (quebecTaxes?.lodgingTaxMinor || 0) + (quebecTaxes?.gstMinor || 0) + (quebecTaxes?.qstMinor || 0)
 
+    // M8 — outside Québec (whose disclosure-only lodging/GST/QST path above is frozen), the guest still
+    // needs an explicit tax line driven by the listing's jurisdiction profile. For Syria today that is
+    // PENDING_CONFIRMATION (taxRequired, no counsel-confirmed rate) so the checkout shows "tax treatment
+    // pending confirmation" instead of an implied $0. Pass-through only: never folded into totalMinor and
+    // never part of the M2 platform-take base (asserted in test/api/stay-tax-line.test.mjs).
+    const jurisdiction = resolveListingJurisdiction(listing)
+    const taxLine = isQuebec
+      ? { status: STAY_TAX_LINE_STATUS.NONE, amountMinor: 0, currency, components: [] }
+      : await resolveStayTaxLine(db(), {
+          country: jurisdiction.countryCode,
+          province: listing.metadata?.governorate || null,
+          municipality: listing.metadata?.city || null,
+          regionCode: jurisdiction.regionCode,
+          accommodationMinor: nightlySubtotalMinor,
+          totalBookingMinor: totalMinor,
+          currency,
+        })
+
     return json(res, 200, {
       ok: true,
       totalMinor,
@@ -164,6 +184,9 @@ export async function handleListings(req, res, url, context) {
         estimatedTaxMinor,
         collectedTaxMinor: 0,
         remittedTaxMinor: 0,
+        // M8 pass-through jurisdiction tax line (separate from the Québec disclosure fields above and from
+        // totalMinor). status PENDING_CONFIRMATION => guest sees "tax treatment pending confirmation".
+        taxLine,
         totalMinor,
         currency,
         taxSource: quebecTaxes?.source || null,
