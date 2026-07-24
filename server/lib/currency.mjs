@@ -67,3 +67,38 @@ export function stayQuoteToRoundedUsd(quote, listingCurrency) {
 export function amountToRoundedUsd(amountMinor, listingCurrency) {
   return listingCurrency === 'USD' ? roundUsdUpToStep(amountMinor) : sypMinorToRoundedUsdMinor(amountMinor)
 }
+
+// R6 (12-rule safety-net) — convert one {amountMinor, currency} money value to a target currency via the
+// single admin rate. Same currency passes through; SYP<->USD use SYP_PER_USD; anything else throws rather
+// than silently mis-adding.
+export function toCurrencyMinor(amountMinor, fromCurrency, toCurrency) {
+  const from = String(fromCurrency || '').toUpperCase()
+  const to = String(toCurrency || '').toUpperCase()
+  const value = Math.round(amountMinor || 0)
+  if (from === to) return value
+  if (from === 'SYP' && to === 'USD') return sypMinorToRoundedUsdMinor(value)
+  if (from === 'USD' && to === 'SYP') return Math.round(value * SYP_PER_USD)
+  const error = new Error(`Unsupported currency conversion ${from} -> ${to}.`)
+  error.code = 'UNSUPPORTED_CURRENCY_CONVERSION'
+  throw error
+}
+
+// R6 — the ONE safe way to add money. Refuses to add raw mixed-currency minor units as a single number:
+// with no targetCurrency, every input must already share one currency; otherwise it THROWS. With a
+// targetCurrency, each input is converted to it (via the single admin rate) before summing. Returns
+// { amountMinor, currency }.
+export function sumMoney(amounts, targetCurrency) {
+  const list = (amounts || []).filter((m) => m && Number.isFinite(m.amountMinor))
+  if (!list.length) return { amountMinor: 0, currency: String(targetCurrency || 'USD').toUpperCase() }
+  if (!targetCurrency) {
+    const currencies = new Set(list.map((m) => String(m.currency || '').toUpperCase()))
+    if (currencies.size > 1) {
+      const error = new Error('Cannot add mixed-currency amounts without a target currency.')
+      error.code = 'MIXED_CURRENCY_SUM'
+      throw error
+    }
+    return { amountMinor: list.reduce((sum, m) => sum + Math.round(m.amountMinor), 0), currency: [...currencies][0] }
+  }
+  const to = String(targetCurrency).toUpperCase()
+  return { amountMinor: list.reduce((sum, m) => sum + toCurrencyMinor(m.amountMinor, m.currency, to), 0), currency: to }
+}
