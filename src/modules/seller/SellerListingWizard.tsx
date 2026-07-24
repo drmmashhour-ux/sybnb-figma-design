@@ -7,6 +7,7 @@ import {
   addAccommodationRoomType,
   createAccommodation,
   createAndSubmitPrototypeListing,
+  fetchHostCommissionRate,
   uploadListingPhoto,
   blobToBase64,
   generateListingDescription,
@@ -343,6 +344,15 @@ export function SellerListingWizard({ lang }: Props) {
         ]
   const draft = useMemo(() => loadDraft(), [])
   const [stepIndex, setStepIndex] = useState(0)
+  // M1: the STR commission rate for the host's payout note, fetched from the server single source (never
+  // hardcoded). Best-effort — if the lookup fails, the note simply omits the number rather than guessing.
+  const [platformFeePct, setPlatformFeePct] = useState<number | null>(null)
+  useEffect(() => {
+    let active = true
+    void fetchHostCommissionRate().then((rate) => { if (active) setPlatformFeePct(rate) }).catch(() => {})
+    return () => { active = false }
+  }, [])
+  const commissionLabel = platformFeePct != null ? `${+(platformFeePct * 100).toFixed(2)}%` : null
   const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
   const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'plus')
   const [listingPlanPaymentMethod, setListingPlanPaymentMethod] = useState(draft.listingPlanPaymentMethod || 'shamCash')
@@ -1536,8 +1546,8 @@ export function SellerListingWizard({ lang }: Props) {
               {division === 'STAYS' && (
                 <div className="seller-wide-field seller-money-note">
                   {isAr
-                    ? 'تخصم SYBNB عمولة خدمة 13% من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.'
-                    : 'SYBNB deducts a 13% service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.'}
+                    ? `تخصم SYBNB عمولة خدمة${commissionLabel ? ` ${commissionLabel}` : ''} من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.`
+                    : `SYBNB deducts ${commissionLabel ? `a ${commissionLabel}` : 'a'} service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.`}
                 </div>
               )}
               {division === 'STAYS' && (

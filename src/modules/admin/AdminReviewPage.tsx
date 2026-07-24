@@ -100,9 +100,9 @@ type ShamCashApprovalPayload = {
 }
 
 const SHAM_CASH_ACCOUNT_BALANCE_KEY = 'sybnb_v6_sham_cash_account_minor'
-// Must match server/lib/finance-ledger.mjs's STR_ADMIN_COMMISSION_RATE -- see that file's comment
-// for why 13% (still below Airbnb's ~17-19% combined take and Booking.com's ~15%+ commission).
-const STR_ADMIN_COMMISSION_RATE = 0.13
+// M1: the STR commission rate is no longer a client constant — it arrives on the authenticated admin
+// review-queue response as `platformFeePct` (the server's single source) and is threaded into
+// createShortRentLedger. The client never re-hardcodes 13%.
 // Tax-compliance foundation (030): removed STR_TAX_RATE (was 0.02, an invented placeholder never
 // backed by any jurisdiction's real tax law). See finance-ledger.mjs's matching comment.
 const STR_CLEANING_RATE = 0.05
@@ -123,6 +123,8 @@ export function AdminReviewPage({ lang }: Props) {
   const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
+  // M1: the server's single-source STR commission rate, delivered with the admin queue (never hardcoded).
+  const [platformFeePct, setPlatformFeePct] = useState<number | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
   const [message, setMessage] = useState('')
@@ -271,7 +273,7 @@ export function AdminReviewPage({ lang }: Props) {
     setMessage('')
 
     try {
-      const [{ queue: nextQueue, pagination: nextPagination }, nextAuditLog] = await Promise.all([
+      const [{ queue: nextQueue, pagination: nextPagination, platformFeePct: nextFeePct }, nextAuditLog] = await Promise.all([
         fetchPrototypeReviewQueue({
           limit: REVIEW_QUEUE_PAGE_SIZE,
           offset: queueOffset,
@@ -280,6 +282,7 @@ export function AdminReviewPage({ lang }: Props) {
         fetchPrototypeAdminAuditLog(12),
       ])
       setQueue(nextQueue)
+      setPlatformFeePct(nextFeePct)
       setPagination(nextPagination)
       setAuditLog(nextAuditLog)
       setStatus('ready')
@@ -341,7 +344,7 @@ export function AdminReviewPage({ lang }: Props) {
       } else {
         await reviewPrototypeQueueEntity(entityType, id, decision)
       }
-      const [{ queue: nextQueue, pagination: nextPagination }, nextAuditLog] = await Promise.all([
+      const [{ queue: nextQueue, pagination: nextPagination, platformFeePct: nextFeePct }, nextAuditLog] = await Promise.all([
         fetchPrototypeReviewQueue({
           limit: REVIEW_QUEUE_PAGE_SIZE,
           offset: queueOffset,
@@ -350,6 +353,7 @@ export function AdminReviewPage({ lang }: Props) {
         fetchPrototypeAdminAuditLog(12),
       ])
       setQueue(nextQueue)
+      setPlatformFeePct(nextFeePct)
       setPagination(nextPagination)
       setAuditLog(nextAuditLog)
       setStatus('ready')
@@ -362,6 +366,7 @@ export function AdminReviewPage({ lang }: Props) {
   return (
     <ShortRentAdminCommandDashboard
       auditLog={visibleAuditLog}
+      platformFeePct={platformFeePct}
       disabled={status === 'saving'}
       isAr={isAr}
       lang={lang}
@@ -600,8 +605,10 @@ function ShortRentAdminCommandDashboard({
   complianceDashboardState,
   onReviewListingDocument,
   onToggleComplianceFlag,
+  platformFeePct,
 }: {
   auditLog: PlatformAdminAuditLog[]
+  platformFeePct: number | null
   bookings: PlatformReviewBooking[]
   disabled: boolean
   isAr: boolean
@@ -660,10 +667,10 @@ function ShortRentAdminCommandDashboard({
   const confirmedBookings = confirmedBookingRows.length
   const pendingPayments = payments.filter((payment) => payment.status !== 'APPROVED' && payment.status !== 'REJECTED').length
   const heldTotal = displayPayments.reduce((sum, payment) => sum + payment.amountMinor, 0)
-  const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 0, previewPayment?.booking?.listing?.metadata)
-  const readyPayout = Math.round(displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor, payment.booking?.listing?.metadata).hostPayoutMinor, 0))
+  const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 0, previewPayment?.booking?.listing?.metadata, platformFeePct ?? 0)
+  const readyPayout = Math.round(displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor, payment.booking?.listing?.metadata, platformFeePct ?? 0).hostPayoutMinor, 0))
   const adminCommission = activeLedger.adminCommissionMinor
-  const totalAdminCommission = displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor, payment.booking?.listing?.metadata).adminCommissionMinor, 0)
+  const totalAdminCommission = displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor, payment.booking?.listing?.metadata, platformFeePct ?? 0).adminCommissionMinor, 0)
   const shamCashReconciliation = createShamCashReconciliation(payments, displayPayments, lang, manualShamCashByPayment)
   const bookingRef = bookingReference(previewPayment)
   const listingTitle = paymentListingTitle(previewPayment, lang)
@@ -2421,7 +2428,7 @@ function metadataNumber(metadata: Record<string, unknown> | undefined, key: stri
 // rentMinor is derived by direct subtraction (exact), not a divisor guess. listingMetadata is
 // optional so every existing call site (which previously passed no metadata at all) keeps working
 // with the same divisor-based fallback for a listing with no declared fee.
-function createShortRentLedger(totalMinor: number, listingMetadata?: Record<string, unknown>) {
+function createShortRentLedger(totalMinor: number, listingMetadata: Record<string, unknown> | undefined, commissionRate: number) {
   const explicitCleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor')
   const divisor = 1 + STR_CLEANING_RATE
   const rentMinor = explicitCleaningFeeMinor
@@ -2429,7 +2436,7 @@ function createShortRentLedger(totalMinor: number, listingMetadata?: Record<stri
     : Math.round(totalMinor / divisor)
   const cleaningFeeMinor = explicitCleaningFeeMinor || Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = Math.max(0, totalMinor - rentMinor - cleaningFeeMinor)
-  const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
+  const adminCommissionMinor = Math.round(rentMinor * commissionRate)
   const hostPayoutMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
   return {
     adminCommissionMinor,

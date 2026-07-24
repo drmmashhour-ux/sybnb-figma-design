@@ -15,10 +15,9 @@ const FLOW_STORAGE_KEY = 'sybnb_v6_sell_flow'
 // same sessionStorage key on mount. Keep both in sync if either key ever changes.
 const DRAFT_STORAGE_KEY = 'sybnb_v6_sell_wizard_draft'
 
-// STR_ADMIN_COMMISSION_RATE mirrors server/lib/finance-ledger.mjs. RENTALS and BUY have no
-// per-transaction commission -- both are flat-plan, self-managed, matching SellerEntryPage's
-// "seller-plan" mode copy.
-const STR_COMMISSION_LABEL = { ar: '13%', en: '13%' }
+// M1: no hardcoded commission % on this pre-auth marketing page (R7 keeps commission out of guest
+// surfaces). The exact rate is shown at the authenticated publish step (SellerListingWizard), fetched
+// from the server single source. RENTALS and BUY have no per-transaction commission (flat-plan).
 
 type IntentConfig = {
   division: 'STAYS' | 'RENTALS' | 'BUY' | 'CARS' | 'NEW_CONSTRUCTION'
@@ -49,8 +48,8 @@ const INTENT_CONFIG: Record<Props['intent'], IntentConfig> = {
     ],
     pricingTitle: { ar: 'تسعيرك من أول يوم', en: 'Your pricing, from day one' },
     pricingBody: {
-      ar: `تختار خطة نشر ثابتة، وتدفع عمولة ${STR_COMMISSION_LABEL.ar} فقط من قيمة الإيجار عند كل حجز مكتمل -- لا رسوم إضافية مفاجئة.`,
-      en: `Pick a fixed publishing plan, and pay just ${STR_COMMISSION_LABEL.en} commission on the rent amount for every completed booking -- no surprise fees later.`,
+      ar: 'تختار خطة نشر ثابتة، وتدفع عمولة خدمة ثابتة من قيمة الإيجار عند كل حجز مكتمل — تظهر لك النسبة الدقيقة قبل النشر، دون رسوم إضافية مفاجئة.',
+      en: 'Pick a fixed publishing plan, and pay a fixed service commission on the rent amount for every completed booking — the exact rate is shown before you publish, with no surprise fees later.',
     },
     altLinkLabel: { ar: 'تريد بيع عقار أو سيارة أو منتج بدلاً من ذلك؟', en: 'Want to sell a property, car, or product instead?' },
   },

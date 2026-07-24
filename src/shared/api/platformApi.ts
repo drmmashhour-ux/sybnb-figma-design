@@ -1663,11 +1663,12 @@ export async function fetchPrototypeReviewQueue(options?: { limit?: number; offs
   if (options?.division) params.set('division', options.division)
   const query = params.toString()
 
-  const response = await runAdminRequest((token) => apiRequest<{ ok: true; queue: PlatformReviewQueue; pagination: PlatformReviewQueuePagination }>(
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; platformFeePct: number; queue: PlatformReviewQueue; pagination: PlatformReviewQueuePagination }>(
     `/api/admin/review-queue${query ? `?${query}` : ''}`,
     { token },
   ))
-  return { queue: response.queue, pagination: response.pagination }
+  // M1: the effective STR commission rate (server single source) travels with the admin queue.
+  return { queue: response.queue, pagination: response.pagination, platformFeePct: response.platformFeePct }
 }
 
 export async function fetchPrototypeAdminAuditLog(limit = 50) {
@@ -2696,6 +2697,7 @@ export type PlatformHostEarningsRow = {
 export type PlatformHostEarnings = {
   rows: PlatformHostEarningsRow[]
   totals: { forecastedMinor: number; grossEarnedMinor: number; releasedMinor: number; pendingMinor: number; currency: string }
+  platformFeePct: number
 }
 
 export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host') {
@@ -2704,6 +2706,15 @@ export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host
     token: session.token,
   })
   return response.earnings
+}
+
+// M1: the effective STR commission rate for host-facing copy (server single source; never a guest body).
+export async function fetchHostCommissionRate(mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; platformFeePct: number }>('/api/host/commission-rate', {
+    token: session.token,
+  })
+  return response.platformFeePct
 }
 
 export type PlatformHostInsight = {

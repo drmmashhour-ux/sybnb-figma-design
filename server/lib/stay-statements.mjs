@@ -1,4 +1,4 @@
-import { bookingFinanceSplit } from './finance-ledger.mjs'
+import { bookingFinanceSplit, makeStrCommissionRateResolver } from './finance-ledger.mjs'
 
 // Tax-compliance foundation (029) — Stay "Host Earnings and Tax Statement". Lodging tax/GST/QST are
 // read from the settlement's own WalletEntry.metadata (stamped at approval time, see
@@ -43,10 +43,11 @@ export async function buildStayStatement(db, { hostId, periodType, periodStart, 
   const refunds = await db.dispute.findMany({ where: { bookingId: { in: bookingIds }, status: 'RESOLVED_REFUNDED' } })
   const refundByBooking = new Map(refunds.map((d) => [d.bookingId, d.refundMinor || 0]))
 
-  const lines = entries.map((entry) => {
+  const rateFor = makeStrCommissionRateResolver(db)
+  const lines = (await Promise.all(entries.map(async (entry) => {
     const booking = bookingById.get(entry.referenceId)
     if (!booking) return null
-    const split = bookingFinanceSplit(booking, booking.amountMinor)
+    const split = bookingFinanceSplit(booking, booking.amountMinor, await rateFor(booking))
     const nights = booking.checkIn && booking.checkOut
       ? Math.max(1, Math.round((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / 86400000))
       : null
@@ -81,7 +82,7 @@ export async function buildStayStatement(db, { hostId, periodType, periodStart, 
       taxesCollectedBySybnbMinor: lodgingTaxMinor + gstQstCollected,
       taxesHostResponsibilityMinor: gstQstHostResponsibility,
     }
-  }).filter(Boolean)
+  }))).filter(Boolean)
 
   const totals = lines.reduce((acc, l) => ({
     grossBookingMinor: acc.grossBookingMinor + l.grossBookingMinor,

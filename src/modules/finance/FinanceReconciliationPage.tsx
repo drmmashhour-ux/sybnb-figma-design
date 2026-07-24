@@ -135,6 +135,8 @@ export function FinanceReconciliationPage({ lang }: Props) {
   const t = copy[lang === 'ar' ? 'ar' : 'en']
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
+  // M1: the server's single-source STR commission rate (from the admin queue) drives the what-if math.
+  const [platformFeePct, setPlatformFeePct] = useState<number | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])
   const [payouts, setPayouts] = useState<AdminPayout[]>([])
   const [payoutHoldDays, setPayoutHoldDays] = useState(14)
@@ -165,8 +167,8 @@ export function FinanceReconciliationPage({ lang }: Props) {
     const strSypBookings = strBookings - strUsdBookings
     const strAvgPriceUsd = sypMinorToRoundedUsdMinor(strAvgPriceSyp)
 
-    const sypCommissionPerBooking = strAdminShareMinor(strAvgPriceSyp)
-    const usdCommissionPerBooking = strAdminShareMinor(strAvgPriceUsd)
+    const sypCommissionPerBooking = strAdminShareMinor(strAvgPriceSyp, platformFeePct ?? 0)
+    const usdCommissionPerBooking = strAdminShareMinor(strAvgPriceUsd, platformFeePct ?? 0)
     const sypProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceSyp)
     const usdProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceUsd)
 
@@ -204,6 +206,7 @@ export function FinanceReconciliationPage({ lang }: Props) {
     whatIfSrRides,
     whatIfSrAvgFare,
     whatIfSrUsdPercent,
+    platformFeePct,
   ])
 
   useEffect(() => {
@@ -214,13 +217,14 @@ export function FinanceReconciliationPage({ lang }: Props) {
     setStatus('loading')
     setMessage('')
     try {
-      const [{ queue: nextQueue }, nextAuditLog, nextPayouts, nextRevenue] = await Promise.all([
+      const [{ queue: nextQueue, platformFeePct: nextFeePct }, nextAuditLog, nextPayouts, nextRevenue] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminAuditLog(10),
         fetchAdminPayouts(),
         fetchAdminRevenueSummary(),
       ])
       setQueue(nextQueue)
+      setPlatformFeePct(nextFeePct)
       setAuditLog(nextAuditLog)
       setPayouts(nextPayouts.payouts)
       setPayoutHoldDays(nextPayouts.holdDays)

@@ -5,6 +5,7 @@ import {
   bookingFinanceSplit,
   originalAdminShareRecipient,
   recordWalletEntry,
+  strCommissionRateForBooking,
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pricing.mjs'
@@ -90,7 +91,7 @@ export async function handleBookings(req, res, url, context) {
       }
 
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
+      const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor, await strCommissionRateForBooking(tx, existing))
 
       if (approvedPayment) {
         const protectedByAddOn = split.cancellationProtectionPurchased

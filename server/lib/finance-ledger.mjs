@@ -29,10 +29,52 @@ function metadataNumber(metadata, key) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }
 
+// M1 — single-source STR commission rate. Resolves the active STR-scoped JurisdictionCommissionPolicy
+// (serviceType STAY) for the listing's jurisdiction; falls back to STR_ADMIN_COMMISSION_RATE when none is
+// active — mirroring the RIDE wiring (resolveSrCommissionTiers): DB policy if active, else fallback, so
+// this is zero-behaviour-change until a Syria STAY policy is seeded/activated. STAY-scoped only — it never
+// touches RIDE commission.
+export async function resolveStrCommissionRate(db, { country, province, asOf = new Date() } = {}) {
+  const { resolveCommissionPolicy, partsToRatio } = await import('./jurisdiction-pricing.mjs')
+  const policy = await resolveCommissionPolicy(db, { country, province, serviceType: 'STAY', asOf })
+  if (policy && policy.policyType === 'FLAT' && typeof policy.flatRateParts === 'number') {
+    return partsToRatio(policy.flatRateParts)
+  }
+  return STR_ADMIN_COMMISSION_RATE
+}
+
+// Convenience: resolve the STR commission rate for a booking from its listing's jurisdiction metadata.
+// A booking whose listing isn't loaded resolves the Syria default (the active closed-beta jurisdiction).
+export async function strCommissionRateForBooking(db, booking) {
+  const meta = booking?.listing?.metadata || {}
+  const country = typeof meta.country === 'string' && meta.country ? meta.country : 'SY'
+  const province = meta.governorate || meta.province || null
+  return resolveStrCommissionRate(db, { country, province })
+}
+
+// M1 — per-operation memoized resolver: resolves each booking's rate from ITS OWN jurisdiction, but
+// caches by (country, province) so a payout list / statement of many same-jurisdiction bookings hits the
+// DB once, not once per row. Use one instance per operation (do NOT share across requests).
+export function makeStrCommissionRateResolver(db) {
+  const cache = new Map()
+  return async (booking) => {
+    const meta = booking?.listing?.metadata || {}
+    const country = typeof meta.country === 'string' && meta.country ? meta.country : 'SY'
+    const province = meta.governorate || meta.province || null
+    const key = `${country}|${province || ''}`
+    if (!cache.has(key)) cache.set(key, await resolveStrCommissionRate(db, { country, province }))
+    return cache.get(key)
+  }
+}
+
 // Mirrors the split the admin finance panel has always displayed (rentMinor / cleaningFeeMinor /
 // taxesMinor / adminCommissionMinor / hostPayoutMinor) so the real wallet ledger finally matches
 // what admin sees, instead of only pulling out taxes and an opt-in protection fee.
-export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMinor || 0) {
+// M1: the commission rate is now resolved from the STR-scoped JurisdictionCommissionPolicy at the call
+// site (see resolveStrCommissionRate / strCommissionRateForBooking) and passed in, keeping this function
+// pure and synchronous. It defaults to STR_ADMIN_COMMISSION_RATE so any caller that hasn't been wired
+// still gets the historical 13% fallback — never a wrong number.
+export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMinor || 0, commissionRate = STR_ADMIN_COMMISSION_RATE) {
   const paidTotalMinor = Math.max(0, Math.round(paidAmountMinor || 0))
   const listing = booking?.listing
   const listingMetadata = listing?.metadata || {}
@@ -91,7 +133,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   const cleaningFeeMinor = explicitCleaningFeeMinor || Math.round(rentMinor * STR_CLEANING_RATE)
   const extraFeesMinor = explicitExtraFeesMinor
   const taxesMinor = explicitLodgingTaxMinor || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor - extraFeesMinor)
-  const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
+  const adminCommissionMinor = Math.round(rentMinor * commissionRate)
   const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor + extraFeesMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 
@@ -229,7 +271,8 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
       throw error
     }
 
-    const split = bookingFinanceSplit(existing.booking, proof.amountMinor)
+    const commissionRate = await strCommissionRateForBooking(tx, existing.booking)
+    const split = bookingFinanceSplit(existing.booking, proof.amountMinor, commissionRate)
     // Card-processing fee comes out of the HOST's share, never the platform's commission --
     // the commission (adminShareMinor below) is still computed on the full rent regardless.
     const clampedFeeMinor = Math.max(0, Math.min(Math.round(paymentProcessingFeeMinor), split.hostGrossMinor))
@@ -386,9 +429,9 @@ export async function originalAdminShareRecipient(tx, bookingId) {
 
 // Shared by admin's payout queue and the host earnings report so both read the same numbers
 // instead of two independent computations that could silently drift apart.
-export function buildPayoutRow(booking, releasedBookingIds) {
+export function buildPayoutRow(booking, releasedBookingIds, commissionRate = STR_ADMIN_COMMISSION_RATE) {
   const approvedPayment = booking.payments?.find((payment) => payment.status === 'APPROVED')
-  const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor)
+  const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor, commissionRate)
   const released = releasedBookingIds.has(booking.id)
 
   return {

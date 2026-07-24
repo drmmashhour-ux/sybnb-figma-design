@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, makeStrCommissionRateResolver, originalAdminShareRecipient, recordWalletEntry, resolveStrCommissionRate, strCommissionRateForBooking } from '../lib/finance-ledger.mjs'
 import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { recordPayoutTransition } from '../lib/host-payout.mjs'
 import { bookingTrackUrl, notify } from '../lib/notifications.mjs'
@@ -154,11 +154,12 @@ export async function handleAdmin(req, res, url, context) {
         ).map((entry) => entry.referenceId),
       )
 
-      const payouts = completedBookings
+      const rateFor = makeStrCommissionRateResolver(db())
+      const payouts = await Promise.all(completedBookings
         .filter((booking) => !releasedBookingIds.has(booking.id))
-        .map((booking) => {
+        .map(async (booking) => {
           const approvedPayment = booking.payments.find((payment) => payment.status === 'APPROVED')
-          const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor)
+          const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor, await rateFor(booking))
           return {
             bookingId: booking.id,
             listingTitle: booking.listing?.titleAr,
@@ -171,7 +172,7 @@ export async function handleAdmin(req, res, url, context) {
             hostPayoutMinor: split.hostGrossMinor,
             currency: booking.currency,
           }
-        })
+        }))
 
       return json(res, 200, { ok: true, payouts, holdDays: PAYOUT_HOLD_DAYS })
     }
@@ -214,7 +215,7 @@ export async function handleAdmin(req, res, url, context) {
       if (!freshBooking || !isPayoutEligible(freshBooking)) throw payoutNotEligibleError()
 
       const approvedPayment = freshBooking.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(freshBooking, approvedPayment?.amountMinor || freshBooking.amountMinor)
+      const split = bookingFinanceSplit(freshBooking, approvedPayment?.amountMinor || freshBooking.amountMinor, await strCommissionRateForBooking(tx, freshBooking))
       const released = await recordWalletEntry(tx, {
         userId: freshBooking.listing.ownerId,
         type: 'RELEASE',
@@ -437,8 +438,12 @@ export async function handleAdmin(req, res, url, context) {
       idDocuments: idDocuments.length,
     }
 
+    // M1: expose the SAME STR commission rate the settlement math uses, for admin display (never a guest
+    // response — R7). Resolved for the active jurisdiction (Syria).
+    const platformFeePct = await resolveStrCommissionRate(db(), { country: 'SY' })
     return json(res, 200, {
       ok: true,
+      platformFeePct,
       queue: { listings: pagedListings, payments: pagedPayments, gifts, bookings, idDocuments },
       pagination: {
         limit,
@@ -1738,7 +1743,7 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (decision !== 'APPROVED') {
     const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
     if (approvedPayment) {
-      const split = bookingFinanceSplit(existing, approvedPayment.amountMinor)
+      const split = bookingFinanceSplit(existing, approvedPayment.amountMinor, await strCommissionRateForBooking(tx, existing))
       const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
 
       await tx.paymentProof.updateMany({

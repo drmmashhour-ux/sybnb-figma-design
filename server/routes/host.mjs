@@ -5,8 +5,11 @@ import {
   CANCELLATION_ADMIN_FEE_MINOR,
   bookingFinanceSplit,
   buildPayoutRow,
+  makeStrCommissionRateResolver,
   originalAdminShareRecipient,
   recordWalletEntry,
+  resolveStrCommissionRate,
+  strCommissionRateForBooking,
 } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, releaseAbandonedHolds } from '../lib/booking-lifecycle.mjs'
 import { expectedHoldExpiryAt } from '../lib/booking-hold-policy.mjs'
@@ -61,7 +64,8 @@ export async function handleHost(req, res, url, context) {
       ).map((entry) => entry.referenceId),
     )
 
-    const rows = bookings.map((booking) => hostSafePayoutRow(buildPayoutRow(booking, releasedBookingIds)))
+    const rateFor = makeStrCommissionRateResolver(db())
+    const rows = await Promise.all(bookings.map(async (booking) => hostSafePayoutRow(buildPayoutRow(booking, releasedBookingIds, await rateFor(booking)))))
 
     const totals = rows.reduce(
       (acc, row) => {
@@ -77,13 +81,27 @@ export async function handleHost(req, res, url, context) {
       { forecastedMinor: 0, grossEarnedMinor: 0, releasedMinor: 0, pendingMinor: 0 },
     )
 
+    // M1: the host sees the SAME STR commission rate used in the per-booking math above (R7 permits it —
+    // this is the host's own cost, never a guest response). Resolved for the active jurisdiction (Syria).
+    const platformFeePct = await resolveStrCommissionRate(db(), { country: 'SY' })
     return json(res, 200, {
       ok: true,
       earnings: {
         rows,
         totals: { ...totals, currency: rows[0]?.currency || 'SYP' },
+        platformFeePct,
       },
     })
+  }
+
+  // M1: lightweight authenticated lookup of the effective STR commission rate, for host onboarding copy
+  // (SellerIntentPage / listing wizard) to render "N% commission" from the server single source instead of
+  // a hardcoded "13%". Host-scoped (never a guest response — R7).
+  if (url.pathname === '/api/host/commission-rate') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const platformFeePct = await resolveStrCommissionRate(db(), { country: 'SY' })
+    return json(res, 200, { ok: true, platformFeePct })
   }
 
   if (url.pathname === '/api/host/overview') {
@@ -299,7 +317,7 @@ export async function handleHost(req, res, url, context) {
       }
 
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
+      const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor, await strCommissionRateForBooking(tx, existing))
 
       if (status === 'CANCELLED') {
         // Same fix as the guest-cancel path in bookings.mjs: reverse against whoever actually
