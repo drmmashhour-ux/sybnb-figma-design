@@ -5,6 +5,7 @@ import { completeExpiredBookings, releaseAbandonedHolds } from '../lib/booking-l
 import { expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 import { ID_DOCUMENT_CATEGORY, deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
+import { maskPayoutMethod, normalizePayoutMethod } from '../lib/host-payout.mjs'
 
 // A booking still owing something to the counterparty, or a ride still in flight, blocks account closure.
 const ACTIVE_BOOKING_STATUSES = ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED']
@@ -137,6 +138,23 @@ export async function handleMe(req, res, url, context) {
     return json(res, 200, { ok: true, unblocked: blockDeleteMatch[1] })
   }
 
+
+  // SYB-011 — host payout destination registration (write path) + masked read.
+  if (url.pathname === '/api/me/payout-method') {
+    requireAuth(context)
+    if (req.method === 'GET') {
+      const me = await db().user.findUnique({ where: { id: context.user.id }, select: { payoutMethod: true } })
+      return json(res, 200, { ok: true, payoutMethod: maskPayoutMethod(me?.payoutMethod) })
+    }
+    if (req.method === 'PATCH') {
+      const body = await readJson(req)
+      const normalized = normalizePayoutMethod(body)
+      await db().user.update({ where: { id: context.user.id }, data: { payoutMethod: normalized } })
+      // Echo the MASKED method — never the raw destination — so the host confirms without re-exposing it.
+      return json(res, 200, { ok: true, payoutMethod: maskPayoutMethod(normalized) })
+    }
+    return methodNotAllowed(res, ['GET', 'PATCH'])
+  }
 
   if (url.pathname === '/api/me/id-document') {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

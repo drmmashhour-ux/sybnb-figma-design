@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
+import { recordPayoutTransition } from '../lib/host-payout.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
@@ -239,6 +240,45 @@ export async function handleAdmin(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, walletEntry: entry })
+  }
+
+  // SYB-011 — record a MANUAL host-payout disbursement transition (staff moved money off-platform).
+  // Does NOT move money; it records the governed lifecycle event so "released" (internal credit) is
+  // never confused with "paid" (funds actually sent). Requires actor/role/timestamp/method/reference/
+  // reason/reconciliation, all captured by recordPayoutTransition.
+  const payoutDisburseMatch = url.pathname.match(/^\/api\/admin\/payouts\/([^/]+)\/disburse$/)
+  if (payoutDisburseMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['transition', 'reference', 'reason', 'reconciliationNote'], 'payout disbursement body')
+
+    const booking = await db().booking.findUnique({
+      where: { id: payoutDisburseMatch[1] },
+      include: { listing: { include: { owner: { select: { id: true, payoutMethod: true } } } } },
+    })
+    if (!booking) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const hostOwner = booking.listing?.owner
+    const methodType = hostOwner?.payoutMethod && typeof hostOwner.payoutMethod === 'object' ? hostOwner.payoutMethod.type : null
+
+    const entry = await recordPayoutTransition(db(), {
+      transition: String(body.transition || '').toUpperCase(),
+      actorUserId: context.user.id,
+      actorRoles: context.roles,
+      entityId: booking.id,
+      hostUserId: hostOwner?.id || null,
+      method: methodType,
+      reference: body.reference,
+      reason: body.reason,
+      reconciliationNote: body.reconciliationNote,
+    })
+    return json(res, 201, { ok: true, transition: entry.after.transition, recordedAt: entry.createdAt })
   }
 
   // SYB-002 — admin manual release of an abandoned PAYMENT_PENDING hold, with a required reason.
