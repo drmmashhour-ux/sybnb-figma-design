@@ -538,25 +538,50 @@ export async function handleHost(req, res, url, context) {
       const body = await readJson(req)
       const dates = normalizeAvailabilityDates(body.dates)
       assertAvailabilityWithinSeason(existing.metadata, dates)
-      const rows = await db().$transaction(
-        dates.map((entry) =>
-          db().listingAvailability.upsert({
-            where: { listingId_date: { listingId, date: entry.date } },
-            create: {
-              listingId,
-              date: entry.date,
-              status: entry.status,
-              priceOverrideMinor: entry.priceOverrideMinor,
-              note: entry.note,
-            },
-            update: {
-              status: entry.status,
-              priceOverrideMinor: entry.priceOverrideMinor,
-              note: entry.note,
-            },
-          }),
-        ),
-      )
+      const requestedDates = dates.map((entry) => entry.date)
+      const minDate = new Date(Math.min(...requestedDates.map((d) => d.getTime())))
+      const maxDate = new Date(Math.max(...requestedDates.map((d) => d.getTime())))
+      const rows = await db().$transaction(async (tx) => {
+        // H5: serialize against concurrent booking creation on this listing (the SAME advisory lock the
+        // booking overlap guard in bookings.mjs takes) so the booked-date check and the write are atomic —
+        // a booking can't land between the check and the upsert.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${listingId}))`
+        // Booked dates change ONLY through the booking lifecycle, never the host calendar. Reject any edit
+        // (BLOCK or price-override) that touches a date inside an ACTIVE booking — same status set the
+        // availability endpoint and overlap guard use. A date equal to a booking's checkOut is the guest's
+        // departure day and stays editable (checkOut is exclusive), matching the overlap semantics.
+        const activeBookings = await tx.booking.findMany({
+          where: { listingId, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] }, checkIn: { not: null, lte: maxDate }, checkOut: { gt: minDate } },
+          select: { checkIn: true, checkOut: true },
+        })
+        const conflicts = requestedDates.filter((d) => activeBookings.some((b) => b.checkIn <= d && d < b.checkOut))
+        if (conflicts.length) {
+          const error = new Error('One or more of these dates has an active booking and cannot be changed from the calendar. Booked dates change only through the booking lifecycle.')
+          error.statusCode = 409
+          error.code = 'AVAILABILITY_DATE_BOOKED'
+          error.expose = true
+          throw error
+        }
+        return Promise.all(
+          dates.map((entry) =>
+            tx.listingAvailability.upsert({
+              where: { listingId_date: { listingId, date: entry.date } },
+              create: {
+                listingId,
+                date: entry.date,
+                status: entry.status,
+                priceOverrideMinor: entry.priceOverrideMinor,
+                note: entry.note,
+              },
+              update: {
+                status: entry.status,
+                priceOverrideMinor: entry.priceOverrideMinor,
+                note: entry.note,
+              },
+            }),
+          ),
+        )
+      })
 
       await db().adminAuditLog.create({
         data: {
