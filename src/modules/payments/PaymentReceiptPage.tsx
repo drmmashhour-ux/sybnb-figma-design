@@ -137,7 +137,7 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <section style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
+      <section className="no-print" style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
         <button
           style={styles.arrowButton}
           onClick={() => (window.location.hash = proof?.bookingId ? `/booking/${proof.bookingId}` : '/')}
@@ -150,7 +150,7 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
         </button>
       </section>
 
-      <section style={styles.hero}>
+      <section className="no-print" style={styles.hero}>
         <p style={styles.eyebrow}>SYBNB V6</p>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
@@ -161,7 +161,7 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
 
       {proof && (
         <>
-          <section style={styles.invoiceShell}>
+          <section id="receipt-print" style={styles.invoiceShell}>
             <header style={styles.invoiceHeader}>
               <span style={styles.invoiceBadge}>{t.title}</span>
               <strong>{t.letterhead}</strong>
@@ -193,7 +193,7 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
             <Info label={t.reviewed} value={proof.reviewedAt ? new Date(proof.reviewedAt).toLocaleString() : '-'} />
           </section>
 
-          <section style={styles.protectionPanel}>
+          <section className="no-print" style={styles.protectionPanel}>
             <span style={styles.invoiceBadge}>{t.held}</span>
             <strong>{t.protectedFunds}</strong>
             <p>{t.protectedCopy}</p>
@@ -207,7 +207,7 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
             <small>{t.warning}</small>
           </section>
 
-          <section style={styles.actions}>
+          <section className="no-print" style={styles.actions}>
             <button style={styles.secondaryButton} onClick={shareReceipt}>{t.share}</button>
             <button style={styles.primaryButton} onClick={downloadReceipt}>{t.download}</button>
             <button style={styles.secondaryButton} onClick={printReceipt}>{t.print}</button>

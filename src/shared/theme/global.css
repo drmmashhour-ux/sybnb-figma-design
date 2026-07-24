@@ -8958,3 +8958,30 @@ button.division-triad-item:hover {
   border-radius: 10px; padding: 8px 12px; min-height: 40px; color: #c8cede; font-weight: 700;
 }
 .listing-amenities li img { width: 22px; height: 22px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; }
+
+/* FIX 1 — Print isolation. window.print() used to render the whole app-shell; this hides everything
+   except the receipt card (id="receipt-print"). The receipt page's own chrome is also marked .no-print.
+   The receipt uses dark inline styles, so the container + descendants are forced onto white with black
+   text (with !important, since normal rules cannot beat inline styles) so it prints legibly. RTL prints
+   correctly because the receipt keeps its own dir. */
+@media print {
+  body * { visibility: hidden; }
+  #receipt-print, #receipt-print * { visibility: visible; }
+  #receipt-print, #receipt-print * {
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    border-color: #999 !important;
+  }
+  #receipt-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 16px;
+  }
+  /* Hide the app-shell chrome, but never the receipt's own <header> letterhead inside #receipt-print. */
+  header:not(#receipt-print *), nav:not(#receipt-print *), footer:not(#receipt-print *), .no-print { display: none !important; }
+  @page { margin: 12mm; }
+}
