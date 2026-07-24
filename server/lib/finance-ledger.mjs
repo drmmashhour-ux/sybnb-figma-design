@@ -4,8 +4,9 @@ import { rewardReferralIfQualifying } from './referrals.mjs'
 import { computeQuebecStayTaxesResolved, resolveGstQstResponsibility } from './quebec-stay-tax.mjs'
 import { STAY_TAX_PLATFORM_COLLECTION, isFeatureEnabled } from './compliance-feature-flags.mjs'
 import { savePricingSnapshot } from './jurisdiction-pricing.mjs'
-import { assertRealSettlementReference } from './payment-gateway.mjs'
+import { assertRealSettlementReference, settlementReference } from './payment-gateway.mjs'
 import { STR_HOST_CONTRACT_VERSION, latestHostContractConsent } from './host-consent.mjs'
+import { SYP_PER_USD, sypMinorToRoundedUsdMinor } from './currency.mjs'
 
 // S12: amounts are whole currency units (see currency.mjs), so the documented $10 fee is 10, not 1000.
 export const CANCELLATION_ADMIN_FEE_MINOR = 10
@@ -295,16 +296,26 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
     const commissionRate = await strCommissionRateForBooking(tx, existing.booking)
     const split = bookingFinanceSplit(existing.booking, proof.amountMinor, commissionRate)
 
-    // M3-A/M6: an instant-book listing auto-confirms on payment (there is no host-accept step; its
-    // publish-time contract consent covers the booking). Freeze the terms snapshot here so an
-    // instant-booked stay carries the same frozen {commissionRate, baseVersion} as one confirmed through
-    // the host-accept gate — a Stripe (or any) payment never confirms a booking with unfrozen terms.
-    if (nextStatus === 'CONFIRMED') {
-      await tx.booking.update({
-        where: { id: proof.bookingId },
-        data: { metadata: { ...(existing.booking?.metadata || {}), termsSnapshot: { commissionRate, baseVersion: STR_HOST_CONTRACT_VERSION, acceptedAt: new Date().toISOString() } } },
-      })
+    // M4: store the settlement detail on the booking — the payment record's additive home until M5
+    // formalizes Payment/Payout models. Charged amount + currency + the applied single admin rate, and —
+    // when settled in SYP (e.g. Sham Cash) — the USD-equivalent too, so the record is self-explanatory and
+    // reproducible. Guest display is USD-only, but the actual charge currency is recorded as-charged.
+    const chargedCurrency = proof.currency || 'SYP'
+    const settlement = {
+      chargedAmountMinor: proof.amountMinor,
+      chargedCurrency,
+      settlementRateSypPerUsd: SYP_PER_USD,
+      usdAmountMinor: chargedCurrency === 'SYP' ? sypMinorToRoundedUsdMinor(proof.amountMinor) : proof.amountMinor,
+      settlementRef: settlementReference(proof),
     }
+    const bookingMetadata = { ...(existing.booking?.metadata || {}), settlement }
+    // M3-A/M6: an instant-book listing auto-confirms on payment (its publish-time consent covers it).
+    // Freeze the terms snapshot on CONFIRM so an instant-booked stay carries the same frozen
+    // {commissionRate, baseVersion} as one confirmed through the host-accept gate.
+    if (nextStatus === 'CONFIRMED') {
+      bookingMetadata.termsSnapshot = { commissionRate, baseVersion: STR_HOST_CONTRACT_VERSION, acceptedAt: new Date().toISOString() }
+    }
+    await tx.booking.update({ where: { id: proof.bookingId }, data: { metadata: bookingMetadata } })
     // Card-processing fee comes out of the HOST's share, never the platform's commission --
     // the commission (adminShareMinor below) is still computed on the full rent regardless.
     const clampedFeeMinor = Math.max(0, Math.min(Math.round(paymentProcessingFeeMinor), split.hostGrossMinor))

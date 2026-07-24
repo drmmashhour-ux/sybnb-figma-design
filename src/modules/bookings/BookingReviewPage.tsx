@@ -162,7 +162,9 @@ export function BookingReviewPage({ listingId, lang }: Props) {
   // FIX MINOR: drop any persisted past range so the review header never shows dates earlier than today.
   const dateRange: DateRange = dropPastDates(draft.dateRange)
   const cancellationProtection = draft.cancellationProtection ?? false
-  const payCurrency = draft.payCurrency ?? 'SYP'
+  // M4: guest currency is USD-only for launch (the listing page already forces USD). Default to USD so a
+  // draft that somehow lacks a currency can never fall back to a SYP guest display.
+  const payCurrency = draft.payCurrency ?? 'USD'
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
