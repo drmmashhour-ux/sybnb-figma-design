@@ -59,6 +59,10 @@ const copy = {
     idGateCopy: 'اكتب اسمك ورقم هاتفك حتى نتمكن من التواصل معك بخصوص هذه الرحلة، ولتتمكن لاحقاً من متابعة حجزك برقم التأكيد.',
     contactNameLabel: 'الاسم الكامل',
     contactPhoneLabel: 'رقم الهاتف',
+    contactEmailLabel: 'البريد الإلكتروني',
+    contactEmailConfirmLabel: 'تأكيد البريد الإلكتروني',
+    contactEmailInvalid: 'أدخل بريداً إلكترونياً صالحاً.',
+    contactEmailMismatch: 'البريدان الإلكترونيان غير متطابقين.',
     idGateSubmit: 'حفظ ومتابعة الدفع',
     idGateError: 'تعذر حفظ معلومات التواصل. تحقق من البيانات وحاول مرة أخرى.',
     draftTimeline: ['اختيار الاستضافة', 'ارفع إثبات الدفع', 'SYBNB يراجع', 'المضيف يوافق', 'تأكيد الحجز'],
@@ -120,6 +124,10 @@ const copy = {
     idGateCopy: "Tell us your name and phone so we can reach you about this trip, and so you can track your booking later with your confirmation number.",
     contactNameLabel: 'Full name',
     contactPhoneLabel: 'Phone number',
+    contactEmailLabel: 'Email',
+    contactEmailConfirmLabel: 'Confirm email',
+    contactEmailInvalid: 'Enter a valid email address.',
+    contactEmailMismatch: 'The emails do not match.',
     idGateSubmit: 'Save and continue to payment',
     idGateError: 'Could not save your contact details. Check the fields and try again.',
     draftTimeline: ['Stay selected', 'Upload payment proof', 'SYBNB reviews', 'Host approves', 'Booking confirmed'],
@@ -170,6 +178,8 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const [cardError, setCardError] = useState('')
   const [contactName, setContactName] = useState('')
   const [contactPhone, setContactPhone] = useState('')
+  const [contactEmail, setContactEmail] = useState('')
+  const [contactEmailConfirm, setContactEmailConfirm] = useState('')
   const [contactSaveState, setContactSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
 
   useEffect(() => {
@@ -227,10 +237,11 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   }
 
   async function saveContactInfo() {
-    if (!booking || !contactName.trim() || !contactPhone.trim()) return
+    // FIX 2: require a valid, matching email so a real confirmation can be sent.
+    if (!booking || !contactName.trim() || !contactPhone.trim() || !contactEmailValid || !contactEmailsMatch) return
     setContactSaveState('saving')
     try {
-      await submitBookingContact(booking.id, { guestName: contactName.trim(), guestPhone: contactPhone.trim() })
+      await submitBookingContact(booking.id, { guestName: contactName.trim(), guestPhone: contactPhone.trim(), guestEmail: contactEmail.trim() })
       await loadBooking()
       setContactSaveState('idle')
     } catch {
@@ -274,6 +285,9 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const hasContactInfo = Boolean(booking?.metadata?.guestContactPhone)
   const isFallbackInspectionBooking = booking?.id.startsWith('fallback-booking-') === true
   const canContinueToPayment = hasContactInfo || isFallbackInspectionBooking
+  // FIX 2: a valid, confirmed email is required so a real confirmation can be sent.
+  const contactEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim())
+  const contactEmailsMatch = contactEmail === contactEmailConfirm
 
   function renderPaymentOptions() {
     if (!canContinueToPayment) {
@@ -300,10 +314,34 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
               type="tel"
             />
           </label>
+          <label style={{ display: 'grid', gap: 6, width: '100%' }}>
+            <span style={{ color: '#9aa6ba' }}>{t.contactEmailLabel}</span>
+            <input
+              value={contactEmail}
+              onChange={(event) => setContactEmail(event.target.value)}
+              style={styles.textInput}
+              dir="ltr"
+              type="email"
+              autoComplete="email"
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 6, width: '100%' }}>
+            <span style={{ color: '#9aa6ba' }}>{t.contactEmailConfirmLabel}</span>
+            <input
+              value={contactEmailConfirm}
+              onChange={(event) => setContactEmailConfirm(event.target.value)}
+              style={styles.textInput}
+              dir="ltr"
+              type="email"
+              autoComplete="off"
+            />
+          </label>
+          {contactEmail.length > 0 && !contactEmailValid && <small style={{ color: '#ff9aac' }}>{t.contactEmailInvalid}</small>}
+          {contactEmailConfirm.length > 0 && !contactEmailsMatch && <small style={{ color: '#ff9aac' }}>{t.contactEmailMismatch}</small>}
           {contactSaveState === 'error' && <small style={{ color: '#ff9aac' }}>{t.idGateError}</small>}
           <button
             style={styles.primaryButton}
-            disabled={!contactName.trim() || !contactPhone.trim() || contactSaveState === 'saving'}
+            disabled={!contactName.trim() || !contactPhone.trim() || !contactEmailValid || !contactEmailsMatch || contactSaveState === 'saving'}
             onClick={() => void saveContactInfo()}
           >
             {contactSaveState === 'saving' ? t.saving : t.idGateSubmit}

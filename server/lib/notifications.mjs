@@ -25,12 +25,12 @@ export const DELIVERY_STATUS = {
 // data (ids, amounts, status) — never sensitive personal content.
 export const TRANSACTIONAL_EVENTS = {
   BOOKING_SUBMITTED: {
-    ar: (d) => ({ subject: 'تم استلام طلب الحجز', text: `استلمنا طلب حجزك رقم ${d.ref}. أكمل الدفع لتأكيد الحجز.` }),
-    en: (d) => ({ subject: 'Booking request received', text: `We received your booking request ${d.ref}. Complete payment to confirm.` }),
+    ar: (d) => ({ subject: 'تم استلام طلب الحجز', text: `استلمنا طلب حجزك رقم ${d.ref}. أكمل الدفع لتأكيد الحجز.${d.trackUrl ? ` تابع حجزك: ${d.trackUrl}` : ''}` }),
+    en: (d) => ({ subject: 'Booking request received', text: `We received your booking request ${d.ref}. Complete payment to confirm.${d.trackUrl ? ` Track your booking: ${d.trackUrl}` : ''}` }),
   },
   BOOKING_CONFIRMED: {
-    ar: (d) => ({ subject: 'تم تأكيد الحجز', text: `تم تأكيد حجزك رقم ${d.ref}.` }),
-    en: (d) => ({ subject: 'Booking confirmed', text: `Your booking ${d.ref} is confirmed.` }),
+    ar: (d) => ({ subject: 'تم تأكيد الحجز', text: `تم تأكيد حجزك رقم ${d.ref}.${d.trackUrl ? ` تابع حجزك: ${d.trackUrl}` : ''}` }),
+    en: (d) => ({ subject: 'Booking confirmed', text: `Your booking ${d.ref} is confirmed.${d.trackUrl ? ` Track your booking: ${d.trackUrl}` : ''}` }),
   },
   BOOKING_CANCELLED: {
     ar: (d) => ({ subject: 'تم إلغاء الحجز', text: `تم إلغاء الحجز رقم ${d.ref}.` }),
@@ -68,6 +68,14 @@ export const TRANSACTIONAL_EVENTS = {
 
 function langFromLocale(locale) {
   return String(locale || '').toLowerCase().startsWith('ar') ? 'ar' : 'en'
+}
+
+// FIX 2 — the guest's public trip-tracking link. PUBLIC_BASE_URL should be set in production; if it is
+// not, fall back to a relative hash path so a misconfigured base never yields a broken
+// "https://undefined/..." link. Never interpolates a secret.
+export function bookingTrackUrl(ref) {
+  const base = String(process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+  return `${base}/#/track?ref=${encodeURIComponent(ref)}`
 }
 
 async function recordDelivery({ event, status, recipientRef, entityId, reason }) {

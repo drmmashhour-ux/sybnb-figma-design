@@ -11,8 +11,9 @@ import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pri
 import { amountToRoundedUsd, stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
 import { getOperationalDocumentStatuses } from '../lib/listing-document-retention.mjs'
-import { assertBoundedString, assertNoUnknownFields, assertValidPhone } from '../lib/validate.mjs'
+import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPhone } from '../lib/validate.mjs'
 import { assertBookingWithinMontrealSeasonAndCap } from '../lib/quebec-str-rules.mjs'
+import { DELIVERY_STATUS, bookingTrackUrl, notify } from '../lib/notifications.mjs'
 
 // Matches the frictionless-guest display name set at account creation (server/routes/auth.mjs
 // POST /api/auth/checkout-guest) -- only overwritten by the real name below if it's still exactly
@@ -299,7 +300,7 @@ export async function handleBookings(req, res, url, context) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context)
     const body = await readJson(req)
-    assertNoUnknownFields(body, ['guestName', 'guestPhone'], 'booking contact body')
+    assertNoUnknownFields(body, ['guestName', 'guestPhone', 'guestEmail'], 'booking contact body')
     const guestName = assertBoundedString(body.guestName, { fieldName: 'guestName', maxLength: 120, required: true })
     const guestPhone = assertValidPhone(body.guestPhone, 'guestPhone')
     if (!guestPhone) {
@@ -309,6 +310,10 @@ export async function handleBookings(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // FIX 2: capture the guest email so a real confirmation can be sent. assertValidEmail rejects a
+    // malformed address (400 VALIDATION_INVALID_EMAIL) but treats a missing one as optional: the client
+    // requires + confirm-matches it, while older callers with no email keep working (no confirmation).
+    const guestEmail = assertValidEmail(body.guestEmail, 'guestEmail')
 
     const existing = await db().booking.findFirst({ where: { id: contactMatch[1], guestId: context.user.id } })
     if (!existing) {
@@ -319,15 +324,40 @@ export async function handleBookings(req, res, url, context) {
       throw error
     }
 
-    const [booking] = await db().$transaction([
-      db().booking.update({
-        where: { id: existing.id },
-        data: { metadata: { ...(existing.metadata || {}), guestContactName: guestName, guestContactPhone: guestPhone } },
-      }),
+    const contactMetadata = {
+      ...(existing.metadata || {}),
+      guestContactName: guestName,
+      guestContactPhone: guestPhone,
+      ...(guestEmail ? { guestContactEmail: guestEmail } : {}),
+    }
+    const [updated] = await db().$transaction([
+      db().booking.update({ where: { id: existing.id }, data: { metadata: contactMetadata } }),
       ...(context.user.displayName === FRICTIONLESS_GUEST_PLACEHOLDER_NAME
         ? [db().user.update({ where: { id: context.user.id }, data: { displayName: guestName } })]
         : []),
     ])
+
+    let booking = updated
+    // FIX 2: best-effort "booking request received" confirmation AFTER the contact info commits, only when
+    // we have an email. notify() never throws, so a mailer outage can't block the workflow;
+    // confirmationEmailSent is set true ONLY when the provider actually sent (never faked). The body
+    // carries the /#/track?ref link.
+    if (guestEmail) {
+      const ref = existing.id.slice(0, 12).toUpperCase()
+      const delivery = await notify({
+        event: 'BOOKING_SUBMITTED',
+        to: guestEmail,
+        locale: context.user.locale,
+        data: { ref, trackUrl: bookingTrackUrl(ref) },
+        entityId: existing.id,
+        recipientRef: context.user.id,
+      })
+      const confirmationEmailSent = delivery.status === DELIVERY_STATUS.SENT
+      booking = await db().booking.update({
+        where: { id: existing.id },
+        data: { metadata: { ...contactMetadata, confirmationEmailSent } },
+      })
+    }
 
     return json(res, 200, { ok: true, booking })
   }

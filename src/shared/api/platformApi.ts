@@ -2527,7 +2527,7 @@ export async function fetchPrototypeBooking(bookingId: string) {
 
 // Replaces the old ID-upload-before-payment step: the guest gives their real name + phone right
 // before paying, so the platform has a way to reach them without the heavier photo-ID requirement.
-export async function submitBookingContact(bookingId: string, input: { guestName: string; guestPhone: string }) {
+export async function submitBookingContact(bookingId: string, input: { guestName: string; guestPhone: string; guestEmail: string }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; booking: PlatformBooking }>(`/api/bookings/${bookingId}/contact`, {
     method: 'PATCH',

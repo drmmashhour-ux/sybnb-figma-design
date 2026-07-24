@@ -3,7 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { recordPayoutTransition } from '../lib/host-payout.mjs'
-import { notify } from '../lib/notifications.mjs'
+import { bookingTrackUrl, notify } from '../lib/notifications.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
@@ -803,6 +803,36 @@ export async function handleAdmin(req, res, url, context) {
       })
       return { entity: after, auditLog }
     })
+
+    // FIX 2: best-effort guest "booking confirmed" email once the booking is actually CONFIRMED (a
+    // payment-proof approval or a booking-review approval). Runs AFTER the review transaction commits and
+    // never throws, so it can never block or roll back the authoritative review workflow.
+    if (decision === 'APPROVED') {
+      try {
+        let confirmedBooking = null
+        if (entityType === 'booking') {
+          confirmedBooking = await db().booking.findUnique({ where: { id: entityId } })
+        } else if (entityType === 'paymentProof') {
+          const proof = await db().paymentProof.findUnique({ where: { id: entityId }, select: { bookingId: true } })
+          if (proof?.bookingId) confirmedBooking = await db().booking.findUnique({ where: { id: proof.bookingId } })
+        }
+        const guestEmail = confirmedBooking?.metadata?.guestContactEmail
+        if (confirmedBooking?.status === 'CONFIRMED' && guestEmail) {
+          const ref = confirmedBooking.id.slice(0, 12).toUpperCase()
+          await notify({
+            event: 'BOOKING_CONFIRMED',
+            to: guestEmail,
+            locale: confirmedBooking.metadata?.guestLocale,
+            data: { ref, trackUrl: bookingTrackUrl(ref) },
+            entityId: confirmedBooking.id,
+            recipientRef: confirmedBooking.guestId,
+          })
+        }
+      } catch {
+        /* best-effort: a confirmation email must never break the admin review workflow */
+      }
+    }
+
     return json(res, 200, { ok: true, ...result })
   }
 
