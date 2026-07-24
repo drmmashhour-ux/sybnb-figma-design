@@ -636,7 +636,11 @@ export function SellerListingWizard({ lang }: Props) {
   const stayNightPrice = Math.max(0, toNumber(variableNightPrice || price))
   const stayCleaningFee = division === 'STAYS' ? Math.max(0, toNumber(cleaningFee)) : 0
   const stayTaxFee = division === 'STAYS' ? Math.max(0, toNumber(taxFee)) : 0
-  const stayBookingTotal = stayNightPrice + stayCleaningFee + stayTaxFee
+  // R5 / one money model: the guest total shown here must equal what the guest is actually charged, which
+  // is nightly + cleaning (+ extra fees) — exactly server/lib/pricing.mjs computeGuestBookingTotalMinor.
+  // Tax is a PASS-THROUGH line rendered separately (M8), never folded into this total and never in the M2
+  // commission base — so a host never advertises a "total" the guest isn't charged.
+  const stayBookingTotal = stayNightPrice + stayCleaningFee
   const availabilityCalendar = {
     searchCapsuleEnabled,
     availabilityDates,
@@ -1548,36 +1552,37 @@ export function SellerListingWizard({ lang }: Props) {
                   </div>
                 </label>
               )}
-              {division === 'STAYS' && (
+              {/* Quebec keeps its frozen auto-computed lodging-tax disclosure field. */}
+              {division === 'STAYS' && isQuebecStr && (
                 <label>
                   <span>
-                    {isQuebecStr
-                      ? isAr
-                        ? 'ضريبة الإقامة (كيبيك — ٣٫٥٪ محسوبة تلقائياً)'
-                        : 'Lodging tax (Quebec — 3.5%, calculated automatically)'
-                      : isAr
-                        ? 'الضريبة بالدولار (اختياري)'
-                        : 'Tax USD (optional)'}
+                    {isAr
+                      ? 'ضريبة الإقامة (كيبيك — ٣٫٥٪ محسوبة تلقائياً)'
+                      : 'Lodging tax (Quebec — 3.5%, calculated automatically)'}
                   </span>
                   <div className="seller-price-input-shell">
                     <b>USD</b>
-                    <input
-                      dir="ltr"
-                      disabled={isQuebecStr}
-                      inputMode="numeric"
-                      onChange={(event) => setTaxFee(event.target.value)}
-                      placeholder="0"
-                      value={taxFee}
-                    />
+                    <input dir="ltr" disabled inputMode="numeric" onChange={(event) => setTaxFee(event.target.value)} placeholder="0" value={taxFee} />
                   </div>
-                  {isQuebecStr && (
-                    <small>
-                      {isAr
-                        ? 'رقم إلزامي بموجب ضريبة الإقامة لدى Revenu Québec (٣٫٥٪ من السعر لليلة). لا يمكن تعديله يدوياً.'
-                        : "Required by Revenu Québec's Tax on Lodging (3.5% of the nightly rate). Cannot be edited manually."}
-                    </small>
-                  )}
+                  <small>
+                    {isAr
+                      ? 'رقم إلزامي بموجب ضريبة الإقامة لدى Revenu Québec (٣٫٥٪ من السعر لليلة). لا يمكن تعديله يدوياً.'
+                      : "Required by Revenu Québec's Tax on Lodging (3.5% of the nightly rate). Cannot be edited manually."}
+                  </small>
                 </label>
+              )}
+              {/* H3/M8 — outside Quebec (Syria today) the host does NOT set a tax: the treatment is "pending
+                  confirmation" until SYBNB's legal review sets a real rate. Read-only, never added to the
+                  guest total, never in the commission base (pass-through). */}
+              {division === 'STAYS' && !isQuebecStr && (
+                <div className="seller-wide-field seller-money-note">
+                  <strong>{isAr ? 'الضريبة — قيد التأكيد' : 'Tax — pending confirmation'}</strong>
+                  <small>
+                    {isAr
+                      ? 'تُحدِّد SYBNB معاملة الضريبة بعد اكتمال المراجعة القانونية. لا تُضاف إلى إجمالي الضيف حالياً وليست جزءاً من أساس العمولة (تمرّ كما هي).'
+                      : 'SYBNB sets the tax treatment once legal review completes. It is not added to the guest total today and is never part of the commission base (pass-through).'}
+                  </small>
+                </div>
               )}
               <label>
                 <span>
@@ -1766,11 +1771,17 @@ export function SellerListingWizard({ lang }: Props) {
                           )}
                           {stayTaxFee > 0 && (
                             <p>
-                              <span>{isAr ? 'ضريبة' : 'Tax'}</span>
+                              <span>{isAr ? 'ضريبة (تُعرض فقط، غير محصّلة)' : 'Tax (disclosed, not charged)'}</span>
                               <b>{`USD ${stayTaxFee}`}</b>
                             </p>
                           )}
-                          <em>{isAr ? `الإجمالي للضيف USD ${stayBookingTotal}` : `Guest total USD ${stayBookingTotal}`}</em>
+                          {!isQuebecStr && (
+                            <p>
+                              <span>{isAr ? 'ضريبة' : 'Tax'}</span>
+                              <b>{isAr ? 'قيد التأكيد' : 'Pending confirmation'}</b>
+                            </p>
+                          )}
+                          <em>{isAr ? `إجمالي الضيف (إيجار + تنظيف) USD ${stayBookingTotal}` : `Guest total (rent + cleaning) USD ${stayBookingTotal}`}</em>
                         </div>
                       </div>
                     </section>
