@@ -49,7 +49,10 @@ async function main() {
 
   const backendChecks = [
     ['Auth denial: host overview without token', () => fetch(`${base}/api/host/overview`), (r) => r.status === 401],
-    ['Auth denial: driver pending rides without token', () => fetch(`${base}/api/driver/rides/pending`), (r) => r.status === 401],
+    // SYB-008: the Ride/SR API family is gated in the STR-only closed beta. The dispatcher refuses it
+    // (403 CLOSED_BETA) BEFORE auth, so an unauthenticated call is denied at the gate, not at auth —
+    // unless the explicit CLOSED_BETA_ALLOW_GATED_ROUTES=1 flag is set (then it falls through to 401).
+    ['Beta gate or auth denial: driver rides gated/denied without token', () => fetch(`${base}/api/driver/rides/pending`), (r) => r.status === 403 || r.status === 401],
     ['Auth denial: admin review-queue without token', () => fetch(`${base}/api/admin/review-queue`), (r) => r.status === 401],
     ['Auth denial: admin metrics without token', () => fetch(`${base}/api/admin/platform-metrics`), (r) => r.status === 401],
     ['Auth denial: admin payouts without token', () => fetch(`${base}/api/admin/payouts`), (r) => r.status === 401],
