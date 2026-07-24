@@ -1628,6 +1628,14 @@ export function SellerListingWizard({ lang }: Props) {
                   {isAr
                     ? `تخصم SYBNB عمولة خدمة${commissionLabel ? ` ${commissionLabel}` : ''} من قيمة الإيجار ورسوم التنظيف (لا تشمل الضريبة) من مستحقاتك عند كل حجز مكتمل.`
                     : `SYBNB deducts ${commissionLabel ? `a ${commissionLabel}` : 'a'} service commission from the rent plus cleaning fee (not the tax) from your payout on every completed booking.`}
+                  {/* H6 / M6 v3 — card-fee disclosure (the host bears the Stripe processing fee). */}
+                  <p style={{ margin: '8px 0 0' }}>
+                    {text({
+                      ar: 'بالنسبة للدفع بالبطاقة (Stripe)، تُخصم رسوم المعالجة من مستحقاتك؛ أما الدفع المحلي عبر Sham Cash فلا رسوم معالجة عليه.',
+                      en: 'For card (Stripe) payments, the processing fee is deducted from your payout; local Sham Cash payments have no processing fee.',
+                      fr: "Pour les paiements par carte (Stripe), les frais de traitement sont déduits de votre versement ; les paiements locaux Sham Cash n'ont aucuns frais de traitement.",
+                    }, lang)}
+                  </p>
                 </div>
               )}
               {division === 'STAYS' && (
@@ -1649,8 +1657,8 @@ export function SellerListingWizard({ lang }: Props) {
                     <input type="checkbox" checked={contractAccepted} onChange={(event) => setContractAccepted(event.target.checked)} />
                     <span>
                       {isAr
-                        ? 'أوافق على عقد العمولة الحالي: تُحتسب العمولة على الإيجار + رسوم التنظيف (لا تشمل الضريبة). مطلوبة قبل النشر.'
-                        : 'I accept the current commission contract: commission is on rent + cleaning (tax excluded). Required before publishing.'}
+                        ? 'أوافق على عقد العمولة الحالي: تُحتسب العمولة على الإيجار + رسوم التنظيف (لا تشمل الضريبة)، وتُخصم رسوم معالجة البطاقة من مستحقاتي في الدفع بالبطاقة (لا رسوم على Sham Cash). مطلوبة قبل النشر.'
+                        : 'I accept the current commission contract: commission is on rent + cleaning (tax excluded), and for card payments the card processing fee is deducted from my payout (no fee on Sham Cash). Required before publishing.'}
                     </span>
                   </label>
                 </div>

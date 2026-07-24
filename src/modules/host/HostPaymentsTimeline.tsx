@@ -28,7 +28,9 @@ const copy = {
     booked: 'محجوز',
     paid: 'دفع الضيف',
     release: 'صرف المستحق',
-    hostPayout: 'مستحقك',
+    grossPayout: 'المستحق (إجمالي)',
+    cardFee: 'رسوم معالجة البطاقة (مخصومة)',
+    hostPayout: 'صافي مستحقك',
     statusPENDING_HOLD: 'ضمن فترة الحجز',
     statusELIGIBLE: 'جاهز للصرف',
     statusRELEASED: 'تم الصرف',
@@ -48,7 +50,9 @@ const copy = {
     booked: 'Booked',
     paid: 'Guest paid',
     release: 'Payout release',
-    hostPayout: 'Your payout',
+    grossPayout: 'Payout (gross)',
+    cardFee: 'Card processing fee (deducted)',
+    hostPayout: 'Your net payout',
     statusPENDING_HOLD: 'In hold window',
     statusELIGIBLE: 'Ready to release',
     statusRELEASED: 'Released',
@@ -151,7 +155,16 @@ export function HostPaymentsTimeline({ lang, mode = 'host' }: Props) {
                 </ol>
                 <footer style={styles.amounts} dir="ltr">
                   <span>{t.commission}: <b>{moneyText(row.commissionMinor ?? 0, row.currency, lang)}</b></span>
-                  <span>{t.hostPayout}: <b>{moneyText(row.netPayoutMinor, row.currency, lang)}</b></span>
+                  {/* H6 / M6 v3 — when a card fee was withheld (net < gross), show WHY the net is lower. */}
+                  {row.netPayoutMinor < row.hostPayoutMinor ? (
+                    <>
+                      <span>{t.grossPayout}: <b>{moneyText(row.hostPayoutMinor, row.currency, lang)}</b></span>
+                      <span style={{ color: '#e5b80b' }}>{t.cardFee}: <b>−{moneyText(row.hostPayoutMinor - row.netPayoutMinor, row.currency, lang)}</b></span>
+                      <span>{t.hostPayout}: <b>{moneyText(row.netPayoutMinor, row.currency, lang)}</b></span>
+                    </>
+                  ) : (
+                    <span>{t.hostPayout}: <b>{moneyText(row.netPayoutMinor, row.currency, lang)}</b></span>
+                  )}
                 </footer>
               </article>
             ))}

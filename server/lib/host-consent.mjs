@@ -5,8 +5,9 @@
 // migration. Bumping the version (e.g. for the M2 commission-base change) forces existing hosts to
 // re-consent at their next publish/accept; already-issued bookings keep their own recorded terms.
 
-// Bumped for M2 (commission base = accommodation + cleaning). Change this whenever host economics change.
-export const STR_HOST_CONTRACT_VERSION = 'str-host-commission-v2-accom-cleaning'
+// Bumped whenever host economics change. v2: commission base = accommodation + cleaning. v3: disclose that
+// the host bears the Stripe card processing fee (net payout = gross − card fee; local Sham Cash has no fee).
+export const STR_HOST_CONTRACT_VERSION = 'str-host-commission-v3-card-fee'
 export const HOST_CONTRACT_AUDIT_ACTION = 'HOST_CONTRACT_ACCEPTED'
 export const CONTRACT_CONSENT_REQUIRED_CODE = 'HOST_CONTRACT_CONSENT_REQUIRED'
 

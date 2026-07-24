@@ -137,6 +137,7 @@ const copy = {
     protection: 'حماية الطلبات',
     termsTitle: 'شروط حماية SYBNB',
     termsCopy: 'أتعهد بصحة الإعلان، جاهزية الاستضافة، احترام السعر والحجز، عدم طلب دفع خارجي، والالتزام بسياسة الإلغاء والنزاع.',
+    cardFeeNote: 'في الدفع بالبطاقة (Stripe) تُخصم رسوم المعالجة من مستحقاتك؛ لا رسوم معالجة على الدفع المحلي عبر Sham Cash.',
     termsRequired: 'يجب قبول شروط SYBNB قبل تأكيد الحجز.',
     markCheckedIn: 'تأكيد وصول الضيف',
     markCheckedOut: 'تأكيد مغادرة الضيف',
@@ -259,6 +260,7 @@ const copy = {
     protection: 'Request protection',
     termsTitle: 'SYBNB protection rules',
     termsCopy: 'I confirm the listing is accurate, the stay is ready, the price and booking will be honored, no outside payment will be requested, and cancellation/dispute rules apply.',
+    cardFeeNote: 'For card (Stripe) payments, the processing fee is deducted from your payout; local Sham Cash payments have no processing fee.',
     termsRequired: 'You must accept SYBNB rules before confirming the booking.',
     markCheckedIn: 'Mark guest checked in',
     markCheckedOut: 'Mark guest checked out',
@@ -806,6 +808,8 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                               </small>
                             )
                           })()}
+                          {/* H6 / M6 v3 — card-fee disclosure (host bears the Stripe processing fee). */}
+                          <small>{t.cardFeeNote}</small>
                         </span>
                       </label>
                       <button
