@@ -365,11 +365,19 @@ function listingImage(listing: PlatformListing) {
   return selectCoverUrl(listing.media, fallback)
 }
 
+// FIX A (tax scaling): the card must never dump a raw SYP fee into a USD total. Convert the base price
+// AND the cleaning/tax fees to the display currency (USD for STAYS) the same way, so a SYP-denominated
+// tax is scaled, not shown verbatim (the "Tax 5,250 USD" bug). Exported for direct unit testing.
+export function stayCardDisplayFeesMinor(listing: Pick<PlatformListing, 'currency' | 'priceMinor' | 'metadata'>) {
+  const toDisplay = (minor: number) => (listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(minor) : minor)
+  const basePriceMinor = toDisplay(listing.priceMinor)
+  const cleaningFeeMinor = toDisplay(metadataMinor(listing.metadata, 'cleaningFeeMinor'))
+  const taxFeeMinor = toDisplay(metadataMinor(listing.metadata, 'taxFeeMinor'))
+  return { basePriceMinor, cleaningFeeMinor, taxFeeMinor, totalMinor: basePriceMinor + cleaningFeeMinor + taxFeeMinor }
+}
+
 function StayFeeDisclosure({ listing, lang }: { listing: PlatformListing; lang: Lang }) {
-  const cleaningFee = metadataMinor(listing.metadata, 'cleaningFeeMinor')
-  const taxFee = metadataMinor(listing.metadata, 'taxFeeMinor')
-  const basePrice = listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor
-  const total = basePrice + cleaningFee + taxFee
+  const { cleaningFeeMinor: cleaningFee, taxFeeMinor: taxFee, totalMinor: total } = stayCardDisplayFeesMinor(listing)
   const hasExtraFees = cleaningFee > 0 || taxFee > 0
 
   if (!hasExtraFees) return null

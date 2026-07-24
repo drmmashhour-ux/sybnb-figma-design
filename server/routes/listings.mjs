@@ -167,7 +167,10 @@ export async function handleListings(req, res, url, context) {
       // Listings created through the wizard never populate the `location` relation — governorate/
       // city/area/bedrooms/bathrooms/propertyType/amenities all live in `metadata` instead, so those
       // filters are applied in-memory below rather than as a Prisma `where` clause.
-      const country = params.get('country') || undefined
+      // FIX A: jurisdiction fail-closed. The guest surface must never leak an out-of-jurisdiction
+      // listing (e.g. a Quebec/CA listing on the Syria surface), so the country filter is MANDATORY and
+      // defaults to the active jurisdiction (Syria) when the caller does not scope it explicitly.
+      const country = params.get('country') || 'SY'
       const governorate = params.get('governorate') || undefined
       const city = params.get('city') || undefined
       const area = params.get('area') || undefined
@@ -200,6 +203,8 @@ export async function handleListings(req, res, url, context) {
         where: {
           status: 'APPROVED',
           division,
+          // FIX A: exclude demo/test accounts' listings from every guest-facing query.
+          NOT: { owner: { isDemo: true } },
           ...(Object.keys(priceMinor).length ? { priceMinor } : {}),
         },
         include: { location: true, media: true },
@@ -210,6 +215,8 @@ export async function handleListings(req, res, url, context) {
       let listings = candidates.filter((listing) => {
         const meta = listing.metadata || {}
         const visual = meta.visualFilters || {}
+        // FIX A: never surface synthetic/sample listings to guests.
+        if (meta.sybnbDataMode === 'sample') return false
         // Legacy listings created before the Quebec work never wrote metadata.country -- treat them
         // as Syria, matching resolveListingJurisdiction's same default (server/lib/jurisdiction-compliance.mjs).
         if (country && (typeof meta.country === 'string' && meta.country ? meta.country : 'SY') !== country) return false
@@ -287,7 +294,11 @@ export async function handleListings(req, res, url, context) {
       }
 
       const rankedListings = sort === 'priceAsc' || sort === 'priceDesc' ? listings : applySearchBoost(listings)
-      return json(res, 200, { ok: true, listings: rankedListings.slice(0, 50) })
+      // FIX A: surface a fail-closed legal-review status per jurisdiction so the guest surface never
+      // presents an unreviewed jurisdiction (Syria) as licensed/live. Unknown jurisdiction => unreviewed.
+      // A persistent, counsel-editable status is a future ops/config item (see launch checklist).
+      const legalReviewStatus = { SY: 'unreviewed' }[country] || 'unreviewed'
+      return json(res, 200, { ok: true, listings: rankedListings.slice(0, 50), jurisdiction: country, legalReviewStatus })
     }
 
     if (req.method === 'POST') {
