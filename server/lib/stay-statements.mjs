@@ -43,11 +43,29 @@ export async function buildStayStatement(db, { hostId, periodType, periodStart, 
   const refunds = await db.dispute.findMany({ where: { bookingId: { in: bookingIds }, status: 'RESOLVED_REFUNDED' } })
   const refundByBooking = new Map(refunds.map((d) => [d.bookingId, d.refundMinor || 0]))
 
+  // M5: render each line from the FROZEN Payment record (never a live recompute) so an issued booking
+  // keeps its terms even if the commission policy rate later changes — this is what closes the M2
+  // retroactive-restatement gap. The backfill (scripts/backfill-payments-payouts.mjs) guarantees a record
+  // for every settled booking; the bookingFinanceSplit branch below is only a pre-backfill safety net and
+  // is flagged (source: 'recomputed') so a restatement can never be silent.
+  const paymentRecords = await db.payment.findMany({ where: { bookingId: { in: bookingIds } } })
+  const paymentByBooking = new Map(paymentRecords.map((p) => [p.bookingId, p]))
   const rateFor = makeStrCommissionRateResolver(db)
+
   const lines = (await Promise.all(entries.map(async (entry) => {
     const booking = bookingById.get(entry.referenceId)
     if (!booking) return null
-    const split = bookingFinanceSplit(booking, booking.amountMinor, await rateFor(booking))
+    const frozen = paymentByBooking.get(booking.id)
+    const split = frozen ? null : bookingFinanceSplit(booking, booking.amountMinor, await rateFor(booking))
+    const source = frozen ? frozen.source : 'recomputed'
+    const nightlyAccommodationMinor = frozen ? frozen.accommodationMinor : split.stayAmountMinor
+    const cleaningFeeMinor = frozen ? frozen.cleaningFeeMinor : split.cleaningFeeMinor
+    const extraFeesMinor = frozen ? frozen.extraFeesMinor : split.extraFeesMinor
+    const grossBookingMinor = frozen ? frozen.grossMinor : split.paidTotalMinor
+    // Commission stays sourced from the frozen record; the booking_admin_share wallet entry is the
+    // legacy fallback for the recomputed path only.
+    const commissionMinor = frozen ? frozen.commissionAmountMinor : (adminShareByBooking.get(booking.id) || split.adminShareMinor)
+    const paymentProcessingFeeMinor = frozen ? frozen.processingFeeMinor : Math.max(0, split.hostGrossMinor - entry.amountMinor)
     const nights = booking.checkIn && booking.checkOut
       ? Math.max(1, Math.round((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / 86400000))
       : null
@@ -66,21 +84,22 @@ export async function buildStayStatement(db, { hostId, periodType, periodStart, 
       date: entry.createdAt,
       currency: entry.currency,
       nights,
-      nightlyAccommodationMinor: split.stayAmountMinor,
-      cleaningFeeMinor: split.cleaningFeeMinor,
-      extraFeesMinor: split.extraFeesMinor,
-      grossBookingMinor: split.paidTotalMinor,
+      nightlyAccommodationMinor,
+      cleaningFeeMinor,
+      extraFeesMinor,
+      grossBookingMinor,
       lodgingTaxMinor,
       gstMinor,
       qstMinor,
       gstQstResponsibility: quebecTax?.gstQstResponsibility || null,
       gstQstCollectedBySybnb: quebecTax?.gstQstCollectedBySybnb || false,
-      commissionMinor: adminShareByBooking.get(booking.id) || split.adminShareMinor,
-      paymentProcessingFeeMinor: Math.max(0, split.hostGrossMinor - entry.amountMinor),
+      commissionMinor,
+      paymentProcessingFeeMinor,
       refundedMinor: refundByBooking.get(booking.id) || 0,
       netHostPayoutMinor: entry.amountMinor,
       taxesCollectedBySybnbMinor: lodgingTaxMinor + gstQstCollected,
       taxesHostResponsibilityMinor: gstQstHostResponsibility,
+      source,
     }
   }))).filter(Boolean)
 

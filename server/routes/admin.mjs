@@ -227,6 +227,13 @@ export async function handleAdmin(req, res, url, context) {
         note: `Host payout released by admin after the ${PAYOUT_HOLD_DAYS}-day hold following stay completion.`,
       })
 
+      // M5: transition the frozen Payout record to RELEASED. updateMany is a no-op for a pre-backfill
+      // booking with no Payout record yet; the wallet RELEASE entry above stays the money source of truth.
+      await tx.payout.updateMany({
+        where: { bookingId: freshBooking.id, status: { in: ['PENDING_HOLD', 'ELIGIBLE'] } },
+        data: { status: 'RELEASED', releaseDate: new Date(), releasedById: context.user.id },
+      })
+
       await tx.adminAuditLog.create({
         data: {
           actorUserId: context.user.id,

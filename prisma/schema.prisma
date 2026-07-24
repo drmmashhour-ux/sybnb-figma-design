@@ -167,55 +167,56 @@ model User {
   createdAt              DateTime          @default(now()) @map("created_at")
   updatedAt              DateTime          @updatedAt @map("updated_at")
 
-  roles                            UserRole[]
-  sellerProfile                    SellerProfile?
-  driverProfile                    DriverProfile?
-  listings                         Listing[]                       @relation("ListingOwner")
-  bookings                         Booking[]                       @relation("BookingGuest")
-  wallets                          Wallet[]
-  sentGifts                        WalletGift[]                    @relation("GiftSender")
-  claimedGifts                     WalletGift[]                    @relation("GiftRecipient")
-  rideRequests                     RideRequest[]                   @relation("RideRider")
-  driverRideMatches                RideRequest[]                   @relation("RideDriver")
-  auditLogs                        AdminAuditLog[]                 @relation("AuditActor")
-  listingReviews                   ListingReview[]                 @relation("ReviewGuest")
-  sentMessages                     Message[]                       @relation("MessageSender")
-  paymentProofs                    PaymentProof[]                  @relation("PaymentPayer")
-  listingInquiries                 MessageThread[]                 @relation("ListingInquiryGuest")
-  accommodations                   Accommodation[]                 @relation("AccommodationOwner")
-  hostInsights                     HostInsight[]                   @relation("HostInsightOwner")
-  referralsMade                    Referral[]                      @relation("ReferralReferrer")
-  referredAs                       Referral?                       @relation("ReferralReferee")
+  roles                              UserRole[]
+  sellerProfile                      SellerProfile?
+  driverProfile                      DriverProfile?
+  listings                           Listing[]                       @relation("ListingOwner")
+  bookings                           Booking[]                       @relation("BookingGuest")
+  wallets                            Wallet[]
+  sentGifts                          WalletGift[]                    @relation("GiftSender")
+  claimedGifts                       WalletGift[]                    @relation("GiftRecipient")
+  rideRequests                       RideRequest[]                   @relation("RideRider")
+  driverRideMatches                  RideRequest[]                   @relation("RideDriver")
+  auditLogs                          AdminAuditLog[]                 @relation("AuditActor")
+  listingReviews                     ListingReview[]                 @relation("ReviewGuest")
+  sentMessages                       Message[]                       @relation("MessageSender")
+  paymentProofs                      PaymentProof[]                  @relation("PaymentPayer")
+  listingInquiries                   MessageThread[]                 @relation("ListingInquiryGuest")
+  accommodations                     Accommodation[]                 @relation("AccommodationOwner")
+  hostInsights                       HostInsight[]                   @relation("HostInsightOwner")
+  referralsMade                      Referral[]                      @relation("ReferralReferrer")
+  referredAs                         Referral?                       @relation("ReferralReferee")
   // SR safety/trust layers (014/015)
-  sosEventsRaised                  SosEvent[]                      @relation("SosRaisedBy")
-  sosEventsResolved                SosEvent[]                      @relation("SosResolvedBy")
-  driverDocuments                  DriverDocument[]                @relation("DriverDocumentOwner")
-  driverDocumentsReviewed          DriverDocument[]                @relation("DriverDocumentReviewer")
-  listingDocumentsReviewed         ListingDocument[]               @relation("ListingDocumentReviewer")
-  listingDocumentLegalHoldsSet     ListingDocument[]               @relation("ListingDocumentLegalHoldSetBy")
-  quebecDriverOnboardingsReviewed  QuebecDriverOnboarding[]        @relation("QuebecDriverOnboardingReviewer")
-  quebecDriverOnboardingsAssigned  QuebecDriverOnboarding[]        @relation("QuebecDriverOnboardingAssignedReviewer")
-  quebecVehicleOnboardingsReviewed QuebecVehicleOnboarding[]       @relation("QuebecVehicleOnboardingReviewer")
-  quebecVehicleOnboardingsAssigned QuebecVehicleOnboarding[]       @relation("QuebecVehicleOnboardingAssignedReviewer")
-  quebecDriverDocumentsReviewed    QuebecDriverDocument[]          @relation("QuebecDriverDocumentReviewer")
-  quebecDriverDocumentLegalHoldsSet QuebecDriverDocument[]         @relation("QuebecDriverDocumentLegalHoldSetBy")
-  quebecVehicleDocumentsReviewed   QuebecVehicleDocument[]         @relation("QuebecVehicleDocumentReviewer")
-  quebecVehicleDocumentLegalHoldsSet QuebecVehicleDocument[]       @relation("QuebecVehicleDocumentLegalHoldSetBy")
-  rideMessagesSent                 RideMessage[]                   @relation("RideMessageSender")
-  rideRatingsGiven                 RideRating[]                    @relation("RideRatingRater")
-  rideRatingsReceived              RideRating[]                    @relation("RideRatingRated")
-  sellerSalesMade                  SellerSale[]                    @relation("SellerSaleSeller")
-  sellerPurchases                  SellerSale[]                    @relation("SellerSaleBuyer")
-  sellerReviewsReceived            SellerReview[]                  @relation("SellerReviewSeller")
-  sellerReviewsWritten             SellerReview[]                  @relation("SellerReviewBuyer")
-  driverCancellations              DriverCancellation[]            @relation("DriverCancellationDriver")
-  driverVehicles                   DriverVehicle[]                 @relation("DriverVehicleOwner")
-  disputesOpened                   Dispute[]                       @relation("DisputeOpener")
-  threadDocumentsUploaded          ThreadDocument[]                @relation("ThreadDocumentUploader")
-  jurisdictionProfilesReviewed     JurisdictionComplianceProfile[] @relation("JurisdictionComplianceReviewer")
-  taxProfiles                      TaxProfile[]                    @relation("TaxProfileOwner")
-  taxProfilesVerified              TaxProfile[]                    @relation("TaxProfileVerifier")
-  partXXRecords                    PartXXRecord[]                  @relation("PartXXRecordSeller")
+  sosEventsRaised                    SosEvent[]                      @relation("SosRaisedBy")
+  sosEventsResolved                  SosEvent[]                      @relation("SosResolvedBy")
+  driverDocuments                    DriverDocument[]                @relation("DriverDocumentOwner")
+  driverDocumentsReviewed            DriverDocument[]                @relation("DriverDocumentReviewer")
+  listingDocumentsReviewed           ListingDocument[]               @relation("ListingDocumentReviewer")
+  listingDocumentLegalHoldsSet       ListingDocument[]               @relation("ListingDocumentLegalHoldSetBy")
+  quebecDriverOnboardingsReviewed    QuebecDriverOnboarding[]        @relation("QuebecDriverOnboardingReviewer")
+  quebecDriverOnboardingsAssigned    QuebecDriverOnboarding[]        @relation("QuebecDriverOnboardingAssignedReviewer")
+  quebecVehicleOnboardingsReviewed   QuebecVehicleOnboarding[]       @relation("QuebecVehicleOnboardingReviewer")
+  quebecVehicleOnboardingsAssigned   QuebecVehicleOnboarding[]       @relation("QuebecVehicleOnboardingAssignedReviewer")
+  quebecDriverDocumentsReviewed      QuebecDriverDocument[]          @relation("QuebecDriverDocumentReviewer")
+  quebecDriverDocumentLegalHoldsSet  QuebecDriverDocument[]          @relation("QuebecDriverDocumentLegalHoldSetBy")
+  quebecVehicleDocumentsReviewed     QuebecVehicleDocument[]         @relation("QuebecVehicleDocumentReviewer")
+  quebecVehicleDocumentLegalHoldsSet QuebecVehicleDocument[]         @relation("QuebecVehicleDocumentLegalHoldSetBy")
+  rideMessagesSent                   RideMessage[]                   @relation("RideMessageSender")
+  rideRatingsGiven                   RideRating[]                    @relation("RideRatingRater")
+  rideRatingsReceived                RideRating[]                    @relation("RideRatingRated")
+  sellerSalesMade                    SellerSale[]                    @relation("SellerSaleSeller")
+  sellerPurchases                    SellerSale[]                    @relation("SellerSaleBuyer")
+  sellerReviewsReceived              SellerReview[]                  @relation("SellerReviewSeller")
+  sellerReviewsWritten               SellerReview[]                  @relation("SellerReviewBuyer")
+  driverCancellations                DriverCancellation[]            @relation("DriverCancellationDriver")
+  driverVehicles                     DriverVehicle[]                 @relation("DriverVehicleOwner")
+  disputesOpened                     Dispute[]                       @relation("DisputeOpener")
+  threadDocumentsUploaded            ThreadDocument[]                @relation("ThreadDocumentUploader")
+  jurisdictionProfilesReviewed       JurisdictionComplianceProfile[] @relation("JurisdictionComplianceReviewer")
+  taxProfiles                        TaxProfile[]                    @relation("TaxProfileOwner")
+  taxProfilesVerified                TaxProfile[]                    @relation("TaxProfileVerifier")
+  partXXRecords                      PartXXRecord[]                  @relation("PartXXRecordSeller")
+  payoutsReceived                    Payout[]                        @relation("PayoutHost")
 
   @@map("users")
 }
@@ -412,36 +413,36 @@ enum QuebecVehicleDocumentType {
 // as every other compliance action in this codebase. version is bumped on every transition/edit as a
 // lightweight change counter surfaced alongside the AdminAuditLog trail, not an optimistic-lock guard.
 model QuebecDriverOnboarding {
-  id                       String                       @id @default(uuid())
-  userId                   String                       @unique @map("user_id")
-  status                   QuebecDriverOnboardingStatus @default(DRAFT)
-  legalNameEncrypted       String?                      @map("legal_name_encrypted")
-  legalNameLast4           String?                      @map("legal_name_last4")
-  ageEligibilityConfirmed  Boolean                      @default(false) @map("age_eligibility_confirmed")
-  licenseNumberEncrypted   String?                      @map("license_number_encrypted")
-  licenseClass             String?                      @map("license_class")
-  licenseExpiresAt         DateTime?                    @map("license_expires_at")
-  drivingExperienceConfirmed   Boolean                  @default(false) @map("driving_experience_confirmed")
-  drivingExperienceConfirmedAt DateTime?                @map("driving_experience_confirmed_at")
-  frenchAttestationConfirmed   Boolean                  @default(false) @map("french_attestation_confirmed")
-  frenchAttestationConfirmedAt DateTime?                @map("french_attestation_confirmed_at")
-  policeCheckExpiresAt     DateTime?                    @map("police_check_expires_at")
-  trainingCompletedAt      DateTime?                    @map("training_completed_at")
-  gstStatus                QuebecComplianceItemStatus   @default(NOT_STARTED) @map("gst_status")
-  qstStatus                QuebecComplianceItemStatus   @default(NOT_STARTED) @map("qst_status")
-  operatorFileStatus       QuebecComplianceItemStatus   @default(NOT_STARTED) @map("operator_file_status")
-  sevSrsStatus             QuebecComplianceItemStatus   @default(NOT_STARTED) @map("sev_srs_status")
-  statusReason             String?                      @map("status_reason")
-  assignedReviewerId       String?                      @map("assigned_reviewer_id")
-  reviewedById             String?                      @map("reviewed_by_id")
-  reviewedAt               DateTime?                    @map("reviewed_at")
-  version                  Int                          @default(1)
-  createdAt                DateTime                     @default(now()) @map("created_at")
-  updatedAt                DateTime                     @updatedAt @map("updated_at")
+  id                           String                       @id @default(uuid())
+  userId                       String                       @unique @map("user_id")
+  status                       QuebecDriverOnboardingStatus @default(DRAFT)
+  legalNameEncrypted           String?                      @map("legal_name_encrypted")
+  legalNameLast4               String?                      @map("legal_name_last4")
+  ageEligibilityConfirmed      Boolean                      @default(false) @map("age_eligibility_confirmed")
+  licenseNumberEncrypted       String?                      @map("license_number_encrypted")
+  licenseClass                 String?                      @map("license_class")
+  licenseExpiresAt             DateTime?                    @map("license_expires_at")
+  drivingExperienceConfirmed   Boolean                      @default(false) @map("driving_experience_confirmed")
+  drivingExperienceConfirmedAt DateTime?                    @map("driving_experience_confirmed_at")
+  frenchAttestationConfirmed   Boolean                      @default(false) @map("french_attestation_confirmed")
+  frenchAttestationConfirmedAt DateTime?                    @map("french_attestation_confirmed_at")
+  policeCheckExpiresAt         DateTime?                    @map("police_check_expires_at")
+  trainingCompletedAt          DateTime?                    @map("training_completed_at")
+  gstStatus                    QuebecComplianceItemStatus   @default(NOT_STARTED) @map("gst_status")
+  qstStatus                    QuebecComplianceItemStatus   @default(NOT_STARTED) @map("qst_status")
+  operatorFileStatus           QuebecComplianceItemStatus   @default(NOT_STARTED) @map("operator_file_status")
+  sevSrsStatus                 QuebecComplianceItemStatus   @default(NOT_STARTED) @map("sev_srs_status")
+  statusReason                 String?                      @map("status_reason")
+  assignedReviewerId           String?                      @map("assigned_reviewer_id")
+  reviewedById                 String?                      @map("reviewed_by_id")
+  reviewedAt                   DateTime?                    @map("reviewed_at")
+  version                      Int                          @default(1)
+  createdAt                    DateTime                     @default(now()) @map("created_at")
+  updatedAt                    DateTime                     @updatedAt @map("updated_at")
 
-  driverProfile    DriverProfile            @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  reviewer         User?                    @relation("QuebecDriverOnboardingReviewer", fields: [reviewedById], references: [id])
-  assignedReviewer User?                    @relation("QuebecDriverOnboardingAssignedReviewer", fields: [assignedReviewerId], references: [id])
+  driverProfile    DriverProfile          @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  reviewer         User?                  @relation("QuebecDriverOnboardingReviewer", fields: [reviewedById], references: [id])
+  assignedReviewer User?                  @relation("QuebecDriverOnboardingAssignedReviewer", fields: [assignedReviewerId], references: [id])
   documents        QuebecDriverDocument[]
 
   @@index([status])
@@ -473,9 +474,9 @@ model QuebecVehicleOnboarding {
   createdAt             DateTime                      @default(now()) @map("created_at")
   updatedAt             DateTime                      @updatedAt @map("updated_at")
 
-  vehicle          DriverVehicle             @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  reviewer         User?                     @relation("QuebecVehicleOnboardingReviewer", fields: [reviewedById], references: [id])
-  assignedReviewer User?                     @relation("QuebecVehicleOnboardingAssignedReviewer", fields: [assignedReviewerId], references: [id])
+  vehicle          DriverVehicle           @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  reviewer         User?                   @relation("QuebecVehicleOnboardingReviewer", fields: [reviewedById], references: [id])
+  assignedReviewer User?                   @relation("QuebecVehicleOnboardingAssignedReviewer", fields: [assignedReviewerId], references: [id])
   documents        QuebecVehicleDocument[]
 
   @@index([status])
@@ -492,9 +493,50 @@ model QuebecVehicleOnboarding {
 // ListingDocument exactly (same reasoning: server/lib/listing-document-retention.mjs).
 // malwareScanStatus stays PENDING under every current code path -- no scanner integration exists.
 model QuebecDriverDocument {
-  id                   String                    @id @default(uuid())
-  onboardingUserId     String                    @map("onboarding_user_id")
+  id                   String                   @id @default(uuid())
+  onboardingUserId     String                   @map("onboarding_user_id")
   type                 QuebecDriverDocumentType
+  version              Int                      @default(1)
+  isCurrent            Boolean                  @default(true) @map("is_current")
+  replacesId           String?                  @unique @map("replaces_id")
+  assetUrl             String?                  @map("asset_url")
+  mimeType             String?                  @map("mime_type")
+  status               ListingDocumentStatus    @default(PENDING_REVIEW)
+  issuer               String?
+  issuedAt             DateTime?                @map("issued_at")
+  expiresAt            DateTime?                @map("expires_at")
+  uploadedAt           DateTime                 @default(now()) @map("uploaded_at")
+  reviewedById         String?                  @map("reviewed_by_id")
+  reviewedAt           DateTime?                @map("reviewed_at")
+  rejectionReason      String?                  @map("rejection_reason")
+  malwareScanStatus    MalwareScanStatus        @default(PENDING) @map("malware_scan_status")
+  retentionDeleteAfter DateTime?                @map("retention_delete_after")
+  legalHold            Boolean                  @default(false) @map("legal_hold")
+  legalHoldReason      String?                  @map("legal_hold_reason")
+  legalHoldSetById     String?                  @map("legal_hold_set_by_id")
+  legalHoldSetAt       DateTime?                @map("legal_hold_set_at")
+  deletedAt            DateTime?                @map("deleted_at")
+  createdAt            DateTime                 @default(now()) @map("created_at")
+  updatedAt            DateTime                 @updatedAt @map("updated_at")
+
+  onboarding     QuebecDriverOnboarding @relation(fields: [onboardingUserId], references: [userId], onDelete: Cascade)
+  reviewer       User?                  @relation("QuebecDriverDocumentReviewer", fields: [reviewedById], references: [id])
+  legalHoldSetBy User?                  @relation("QuebecDriverDocumentLegalHoldSetBy", fields: [legalHoldSetById], references: [id])
+  replaces       QuebecDriverDocument?  @relation("QuebecDriverDocumentReplaces", fields: [replacesId], references: [id])
+  replacedBy     QuebecDriverDocument?  @relation("QuebecDriverDocumentReplaces")
+
+  @@index([onboardingUserId, type, isCurrent])
+  @@index([status])
+  @@index([retentionDeleteAfter])
+  @@map("quebec_driver_documents")
+}
+
+// Versioned vehicle compliance documents -- same versioning/legal-hold/retention design as
+// QuebecDriverDocument above.
+model QuebecVehicleDocument {
+  id                   String                    @id @default(uuid())
+  onboardingVehicleId  String                    @map("onboarding_vehicle_id")
+  type                 QuebecVehicleDocumentType
   version              Int                       @default(1)
   isCurrent            Boolean                   @default(true) @map("is_current")
   replacesId           String?                   @unique @map("replaces_id")
@@ -517,47 +559,6 @@ model QuebecDriverDocument {
   deletedAt            DateTime?                 @map("deleted_at")
   createdAt            DateTime                  @default(now()) @map("created_at")
   updatedAt            DateTime                  @updatedAt @map("updated_at")
-
-  onboarding     QuebecDriverOnboarding @relation(fields: [onboardingUserId], references: [userId], onDelete: Cascade)
-  reviewer       User?                  @relation("QuebecDriverDocumentReviewer", fields: [reviewedById], references: [id])
-  legalHoldSetBy User?                  @relation("QuebecDriverDocumentLegalHoldSetBy", fields: [legalHoldSetById], references: [id])
-  replaces       QuebecDriverDocument?  @relation("QuebecDriverDocumentReplaces", fields: [replacesId], references: [id])
-  replacedBy     QuebecDriverDocument?  @relation("QuebecDriverDocumentReplaces")
-
-  @@index([onboardingUserId, type, isCurrent])
-  @@index([status])
-  @@index([retentionDeleteAfter])
-  @@map("quebec_driver_documents")
-}
-
-// Versioned vehicle compliance documents -- same versioning/legal-hold/retention design as
-// QuebecDriverDocument above.
-model QuebecVehicleDocument {
-  id                   String                     @id @default(uuid())
-  onboardingVehicleId  String                     @map("onboarding_vehicle_id")
-  type                 QuebecVehicleDocumentType
-  version              Int                        @default(1)
-  isCurrent            Boolean                    @default(true) @map("is_current")
-  replacesId           String?                    @unique @map("replaces_id")
-  assetUrl             String?                    @map("asset_url")
-  mimeType             String?                    @map("mime_type")
-  status               ListingDocumentStatus      @default(PENDING_REVIEW)
-  issuer               String?
-  issuedAt             DateTime?                  @map("issued_at")
-  expiresAt            DateTime?                  @map("expires_at")
-  uploadedAt           DateTime                   @default(now()) @map("uploaded_at")
-  reviewedById         String?                    @map("reviewed_by_id")
-  reviewedAt           DateTime?                  @map("reviewed_at")
-  rejectionReason      String?                    @map("rejection_reason")
-  malwareScanStatus    MalwareScanStatus          @default(PENDING) @map("malware_scan_status")
-  retentionDeleteAfter DateTime?                  @map("retention_delete_after")
-  legalHold            Boolean                    @default(false) @map("legal_hold")
-  legalHoldReason      String?                    @map("legal_hold_reason")
-  legalHoldSetById     String?                    @map("legal_hold_set_by_id")
-  legalHoldSetAt       DateTime?                  @map("legal_hold_set_at")
-  deletedAt            DateTime?                  @map("deleted_at")
-  createdAt            DateTime                   @default(now()) @map("created_at")
-  updatedAt            DateTime                   @updatedAt @map("updated_at")
 
   onboarding     QuebecVehicleOnboarding @relation(fields: [onboardingVehicleId], references: [vehicleId], onDelete: Cascade)
   reviewer       User?                   @relation("QuebecVehicleDocumentReviewer", fields: [reviewedById], references: [id])
@@ -777,10 +778,71 @@ model Booking {
   review        ListingReview?
   messageThread MessageThread?
   disputes      Dispute[]
+  payment       Payment?
+  payout        Payout?
 
   @@index([guestId, status])
   @@index([listingId, status])
   @@map("bookings")
+}
+
+// ============ Financial statement records (031 / M5) ============
+// A Payment is the FROZEN, immutable financial statement for one settled booking — captured once at the
+// paid→settlement transition (approvePaymentProof) from the pure bookingFinanceSplit + the M8 tax capsule,
+// then never recomputed. Statements and totals RENDER FROM THIS RECORD so an already-issued booking keeps
+// its terms even if the commission policy rate later changes (this closes the M2 retroactive-restatement
+// gap). Money is integer minor units + a currency; the commission rate is frozen as parts-per-million
+// (1% = 10,000 parts) alongside the M6 host-contract baseVersion the guest/host actually agreed to.
+model Payment {
+  id                    String   @id @default(uuid())
+  bookingId             String   @unique @map("booking_id")
+  grossMinor            Int      @map("gross_minor") // the guest's all-inclusive paid total
+  accommodationMinor    Int      @default(0) @map("accommodation_minor") // itemized so a statement renders fully from this record
+  cleaningFeeMinor      Int      @default(0) @map("cleaning_fee_minor")
+  extraFeesMinor        Int      @default(0) @map("extra_fees_minor")
+  processingFeeMinor    Int      @default(0) @map("processing_fee_minor") // card-processing fee withheld from the host net
+  commissionBaseMinor   Int      @map("commission_base_minor") // M2 base = accommodation + cleaning only
+  commissionRateParts   Int      @map("commission_rate_parts") // frozen rate, parts-per-million
+  commissionAmountMinor Int      @map("commission_amount_minor") // platform take on the base
+  hostPayoutMinor       Int      @map("host_payout_minor") // host gross before any processing fee
+  taxComponents         Json     @default("[]") @map("tax_components") // [{name, rateParts, calculationBase, amountMinor}]
+  taxTotalMinor         Int      @default(0) @map("tax_total_minor") // Σ tax components (pass-through, never in commission base)
+  currency              String
+  settlementRef         String   @map("settlement_ref") // real Stripe capture id / Sham Cash proof id (R8)
+  baseVersion           String   @map("base_version") // M6 STR_HOST_CONTRACT_VERSION, or 'legacy-unversioned' for backfilled pre-M6
+  status                String   @default("SETTLED") // SETTLED | REFUNDED
+  source                String   @default("live") // 'live' (written at settlement) | 'backfill' (from pre-M5 records)
+  settledAt             DateTime @default(now()) @map("settled_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([status, settledAt])
+  @@map("payments")
+}
+
+// A Payout is the host-facing side of the same settlement: the frozen net amount owed to the host and its
+// release lifecycle. Release/reversal are explicit admin actions, each audited in AdminAuditLog.
+model Payout {
+  id           String    @id @default(uuid())
+  bookingId    String    @unique @map("booking_id")
+  hostId       String    @map("host_id")
+  amountMinor  Int       @map("amount_minor") // frozen host net payout
+  currency     String
+  status       String    @default("PENDING_HOLD") // PENDING_HOLD | ELIGIBLE | RELEASED | REVERSED
+  releaseDate  DateTime? @map("release_date")
+  releasedById String?   @map("released_by_id")
+  source       String    @default("live") // 'live' | 'backfill'
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  host    User    @relation("PayoutHost", fields: [hostId], references: [id])
+
+  @@index([hostId, status])
+  @@index([status, releaseDate])
+  @@map("payouts")
 }
 
 model PaymentProof {

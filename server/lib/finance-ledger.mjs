@@ -402,6 +402,42 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
       }
     }
 
+    // M5: freeze the financial statement for this settled booking — a Payment (admin/commission side) and a
+    // Payout (host side), computed ONCE here from the pure split and NEVER recomputed. A statement rendered
+    // later reads these exact frozen terms even if the commission policy rate changes afterward — this is
+    // what closes the M2 retroactive-restatement gap. Upsert on the unique bookingId: the one-time
+    // bookingClaim above already guarantees a single settlement, but upsert keeps a prior backfill safe.
+    // Tax is disclosed-not-charged today (M8) so no tax money moves here — taxComponents is empty until the
+    // collection path is wired (see the GO-LIVE TODO in server/lib/stay-tax-line.mjs).
+    const paymentFrozen = {
+      grossMinor: split.paidTotalMinor,
+      accommodationMinor: split.stayAmountMinor,
+      cleaningFeeMinor: split.cleaningFeeMinor,
+      extraFeesMinor: split.extraFeesMinor,
+      processingFeeMinor: clampedFeeMinor,                                  // withheld from host net (hostGross − net)
+      commissionBaseMinor: split.stayAmountMinor + split.cleaningFeeMinor, // M2 base: accommodation + cleaning
+      commissionRateParts: Math.round(commissionRate * 1_000_000),         // frozen rate, parts-per-million
+      commissionAmountMinor: split.adminShareMinor,
+      hostPayoutMinor: split.hostGrossMinor,                                // gross; Payout.amountMinor is net of processing fee
+      taxComponents: [],
+      taxTotalMinor: 0,
+      currency: proof.currency,
+      settlementRef: settlement.settlementRef || proof.id,
+      baseVersion: bookingMetadata.termsSnapshot?.baseVersion || STR_HOST_CONTRACT_VERSION,
+      status: 'SETTLED',
+      source: 'live',
+    }
+    await tx.payment.upsert({
+      where: { bookingId: proof.bookingId },
+      create: { bookingId: proof.bookingId, ...paymentFrozen },
+      update: paymentFrozen,
+    })
+    await tx.payout.upsert({
+      where: { bookingId: proof.bookingId },
+      create: { bookingId: proof.bookingId, hostId: existing.booking?.listing?.ownerId, amountMinor: hostNetMinor, currency: proof.currency, status: 'PENDING_HOLD', source: 'live' },
+      update: { amountMinor: hostNetMinor, currency: proof.currency },
+    })
+
     // Referral reward (double-sided referral program, server/lib/referrals.mjs): only pays the
     // referrer once this guest's first-ever approved payment lands, so a referral can't be
     // farmed with a signup that never generates real revenue. No-ops instantly if this guest was
