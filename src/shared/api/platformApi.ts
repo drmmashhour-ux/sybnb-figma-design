@@ -1536,12 +1536,11 @@ export async function submitPrototypeLocalWalletProof(input: {
   proofAssetUrl?: string
   providerRef: string
 }) {
-  const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof }>('/api/payments/local-wallet-proof', {
+  const response = await withGuestSession((token) => apiRequest<{ ok: true; proof: PlatformPaymentProof }>('/api/payments/local-wallet-proof', {
     method: 'POST',
-    token: session.token,
+    token,
     body: input,
-  })
+  }))
   return response.proof
 }
 
@@ -2498,12 +2497,11 @@ export async function createPrototypeBooking(input: {
   termsVersion?: string
 }) {
   try {
-    const session = await ensurePrototypeGuestSession()
-    const response = await apiRequest<{ ok: true; booking: PlatformBooking }>('/api/bookings', {
+    const response = await withGuestSession((token) => apiRequest<{ ok: true; booking: PlatformBooking }>('/api/bookings', {
       method: 'POST',
-      token: session.token,
+      token,
       body: input,
-    })
+    }))
     return response.booking
   } catch (error) {
     // SYB-006: a booking is only ever a real server record. The former fabricated-booking fallback
@@ -2899,9 +2897,11 @@ function getOrCreateGuestDeviceId(): string {
   return generated
 }
 
-async function ensurePrototypeGuestSession() {
-  const guestSession = getStoredGuestSession()
-  if (guestSession) return guestSession
+async function ensurePrototypeGuestSession(forceNew = false) {
+  if (!forceNew) {
+    const guestSession = getStoredGuestSession()
+    if (guestSession) return guestSession
+  }
 
   const deviceId = getOrCreateGuestDeviceId()
   const session = await apiRequest<AuthResponse>('/api/auth/checkout-guest', {
@@ -2912,6 +2912,20 @@ async function ensurePrototypeGuestSession() {
   authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
   window.dispatchEvent(new Event('sybnb-session-changed'))
   return session
+}
+
+// Runs an authenticated guest request. If the stored session token is rejected (401/403) — a stale
+// device token — it clears the session, re-establishes a fresh one, and retries the request ONCE.
+async function withGuestSession<T>(run: (token: string) => Promise<T>): Promise<T> {
+  const session = await ensurePrototypeGuestSession()
+  try {
+    return await run(session.token)
+  } catch (error) {
+    if (!isAuthApiError(error)) throw error
+    clearGuestSession()
+    const fresh = await ensurePrototypeGuestSession(true)
+    return run(fresh.token)
+  }
 }
 
 async function ensurePrototypeAdminSession() {
