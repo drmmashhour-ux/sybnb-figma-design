@@ -62,7 +62,7 @@ const copy = {
     agreementVersionLabel: '',
     confirm: 'تأكيد وإرسال طلب الحجز',
     saving: 'جار الإرسال',
-    datesMissing: 'اختر تاريخ الدخول والخروج من صفحة الإعلان أولاً.',
+    datesMissing: 'استخدم أداة اختيار التواريخ في صفحة الإعلان لتحديد تاريخ الوصول والمغادرة، ثم تابع.',
     freeCancellation: 'إلغاء مجاني',
   },
   en: {
@@ -101,7 +101,7 @@ const copy = {
     agreementVersionLabel: '',
     confirm: 'Confirm and send booking request',
     saving: 'Sending',
-    datesMissing: 'Choose check-in and check-out dates on the listing page first.',
+    datesMissing: 'Use the date selector on the listing page to choose your check-in and check-out dates, then continue.',
     freeCancellation: 'Free cancellation',
   },
   fr: {
@@ -140,7 +140,7 @@ const copy = {
     agreementVersionLabel: '',
     confirm: 'Confirmer et envoyer la demande de réservation',
     saving: 'Envoi en cours',
-    datesMissing: "Choisissez d'abord les dates d'arrivée et de départ sur la page de l'annonce.",
+    datesMissing: "Utilisez le sélecteur de dates sur la page de l'annonce pour choisir vos dates d'arrivée et de départ, puis continuez.",
     freeCancellation: 'Annulation gratuite',
   },
 }

@@ -19,7 +19,7 @@ import { BlockButton } from '../safety/BlockButton'
 import { selectCoverUrl } from '../seller/listingPhotos'
 import { ListingGallery } from './ListingGallery'
 import { listingAmenities } from './listingAmenities'
-import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
+import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
@@ -215,6 +215,10 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     bookingDraft.dateRange || loadSearchDatesDraft() || defaultStayDateRange(),
   )
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
+  // SYB-001: the listing page now owns a governed date-range control. The picker opens over the
+  // already-computed availability set; changing dates re-quotes price and re-persists the booking draft
+  // through the existing effects, so the guest never sees a price for dates they did not choose.
+  const [openCalendar, setOpenCalendar] = useState(false)
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number; perNight: Array<{ date: string; priceMinor: number }> } | null>(null)
   const [payCurrency] = useState<'USD'>('USD')
   const [offerSummary, setOfferSummary] = useState<{ count: number; cheapestMinor: number | null }>({ count: 0, cheapestMinor: null })
@@ -556,6 +560,40 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
               {listing.division === 'STAYS' && (
                 <>
+                  {/* SYB-001: governed date selection. Fed the server-computed disabledDates; changing
+                      dates re-quotes price + re-persists the draft via existing effects. Server stays
+                      authoritative — the overlap check at booking time is the final guard. */}
+                  <section style={styles.panel} aria-label={isAr ? 'اختيار التواريخ' : 'Date selection'}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <DateField
+                        lang={lang}
+                        label={isAr ? 'تاريخ الوصول' : 'Check-in'}
+                        value={dateRange.checkIn}
+                        active={openCalendar}
+                        onClick={() => { setOpenCalendar(true); void loadAvailability() }}
+                      />
+                      <DateField
+                        lang={lang}
+                        label={isAr ? 'تاريخ المغادرة' : 'Check-out'}
+                        value={dateRange.checkOut}
+                        active={openCalendar}
+                        onClick={() => { setOpenCalendar(true); void loadAvailability() }}
+                      />
+                    </div>
+                    {openCalendar && (
+                      <DateRangePicker
+                        lang={lang}
+                        value={dateRange}
+                        disabledDates={disabledDates}
+                        disabledHint={isAr ? 'بعض التواريخ غير متاحة لهذا الإعلان.' : 'Some dates are unavailable for this listing.'}
+                        onChange={(range) => setDateRange(range)}
+                        onClose={() => setOpenCalendar(false)}
+                      />
+                    )}
+                    {!dateRange.checkIn && (
+                      <small style={styles.body}>{isAr ? 'اختر تاريخي الوصول والمغادرة لعرض السعر النهائي.' : 'Choose check-in and check-out to see the final price.'}</small>
+                    )}
+                  </section>
                   {!dateRange.checkIn && offerSummary.count > 0 && (
                     <section style={styles.panel}>
                       <strong>{t.specialOfferBadge(offerSummary.count, 180)}</strong>
