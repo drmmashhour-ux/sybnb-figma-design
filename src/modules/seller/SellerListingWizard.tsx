@@ -317,6 +317,62 @@ const HOST_LISTING_PLANS: Array<{
   },
 ]
 
+// H2 / founder decision #11 — STR publishing is FREE at the base: a Daily-Stay host publishes without paying
+// (13% commission on bookings is the only ALWAYS charge; plans are ADDITIVE, never mandatory). The two paid
+// tiers ($19/$49) are OPTIONAL upgrades. This is a division-scoped list so it never disturbs the paid
+// divisions (CARS / NEW_CONSTRUCTION), which still require a paid plan. The base id is deliberately NOT
+// 'basic' so the honest amenity-proof capsule (planAllowsOfferProofs = id !== 'basic') stays available on
+// the free tier — proving your amenities is core honesty, not a paywalled feature.
+const STR_LISTING_PLANS: typeof HOST_LISTING_PLANS = [
+  {
+    id: 'strBase',
+    ar: 'مجاني',
+    en: 'Free',
+    priceUsd: 0,
+    services: {
+      ar: ['نشر مجاني للإعلان', 'رفع صور العقار وإثبات الملكية', 'كبسولات البحث مع صور إثبات', 'ظهور في البحث بعد موافقة الإدارة', 'عمولة 13٪ على الحجوزات فقط'],
+      en: ['Free listing publish', 'Upload property photos + ownership proof', 'Search capsules with proof photos', 'Search visibility after admin approval', '13% commission on bookings only'],
+    },
+    mediaSlots: [
+      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
+      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
+    ],
+  },
+  {
+    id: 'plus',
+    ar: 'Plus',
+    en: 'Plus',
+    priceUsd: 19,
+    services: {
+      ar: ['كل مزايا المجاني', 'رفع التفويض أو السند', 'مراجعة أولوية من الإدارة'],
+      en: ['Everything in Free', 'Upload authorization or deed', 'Priority admin review'],
+    },
+    mediaSlots: [
+      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
+      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
+      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
+      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
+    ],
+  },
+  {
+    id: 'strFeatured',
+    ar: 'مميّز',
+    en: 'Featured',
+    priceUsd: 49,
+    services: {
+      ar: ['كل مزايا Plus', 'صور وملفات إضافية', 'تمييز أعلى داخل البحث', 'دعم تجهيز الإعلان قبل النشر'],
+      en: ['Everything in Plus', 'Extra photos and files', 'Higher search highlight', 'Listing preparation support before publishing'],
+    },
+    mediaSlots: [
+      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
+      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
+      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
+      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
+      { id: 'extraGallery', ar: 'صور إضافية', en: 'Extra gallery' },
+    ],
+  },
+]
+
 export function SellerListingWizard({ lang }: Props) {
   const isAr = lang === 'ar'
   const isAdvertisingFlow = useMemo(() => {
@@ -357,7 +413,7 @@ export function SellerListingWizard({ lang }: Props) {
   }, [])
   const commissionLabel = platformFeePct != null ? `${+(platformFeePct * 100).toFixed(2)}%` : null
   const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
-  const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'plus')
+  const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'strBase')
   const [listingPlanPaymentMethod, setListingPlanPaymentMethod] = useState(draft.listingPlanPaymentMethod || 'shamCash')
   const [listingPlanPaymentConfirmed, setListingPlanPaymentConfirmed] = useState(draft.listingPlanPaymentConfirmed ?? false)
   const [listingPlanFollowCode] = useState(() => createListingPlanFollowCode())
@@ -530,7 +586,15 @@ export function SellerListingWizard({ lang }: Props) {
     : areaOptions.slice(0, 10)
   ).slice(0, 16)
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
-  const selectedListingPlan = HOST_LISTING_PLANS.find((plan) => plan.id === listingPlan) || HOST_LISTING_PLANS[1]
+  // STR sees the free-base + optional-upgrade list; other divisions keep the paid HOST plans untouched.
+  const activePlans = division === 'STAYS' ? STR_LISTING_PLANS : HOST_LISTING_PLANS
+  const selectedListingPlan = activePlans.find((plan) => plan.id === listingPlan) || activePlans[0]
+  // Free base publish: a $0 plan requires no payment, so treat it as already "confirmed" — this is what
+  // lets a STR host clear the plan/media gates without ever paying (founder decision #11). Selecting a paid
+  // upgrade resets the flag (see the plan-card onClick), so a chosen upgrade is still really paid for.
+  useEffect(() => {
+    if (selectedListingPlan.priceUsd === 0) setListingPlanPaymentConfirmed(true)
+  }, [selectedListingPlan.priceUsd])
 
   // Real, scannable QR (same qrcode package + pattern already used in SellerAccountPage.tsx,
   // SyrianLocalWalletPaymentPage, and SellerAdvertisingPaymentPage) instead of plain text.
@@ -1747,7 +1811,7 @@ export function SellerListingWizard({ lang }: Props) {
           {activeStep.id === 'plan' && !isAdvertisingFlow && (
             <div className="seller-wizard-section">
               <div className="seller-host-plan-grid">
-                {HOST_LISTING_PLANS.map((plan) => (
+                {activePlans.map((plan) => (
                   <button
                     className={`seller-host-plan-card ${plan.id === selectedListingPlan.id ? 'active' : ''}`}
                     key={plan.id}
@@ -1778,7 +1842,7 @@ export function SellerListingWizard({ lang }: Props) {
                     <span>{isAr ? 'دفع خطة الإعلان' : 'Listing plan payment'}</span>
                     <strong>{`${selectedListingPlan[lang === 'ar' ? 'ar' : 'en']} · USD ${selectedListingPlan.priceUsd}`}</strong>
                   </div>
-                  <em>{listingPlanPaymentConfirmed ? (isAr ? 'مدفوعة' : 'Paid') : isAr ? 'مطلوبة قبل الرفع' : 'Required before upload'}</em>
+                  <em>{selectedListingPlan.priceUsd === 0 ? (isAr ? 'مجانية — مضمّنة' : 'Free — included') : listingPlanPaymentConfirmed ? (isAr ? 'مدفوعة' : 'Paid') : isAr ? 'مطلوبة قبل الرفع' : 'Required before upload'}</em>
                 </div>
                 <div className="seller-host-plan-methods">
                   {[
