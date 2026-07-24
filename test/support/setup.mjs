@@ -10,3 +10,6 @@ process.env.RATE_LIMIT_AUTH_REGISTER_MAX = '1000'
 // (test/support/testServer.mjs's verifyEmailForTest), so these need the same generous ceiling.
 process.env.RATE_LIMIT_AUTH_EMAIL_CODE_SEND_MAX = '1000'
 process.env.RATE_LIMIT_AUTH_EMAIL_CODE_VERIFY_MAX = '1000'
+// H1: reset endpoint has its own per-IP throttle now — raise it for functional tests; the enforcement
+// itself is exercised with a narrow per-test override in test/security/rate-limit-http.test.mjs.
+process.env.RATE_LIMIT_AUTH_PASSWORD_RESET_MAX = '1000'

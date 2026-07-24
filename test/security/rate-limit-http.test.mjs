@@ -67,6 +67,45 @@ describe('rate limiting wired to POST /api/auth/login', () => {
   })
 })
 
+// H1: the reset endpoint has its own per-IP throttle (RATE_LIMIT_RULES 'AUTH_PASSWORD_RESET'), on top
+// of the email-code send gate. The limiter runs BEFORE the handler, so it bounds the endpoint even for
+// requests that would otherwise 403 (unverified) — a scripted reset flood can't run unbounded.
+describe('rate limiting wired to POST /api/auth/password-reset', () => {
+  let app
+
+  beforeAll(() => {
+    app = testApp()
+  })
+
+  beforeEach(() => {
+    __resetRateLimitsForTests()
+    process.env.RATE_LIMIT_AUTH_PASSWORD_RESET_MAX = '3'
+    process.env.RATE_LIMIT_AUTH_PASSWORD_RESET_WINDOW_MS = '60000'
+  })
+
+  afterEach(() => {
+    process.env.RATE_LIMIT_AUTH_PASSWORD_RESET_MAX = '1000'
+    delete process.env.RATE_LIMIT_AUTH_PASSWORD_RESET_WINDOW_MS
+    __resetRateLimitsForTests()
+  })
+
+  it('returns 429 with a retry-after header once the per-IP limit is exceeded', async () => {
+    const attempt = () =>
+      request(app).post('/api/auth/password-reset').send({ email: 'nobody-reset@sybnb.test', newPassword: 'correct-horse-battery' })
+
+    const responses = []
+    for (let i = 0; i < 4; i += 1) {
+      responses.push(await attempt()) // eslint-disable-line no-await-in-loop
+    }
+    // Under the limit the handler runs and rejects the unverified reset (403); the 4th is throttled.
+    expect(responses[0].status).toBe(403)
+    expect(responses[0].body.error.code).toBe('EMAIL_NOT_VERIFIED')
+    expect(responses[3].status).toBe(429)
+    expect(responses[3].body.error.code).toBe('RATE_LIMITED')
+    expect(Number(responses[3].headers['retry-after'])).toBeGreaterThan(0)
+  })
+})
+
 // Separate describe block: exercises TRUST_PROXY through the real HTTP pipeline (not just the
 // unit-level clientIp() checks in test/unit/rate-limit.test.mjs), confirming the call-time-read
 // fix actually takes effect when a request is rate-limited by IP.

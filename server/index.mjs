@@ -53,6 +53,9 @@ const RATE_LIMIT_RULES = [
   { name: 'AUTH_REGISTER', method: 'POST', pattern: /^\/api\/auth\/register$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
   { name: 'AUTH_EMAIL_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/email-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
   { name: 'AUTH_EMAIL_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/email-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
+  // H1: the reset endpoint gets its OWN per-IP throttle on top of the email-code send gate above — a
+  // stolen-code or scripted-reset flood is bounded even if it reuses one already-verified code window.
+  { name: 'AUTH_PASSWORD_RESET', method: 'POST', pattern: /^\/api\/auth\/password-reset$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
   // Phone/SMS OTP: same per-IP caps as email — bounds SMS cost/bombing on send and brute-force on verify.
   { name: 'AUTH_PHONE_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/phone-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
   { name: 'AUTH_PHONE_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/phone-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false, failMode: 'closed' },
