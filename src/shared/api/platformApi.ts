@@ -2737,6 +2737,39 @@ export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host
   return response.earnings
 }
 
+// H6 — the host payments calendar/timeline: each booking's payment date + payout-release date + status,
+// read from the FROZEN M5 Payout/Payment records (never recomputed). Commission is the host's own cost
+// (shown here, never in a guest response — R7).
+export type PlatformHostPaymentRow = {
+  bookingId: string
+  listingTitle: string | null
+  checkIn: string | null
+  checkOut: string | null
+  paymentDate: string | null
+  releaseDate: string | null
+  grossMinor: number | null
+  accommodationMinor: number | null
+  cleaningFeeMinor: number | null
+  commissionMinor: number | null
+  hostPayoutMinor: number
+  netPayoutMinor: number
+  currency: string
+  payoutStatus: 'PENDING_HOLD' | 'ELIGIBLE' | 'RELEASED' | 'REVERSED'
+}
+
+export type PlatformHostPayments = {
+  rows: PlatformHostPaymentRow[]
+  totals: { releasedMinor: number; pendingMinor: number; commissionMinor: number; currency: string }
+}
+
+export async function fetchHostPayments(mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; payments: PlatformHostPayments }>('/api/host/payments', {
+    token: session.token,
+  })
+  return response.payments
+}
+
 // M1: the effective STR commission rate for host-facing copy (server single source; never a guest body).
 export async function fetchHostCommissionRate(mode: HostDashboardMode = 'host') {
   const session = await getHostDashboardSession(mode)

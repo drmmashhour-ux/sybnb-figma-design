@@ -95,6 +95,58 @@ export async function handleHost(req, res, url, context) {
     })
   }
 
+  // H6: the host payments calendar/timeline. Reads the FROZEN M5 records (Payout + its booking's Payment) —
+  // never a live recompute — so each booking's payout terms match exactly what was frozen at settlement even
+  // if the commission policy rate changes later (M5 closes the restatement gap; this surfaces it). Payout
+  // rows are scoped by Payout.hostId to the caller (a host sees only their own), and commission is shown
+  // because it is the host's OWN cost — R7 keeps commission out of guest responses, never host ones.
+  if (url.pathname === '/api/host/payments') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const payouts = await db().payout.findMany({
+      where: { hostId: context.user.id },
+      include: {
+        booking: {
+          select: { id: true, checkIn: true, checkOut: true, listing: { select: { titleAr: true, titleEn: true } }, payment: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    })
+    const rows = payouts.map((payout) => {
+      const payment = payout.booking?.payment || null
+      return {
+        bookingId: payout.bookingId,
+        listingTitle: payout.booking?.listing?.titleAr || null,
+        checkIn: payout.booking?.checkIn || null,
+        checkOut: payout.booking?.checkOut || null,
+        // Timeline dates, straight from the frozen records.
+        paymentDate: payment?.settledAt || null,
+        releaseDate: payout.releaseDate || null,
+        // Frozen amounts — never recomputed. payout = (accom + cleaning) − commission (Payment.hostPayoutMinor);
+        // netPayoutMinor is what is actually released after any card-processing fee (equal for Sham Cash).
+        grossMinor: payment?.grossMinor ?? null,
+        accommodationMinor: payment?.accommodationMinor ?? null,
+        cleaningFeeMinor: payment?.cleaningFeeMinor ?? null,
+        commissionMinor: payment?.commissionAmountMinor ?? null,
+        hostPayoutMinor: payment?.hostPayoutMinor ?? payout.amountMinor,
+        netPayoutMinor: payout.amountMinor,
+        currency: payout.currency,
+        payoutStatus: payout.status, // PENDING_HOLD | ELIGIBLE | RELEASED | REVERSED
+      }
+    })
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.commissionMinor += row.commissionMinor || 0
+        if (row.payoutStatus === 'RELEASED') acc.releasedMinor += row.netPayoutMinor
+        else acc.pendingMinor += row.netPayoutMinor
+        return acc
+      },
+      { releasedMinor: 0, pendingMinor: 0, commissionMinor: 0 },
+    )
+    return json(res, 200, { ok: true, payments: { rows, totals: { ...totals, currency: rows[0]?.currency || 'USD' } } })
+  }
+
   // M1: lightweight authenticated lookup of the effective STR commission rate, for host onboarding copy
   // (SellerIntentPage / listing wizard) to render "N% commission" from the server single source instead of
   // a hardcoded "13%". Host-scoped (never a guest response — R7).
