@@ -64,7 +64,7 @@ export const DIVISIONS: Division[] = [
   {
     id: 'rentals',
     route: '/rentals',
-    status: 'active',
+    status: 'soon',
     accent: '#19d7ff',
     mark: 'calendar',
     title: { ar: 'الإيجار الشهري', en: 'Monthly Rentals', fr: 'Locations mensuelles' },
@@ -92,7 +92,7 @@ export const DIVISIONS: Division[] = [
   {
     id: 'buy',
     route: '/buy',
-    status: 'active',
+    status: 'soon',
     accent: '#d5a915',
     mark: 'tag',
     title: { ar: 'شراء عقار', en: 'Buy Property', fr: 'Acheter un bien' },
@@ -124,7 +124,7 @@ export const DIVISIONS: Division[] = [
   {
     id: 'cars',
     route: '/cars',
-    status: 'active',
+    status: 'soon',
     accent: '#20d29b',
     mark: 'car',
     title: { ar: 'المركبات', en: 'Cars', fr: 'Véhicules' },
@@ -156,7 +156,7 @@ export const DIVISIONS: Division[] = [
   {
     id: 'marketplace',
     route: '/marketplace',
-    status: 'active',
+    status: 'soon',
     accent: '#ff9f43',
     mark: 'bag',
     title: { ar: 'السوق', en: 'Marketplace', fr: 'Marché' },
@@ -188,7 +188,7 @@ export const DIVISIONS: Division[] = [
   {
     id: 'new-construction',
     route: '/new-construction',
-    status: 'active',
+    status: 'soon',
     accent: '#a772ff',
     mark: 'crane',
     title: { ar: 'مشاريع جديدة', en: 'New Construction', fr: 'Nouveaux projets' },
@@ -225,7 +225,7 @@ export const DIVISIONS: Division[] = [
   {
     id: 'sell',
     route: '/sell',
-    status: 'active',
+    status: 'soon',
     accent: '#6f8cff',
     mark: 'plus',
     title: { ar: 'أضف إعلانك', en: 'Add Listing', fr: 'Ajouter une annonce' },
@@ -257,7 +257,7 @@ export const DIVISIONS: Division[] = [
   {
     id: 'ride',
     route: '/ride',
-    status: 'active',
+    status: 'soon',
     accent: '#19d7ff',
     mark: 'pin',
     title: { ar: 'SYBNB Ride', en: 'SYBNB Ride', fr: 'SYBNB Ride' },
@@ -294,4 +294,15 @@ export const DIVISIONS: Division[] = [
 
 export function findDivisionByRoute(route: string) {
   return DIVISIONS.find((division) => division.route === route)
+}
+
+// SYB-008 — client route gate. Returns the gated (non-active) division a path belongs to, matching the
+// exact route, any sub-route, and the `-preview` variant, so a direct hash URL into a Soon division is
+// caught before its page renders. Returns undefined for active divisions and non-division paths.
+export function gatedDivisionForPath(path: string): Division | undefined {
+  return DIVISIONS.find(
+    (division) =>
+      division.status !== 'active' &&
+      (path === division.route || path.startsWith(`${division.route}/`) || path === `${division.route}-preview`),
+  )
 }

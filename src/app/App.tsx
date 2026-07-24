@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useState, type ComponentType } from 'react'
-import { findDivisionByRoute } from '../engines/navigation/divisions'
+import { findDivisionByRoute, gatedDivisionForPath } from '../engines/navigation/divisions'
+import { ClosedBetaDivisionNotice } from '../modules/beta/ClosedBetaDivisionNotice'
 import type { Lang } from '../engines/language/languageEngine'
 import { getInitialLanguage, persistLanguage, text } from '../engines/language/languageEngine'
 import { AppShell } from '../shared/layout/AppShell'
@@ -79,6 +80,10 @@ export function App() {
   }, [])
 
   const division = findDivisionByRoute(path)
+  // SYB-008: STR-only closed beta. A direct hash URL into a gated (Soon) division must not render that
+  // division's page — the client shows a governed closed-beta notice. The API gate is the authoritative
+  // enforcement; this is the navigation/route layer.
+  const gatedDivision = gatedDivisionForPath(path)
   const bookingMatch = path.match(/^\/booking\/([^/]+)$/)
   const bookingReviewMatch = path.match(/^\/booking\/review\/([^/]+)$/)
   const listingMatch = path.match(/^\/listing\/([^/]+)$/)
@@ -93,6 +98,8 @@ export function App() {
       <Suspense fallback={<RouteLoading lang={lang} />}>
         {staffRequiredRole && !hasStaffSession ? (
           <StaffAccessPage lang={lang} role={staffRequiredRole} returnPath={path} />
+        ) : gatedDivision ? (
+          <ClosedBetaDivisionNotice lang={lang} title={lang === 'ar' ? gatedDivision.title.ar : gatedDivision.title.en} />
         ) : isGiftFlowRoute(path) ? (
           <GiftFlowRoutes lang={lang} path={path} />
         ) : isTrustProtectionRoute(path) ? (

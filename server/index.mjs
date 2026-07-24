@@ -6,6 +6,7 @@ import { loadEnv, validateProductionConfig } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { checkRateLimit, clientIp } from './lib/rate-limit.mjs'
 import { CORS_ORIGINS } from './lib/allowed-origins.mjs'
+import { closedBetaRouteBlocked, CLOSED_BETA_DIVISION_CODE, CLOSED_BETA_DIVISION_MESSAGE } from './lib/closed-beta-gate.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { applySecurityHeaders } from './lib/security-headers.mjs'
 import { handleAccommodations } from './routes/accommodations.mjs'
@@ -140,6 +141,14 @@ export async function handleRequest(req, res) {
 const server = createServer(handleRequest)
 
 async function dispatch(req, res, url, context) {
+  // SYB-008: STR-only closed-beta API gate. Refuse gated-division API families (Ride/SR) at the entry,
+  // before any handler runs, so a direct call can't bypass the hidden navigation. Enforced in
+  // beta/production; relaxed only under the explicit CLOSED_BETA_ALLOW_GATED_ROUTES=1 test flag.
+  if (closedBetaRouteBlocked(url.pathname)) {
+    json(res, 403, { ok: false, error: { code: CLOSED_BETA_DIVISION_CODE, message: CLOSED_BETA_DIVISION_MESSAGE } })
+    return true
+  }
+
   for (const handler of [
     handleAuth,
     handleAccommodations,

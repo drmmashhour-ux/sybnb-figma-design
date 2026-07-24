@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertNoUnknownFields } from '../lib/validate.mjs'
+import { assertDivisionActiveForBeta } from '../lib/closed-beta-gate.mjs'
 import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pricing.mjs'
 import { computeQuebecStayTaxesResolved } from '../lib/quebec-stay-tax.mjs'
 import { stayQuoteToRoundedUsd } from '../lib/currency.mjs'
@@ -160,6 +161,9 @@ export async function handleListings(req, res, url, context) {
       // Validate the division enum before it reaches Prisma, else an invalid ?division= raises a raw 500.
       const divisionParam = params.get('division')
       const division = divisionParam ? normalizeListingDivision(divisionParam) : undefined
+      // SYB-008: refuse browsing a gated division during the STR-only closed beta (Rentals/Buy/Cars/
+      // Marketplace/New Construction/Sell). STAYS stays active; unspecified division is unaffected.
+      if (division) assertDivisionActiveForBeta(division)
       // Listings created through the wizard never populate the `location` relation — governorate/
       // city/area/bedrooms/bathrooms/propertyType/amenities all live in `metadata` instead, so those
       // filters are applied in-memory below rather than as a Prisma `where` clause.

@@ -28,6 +28,11 @@ delete process.env.STORAGE_S3_ENDPOINT
 delete process.env.STORAGE_S3_ACCESS_KEY_ID
 delete process.env.STORAGE_S3_SECRET_ACCESS_KEY
 
+// SYB-008: the SR/Ride and other-division test suites drive gated APIs directly. The closed-beta
+// division gate is enforced in beta/production but relaxed here under this EXPLICIT test flag, so the
+// existing division suites keep passing. The division-isolation test unsets it to prove enforcement.
+process.env.CLOSED_BETA_ALLOW_GATED_ROUTES = '1'
+
 await resetTestDatabase()
 // Jurisdiction compliance (026) fail-closes STR/SR by default -- every existing test fixture
 // implicitly assumes "the market is fine, test the feature," so seed Syria as APPROVED here.
