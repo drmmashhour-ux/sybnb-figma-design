@@ -1,7 +1,9 @@
 import request from 'supertest'
+import { fileURLToPath } from 'node:url'
 import { db } from '../../../server/lib/prisma.mjs'
 import { createSessionToken, hashPassword } from '../../../server/lib/security.mjs'
 import { platformFee } from '../../../server/lib/finance-ledger.mjs'
+import { findAuditMutationPaths } from '../contract.mjs'
 import { testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../../support/testServer.mjs'
 
 // Stays (STR) fixture for the CORE conformance suite. Full read/write — creates its own SY listing +
@@ -15,7 +17,7 @@ function isoDay(offset) {
 
 export const staysFixture = {
   name: 'stays',
-  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true },
+  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true },
 
   async setup() {
     const app = testApp()
@@ -60,6 +62,10 @@ export const staysFixture = {
 
   async teardown(ctx) {
     if (!ctx) return
+    if (ctx.c9PolicyId) {
+      await db().adminAuditLog.deleteMany({ where: { entityId: ctx.c9PolicyId } }).catch(() => {})
+      await db().jurisdictionCommissionPolicy.delete({ where: { id: ctx.c9PolicyId } }).catch(() => {})
+    }
     await db().paymentProof.deleteMany({ where: { bookingId: ctx.booking?.id } }).catch(() => {})
     await db().booking.deleteMany({ where: { guestId: ctx.guest.id } }).catch(() => {})
     await db().listing.deleteMany({ where: { accommodationId: ctx.accommodationId } }).catch(() => {})
@@ -108,6 +114,31 @@ export const staysFixture = {
     return {
       chargedWhileUnconfirmed: (taxLine.status && taxLine.status !== 'NONE') || collected > 0,
       legalReviewStatus: feed.body?.legalReviewStatus,
+    }
+  },
+
+  async auditAppendOnly(ctx) {
+    // Money/config path: an admin changes a commission policy (create → update). Each write must APPEND an
+    // immutable audit row, and the update row must carry both before AND after (the changed value). Then
+    // assert the whole audit log is append-only at the source level — no update/delete/upsert path exists,
+    // which is what makes every row (money/config/consent alike) immutable. Uses a unique throwaway
+    // jurisdiction (inactive, so it never affects real pricing); cleaned up in teardown via ctx.c9PolicyId.
+    const country = `ZY${String(Date.now()).slice(-6)}`
+    const admin = { Authorization: `Bearer ${ctx.admin.token}` }
+    const create = await request(ctx.app).post('/api/admin/jurisdiction-pricing/commission-policies').set(admin)
+      .send({ country, serviceType: 'STAY', policyType: 'FLAT', flatRateParts: 160_000, effectiveFrom: '2021-01-01', active: false })
+    const policyId = create.body?.policy?.id
+    ctx.c9PolicyId = policyId
+    const update = policyId
+      ? await request(ctx.app).patch(`/api/admin/jurisdiction-pricing/commission-policies/${policyId}`).set(admin).send({ flatRateParts: 180_000 })
+      : { status: 0 }
+    const createRow = policyId ? await db().adminAuditLog.findFirst({ where: { entityType: 'jurisdiction_commission_policies', entityId: policyId, action: 'JURISDICTION_COMMISSION_POLICY_CREATED' } }) : null
+    const updateRow = policyId ? await db().adminAuditLog.findFirst({ where: { entityType: 'jurisdiction_commission_policies', entityId: policyId, action: 'JURISDICTION_COMMISSION_POLICY_UPDATED' }, orderBy: { createdAt: 'desc' } }) : null
+    const serverDir = fileURLToPath(new URL('../../../server', import.meta.url))
+    return {
+      configChangeAppended: create.status === 200 && update.status === 200 && !!createRow && !!updateRow,
+      updateHasBeforeAfter: updateRow?.before != null && updateRow?.after != null && updateRow.before.flatRateParts !== updateRow.after.flatRateParts,
+      mutationPaths: findAuditMutationPaths(serverDir),
     }
   },
 

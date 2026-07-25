@@ -76,6 +76,13 @@ for (const fx of FIXTURES) {
       const s = await fx.settlementRef(ctx)
       expect(s.paidWithoutRef, `payment without a settlement reference was accepted (status ${s.status}, code ${s.rejectionCode})`).toBe(false)
     })
+
+    runOr(fx.supports.auditAppendOnly, 'C9 append-only audit on money/config/consent (config change appends before/after; no mutation path)', fx.skipReason?.auditAppendOnly, async () => {
+      const a = await fx.auditAppendOnly(ctx)
+      expect(a.configChangeAppended, 'a config/rate change appends an audit row').toBe(true)
+      expect(a.updateHasBeforeAfter, 'the config-change audit records before AND after (values differ)').toBe(true)
+      expect(a.mutationPaths, `audit log must be append-only; mutation paths: ${JSON.stringify(a.mutationPaths)}`).toEqual([])
+    })
   })
 }
 
@@ -87,6 +94,6 @@ afterAll(async () => {
 describe('CONFORMANCE · pending invariants (documented; grow with the A-items)', () => {
   it.skip('C7 frozen-terms: a booking\'s commission terms are immutable once set  [→ A-item: frozen M5 records]', () => {})
   it.skip('C8 no-double-book: two concurrent bookings for one slot cannot both confirm  [→ A-item: H5 concurrency]', () => {})
-  it.skip('C9 append-only audit: the admin/settlement audit log is append-only  [→ A-item: audit immutability]', () => {})
+  // C9 append-only audit — NOW LIVE (A6.3): wired per-fixture above (Stays proves it; Ride skips read-only).
   it.skip('C5b sandbox ref rejected in prod: a test/sandbox settlement ref is refused under NODE_ENV=production  [→ A-item: prod settlement guard]', () => {})
 })

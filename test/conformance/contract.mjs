@@ -22,6 +22,37 @@
 //     async settlementRef(ctx) -> { paidWithoutRef: boolean },     // C5
 //   }
 
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+// C9 — the audit log (AdminAuditLog) is APPEND-ONLY. The ONLY Prisma operation any server code may run on
+// it is .create; any .update/.updateMany/.delete/.deleteMany/.upsert would make an audit row mutable and
+// break immutability. This scans the server source tree and returns every offending `file:line` (empty ⇒
+// append-only). Kept here in the contract so the conformance suite AND the A6.3 unit test share one
+// definition of the property.
+const AUDIT_MUTATION_RE = /adminAuditLog\s*\.\s*(update|updateMany|delete|deleteMany|upsert)\b/
+
+export function findAuditMutationPaths(serverDir) {
+  const offenders = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+        continue
+      }
+      if (!entry.isFile() || !full.endsWith('.mjs')) continue
+      readFileSync(full, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (AUDIT_MUTATION_RE.test(line)) offenders.push(`${full}:${i + 1}`)
+        })
+    }
+  }
+  walk(serverDir)
+  return offenders
+}
+
 // Any buyer-facing payload (quote / booking / ride) must expose NONE of these host/driver-economics
 // fields — the platform's cut and the supplier's payout are never shown to the paying buyer.
 export const FORBIDDEN_ECONOMICS_KEYS = [
