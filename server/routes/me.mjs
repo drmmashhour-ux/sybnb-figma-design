@@ -325,6 +325,10 @@ export async function handleMe(req, res, url, context) {
         idDocumentSubmittedAt: context.user.idDocumentSubmittedAt,
         idDocumentStatus: context.user.idDocumentStatus,
         referralCode: context.user.referralCode,
+        // A3.2 (Finding 3): whether the account has a contactable phone on file (the raw number is
+        // stored only as a hash and never returned). The STR wizard uses this to require a phone
+        // before a listing can publish, so guests can reach the host.
+        hasPhone: Boolean(context.user.phoneHash),
       },
       bookings: bookingsWithLocation,
       listings,

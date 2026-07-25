@@ -477,6 +477,7 @@ export type PlatformOverview = {
     idDocumentRef?: string | null
     idDocumentSubmittedAt?: string | null
     idDocumentStatus?: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null
+    hasPhone?: boolean
   }
   bookings: Array<PlatformBooking & { listing?: PlatformListing; payments?: PlatformPaymentProof[] }>
   listings: PlatformListing[]

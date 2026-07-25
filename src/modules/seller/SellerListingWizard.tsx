@@ -8,6 +8,7 @@ import {
   createAccommodation,
   createAndSubmitPrototypeListing,
   fetchHostCommissionRate,
+  fetchSellerOverview,
   uploadListingPhoto,
   blobToBase64,
   generateListingDescription,
@@ -409,9 +410,13 @@ export function SellerListingWizard({ lang, lockedDivision }: Props) {
   // M6: the current commission contract version + the host's acceptance of it (required to publish a STAYS listing).
   const [contractVersion, setContractVersion] = useState<string | null>(null)
   const [contractAccepted, setContractAccepted] = useState(false)
+  // A3.2 (Finding 3): a STAYS listing requires a contactable host phone before it can publish. null =
+  // not yet loaded (don't block prematurely); false = no phone on file → surfaced + blocked before submit.
+  const [hostHasPhone, setHostHasPhone] = useState<boolean | null>(null)
   useEffect(() => {
     let active = true
     void fetchHostCommissionRate().then((r) => { if (active) { setPlatformFeePct(r.platformFeePct); setContractVersion(r.contractVersion) } }).catch(() => {})
+    void fetchSellerOverview().then((o) => { if (active) setHostHasPhone(Boolean(o.user.hasPhone)) }).catch(() => {})
     return () => { active = false }
   }, [])
   const commissionLabel = platformFeePct != null ? `${+(platformFeePct * 100).toFixed(2)}%` : null
@@ -1099,6 +1104,13 @@ export function SellerListingWizard({ lang, lockedDivision }: Props) {
 
   async function finishAccommodation() {
     if (!accommodationId) return
+    // A3.2 (Finding 3): a STAYS listing needs a contactable host phone before it can publish, so guests
+    // can reach the host. Surfaced proactively in the review step and enforced here before submit.
+    if (hostHasPhone === false) {
+      setSubmitState('error')
+      setSubmitError(isAr ? 'أضف رقم هاتف إلى حسابك قبل النشر ليتمكن الضيوف من التواصل معك.' : 'Add a phone number to your account before publishing so guests can reach you.')
+      return
+    }
     // M6: publishing a STAYS accommodation requires the host to have accepted the current commission contract.
     if (!contractAccepted || !contractVersion) {
       setSubmitState('error')
@@ -1656,6 +1668,13 @@ export function SellerListingWizard({ lang, lockedDivision }: Props) {
                       </p>
                     ) : null
                   })()}
+                  {hostHasPhone === false && (
+                    <p role="alert" style={{ color: '#c0392b', margin: '8px 0', fontSize: 13 }}>
+                      {isAr
+                        ? 'أضف رقم هاتف إلى حسابك قبل النشر ليتمكن الضيوف من التواصل معك.'
+                        : 'Add a phone number to your account before publishing so guests can reach you.'}
+                    </p>
+                  )}
                   <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <input type="checkbox" checked={contractAccepted} onChange={(event) => setContractAccepted(event.target.checked)} />
                     <span>
