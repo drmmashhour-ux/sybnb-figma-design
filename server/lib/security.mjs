@@ -32,6 +32,22 @@ export function hashPhone(phone) {
   return createHmac('sha256', requiredSecret('PHONE_HASH_SECRET')).update(normalized).digest('hex')
 }
 
+// One-way, deterministic reference for an email — lets an audit row correlate events to the same address
+// (e.g. repeated OTP issuance) WITHOUT ever storing the raw address. Mirrors hashPhone; keyed by
+// AUTH_SECRET (the same secret hashEmailVerificationCode uses). Normalizes to trimmed+lowercased first so
+// the same address always hashes identically.
+export function hashEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase()
+  if (!normalized) {
+    const error = new Error('email is required.')
+    error.statusCode = 400
+    error.code = 'EMAIL_REQUIRED'
+    error.expose = true
+    throw error
+  }
+  return createHmac('sha256', requiredSecret('AUTH_SECRET')).update(normalized).digest('hex')
+}
+
 export function hashPassword(password) {
   if (!password || String(password).length < 8) {
     const error = new Error('password must be at least 8 characters.')

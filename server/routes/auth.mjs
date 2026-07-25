@@ -1,5 +1,6 @@
 import { db } from '../lib/prisma.mjs'
-import { createSessionToken, hashPassword, hashPhone, verifyPassword } from '../lib/security.mjs'
+import { createSessionToken, hashEmail, hashPassword, hashPhone, verifyPassword } from '../lib/security.mjs'
+import { recordOtpIssued, recordPasswordResetCompleted } from '../lib/auth-audit.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPassword, assertValidPhone } from '../lib/validate.mjs'
 import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerificationCode } from '../lib/email-verification.mjs'
@@ -110,6 +111,8 @@ export async function handleAuth(req, res, url, context) {
     }
     const purpose = resolveEmailCodePurpose(body.purpose)
     const result = await sendEmailVerificationCode(validEmail, purpose)
+    // A6.2: append-only audit that a code was issued — hashed email only, never the code value.
+    await recordOtpIssued(db(), { channel: 'email', identifierHash: hashEmail(validEmail), purpose })
     return json(res, 200, result)
   }
 
@@ -147,6 +150,8 @@ export async function handleAuth(req, res, url, context) {
     }
     const purpose = resolveEmailCodePurpose(body.purpose)
     const result = await sendPhoneVerificationCode(validPhone, purpose)
+    // A6.2: append-only audit that a code was issued — hashed phone only, never the code value.
+    await recordOtpIssued(db(), { channel: 'phone', identifierHash: hashPhone(validPhone), purpose })
     return json(res, 200, result)
   }
 
@@ -199,10 +204,17 @@ export async function handleAuth(req, res, url, context) {
     // Bumping sessionVersion here invalidates any session issued before the reset (F-02) -- e.g.
     // an attacker who stole a session token loses it the moment the legitimate owner resets their
     // password, instead of the token staying valid until its own 7-day expiry regardless.
-    await db().user.updateMany({
+    const result = await db().user.updateMany({
       where: { email: validEmail },
       data: { passwordHash: hashPassword(validPassword), sessionVersion: { increment: 1 } },
     })
+    // A6.2: audit a COMPLETED reset (count > 0 = a real user was reset). Enumeration-safe — the response is
+    // always {ok:true} regardless (F-01); we only add an internal, append-only audit row (hashed email +
+    // the actor userId, never the password) when a reset actually happened.
+    if (result.count > 0) {
+      const target = await db().user.findFirst({ where: { email: validEmail }, select: { id: true } })
+      await recordPasswordResetCompleted(db(), { actorUserId: target?.id ?? null, identifierHash: hashEmail(validEmail) })
+    }
     return json(res, 200, { ok: true })
   }
 
