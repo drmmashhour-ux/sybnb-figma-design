@@ -16,7 +16,7 @@ export default defineConfig({
     // database via real HTTP requests against an in-process server instance (see
     // test/support/testServer.mjs). Parallel workers would race on the same DB rows.
     fileParallelism: false,
-    include: ['test/api/**/*.test.{ts,mjs}', 'test/security/**/*.test.{ts,mjs}'],
+    include: ['test/api/**/*.test.{ts,mjs}', 'test/security/**/*.test.{ts,mjs}', 'test/conformance/**/*.test.{ts,mjs}'],
     setupFiles: ['test/support/setup.env.mjs', 'test/support/setup.mjs'],
   },
 })
