@@ -300,7 +300,7 @@ export function AccountGateCapsule({ lang, actor, returnPath, onSuccess, sellerR
               {codeConfirmed ? '✓' : codeBusy === 'confirming' ? t.confirmingCode : t.confirmCode}
             </button>
           </div>
-          {devCode && (
+          {import.meta.env.DEV && devCode && (
             <p style={styles.notice} dir="ltr">
               DEV CODE: <strong>{devCode}</strong>
             </p>

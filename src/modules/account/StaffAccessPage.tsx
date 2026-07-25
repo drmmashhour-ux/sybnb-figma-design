@@ -480,7 +480,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
           )}
         </div>
 
-        {devCode && (
+        {import.meta.env.DEV && devCode && (
           <div style={styles.smsBox}>
             <small>
               {t.demoCode}: <b dir="ltr">{devCode}</b>
