@@ -4,6 +4,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes } from '../lib/listing-attributes.mjs'
 import { assertContractConsentAccepted, recordHostContractConsent } from '../lib/host-consent.mjs'
+import { resolveStrCommissionRate } from '../lib/finance-ledger.mjs'
 
 // Lets a hotel-like host (Studio/Suite/Double-Queen room types under one physical property)
 // share one location + one set of seller documents/photos across multiple STAYS Listing rows,
@@ -140,9 +141,14 @@ export async function handleAccommodations(req, res, url, context) {
     }
 
     // M6: publishing STAYS accommodation room types requires the host to accept the current commission
-    // contract (hard block) — accommodations are STR. Re-affirms + audits consent on each publish.
+    // contract (hard block) — accommodations are STR. Re-affirms + audits consent on each publish, logging
+    // the RESOLVED commission rate for this accommodation's jurisdiction (not a hardcoded default).
     assertContractConsentAccepted(body)
-    await recordHostContractConsent(db(), { userId: context.user.id, action: 'publish', entityId: accommodationId })
+    const commissionRate = await resolveStrCommissionRate(db(), {
+      country: accommodation.metadata?.country || 'SY',
+      province: accommodation.governorate || accommodation.metadata?.governorate || accommodation.metadata?.province || null,
+    })
+    await recordHostContractConsent(db(), { userId: context.user.id, action: 'publish', entityId: accommodationId, rate: commissionRate })
 
     const [updatedAccommodation] = await db().$transaction([
       db().accommodation.update({

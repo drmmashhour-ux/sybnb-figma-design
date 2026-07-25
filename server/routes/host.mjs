@@ -384,7 +384,7 @@ export async function handleHost(req, res, url, context) {
       // retroactively restate this booking. Snapshot lives on booking.metadata (no migration).
       if (canConfirm && existing.listing?.division === 'STAYS') {
         const commissionRate = await strCommissionRateForBooking(tx, existing)
-        const acceptedAt = await recordHostContractConsent(tx, { userId: context.user.id, action: 'accept', entityId: existing.id })
+        const acceptedAt = await recordHostContractConsent(tx, { userId: context.user.id, action: 'accept', entityId: existing.id, rate: commissionRate })
         await tx.booking.update({
           where: { id: existing.id },
           data: { metadata: { ...(existing.metadata || {}), termsSnapshot: { commissionRate, baseVersion: STR_HOST_CONTRACT_VERSION, acceptedAt } } },

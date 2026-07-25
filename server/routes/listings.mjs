@@ -26,6 +26,7 @@ import { privateDocumentDownloadHeaders } from '../lib/private-document-download
 import { recordStaffDocumentAccess } from '../lib/document-access-audit.mjs'
 import { retentionDeleteAfter } from '../lib/listing-document-retention.mjs'
 import { assertContractConsentAccepted, recordHostContractConsent } from '../lib/host-consent.mjs'
+import { resolveStrCommissionRate } from '../lib/finance-ledger.mjs'
 
 // FIX A / A-2: a listing is guest-visible only if it is in the active jurisdiction (Syria, fail-closed)
 // and is not a demo/synthetic listing. Used by EVERY guest-facing single-listing fetch (detail + quote)
@@ -863,7 +864,11 @@ export async function handleListings(req, res, url, context) {
     // (403) if the request doesn't accept the current version; each publish re-affirms + audits consent.
     if (existing.division === 'STAYS') {
       assertContractConsentAccepted(body)
-      await recordHostContractConsent(db(), { userId: context.user.id, action: 'publish', entityId: existing.id })
+      const commissionRate = await resolveStrCommissionRate(db(), {
+        country: existing.metadata?.country || 'SY',
+        province: existing.metadata?.governorate || existing.metadata?.province || null,
+      })
+      await recordHostContractConsent(db(), { userId: context.user.id, action: 'publish', entityId: existing.id, rate: commissionRate })
     }
 
     const listing = await db().listing.update({

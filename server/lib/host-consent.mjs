@@ -26,12 +26,15 @@ export function assertContractConsentAccepted(body) {
 
 // Record (re-affirm) the host's acceptance of the current contract version at a given action point. The
 // User model has no free-form metadata column (only payoutMethod), so the USER-LEVEL consent record IS the
-// append-only AdminAuditLog row: actorUserId (the host) + after.version + createdAt (the timestamp). Each
-// publish/accept writes a fresh row, giving the full re-consent audit trail. Accepts a db or a tx.
-export async function recordHostContractConsent(dbOrTx, { userId, action, entityId }) {
+// append-only AdminAuditLog row: actorUserId (the host) + createdAt (the timestamp) + after.version +
+// after.rate. `rate` is the RESOLVED commission rate the host consented to for THIS listing's jurisdiction
+// (the caller resolves it via resolveStrCommissionRate and passes it in — never a hardcoded default, so a
+// jurisdiction with a non-13% JurisdictionCommissionPolicy logs its own rate). Each publish/accept writes a
+// fresh row, giving the full re-consent audit trail. Accepts a db or a tx.
+export async function recordHostContractConsent(dbOrTx, { userId, action, entityId, rate }) {
   const acceptedAt = new Date().toISOString()
   await dbOrTx.adminAuditLog.create({
-    data: { actorUserId: userId, action: HOST_CONTRACT_AUDIT_ACTION, entityType: 'host_contract', entityId: entityId || userId, after: { version: STR_HOST_CONTRACT_VERSION, acceptedAt, at: action } },
+    data: { actorUserId: userId, action: HOST_CONTRACT_AUDIT_ACTION, entityType: 'host_contract', entityId: entityId || userId, after: { version: STR_HOST_CONTRACT_VERSION, rate: rate ?? null, acceptedAt, at: action } },
   })
   return acceptedAt
 }
