@@ -49,6 +49,7 @@ const labels = {
     repeatPassword: 'تأكيد كلمة المرور',
     newPassword: 'كلمة المرور الجديدة',
     phone: 'رقم الهاتف',
+    phoneRequiredHelp: 'رقم الهاتف مطلوب لحساب الشريك — نستخدمه للتواصل معك بشأن الحجوزات.',
     partnerType: 'نوع الحساب',
     code: 'رمز البريد',
     sendCode: 'إرسال الرمز',
@@ -102,6 +103,7 @@ const labels = {
     repeatPassword: 'Repeat password',
     newPassword: 'New password',
     phone: 'Phone number',
+    phoneRequiredHelp: 'Required for partner accounts — we use it to reach you about bookings.',
     partnerType: 'Account type',
     code: 'Email code',
     sendCode: 'Send code',
@@ -406,15 +408,17 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
 
           {usePhone && (
             <label style={styles.labelWide}>
-              {t.phone}
+              {t.phone}{mode === 'signUp' && <span style={styles.requiredMark}> *</span>}
               <input
                 style={styles.input}
                 value={phone}
                 inputMode="tel"
                 placeholder="+963..."
+                aria-required={mode === 'signUp'}
                 onChange={(event) => { setPhone(event.target.value); setCodeConfirmed(false) }}
                 dir="ltr"
               />
+              {mode === 'signUp' && <small style={styles.helpText}>{t.phoneRequiredHelp}</small>}
             </label>
           )}
 
@@ -472,8 +476,9 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               )}
               {mode === 'signUp' && (
                 <label style={styles.labelWide}>
-                  {t.phone}
-                  <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
+                  {t.phone}<span style={styles.requiredMark}> *</span>
+                  <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" placeholder="+963..." aria-required="true" />
+                  <small style={styles.helpText}>{t.phoneRequiredHelp}</small>
                 </label>
               )}
             </>
@@ -530,6 +535,7 @@ const styles: Record<string, CSSProperties> = {
   emailInputSecondary: { minHeight: 62, border: '1px solid #27324d', borderRadius: 14, background: '#0b1220', color: '#fff', padding: '0 18px', fontSize: 20, fontWeight: 800, width: '100%', boxSizing: 'border-box' },
   input: { minHeight: 52, border: '1px solid #27324d', borderRadius: 12, background: '#0b1220', color: '#fff', padding: '0 14px', fontSize: 17, width: '100%', boxSizing: 'border-box' },
   helpText: { color: '#8f9bb3', fontWeight: 700 },
+  requiredMark: { color: '#ff8fa3', fontWeight: 900 },
   emailConfirmBox: { border: '1px solid rgba(255,255,255,.1)', borderRadius: 14, background: '#0c111d', display: 'grid', gap: 12, gridColumn: '1 / -1', padding: 14 },
   confirmHeader: { alignItems: 'center', display: 'flex', gap: 10, justifyContent: 'space-between' },
   confirmedPill: { background: '#08251c', border: '1px solid #22d28f', borderRadius: 999, color: '#22d28f', padding: '6px 10px', fontSize: 12, fontWeight: 900 },
