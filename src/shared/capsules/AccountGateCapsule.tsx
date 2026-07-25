@@ -120,9 +120,13 @@ export function AccountGateCapsule({ lang, actor, returnPath, onSuccess, sellerR
   const [isError, setIsError] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // Sign-in only ever needs a real identifier + password (matches login/loginByPhone server-side) --
-  // the OTP step is a signup-only proof of ownership for a brand-new account.
-  const needsVerification = mode === 'signup'
+  // Finding 2 — sign-in verification matches the server: a GUEST signs in with just identifier +
+  // password, but STAFF roles (SELLER/HOST/ADMIN/DRIVER/SUPPORT — every non-guest actor here) must
+  // pass a real 'staff-login' email/phone OTP on EVERY sign-in (server/routes/auth.mjs), so the code
+  // step is shown for them on sign-in too. The "no verification code" note below is therefore only
+  // ever shown to a guest, where it is true. Keeps the OTP; the copy now matches the behavior.
+  const signInNeedsCode = actor !== 'guest'
+  const needsVerification = mode === 'signup' || (mode === 'signin' && signInNeedsCode)
 
   async function sendCode() {
     setCodeBusy('sending')
