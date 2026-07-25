@@ -35,6 +35,9 @@ import { SellerLocationMap } from './SellerLocationMap'
 
 type Props = {
   lang: Lang
+  // A3.1 — when set, the wizard is locked to this division (the STR carve-out entry passes 'STAYS'):
+  // the division picker is hidden and no non-STR vertical (CARS/BUY/…) can be selected.
+  lockedDivision?: ListingDivision
 }
 
 const FLOW_STORAGE_KEY = 'sybnb_v6_sell_flow'
@@ -373,7 +376,7 @@ const STR_LISTING_PLANS: typeof HOST_LISTING_PLANS = [
   },
 ]
 
-export function SellerListingWizard({ lang }: Props) {
+export function SellerListingWizard({ lang, lockedDivision }: Props) {
   const isAr = lang === 'ar'
   const isAdvertisingFlow = useMemo(() => {
     if (typeof window === 'undefined') return false
@@ -412,7 +415,7 @@ export function SellerListingWizard({ lang }: Props) {
     return () => { active = false }
   }, [])
   const commissionLabel = platformFeePct != null ? `${+(platformFeePct * 100).toFixed(2)}%` : null
-  const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
+  const [division, setDivision] = useState<ListingDivision>(lockedDivision || draft.division || 'STAYS')
   const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'strBase')
   const [listingPlanPaymentMethod, setListingPlanPaymentMethod] = useState(draft.listingPlanPaymentMethod || 'shamCash')
   const [listingPlanPaymentConfirmed, setListingPlanPaymentConfirmed] = useState(draft.listingPlanPaymentConfirmed ?? false)
@@ -1218,7 +1221,7 @@ export function SellerListingWizard({ lang }: Props) {
         <div className="seller-wizard-body">
           {activeStep.id === 'basics' && (
             <div className="seller-wizard-section">
-              {!isAdvertisingFlow && (
+              {!isAdvertisingFlow && !lockedDivision && (
                 <TouchChoiceGroup
                   active={DIVISION_OPTIONS.find((item) => item.value === division)?.[lang === 'ar' ? 'ar' : 'en'] || ''}
                   items={DIVISION_OPTIONS.map((item) => item[lang === 'ar' ? 'ar' : 'en'])}

@@ -51,6 +51,12 @@ export function SellerDivisionRoutes({ lang, path }: Props) {
     return <SellerAccountPage flow="platform-sale" lang={lang} />
   }
 
+  // A3.1 — STR carve-out: the stay-listing wizard is open during the STR closed beta, locked to STAYS
+  // so no non-STR vertical can be selected. The generic /sell/listing-wizard entry below stays gated.
+  if (path === '/sell/listing-wizard/stays') {
+    return <SellerListingWizard lang={lang} lockedDivision="STAYS" />
+  }
+
   if (path === '/sell/listing-wizard') {
     return <SellerListingWizard lang={lang} />
   }

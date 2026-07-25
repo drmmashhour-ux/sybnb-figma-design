@@ -299,7 +299,13 @@ export function findDivisionByRoute(route: string) {
 // SYB-008 — client route gate. Returns the gated (non-active) division a path belongs to, matching the
 // exact route, any sub-route, and the `-preview` variant, so a direct hash URL into a Soon division is
 // caught before its page renders. Returns undefined for active divisions and non-division paths.
+// A3.1 — explicit STR carve-out: the stay-listing wizard is OPEN during the STR closed beta even though
+// it lives under the gated `sell` division. Only these exact paths are exempted — the generic
+// /sell/listing-wizard, the /sell landing, and every other gated division route stay gated.
+const STR_OPEN_PATHS = new Set(['/sell/listing-wizard/stays'])
+
 export function gatedDivisionForPath(path: string): Division | undefined {
+  if (STR_OPEN_PATHS.has(path)) return undefined
   return DIVISIONS.find(
     (division) =>
       division.status !== 'active' &&

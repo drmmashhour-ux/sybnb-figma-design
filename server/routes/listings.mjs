@@ -346,6 +346,10 @@ export async function handleListings(req, res, url, context) {
       requireAuth(context, ['SELLER', 'HOST'])
       const body = await readJson(req)
       const division = normalizeListingDivision(body.division || 'STAYS')
+      // A3.1 defense-in-depth: refuse creating a listing in a gated (non-STR) division during the STR
+      // closed beta — mirrors the browse-side gate above, so a non-STR create is rejected server-side
+      // even if a client somehow reached the wizard for it.
+      assertDivisionActiveForBeta(division)
 
       if (PAID_PLAN_DIVISIONS.has(division)) {
         const sellerProfile = await db().sellerProfile.findUnique({ where: { userId: context.user.id } })
