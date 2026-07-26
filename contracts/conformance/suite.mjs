@@ -50,11 +50,13 @@ export function defineConformanceSuite(fixtures, harness) {
         expect(Number.isInteger(converted.amountMinor), 'result stays integer minor units').toBe(true)
       })
 
-      // C1 — no economics leak: no buyer-facing payload exposes the platform cut / supplier payout.
+      // C1 — no economics leak: no buyer-facing payload exposes the platform cut / supplier payout. The
+      // fixture supplies its own forbidden economics keys (there is no SYBNB default — see
+      // security/economicsLeak.mjs), so the scan is checked against YOUR domain's key names.
       runOr(fx.supports.leak, 'C1 no buyer-facing economics leak', fx.skipReason?.leak, async () => {
         const payloads = await fx.buyerFacingPayloads(ctx)
         for (const [label, json] of Object.entries(payloads)) {
-          expect(findLeakedEconomicsKeys(json), `${label} leaked economics keys`).toEqual([])
+          expect(findLeakedEconomicsKeys(json, fx.forbiddenEconomicsKeys), `${label} leaked economics keys`).toEqual([])
         }
       })
 

@@ -7,8 +7,15 @@
 // `skipReason` so the skip is documented, e.g. a read-only fixture that asserts against frozen behavior).
 // A fixture that mutates shared state MUST clean up in teardown — see ISOLATION.md.
 
+import { EXAMPLE_ECONOMICS_KEYS } from '../security/economicsLeak.mjs'
+
 export const exampleFixture = {
   name: 'example', // shown in the suite output: "CONFORMANCE · example"
+
+  // C1 — YOUR platform's buyer-forbidden economics key names (there is no SYBNB default). Required when
+  // supports.leak is true; the C1 runner passes these to findLeakedEconomicsKeys. Spread the kit's example
+  // list and extend it for your domain.
+  forbiddenEconomicsKeys: [...EXAMPLE_ECONOMICS_KEYS /* , 'agentCommission', 'workerPayoutMinor' */],
 
   supports: {
     oneMoneyModel: false,

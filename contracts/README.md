@@ -34,7 +34,7 @@ your fixture proves via `supports`; the rest skip with your documented `skipReas
 
 | Invariant | What it guarantees |
 | --- | --- |
-| **C1** leak | No buyer-facing payload exposes the platform cut / supplier payout |
+| **C1** leak | No buyer-facing payload exposes the platform cut / supplier payout (fixture supplies `forbiddenEconomicsKeys`) |
 | **C2** authz | Sensitive routes reject unauth (401) and wrong-role (403) |
 | **C3** oneMoneyModel | Integer minor units; same-currency exact sum; convert-then-sum to a target; rejects mixed-currency without a target |
 | **C4** commission-on-base | Commission is on the tax-excluded base; unchanged when tax changes |
@@ -120,6 +120,9 @@ and the Node-http router accessors (`pathAccessor`/`methodAccessor`) — verify 
 
 ## Versioning
 
-**v1.1** — adds the executable **C3 one-money-model** runner (fixture supplies `oneMoneyModel`). **v1** was
-cut from the SYBNB STR golden state (see `VERSION`). Bump the kit when the CORE contract itself changes (a
-new invariant, a changed evidence shape) — adding a product fixture is not a kit change.
+**v1.2** — the C1 runner is now fixture-parameterized: it reads `forbiddenEconomicsKeys` from the fixture and
+passes them to `findLeakedEconomicsKeys` (v1.1's C1 runner called it with no keys, which threw after the
+required-param hardening). **v1.1** added the executable **C3 one-money-model** runner (fixture supplies
+`oneMoneyModel`). **v1** was cut from the SYBNB STR golden state (see `VERSION`). Bump the kit when the CORE
+contract itself changes (a new invariant, a changed evidence shape) — adding a product fixture is not a kit
+change.
