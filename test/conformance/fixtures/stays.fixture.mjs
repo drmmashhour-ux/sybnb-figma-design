@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { db } from '../../../server/lib/prisma.mjs'
 import { createSessionToken, hashPassword } from '../../../server/lib/security.mjs'
 import { approvePaymentProof, platformFee, strCommissionRateForBooking } from '../../../server/lib/finance-ledger.mjs'
+import { assertStripeLivemodeForProduction, STRIPE_TEST_MODE_IN_PRODUCTION_CODE } from '../../../server/lib/payment-gateway.mjs'
+import { finalizeStripeSession } from '../../../server/routes/payments.mjs'
 import { buildStayStatement } from '../../../server/lib/stay-statements.mjs'
 import { findAuditMutationPaths } from '../contract.mjs'
 import { testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../../support/testServer.mjs'
@@ -18,7 +20,7 @@ function isoDay(offset) {
 
 export const staysFixture = {
   name: 'stays',
-  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true, frozenTerms: true, noDoubleBook: true },
+  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true, frozenTerms: true, noDoubleBook: true, sandboxRefRejected: true },
 
   async setup() {
     const app = testApp()
@@ -128,6 +130,44 @@ export const staysFixture = {
     return {
       chargedWhileUnconfirmed: (taxLine.status && taxLine.status !== 'NONE') || collected > 0,
       legalReviewStatus: feed.body?.legalReviewStatus,
+    }
+  },
+
+  async sandboxRefRejected() {
+    // C5b — in PRODUCTION a test/sandbox Stripe settlement (livemode !== true) must be REJECTED so a booking
+    // can never be marked paid with a non-production reference, while a real (livemode:true) settlement is
+    // accepted. Two layers: (1) the REAL guard (assertStripeLivemodeForProduction) tested deterministically
+    // via its explicit isProduction param; (2) an END-TO-END drive of the actual settlement entry point
+    // (finalizeStripeSession) under a simulated production env — a test-mode 'paid' session must throw
+    // BEFORE any booking is settled. Layer (2) proves the guard is actually WIRED (removing it makes
+    // finalizeStripeSession fall through and return instead of throwing). NODE_ENV is restored in finally.
+    const codeOf = (stripeObject, isProduction) => {
+      try {
+        assertStripeLivemodeForProduction(stripeObject, { isProduction })
+        return null
+      } catch (e) {
+        return e.code
+      }
+    }
+    const prevNodeEnv = process.env.NODE_ENV
+    let settlementRejectedCode = null
+    try {
+      process.env.NODE_ENV = 'production'
+      // A test-mode (livemode:false) 'paid' session for a nonexistent booking: the guard runs first and
+      // must throw before any DB work. A real live-mode path would only proceed past this line.
+      await finalizeStripeSession({ payment_status: 'paid', livemode: false, payment_intent: 'pi_sandbox_c5b', metadata: { bookingId: 'c5b-nonexistent-booking' } })
+    } catch (e) {
+      settlementRejectedCode = e.code
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv
+    }
+    return {
+      expectedRejectCode: STRIPE_TEST_MODE_IN_PRODUCTION_CODE,
+      testModeRejectedInProd: codeOf({ livemode: false }, true),
+      missingLivemodeRejectedInProd: codeOf({}, true),
+      liveAcceptedInProd: codeOf({ livemode: true }, true),
+      testModeAllowedOutsideProd: codeOf({ livemode: false }, false),
+      settlementPathRejectsSandboxInProd: settlementRejectedCode,
     }
   },
 

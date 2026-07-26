@@ -87,6 +87,15 @@ for (const fx of FIXTURES) {
       expect(f.statementCommissionMinor, 'the statement renders the frozen 13% commission, NOT the new 25%').toBe(15_60)
     })
 
+    runOr(fx.supports.sandboxRefRejected, 'C5b sandbox settlement ref rejected in production (real live-mode ref accepted)', fx.skipReason?.sandboxRefRejected, async () => {
+      const s = await fx.sandboxRefRejected()
+      expect(s.testModeRejectedInProd, 'a test-mode (livemode:false) settlement is rejected in production').toBe(s.expectedRejectCode)
+      expect(s.missingLivemodeRejectedInProd, 'a missing livemode is treated as unsafe (rejected) in production').toBe(s.expectedRejectCode)
+      expect(s.liveAcceptedInProd, 'a real live-mode settlement is accepted in production').toBeNull()
+      expect(s.testModeAllowedOutsideProd, 'test-mode settles fine outside production (dev/test)').toBeNull()
+      expect(s.settlementPathRejectsSandboxInProd, 'the REAL Stripe settlement path rejects a sandbox ref in production (guard wired)').toBe(s.expectedRejectCode)
+    })
+
     runOr(fx.supports.noDoubleBook, 'C8 no-double-book: concurrent bookings for one slot — exactly one wins, no double-allocation', fx.skipReason?.noDoubleBook, async () => {
       const c = await fx.noDoubleBook(ctx)
       expect(c.successCount, `exactly one concurrent attempt succeeds (got statuses ${JSON.stringify(c.statuses)})`).toBe(1)
@@ -108,10 +117,17 @@ afterAll(async () => {
   await cleanupTestUsers()
 })
 
-// ---- PENDING — the rest of the CORE contract, documented + tied to the A-item that will fill each ----
-describe('CONFORMANCE · pending invariants (documented; grow with the A-items)', () => {
-  // C7 frozen-terms — NOW LIVE: wired per-fixture above (Stays proves it; Ride scoped-skips read-only).
-  // C8 no-double-book — NOW LIVE: wired per-fixture above (Stays proves it; Ride scoped-skips — no slot inventory).
-  // C9 append-only audit — NOW LIVE (A6.3): wired per-fixture above (Stays proves it; Ride skips read-only).
-  it.skip('C5b sandbox ref rejected in prod: a test/sandbox settlement ref is refused under NODE_ENV=production  [→ A-item: prod settlement guard]', () => {})
+// ---- COVERAGE — the CORE contract is fully wired: every invariant above is LIVE (no pending stubs) ----
+// The historical pending set (C7 frozen-terms, C8 no-double-book, C9 append-only audit, C5b sandbox-ref)
+// is now proven per-fixture above. This makes Stays the first fully conformance-covered golden brick.
+describe('CONFORMANCE · contract coverage (STR is the golden reference brick)', () => {
+  it('Stays declares support for EVERY CORE invariant — nothing is documented-only', () => {
+    const CORE_INVARIANTS = [
+      'leak', 'authz', 'commissionTaxInvariant', 'jurisdictionFailClosed', 'settlementRef',
+      'sandboxRefRejected', 'frozenTerms', 'noDoubleBook', 'auditAppendOnly',
+    ]
+    for (const inv of CORE_INVARIANTS) {
+      expect(staysFixture.supports[inv], `Stays must prove ${inv} as a live invariant`).toBe(true)
+    }
+  })
 })
