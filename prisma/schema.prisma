@@ -817,9 +817,36 @@ model Payment {
   updatedAt             DateTime @updatedAt @map("updated_at")
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  reconciliations ReconciliationRecord[]
 
   @@index([status, settledAt])
   @@map("payments")
+}
+
+// Fix E — received-funds reconciliation. One row per reconciliation ATTEMPT of a frozen Payment against a
+// merchant-statement line. Append-only: a re-attempt is a NEW row; status is set at INSERT and never edited in
+// place (a MISMATCH is never flipped to MATCHED), mirroring admin_audit_logs immutability (migration 037/040).
+// A partial unique index (migration 040) enforces at most one MATCHED row per payment — the "unique-per-match
+// target" invariant — while allowing any number of PENDING/MISMATCH attempts.
+model ReconciliationRecord {
+  id             String    @id @default(uuid())
+  bookingId      String    @map("booking_id") // denormalized join key (Payment/Payout are 1:1 on booking)
+  paymentId      String    @map("payment_id") // the frozen Payment this attempt reconciles against
+  statementRef   String    @map("statement_ref") // merchant-statement line id (Sham Cash transaction id)
+  amountMinor    Int       @map("amount_minor") // amount AS SEEN on the statement (received funds), never recomputed
+  currency       String
+  source         String // 'manual' | 'csv'
+  status         String    @default("PENDING") // PENDING | MATCHED | MISMATCH
+  mismatchReason String?   @map("mismatch_reason") // UNDERPAYMENT | OVERPAYMENT | WRONG_REFERENCE | DUPLICATE
+  matchedById    String?   @map("matched_by_id") // the reconciler admin (dual-control actor); plain id, no FK (mirror disbursedById)
+  matchedAt      DateTime? @map("matched_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, status])
+  @@index([paymentId, status])
+  @@map("reconciliation_records")
 }
 
 // A Payout is the host-facing side of the same settlement: the frozen net amount owed to the host and its
