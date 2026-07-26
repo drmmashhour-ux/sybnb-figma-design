@@ -6,7 +6,7 @@ import { assertDivisionActiveForBeta } from '../lib/closed-beta-gate.mjs'
 import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pricing.mjs'
 import { computeQuebecStayTaxesResolved } from '../lib/quebec-stay-tax.mjs'
 import { resolveStayTaxLine, STAY_TAX_LINE_STATUS } from '../lib/stay-tax-line.mjs'
-import { resolveListingJurisdiction } from '../lib/jurisdiction-compliance.mjs'
+import { resolveListingJurisdiction, getJurisdictionProfile } from '../lib/jurisdiction-compliance.mjs'
 import { approximateLocation } from '../lib/listing-location.mjs'
 import { stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
@@ -336,10 +336,14 @@ export async function handleListings(req, res, url, context) {
       }
 
       const rankedListings = sort === 'priceAsc' || sort === 'priceDesc' ? listings : applySearchBoost(listings)
-      // FIX A: surface a fail-closed legal-review status per jurisdiction so the guest surface never
-      // presents an unreviewed jurisdiction (Syria) as licensed/live. Unknown jurisdiction => unreviewed.
-      // A persistent, counsel-editable status is a future ops/config item (see launch checklist).
-      const legalReviewStatus = { SY: 'unreviewed' }[country] || 'unreviewed'
+      // Surface a fail-closed legal-review status per jurisdiction so the guest surface never presents an
+      // unreviewed market (Syria today) as licensed/live. This reads the admin-settable, audit-gated
+      // JurisdictionComplianceProfile (the same "master go-live switch" that gates listing approval) instead
+      // of a hardcoded literal: APPROVED → 'reviewed'; missing/PENDING/BLOCKED → 'unreviewed'. So counsel
+      // clearance is an admin config action (approve the profile) that auto-flips this signal — not a code
+      // deploy — and a never-reviewed jurisdiction is never implicitly presented as live.
+      const jurisdictionProfile = await getJurisdictionProfile(db(), { division: 'STR', countryCode: country, regionCode: '' })
+      const legalReviewStatus = jurisdictionProfile?.status === 'APPROVED' ? 'reviewed' : 'unreviewed'
       return json(res, 200, { ok: true, listings: rankedListings.slice(0, 50), jurisdiction: country, legalReviewStatus })
     }
 

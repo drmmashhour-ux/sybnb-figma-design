@@ -66,8 +66,16 @@ describe('FIX A — guest listings query is jurisdiction fail-closed + excludes 
     expect(ids).not.toContain(created.demo)
   })
 
-  it('surfaces a fail-closed legalReviewStatus (Syria = unreviewed)', async () => {
-    const res = await request(app).get('/api/listings?division=STAYS')
+  it('surfaces a fail-closed legalReviewStatus for a never-reviewed jurisdiction (config-driven)', async () => {
+    // legalReviewStatus now reads the JurisdictionComplianceProfile (server/routes/listings.mjs): a
+    // jurisdiction with no APPROVED profile presents as 'unreviewed', so the guest surface never shows an
+    // unreviewed market as licensed. Syria itself is force-APPROVED in the test env (see
+    // test/support/seedApprovedJurisdictions.mjs) so STR listing-approval tests work, so we assert the
+    // fail-closed default against a throwaway jurisdiction with no profile; the full
+    // APPROVED→'reviewed' / PENDING·BLOCKED·missing→'unreviewed' matrix lives in
+    // test/api/legal-review-status.test.mjs.
+    const res = await request(app).get(`/api/listings?country=ZZ${Date.now().toString().slice(-6)}`)
+    expect(res.status).toBe(200)
     expect(res.body.legalReviewStatus).toBe('unreviewed')
   })
 })
