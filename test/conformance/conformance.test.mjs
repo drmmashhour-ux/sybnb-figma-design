@@ -87,6 +87,14 @@ for (const fx of FIXTURES) {
       expect(f.statementCommissionMinor, 'the statement renders the frozen 13% commission, NOT the new 25%').toBe(15_60)
     })
 
+    runOr(fx.supports.noDoubleBook, 'C8 no-double-book: concurrent bookings for one slot — exactly one wins, no double-allocation', fx.skipReason?.noDoubleBook, async () => {
+      const c = await fx.noDoubleBook(ctx)
+      expect(c.successCount, `exactly one concurrent attempt succeeds (got statuses ${JSON.stringify(c.statuses)})`).toBe(1)
+      expect(c.conflictCount, 'the other concurrent attempt is rejected').toBe(1)
+      expect(c.conflictCode, 'the loser is rejected with the dates-unavailable conflict').toBe('BOOKING_DATES_UNAVAILABLE')
+      expect(c.activeForSlot, 'exactly one active booking exists for the slot (no double-allocation)').toBe(1)
+    })
+
     runOr(fx.supports.auditAppendOnly, 'C9 append-only audit on money/config/consent (config change appends before/after; no mutation path)', fx.skipReason?.auditAppendOnly, async () => {
       const a = await fx.auditAppendOnly(ctx)
       expect(a.configChangeAppended, 'a config/rate change appends an audit row').toBe(true)
@@ -103,7 +111,7 @@ afterAll(async () => {
 // ---- PENDING — the rest of the CORE contract, documented + tied to the A-item that will fill each ----
 describe('CONFORMANCE · pending invariants (documented; grow with the A-items)', () => {
   // C7 frozen-terms — NOW LIVE: wired per-fixture above (Stays proves it; Ride scoped-skips read-only).
-  it.skip('C8 no-double-book: two concurrent bookings for one slot cannot both confirm  [→ A-item: H5 concurrency]', () => {})
+  // C8 no-double-book — NOW LIVE: wired per-fixture above (Stays proves it; Ride scoped-skips — no slot inventory).
   // C9 append-only audit — NOW LIVE (A6.3): wired per-fixture above (Stays proves it; Ride skips read-only).
   it.skip('C5b sandbox ref rejected in prod: a test/sandbox settlement ref is refused under NODE_ENV=production  [→ A-item: prod settlement guard]', () => {})
 })

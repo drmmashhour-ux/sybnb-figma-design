@@ -18,7 +18,7 @@ function isoDay(offset) {
 
 export const staysFixture = {
   name: 'stays',
-  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true, frozenTerms: true },
+  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true, frozenTerms: true, noDoubleBook: true },
 
   async setup() {
     const app = testApp()
@@ -63,6 +63,10 @@ export const staysFixture = {
 
   async teardown(ctx) {
     if (!ctx) return
+    if (ctx.c8) {
+      await db().booking.deleteMany({ where: { listingId: ctx.c8.listingId } }).catch(() => {})
+      await db().listing.deleteMany({ where: { id: ctx.c8.listingId } }).catch(() => {})
+    }
     if (ctx.c7) {
       await db().payout.deleteMany({ where: { bookingId: ctx.c7.bookingId } }).catch(() => {})
       await db().payment.deleteMany({ where: { bookingId: ctx.c7.bookingId } }).catch(() => {})
@@ -124,6 +128,41 @@ export const staysFixture = {
     return {
       chargedWhileUnconfirmed: (taxLine.status && taxLine.status !== 'NONE') || collected > 0,
       legalReviewStatus: feed.body?.legalReviewStatus,
+    }
+  },
+
+  async noDoubleBook(ctx) {
+    // C8 — two guests race for the SAME listing + overlapping dates. The booking create runs inside a
+    // transaction holding pg_advisory_xact_lock(hashtext(listingId)) (server/routes/bookings.mjs), which
+    // serializes the two requests: the winner commits its booking, the loser then sees the overlap and is
+    // rejected 409 BOOKING_DATES_UNAVAILABLE. Real Postgres (test DB) makes this deterministic — exactly one
+    // active booking exists for the slot, never two. Fresh listing + a second guest so it's isolated.
+    const listing = await db().listing.create({
+      data: { ownerId: ctx.host.id, division: 'STAYS', titleAr: 'C8', priceMinor: 100_00, currency: 'USD', status: 'APPROVED', instantBookEnabled: false, metadata: { country: 'SY' } },
+    })
+    const guest2User = await db().user.create({
+      data: { email: uniqueTestEmail('conf-stays-guest2'), passwordHash: hashPassword('correct-horse-battery'), displayName: 'Conf GUEST2', referralCode: uniqueTestReferralCode(), status: 'ACTIVE', roles: { create: { role: 'GUEST' } }, phoneHash: `conf-g2-${Math.random().toString(36).slice(2)}` },
+    })
+    trackTestUser(guest2User.id)
+    ctx.c8 = { listingId: listing.id }
+
+    const checkIn = isoDay(40)
+    const checkOut = isoDay(43)
+    const attempt = (token) =>
+      request(ctx.app).post('/api/bookings').set({ Authorization: `Bearer ${token}` }).send({ listingId: listing.id, checkIn, checkOut, currency: 'USD' })
+    const results = await Promise.all([attempt(ctx.guest.token), attempt(createSessionToken(guest2User))])
+
+    const successCount = results.filter((r) => r.status === 201).length
+    const conflictCount = results.filter((r) => r.status === 409).length
+    const activeForSlot = await db().booking.count({
+      where: { listingId: listing.id, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] }, checkIn: { lt: new Date(checkOut) }, checkOut: { gt: new Date(checkIn) } },
+    })
+    return {
+      statuses: results.map((r) => r.status).sort(),
+      successCount,
+      conflictCount,
+      conflictCode: results.find((r) => r.status === 409)?.body?.error?.code,
+      activeForSlot,
     }
   },
 
