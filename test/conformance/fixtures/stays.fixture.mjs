@@ -20,7 +20,7 @@ function isoDay(offset) {
 
 export const staysFixture = {
   name: 'stays',
-  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true, frozenTerms: true, noDoubleBook: true, sandboxRefRejected: true },
+  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true, frozenTerms: true, noDoubleBook: true, sandboxRefRejected: true, reconciliationGate: true },
 
   async setup() {
     const app = testApp()
@@ -65,6 +65,15 @@ export const staysFixture = {
 
   async teardown(ctx) {
     if (!ctx) return
+    if (ctx.c10) {
+      await db().reconciliationRecord.deleteMany({ where: { bookingId: { in: ctx.c10.bookingIds } } }).catch(() => {})
+      await db().payout.deleteMany({ where: { bookingId: { in: ctx.c10.bookingIds } } }).catch(() => {})
+      await db().payment.deleteMany({ where: { bookingId: { in: ctx.c10.bookingIds } } }).catch(() => {})
+      await db().walletEntry.deleteMany({ where: { referenceId: { in: ctx.c10.bookingIds } } }).catch(() => {})
+      await db().adminAuditLog.deleteMany({ where: { entityId: { in: ctx.c10.bookingIds } } }).catch(() => {})
+      await db().paymentProof.deleteMany({ where: { bookingId: { in: ctx.c10.bookingIds } } }).catch(() => {})
+      await db().booking.deleteMany({ where: { id: { in: ctx.c10.bookingIds } } }).catch(() => {})
+    }
     if (ctx.c8) {
       await db().booking.deleteMany({ where: { listingId: ctx.c8.listingId } }).catch(() => {})
       await db().listing.deleteMany({ where: { id: ctx.c8.listingId } }).catch(() => {})
@@ -276,5 +285,56 @@ export const staysFixture = {
       .set({ Authorization: `Bearer ${ctx.guest.token}` })
       .send({ bookingId: ctx.booking?.id, amountMinor: ctx.booking?.amountMinor })
     return { paidWithoutRef: res.status < 400, rejectionCode: res.body?.error?.code, status: res.status }
+  },
+
+  async reconciliationGate(ctx) {
+    // C10 — the money-out reconciliation controls. Settle + release a booking (verifier + releaser on record),
+    // then drive the disburse endpoint: (1) it refuses until a MATCHED received-funds record exists
+    // (PAYOUT_NOT_RECONCILED); (2) the admin who reconciled cannot also disburse (PAYOUT_DUAL_CONTROL_REQUIRED),
+    // while a DISTINCT admin can; (3) at most one MATCHED per payment and records are append-only (a re-attempt
+    // appends a new row — here the duplicate line is recorded as a fresh MISMATCH, never a second MATCHED, and
+    // never an in-place mutation). Four distinct admins so maker != checker is real.
+    const mkAdmin = async (label) => {
+      const u = await db().user.create({ data: { email: uniqueTestEmail(label), passwordHash: hashPassword('correct-horse-battery'), displayName: `Conf ${label}`, referralCode: uniqueTestReferralCode(), status: 'ACTIVE', roles: { create: { role: 'ADMIN' } }, phoneHash: `conf-${label}-${Math.random().toString(36).slice(2)}` } })
+      trackTestUser(u.id)
+      return { id: u.id, token: createSessionToken(u) }
+    }
+    const verifier = await mkAdmin('c10-verifier')
+    const releaser = await mkAdmin('c10-releaser')
+    const reconciler = await mkAdmin('c10-reconciler')
+    const stranger = await mkAdmin('c10-stranger')
+    await db().user.update({ where: { id: ctx.host.id }, data: { payoutMethod: { type: 'sham_cash', receiverName: 'H', phone: '0999', version: 1 } } })
+
+    const bookingIds = []
+    const booking = await db().booking.create({ data: { listingId: ctx.listingId, guestId: ctx.guest.id, status: 'PAYMENT_PENDING', amountMinor: 120_00, currency: 'USD' } })
+    bookingIds.push(booking.id)
+    const proof = await db().paymentProof.create({ data: { bookingId: booking.id, userId: ctx.guest.id, provider: 'stripe', providerRef: `pi_c10_${booking.id.slice(0, 8)}`, status: 'PENDING_ADMIN_REVIEW', amountMinor: 120_00, currency: 'USD' } })
+    await db().$transaction((tx) => approvePaymentProof(tx, { proofId: proof.id, actorUserId: verifier.id }))
+    await db().payout.update({ where: { bookingId: booking.id }, data: { status: 'RELEASED', releaseDate: new Date(), releasedById: releaser.id } })
+    const payment = await db().payment.findUnique({ where: { bookingId: booking.id } })
+    ctx.c10 = { bookingIds }
+
+    const disburse = (token) => request(ctx.app).post(`/api/admin/payouts/${booking.id}/disburse`).set({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }).send({ transition: 'INITIATED', reason: 'c10' })
+    const reconcile = (token, amount) => request(ctx.app).post(`/api/admin/payments/${booking.id}/reconcile`).set({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }).send({ statementRef: payment.settlementRef, amount, currency: payment.currency })
+
+    const noMatch = await disburse(stranger.token) // (1) blocked: not reconciled yet
+    const matched = await reconcile(reconciler.token, payment.grossMinor) // exact -> MATCHED
+    const reconcilerDisburse = await disburse(reconciler.token) // (2) reconciler is a control actor -> blocked
+    const duplicate = await reconcile(reconciler.token, payment.grossMinor) // (3) same line again -> DUPLICATE, not a 2nd MATCHED
+    const matchedCount = await db().reconciliationRecord.count({ where: { bookingId: booking.id, status: 'MATCHED' } })
+    const totalRows = await db().reconciliationRecord.count({ where: { bookingId: booking.id } })
+    const distinct = await disburse(stranger.token) // a distinct admin CAN disburse reconciled funds
+
+    return {
+      disbursedWithoutMatch: noMatch.status < 400,
+      noMatchRejectionCode: noMatch.body?.error?.code,
+      matchRecorded: matched.body?.status,
+      reconcilerCouldDisburse: reconcilerDisburse.status < 400,
+      reconcilerRejectionCode: reconcilerDisburse.body?.error?.code,
+      duplicateStatus: duplicate.body?.status,
+      matchedCount,
+      appendOnlyRowsAccumulate: totalRows >= 2,
+      distinctDisburserSucceeded: distinct.status === 201,
+    }
   },
 }

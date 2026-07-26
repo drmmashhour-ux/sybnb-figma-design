@@ -14,7 +14,7 @@ const NEARBY = { latitude: 33.53, longitude: 36.29 }
 
 export const rideFixture = {
   name: 'ride',
-  supports: { leak: true, authz: true, commissionTaxInvariant: false, jurisdictionFailClosed: false, settlementRef: false, frozenTerms: false, noDoubleBook: false, sandboxRefRejected: false },
+  supports: { leak: true, authz: true, commissionTaxInvariant: false, jurisdictionFailClosed: false, settlementRef: false, frozenTerms: false, noDoubleBook: false, sandboxRefRejected: false, reconciliationGate: false },
   skipReason: {
     commissionTaxInvariant: 'SR commission tiers are frozen/read-only here — proving on the SR path is a separate SR A-item',
     jurisdictionFailClosed: 'SR jurisdiction gating is frozen/read-only here — separate SR A-item',
@@ -22,6 +22,7 @@ export const rideFixture = {
     frozenTerms: 'SR ride settlement/terms are frozen/read-only here — proving the SR frozen-terms guarantee is a separate SR A-item',
     noDoubleBook: 'SR has no date-slot inventory (a ride is a one-off dispatch, not a calendar slot) — its one-winner guard is driver-assignment, a separate frozen SR concern',
     sandboxRefRejected: 'SR ride settlement is frozen/read-only here — the Stripe livemode prod-guard lives on the Stays settlement path; proving it on the SR path is a separate frozen SR concern',
+    reconciliationGate: 'received-funds reconcile-before-payout is an STR host-payout control; SR ride payout/settlement is frozen/read-only here — a candidate to upstream when SR reaches its payment-execution layer',
   },
 
   async setup() {

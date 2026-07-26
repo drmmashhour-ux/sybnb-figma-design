@@ -110,6 +110,22 @@ for (const fx of FIXTURES) {
       expect(a.updateHasBeforeAfter, 'the config-change audit records before AND after (values differ)').toBe(true)
       expect(a.mutationPaths, `audit log must be append-only; mutation paths: ${JSON.stringify(a.mutationPaths)}`).toEqual([])
     })
+
+    runOr(fx.supports.reconciliationGate, 'C10 reconcile-before-payout: no disburse without a MATCHED reconciliation; disburser != verifier/releaser/reconciler; records append-only, one MATCHED per payment', fx.skipReason?.reconciliationGate, async () => {
+      const r = await fx.reconciliationGate(ctx)
+      // 1. money-out gate: a payout cannot disburse until its funds are reconciled to a MATCHED record.
+      expect(r.disbursedWithoutMatch, 'a payout with no MATCHED reconciliation must be refused').toBe(false)
+      expect(r.noMatchRejectionCode, 'the refusal code is PAYOUT_NOT_RECONCILED').toBe('PAYOUT_NOT_RECONCILED')
+      expect(r.matchRecorded, 'an exact statement line records a MATCHED (computed, never asserted)').toBe('MATCHED')
+      // 2. maker != checker includes the reconciler; a distinct admin can still disburse.
+      expect(r.reconcilerCouldDisburse, 'the admin who reconciled must not also disburse').toBe(false)
+      expect(r.reconcilerRejectionCode, 'the reconciler disburse is refused as dual-control').toBe('PAYOUT_DUAL_CONTROL_REQUIRED')
+      expect(r.distinctDisburserSucceeded, 'a distinct disburser CAN disburse reconciled funds').toBe(true)
+      // 3. append-only + at most one MATCHED per payment.
+      expect(r.matchedCount, 'at most one MATCHED reconciliation per payment').toBe(1)
+      expect(r.duplicateStatus, 'a re-submitted line is recorded as a MISMATCH, never a second MATCHED').toBe('MISMATCH')
+      expect(r.appendOnlyRowsAccumulate, 'a re-attempt appends a NEW row (records are append-only, never mutated)').toBe(true)
+    })
   })
 }
 
