@@ -82,6 +82,16 @@ export async function handleDisputes(req, res, url, context) {
       return json(res, 200, { ok: true, dispute: updated })
     }
 
+    // SEPARATION OF DUTIES (STR bookings): the admin APPROVING a refund must not be the person who OPENED the
+    // dispute. The opener (dispute.openedByUserId) is guaranteed to be the booking's guest by the open path
+    // (POST /api/disputes requires the caller own the booking), so this one check stops an admin who is also
+    // the booking's guest from opening a dispute on their own booking and approving their own refund. Scoped
+    // to booking disputes (dispute.bookingId) to leave the frozen SR/ride refund path untouched — the ride
+    // equivalent is a separate SR-track item. The guest-only-open and ADMIN-only-approve checks are untouched.
+    if (dispute.bookingId && dispute.openedByUserId === context.user.id) {
+      fail('You cannot approve a refund on a dispute you opened. A different admin must review it.', 403, 'DISPUTE_SELF_APPROVAL_FORBIDDEN')
+    }
+
     // REFUND: credit the customer's wallet, capped at what they actually paid.
     const subject = await disputeSubject(dispute)
     if (!subject) fail('The item this dispute refers to no longer exists.', 409, 'DISPUTE_SUBJECT_MISSING')
