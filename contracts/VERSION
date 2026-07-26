@@ -1,0 +1,14 @@
+Platform Contract Kit — v1
+
+Cut from the SYBNB STR golden state:
+  branch:  claude/intelligent-kilby-5ff258
+  commit:  97ffcb6  (feat(str): B2 pilot-scope guest UI …)
+  status:  all 8 panel findings closed; full CORE conformance contract (C1–C9, incl. C5b) live;
+           pilot scope enforced on server + client; suite green.
+
+Contents: generic conformance suite + fixture template, and the reusable security checks
+(no-economics-leak, elevated-route authz sweep, append-only audit scan, secret/sandbox-not-in-prod,
+enumeration/rate-limit). SYBNB-specific fixtures are NOT included — a consumer supplies its own.
+
+Bump when the CORE contract changes (a new invariant or a changed evidence shape). Adding a product
+fixture is not a kit change.
