@@ -7,6 +7,7 @@ dist-mobile/
 !.env.example
 !.env.test.example
 !.env.production.example
+!.env.staging.example
 server/uploads/
 test-results/
 playwright-report/
