@@ -14,6 +14,7 @@ import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mj
 import { getOperationalDocumentStatuses } from '../lib/listing-document-retention.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPhone } from '../lib/validate.mjs'
 import { assertBookingWithinMontrealSeasonAndCap } from '../lib/quebec-str-rules.mjs'
+import { isShamCashOnlyPilot, CANCELLATION_VIA_SUPPORT_CODE } from '../lib/pilot-scope.mjs'
 import { DELIVERY_STATUS, bookingTrackUrl, notify } from '../lib/notifications.mjs'
 
 // Matches the frictionless-guest display name set at account creation (server/routes/auth.mjs
@@ -39,6 +40,17 @@ export async function handleBookings(req, res, url, context) {
   if (cancelMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['GUEST'])
+    // Section B: the self-serve AUTOMATED cancellation+refund path is deferred in the Sham-Cash-only pilot
+    // (its money-movement is not yet fully tested). Refuse here and route to support — but cancellation is
+    // NOT removed: the guest can still open a dispute (/api/disputes), which an admin resolves (and can
+    // refund), so no one is ever trapped in an un-cancellable booking.
+    if (isShamCashOnlyPilot()) {
+      const error = new Error('Self-service cancellation is handled by support during the pilot — please contact support or open a request, and an admin will process your cancellation and any refund.')
+      error.statusCode = 409
+      error.code = CANCELLATION_VIA_SUPPORT_CODE
+      error.expose = true
+      throw error
+    }
     const body = await readJson(req)
     const existing = await db().booking.findFirst({
       where: {

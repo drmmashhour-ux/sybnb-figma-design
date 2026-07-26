@@ -4,6 +4,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
 import { getCountryConfig, disputeWindowHours, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
+import { pilotScopeCapabilities } from '../lib/pilot-scope.mjs'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -35,11 +36,11 @@ export async function handleDisputes(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     const config = getCountryConfig(countryMatch[1])
     if (!config) fail('Country is not configured.', 404, 'COUNTRY_NOT_CONFIGURED')
-    return json(res, 200, { ok: true, country: config })
+    return json(res, 200, { ok: true, country: config, scope: pilotScopeCapabilities() })
   }
   if (url.pathname === '/api/config/country') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
-    return json(res, 200, { ok: true, country: getCountryConfig(DEFAULT_COUNTRY) })
+    return json(res, 200, { ok: true, country: getCountryConfig(DEFAULT_COUNTRY), scope: pilotScopeCapabilities() })
   }
 
   // ---- Admin dispute queue + adjudication ----

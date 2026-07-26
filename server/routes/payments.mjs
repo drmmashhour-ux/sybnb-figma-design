@@ -3,6 +3,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE } from '../lib/finance-ledger.mjs'
 import { assertStripeLivemodeForProduction } from '../lib/payment-gateway.mjs'
+import { isShamCashOnlyPilot, CARD_PAYMENT_NOT_IN_PILOT_CODE } from '../lib/pilot-scope.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isAllowedOrigin } from '../lib/allowed-origins.mjs'
 
@@ -266,6 +267,16 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
+
+    // Section B: card payment is deferred in the Sham-Cash-only pilot. Refuse here (defense-in-depth) so a
+    // hidden/bypassed card UI can never start a Stripe checkout — the guest pays with Sham Cash instead.
+    if (isShamCashOnlyPilot()) {
+      const error = new Error('Card payment is not available in the current pilot — please pay with Sham Cash (local wallet).')
+      error.statusCode = 403
+      error.code = CARD_PAYMENT_NOT_IN_PILOT_CODE
+      error.expose = true
+      throw error
+    }
 
     const body = await readJson(req)
     const bookingId = String(body.bookingId || '')
