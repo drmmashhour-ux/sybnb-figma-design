@@ -24,6 +24,15 @@ function isTrustProxyEnabled() {
   return process.env.TRUST_PROXY === '1'
 }
 
+// Number of TRUSTED proxy hops between the client and this origin. Default 1 (the single Vercel/Cloudflare
+// edge — the topology TRUST_PROXY=1 describes). Each trusted proxy APPENDS the address it received the
+// connection from to X-Forwarded-For, so the real client is the Nth entry FROM THE RIGHT; everything to its
+// left is client-supplied and untrustworthy. Override with TRUST_PROXY_HOPS only if the real deployment puts
+// more than one trusted proxy in front of the origin (e.g. Cloudflare → Vercel = 2).
+function trustedProxyHopCount() {
+  return safePositiveInt(process.env.TRUST_PROXY_HOPS, 1)
+}
+
 // Strips the IPv4-mapped-IPv6 prefix (::ffff:x.x.x.x -> x.x.x.x) so the same real client always
 // buckets identically regardless of whether the server is bound IPv4-only or dual-stack. See
 // docs/security/SYBNB_V6_RATE_LIMIT_POLICY.md's IPv4/IPv6 section for why this matters.
@@ -47,15 +56,17 @@ export function clientIp(req) {
   if (isTrustProxyEnabled()) {
     const forwardedHeader = req.headers['x-forwarded-for']
     if (forwardedHeader) {
-      // X-Forwarded-For can carry a comma-separated hop list (client, proxy1, proxy2, ...); Node
-      // also joins repeated header instances with ", " before exposing them here, so a single
-      // split covers both shapes. The leftmost entry is the original client only under the
-      // single-trusted-reverse-proxy topology this flag is designed for — exactly the deployment
-      // TRUST_PROXY=1 is meant to describe.
-      const first = String(forwardedHeader).split(',')[0]
-      const candidate = normalizeIp(first)
+      // X-Forwarded-For is a hop list (client, proxy1, proxy2, ...); Node also joins repeated header
+      // instances with ", " before exposing them here, so a single split covers both shapes. Take the
+      // RIGHT-anchored trusted hop — the Nth entry from the right for `trustedProxyHopCount()` trusted
+      // proxies (1 for the Vercel/Cloudflare edge) — NOT the leftmost. The trusted edge appends the real
+      // client IP as the last hop; anything the client PREPENDS sits to the left and is ignored, so an
+      // attacker can't rotate a spoofed leftmost value to mint a fresh per-IP bucket and evade the limit.
+      const parts = String(forwardedHeader).split(',')
+      const trusted = parts[parts.length - trustedProxyHopCount()] // undefined if fewer hops than expected
+      const candidate = normalizeIp(trusted !== undefined ? trusted : '')
       if (isPlausibleIp(candidate)) return candidate
-      // Malformed/empty first hop: fall through to the raw socket address rather than trusting it.
+      // Malformed/empty/absent trusted hop: fall through to the raw socket address rather than trusting it.
     }
   }
   return normalizeIp(req.socket?.remoteAddress) || 'unknown'

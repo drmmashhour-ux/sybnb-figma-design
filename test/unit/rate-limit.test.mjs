@@ -220,10 +220,25 @@ describe('rate-limit: clientIp (trusted-proxy handling, read at call time)', () 
     expect(clientIp(req)).toBe('203.0.113.7')
   })
 
-  it('handles a multi-hop X-Forwarded-For list by taking the leftmost (client) entry', () => {
+  it('resolves a multi-hop X-Forwarded-For to the right-anchored trusted hop (1-hop topology → rightmost)', () => {
     process.env.TRUST_PROXY = '1'
+    // Leftmost entries are client-supplied; the trusted edge appended the rightmost. With 1 trusted hop the
+    // identity is that rightmost entry, never the (spoofable) leftmost.
     const req = { headers: { 'x-forwarded-for': '198.51.100.4, 10.0.0.1, 10.0.0.2' }, socket: { remoteAddress: '10.0.0.2' } }
-    expect(clientIp(req)).toBe('198.51.100.4')
+    expect(clientIp(req)).toBe('10.0.0.2')
+  })
+
+  it('SECURITY: a spoofed PREPENDED X-Forwarded-For does not change the rate-limit identity (right-anchored trusted hop)', () => {
+    // Under the 1-hop Vercel/Cloudflare topology the trusted edge APPENDS the real client IP as the last
+    // XFF entry; anything to its left is client-controlled. Taking the leftmost lets an attacker rotate the
+    // prepended value to mint a fresh per-IP bucket every request and evade the limit. The identity must be
+    // the right-anchored trusted hop, unchanged by whatever the client prepends.
+    process.env.TRUST_PROXY = '1'
+    const realHop = '203.0.113.50' // what the single trusted proxy appended (the actual client, per the edge)
+    const withSpoof = (spoof) => ({ headers: { 'x-forwarded-for': `${spoof}, ${realHop}` }, socket: { remoteAddress: '10.0.0.2' } })
+    expect(clientIp(withSpoof('1.2.3.4')), 'spoofed leftmost must be ignored').toBe(realHop)
+    // rotating the prepended value must NOT change the identity (otherwise the per-IP limit is evadable)
+    expect(clientIp(withSpoof('1.2.3.4'))).toBe(clientIp(withSpoof('5.6.7.8')))
   })
 
   it('falls back to the socket address when the forwarded header is present but malformed', () => {
