@@ -7,6 +7,7 @@ import { savePricingSnapshot } from './jurisdiction-pricing.mjs'
 import { assertRealSettlementReference, settlementReference } from './payment-gateway.mjs'
 import { STR_HOST_CONTRACT_VERSION, latestHostContractConsent } from './host-consent.mjs'
 import { SYP_PER_USD, sypMinorToRoundedUsdMinor } from './currency.mjs'
+import { createHash } from 'node:crypto'
 
 // S12: amounts are whole currency units (see currency.mjs), so the documented $10 fee is 10, not 1000.
 export const CANCELLATION_ADMIN_FEE_MINOR = 10
@@ -432,9 +433,29 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note, paym
       create: { bookingId: proof.bookingId, ...paymentFrozen },
       update: paymentFrozen,
     })
+    // D1: FREEZE the host's payout destination here — in the same transaction that freezes amountMinor — so
+    // disburse reads this snapshot, never a live User.payoutMethod. A post-verify change to the host's method
+    // therefore cannot redirect the funds. The fingerprint is a stable hash of the snapshot for tamper-evident
+    // comparison. Set only on create (the first freeze); a re-upsert never restates the frozen destination.
+    const payoutHostId = existing.booking?.listing?.ownerId
+    const hostPayoutMethod = payoutHostId
+      ? (await tx.user.findUnique({ where: { id: payoutHostId }, select: { payoutMethod: true } }))?.payoutMethod ?? null
+      : null
+    const destinationFingerprint = hostPayoutMethod
+      ? createHash('sha256').update(JSON.stringify(hostPayoutMethod, Object.keys(hostPayoutMethod).sort())).digest('hex')
+      : null
     await tx.payout.upsert({
       where: { bookingId: proof.bookingId },
-      create: { bookingId: proof.bookingId, hostId: existing.booking?.listing?.ownerId, amountMinor: hostNetMinor, currency: proof.currency, status: 'PENDING_HOLD', source: 'live' },
+      create: {
+        bookingId: proof.bookingId,
+        hostId: payoutHostId,
+        amountMinor: hostNetMinor,
+        currency: proof.currency,
+        status: 'PENDING_HOLD',
+        source: 'live',
+        destinationSnapshot: hostPayoutMethod ?? undefined,
+        destinationFingerprint: destinationFingerprint ?? undefined,
+      },
       update: { amountMinor: hostNetMinor, currency: proof.currency },
     })
 

@@ -63,6 +63,9 @@ describe('SYB-011 — admin disbursement lifecycle recording', () => {
     await db().user.update({ where: { id: host.user.id }, data: { payoutMethod: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
     listing = await db().listing.create({ data: { ownerId: host.user.id, division: 'STAYS', titleAr: 'دفعة', titleEn: 'Payout Test Stay', priceMinor: 50_00, currency: 'USD', status: 'APPROVED' } })
     booking = await db().booking.create({ data: { listingId: listing.id, guestId: guest.user.id, status: 'COMPLETED', amountMinor: 50_00, currency: 'USD' } })
+    // D1: disburse now reads the FROZEN destination snapshot on the payout, never the live host method.
+    // Freeze sham_cash here so these lifecycle tests exercise disbursement (not the missing-destination guard).
+    await db().payout.create({ data: { bookingId: booking.id, hostId: host.user.id, amountMinor: 50_00, currency: 'USD', status: 'PENDING_HOLD', destinationSnapshot: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
   })
   afterAll(async () => { await cleanupTestUsers() })
 

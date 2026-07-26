@@ -834,6 +834,12 @@ model Payout {
   releaseDate  DateTime? @map("release_date")
   releasedById String?   @map("released_by_id")
   source       String    @default("live") // 'live' | 'backfill'
+  // D1: the host payout destination FROZEN at verify (payout creation) — disburse reads this, never the live
+  // User.payoutMethod, so a post-verify change can't redirect the funds. Fingerprint is a hash of the
+  // snapshot for tamper-evident comparison. Nullable: pre-D1 rows / hosts with no method at verify are null,
+  // and disburse refuses a null destination (403 PAYOUT_DESTINATION_MISSING) rather than falling back to live.
+  destinationSnapshot    Json?   @map("destination_snapshot")
+  destinationFingerprint String? @map("destination_fingerprint")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

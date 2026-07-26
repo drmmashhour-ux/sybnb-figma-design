@@ -419,7 +419,7 @@ export async function handleAdmin(req, res, url, context) {
 
     const booking = await db().booking.findUnique({
       where: { id: payoutDisburseMatch[1] },
-      include: { listing: { include: { owner: { select: { id: true, payoutMethod: true } } } } },
+      include: { listing: { include: { owner: { select: { id: true } } } } },
     })
     if (!booking) {
       const error = new Error('Booking not found.')
@@ -428,8 +428,20 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // D1: disburse against the payout destination FROZEN at verify (Payout.destinationSnapshot), NEVER the
+    // live User.payoutMethod — so a post-verify change to the host's method cannot redirect the funds. A payout
+    // with no frozen destination is refused rather than falling back to the live method.
+    const payout = await db().payout.findUnique({ where: { bookingId: payoutDisburseMatch[1] } })
+    const destination = payout?.destinationSnapshot
+    if (!destination || typeof destination !== 'object' || !destination.type) {
+      const error = new Error('This payout has no frozen destination on record — capture one before disbursing.')
+      error.statusCode = 403
+      error.code = 'PAYOUT_DESTINATION_MISSING'
+      error.expose = true
+      throw error
+    }
     const hostOwner = booking.listing?.owner
-    const methodType = hostOwner?.payoutMethod && typeof hostOwner.payoutMethod === 'object' ? hostOwner.payoutMethod.type : null
+    const methodType = destination.type
 
     const transition = String(body.transition || '').toUpperCase()
     const entry = await recordPayoutTransition(db(), {
