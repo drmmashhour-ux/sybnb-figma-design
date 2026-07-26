@@ -36,6 +36,7 @@ your fixture proves via `supports`; the rest skip with your documented `skipReas
 | --- | --- |
 | **C1** leak | No buyer-facing payload exposes the platform cut / supplier payout |
 | **C2** authz | Sensitive routes reject unauth (401) and wrong-role (403) |
+| **C3** oneMoneyModel | Integer minor units; same-currency exact sum; convert-then-sum to a target; rejects mixed-currency without a target |
 | **C4** commission-on-base | Commission is on the tax-excluded base; unchanged when tax changes |
 | **C5** settlementRef | Nothing is "paid" without a real settlement reference |
 | **C5b** sandbox-in-prod | A test/sandbox settlement ref is rejected in production; a real one accepted |
@@ -119,5 +120,6 @@ and the Node-http router accessors (`pathAccessor`/`methodAccessor`) — verify 
 
 ## Versioning
 
-**v1** is cut from the SYBNB STR golden state (see `VERSION`). Bump the kit when the CORE contract itself
-changes (a new invariant, a changed evidence shape) — adding a product fixture is not a kit change.
+**v1.1** — adds the executable **C3 one-money-model** runner (fixture supplies `oneMoneyModel`). **v1** was
+cut from the SYBNB STR golden state (see `VERSION`). Bump the kit when the CORE contract itself changes (a
+new invariant, a changed evidence shape) — adding a product fixture is not a kit change.

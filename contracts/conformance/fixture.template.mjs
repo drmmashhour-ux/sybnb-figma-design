@@ -11,6 +11,7 @@ export const exampleFixture = {
   name: 'example', // shown in the suite output: "CONFORMANCE · example"
 
   supports: {
+    oneMoneyModel: false,
     leak: false,
     authz: false,
     commissionOnBaseExcludingTax: false,
@@ -33,6 +34,18 @@ export const exampleFixture = {
   },
   // Delete EVERYTHING this fixture created (rows, audit entries, uploaded files). Restore any env you set.
   async teardown(_ctx) {},
+
+  // C3 — one money model. Provide your money-sum function plus two currencies your engine can CONVERT
+  // between. `sum(amounts, targetCurrency?)` must: sum same-currency amounts to an exact integer; THROW when
+  // amounts mix currencies and no target is given; and, with a target, convert each input then sum to an
+  // integer minor result in that currency. { sum, currency, otherCurrency }.
+  async oneMoneyModel(_ctx) {
+    return {
+      sum: (_amounts, _targetCurrency) => ({ amountMinor: 0, currency: _targetCurrency || 'USD' }),
+      currency: 'USD',
+      otherCurrency: 'EUR',
+    }
+  },
 
   // C1 — return the buyer-visible payloads to scan. { label: json }.
   async buyerFacingPayloads(_ctx) {

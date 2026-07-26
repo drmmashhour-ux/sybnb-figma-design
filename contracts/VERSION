@@ -1,4 +1,4 @@
-Platform Contract Kit — v1
+Platform Contract Kit — v1.1
 
 Cut from the SYBNB STR golden state:
   branch:  claude/intelligent-kilby-5ff258
@@ -9,6 +9,14 @@ Cut from the SYBNB STR golden state:
 Contents: generic conformance suite + fixture template, and the reusable security checks
 (no-economics-leak, elevated-route authz sweep, append-only audit scan, secret/sandbox-not-in-prod,
 enumeration/rate-limit). SYBNB-specific fixtures are NOT included — a consumer supplies its own.
+
+Changelog
+  v1.1 — added the executable C3 "one money model" runner (fixture-parameterized: the fixture supplies a
+         `oneMoneyModel` { sum, currency, otherCurrency }; the kit asserts integer minor units, same-currency
+         exact sum, convert-then-sum to a target, and rejection of mixed-currency without a target). v1 had
+         no executable C3 runner (SYBNB verified the money model via the engine's own unit tests + a direct
+         conformance test); v1.1 makes C3 portable/executable for any consumer's money engine.
+  v1   — initial export (C1, C2, C4, C5, C5b, C6, C7, C8, C9 + the five security checks).
 
 Bump when the CORE contract changes (a new invariant or a changed evidence shape). Adding a product
 fixture is not a kit change.

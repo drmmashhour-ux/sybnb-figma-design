@@ -34,6 +34,22 @@ export function defineConformanceSuite(fixtures, harness) {
         await fx.teardown?.(ctx)
       })
 
+      // C3 — one money model: integer minor units, same-currency exact sum, convert-then-sum to a target,
+      // and a REFUSAL to add mixed currencies without a target. The fixture supplies its money-sum function
+      // plus two currencies its engine can convert between; the kit asserts the properties against it. (In a
+      // platform where every vertical shares one money engine this is the same engine each fixture hands in.)
+      runOr(fx.supports.oneMoneyModel, 'C3 one money model (integer minor; convert-then-sum; rejects mixed-currency)', fx.skipReason?.oneMoneyModel, async () => {
+        const { sum, currency, otherCurrency } = await fx.oneMoneyModel(ctx)
+        // same-currency: exact integer sum, same currency
+        expect(sum([{ amountMinor: 100, currency }, { amountMinor: 200, currency }]), 'same-currency integer sum is exact').toEqual({ amountMinor: 300, currency })
+        // mixed-currency WITHOUT a target currency: refused (no silent implicit conversion)
+        expect(() => sum([{ amountMinor: 100, currency }, { amountMinor: 100, currency: otherCurrency }]), 'mixed-currency without a target must throw').toThrow()
+        // convert-then-sum: with a target, each input is converted first; result is integer minor in the target
+        const converted = sum([{ amountMinor: 100, currency }, { amountMinor: 100, currency: otherCurrency }], currency)
+        expect(converted.currency, 'result is in the target currency').toBe(currency)
+        expect(Number.isInteger(converted.amountMinor), 'result stays integer minor units').toBe(true)
+      })
+
       // C1 — no economics leak: no buyer-facing payload exposes the platform cut / supplier payout.
       runOr(fx.supports.leak, 'C1 no buyer-facing economics leak', fx.skipReason?.leak, async () => {
         const payloads = await fx.buyerFacingPayloads(ctx)
