@@ -21,10 +21,11 @@ async function createUser(role, label, withEmail = true) {
 const deliveryFor = (id) => db().adminAuditLog.findFirst({ where: { action: NOTIFICATION_AUDIT_ACTION, entityId: id }, orderBy: { createdAt: 'desc' } })
 
 describe('SYB-003 — notifications wired to authoritative events (best-effort, non-blocking)', () => {
-  let app, host, guest, admin, listing
+  let app, host, guest, admin, releaser, listing
   beforeAll(async () => {
     app = testApp()
     admin = await createUser('ADMIN', 'notif-admin')
+    releaser = await createUser('ADMIN', 'notif-releaser') // D2.1: a distinct admin on record so disburse has provenance
     host = await createUser('HOST', 'notif-host')
     guest = await createUser('GUEST', 'notif-guest')
     await db().user.update({ where: { id: host.user.id }, data: { payoutMethod: { type: 'sham_cash', receiverName: 'H', phone: '099', version: 1 } } })
@@ -46,7 +47,7 @@ describe('SYB-003 — notifications wired to authoritative events (best-effort, 
   it('a manual payout disbursement records a delivery event and still completes', async () => {
     const b = await db().booking.create({ data: { listingId: listing.id, guestId: guest.user.id, status: 'COMPLETED', amountMinor: 50_00, currency: 'USD' } })
     // D1: disburse requires a frozen destination snapshot on the payout — provide one so this notification test disburses.
-    await db().payout.create({ data: { bookingId: b.id, hostId: host.user.id, amountMinor: 50_00, currency: 'USD', status: 'PENDING_HOLD', destinationSnapshot: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
+    await db().payout.create({ data: { bookingId: b.id, hostId: host.user.id, amountMinor: 50_00, currency: 'USD', status: 'PENDING_HOLD', releasedById: releaser.user.id, destinationSnapshot: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
     const res = await request(app).post(`/api/admin/payouts/${b.id}/disburse`).set('Authorization', `Bearer ${admin.token}`).send({ transition: 'INITIATED', reason: 'notify test' })
     expect(res.status).toBe(201) // workflow completed regardless of delivery
     const delivery = await deliveryFor(b.id)

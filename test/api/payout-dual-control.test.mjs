@@ -87,4 +87,15 @@ describe('payout dual control — maker != checker at disburse (D2)', () => {
     expect(payout.disbursedById, 'the disbursing actor is recorded for audit symmetry').toBe(stranger.id)
     expect(payout.destinationSnapshot?.type, 'the frozen D1 destination is unchanged').toBe('sham_cash')
   })
+
+  it('(d) a payout with NO verifier and NO releaser on record is REFUSED (403 PAYOUT_PROVENANCE_REQUIRED)', async () => {
+    // A frozen destination but no provenance: dual control cannot be established, so a single admin must
+    // not be able to push it through. This is the fail-closed counterpart to D1's no-fallback rule.
+    const booking = await db().booking.create({ data: { listingId, guestId, status: 'COMPLETED', amountMinor: 120_00, currency: 'USD' } })
+    bookingIds.push(booking.id)
+    await db().payout.create({ data: { bookingId: booking.id, hostId, amountMinor: 120_00, currency: 'USD', status: 'PENDING_HOLD', destinationSnapshot: FROZEN_METHOD } })
+    const res = await disburse(booking.id, stranger.token)
+    expect(res.status, 'a payout with no verifier/releaser on record must not be disbursable by a single admin').toBe(403)
+    expect(res.body.error?.code).toBe('PAYOUT_PROVENANCE_REQUIRED')
+  })
 })

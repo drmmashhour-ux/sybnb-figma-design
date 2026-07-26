@@ -54,10 +54,11 @@ describe('SYB-011 — host payout registration', () => {
 })
 
 describe('SYB-011 — admin disbursement lifecycle recording', () => {
-  let app, host, admin, guest, listing, booking
+  let app, host, admin, releaser, guest, listing, booking
   beforeAll(async () => {
     app = testApp()
     admin = await createUser('ADMIN', 'payout-admin')
+    releaser = await createUser('ADMIN', 'payout-releaser') // D2.1: a distinct admin on record so disburse has provenance
     host = await createUser('HOST', 'payout-host2')
     guest = await createUser('GUEST', 'payout-guest')
     await db().user.update({ where: { id: host.user.id }, data: { payoutMethod: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
@@ -65,7 +66,7 @@ describe('SYB-011 — admin disbursement lifecycle recording', () => {
     booking = await db().booking.create({ data: { listingId: listing.id, guestId: guest.user.id, status: 'COMPLETED', amountMinor: 50_00, currency: 'USD' } })
     // D1: disburse now reads the FROZEN destination snapshot on the payout, never the live host method.
     // Freeze sham_cash here so these lifecycle tests exercise disbursement (not the missing-destination guard).
-    await db().payout.create({ data: { bookingId: booking.id, hostId: host.user.id, amountMinor: 50_00, currency: 'USD', status: 'PENDING_HOLD', destinationSnapshot: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
+    await db().payout.create({ data: { bookingId: booking.id, hostId: host.user.id, amountMinor: 50_00, currency: 'USD', status: 'PENDING_HOLD', releasedById: releaser.user.id, destinationSnapshot: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
   })
   afterAll(async () => { await cleanupTestUsers() })
 

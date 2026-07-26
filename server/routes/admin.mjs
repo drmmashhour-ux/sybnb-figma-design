@@ -451,6 +451,15 @@ export async function handleAdmin(req, res, url, context) {
       select: { reviewedById: true },
     })
     const priorActors = new Set([payout.releasedById, approvedProof?.reviewedById].filter(Boolean))
+    // D2.1: fail closed on missing provenance. Dual control cannot be established if no verifier/releaser is on
+    // record, so refuse rather than let a single admin through — the counterpart to D1's no-live-fallback rule.
+    if (priorActors.size === 0) {
+      const error = new Error('Cannot disburse a payout with no verifier/releaser on record.')
+      error.statusCode = 403
+      error.code = 'PAYOUT_PROVENANCE_REQUIRED'
+      error.expose = true
+      throw error
+    }
     if (priorActors.has(context.user.id)) {
       const error = new Error('A different admin from the verifier/releaser must disburse this payout.')
       error.statusCode = 403

@@ -27,7 +27,7 @@ describe('AD3 — admin daily report (real data only)', () => {
     created.booking = (await db().booking.create({ data: { listingId: approved.id, guestId: guest.id, status: 'PAYMENT_PENDING', amountMinor: 100_00, currency: 'USD' } })).id
     created.pendingListing = (await db().listing.create({ data: { ownerId: host.id, division: 'STAYS', titleAr: 'قيد المراجعة', priceMinor: 100_00, currency: 'USD', status: 'PENDING_REVIEW', metadata: { country: 'SY' } } })).id
     created.proof = (await db().paymentProof.create({ data: { bookingId: created.booking, userId: guest.id, provider: 'sham_cash', status: 'PENDING_ADMIN_REVIEW', amountMinor: 100_00, currency: 'USD' } })).id
-    created.payout = (await db().payout.create({ data: { bookingId: created.booking, hostId: host.id, amountMinor: 104_40, currency: 'USD', status: 'PENDING_HOLD' } })).id
+    created.payout = (await db().payout.create({ data: { bookingId: created.booking, hostId: host.id, amountMinor: 104_40, currency: 'USD', status: 'PENDING_HOLD', releasedById: admin.id } })).id
     created.dispute = (await db().dispute.create({ data: { subjectType: 'STR_BOOKING', bookingId: created.booking, openedByUserId: guest.id, reason: 'test dispute', status: 'OPEN' } })).id
   })
   afterAll(async () => {
