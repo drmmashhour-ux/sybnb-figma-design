@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken, hashPassword } from '../../server/lib/security.mjs'
 import { approvePaymentProof } from '../../server/lib/finance-ledger.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
+import { cleanupTestUsers, seedMatchedReconciliation, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
 
 // D2 — maker != checker at disburse. The admin who moves the money must differ from BOTH the admin who
 // verified the payment (PaymentProof.reviewedById) and the admin who released the payout (Payout.releasedById).
@@ -39,6 +39,8 @@ describe('payout dual control — maker != checker at disburse (D2)', () => {
     const proof = await db().paymentProof.create({ data: { bookingId: booking.id, userId: guestId, provider: 'stripe', providerRef: `pi_d2_${booking.id.slice(0, 8)}`, status: 'PENDING_ADMIN_REVIEW', amountMinor: 120_00, currency: 'USD' } })
     await db().$transaction((tx) => approvePaymentProof(tx, { proofId: proof.id, actorUserId: verifierId }))
     await db().payout.update({ where: { bookingId: booking.id }, data: { status: 'RELEASED', releaseDate: new Date(), releasedById: releaserId } })
+    // Fix E: a MATCHED reconciliation (by the verifier, a distinct admin) so the E gate passes and the D2 checks run.
+    await seedMatchedReconciliation({ bookingId: booking.id, matchedById: verifierId, grossMinor: 120_00 })
     return booking
   }
 
@@ -55,6 +57,7 @@ describe('payout dual control — maker != checker at disburse (D2)', () => {
     listingId = listing.id
   })
   afterAll(async () => {
+    await db().reconciliationRecord.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {})
     await db().payout.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {})
     await db().payment.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {})
     await db().walletEntry.deleteMany({ where: { referenceId: { in: bookingIds } } }).catch(() => {})
@@ -94,6 +97,8 @@ describe('payout dual control — maker != checker at disburse (D2)', () => {
     const booking = await db().booking.create({ data: { listingId, guestId, status: 'COMPLETED', amountMinor: 120_00, currency: 'USD' } })
     bookingIds.push(booking.id)
     await db().payout.create({ data: { bookingId: booking.id, hostId, amountMinor: 120_00, currency: 'USD', status: 'PENDING_HOLD', destinationSnapshot: FROZEN_METHOD } })
+    // Reconciled (so the E gate passes) but with NO verifier/releaser on record — provenance is what must fail.
+    await seedMatchedReconciliation({ bookingId: booking.id, matchedById: verifier.id, grossMinor: 120_00 })
     const res = await disburse(booking.id, stranger.token)
     expect(res.status, 'a payout with no verifier/releaser on record must not be disbursable by a single admin').toBe(403)
     expect(res.body.error?.code).toBe('PAYOUT_PROVENANCE_REQUIRED')

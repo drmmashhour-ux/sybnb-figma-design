@@ -15,6 +15,22 @@ export async function fundWallet(userId, amountMinor = 1_000_000_000, currency =
   })
 }
 
+// Fix E (Slice 2): disburse now requires a MATCHED ReconciliationRecord for the booking's frozen Payment.
+// This seeds that runtime precondition for disburse tests — it find-or-creates a minimal Payment (settled
+// flows already have one) and appends a MATCHED reconciliation. `matchedById` must differ from the disbursing
+// admin so the maker!=checker (D2) gate still passes. Returns the created reconciliation row.
+export async function seedMatchedReconciliation({ bookingId, matchedById, grossMinor = 100_00, currency = 'USD', settlementRef }) {
+  let payment = await db().payment.findUnique({ where: { bookingId } })
+  if (!payment) {
+    payment = await db().payment.create({
+      data: { bookingId, grossMinor, commissionBaseMinor: grossMinor, commissionRateParts: 0, commissionAmountMinor: 0, hostPayoutMinor: grossMinor, currency, settlementRef: settlementRef || `SEED-${bookingId.slice(0, 8)}`, baseVersion: 'test' },
+    })
+  }
+  return db().reconciliationRecord.create({
+    data: { bookingId, paymentId: payment.id, statementRef: payment.settlementRef, amountMinor: payment.grossMinor, currency: payment.currency, source: 'manual', status: 'MATCHED', matchedById, matchedAt: new Date() },
+  })
+}
+
 // SR trust (015): claiming/working a ride now requires requireRoadReadyDriver — ID + license + vehicle
 // registration all APPROVED. Test drivers that will claim a ride must be made road-ready first.
 export async function approveDriverForRides(userId) {

@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, makeStrCommissionRateResolver, originalAdminShareRecipient, recordWalletEntry, resolveStrCommissionRate, strCommissionRateForBooking } from '../lib/finance-ledger.mjs'
 import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { recordPayoutTransition } from '../lib/host-payout.mjs'
+import { matchReconciliation, RECONCILIATION_STATUS } from '../lib/reconciliation.mjs'
 import { bookingTrackUrl, notify } from '../lib/notifications.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
@@ -406,6 +407,88 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, walletEntry: entry })
   }
 
+  // Fix E — manual received-funds reconciliation. An admin submits a merchant-statement line for a booking's
+  // frozen Payment; the server COMPUTES the outcome (never trusting a client "matched" flag) via the pure
+  // matchReconciliation and appends a ReconciliationRecord (MATCHED or MISMATCH + reason). Append-only: every
+  // submission is a new row. A MATCHED record is what unlocks disburse (see the E gate above).
+  const paymentReconcileMatch = url.pathname.match(/^\/api\/admin\/payments\/([^/]+)\/reconcile$/)
+  if (paymentReconcileMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['statementRef', 'amount', 'amountMinor', 'currency'], 'reconciliation body')
+    const bookingId = paymentReconcileMatch[1]
+
+    const payment = await db().payment.findUnique({ where: { bookingId } })
+    if (!payment) {
+      const error = new Error('No settled payment exists for this booking to reconcile.')
+      error.statusCode = 404
+      error.code = 'PAYMENT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const statementRef = String(body.statementRef ?? '').trim()
+    const amountMinor = Math.round(Number(body.amountMinor ?? body.amount))
+    const currency = String(body.currency ?? '').trim()
+    if (!statementRef || !Number.isFinite(amountMinor) || !currency) {
+      const error = new Error('statementRef, amount, and currency are required.')
+      error.statusCode = 400
+      error.code = 'RECONCILIATION_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+
+    // Duplicate detection: a statement line already consumed by a MATCHED record cannot be applied again.
+    const usedRows = await db().reconciliationRecord.findMany({ where: { status: RECONCILIATION_STATUS.MATCHED, statementRef }, select: { statementRef: true } })
+    const result = matchReconciliation({
+      payment: { grossMinor: payment.grossMinor, currency: payment.currency, settlementRef: payment.settlementRef },
+      statementLine: { amountMinor, currency, reference: statementRef },
+      usedStatementRefs: usedRows.map((r) => r.statementRef),
+    })
+
+    const isMatched = result.status === RECONCILIATION_STATUS.MATCHED
+    let record
+    try {
+      record = await db().reconciliationRecord.create({
+        data: {
+          bookingId,
+          paymentId: payment.id,
+          statementRef,
+          amountMinor,
+          currency,
+          source: 'manual',
+          status: result.status,
+          mismatchReason: result.reason ?? undefined,
+          matchedById: isMatched ? context.user.id : undefined,
+          matchedAt: isMatched ? new Date() : undefined,
+        },
+      })
+    } catch (error) {
+      // Backstop for the partial unique index (one MATCHED per payment): a concurrent match already won.
+      if (error?.code === 'P2002') {
+        const conflict = new Error('This payment is already reconciled to a MATCHED received-funds record.')
+        conflict.statusCode = 409
+        conflict.code = 'RECONCILIATION_ALREADY_MATCHED'
+        conflict.expose = true
+        throw conflict
+      }
+      throw error
+    }
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: `RECONCILIATION_${result.status}`,
+        entityType: 'reconciliation_records',
+        entityId: bookingId,
+        after: { status: result.status, reason: result.reason ?? null, amountMinor, currency },
+      },
+    })
+
+    return json(res, 201, { ok: true, status: record.status, reason: record.mismatchReason ?? null })
+  }
+
   // SYB-011 — record a MANUAL host-payout disbursement transition (staff moved money off-platform).
   // Does NOT move money; it records the governed lifecycle event so "released" (internal credit) is
   // never confused with "paid" (funds actually sent). Requires actor/role/timestamp/method/reference/
@@ -443,25 +526,41 @@ export async function handleAdmin(req, res, url, context) {
     const hostOwner = booking.listing?.owner
     const methodType = destination.type
 
-    // D2: maker != checker. The disbursing admin must differ from BOTH the admin who released this payout
-    // (Payout.releasedById) and the admin who verified the booking's payment (approved PaymentProof.reviewedById).
-    // A single admin who could verify/release AND disburse could move money to a destination no second party saw.
+    // E: received-funds reconciliation. Money may only leave once the funds have been independently reconciled
+    // to a MATCHED received-funds record (server/lib/reconciliation.mjs). A MISMATCH-only payment (no MATCHED)
+    // stays blocked. Runs after the D1 destination guard and before the dual-control checks.
+    const matchedReconciliation = await db().reconciliationRecord.findFirst({
+      where: { bookingId: payoutDisburseMatch[1], status: RECONCILIATION_STATUS.MATCHED },
+      select: { matchedById: true },
+    })
+    if (!matchedReconciliation) {
+      const error = new Error('This payout is not reconciled to a received-funds record — reconcile the merchant statement before disbursing.')
+      error.statusCode = 403
+      error.code = 'PAYOUT_NOT_RECONCILED'
+      error.expose = true
+      throw error
+    }
+
+    // D2: maker != checker. The disbursing admin must differ from every prior control actor on this payout: the
+    // admin who verified the payment (approved PaymentProof.reviewedById), the admin who released it
+    // (Payout.releasedById), and the admin who reconciled the funds (ReconciliationRecord.matchedById).
     const approvedProof = await db().paymentProof.findFirst({
       where: { bookingId: payoutDisburseMatch[1], status: 'APPROVED' },
       select: { reviewedById: true },
     })
-    const priorActors = new Set([payout.releasedById, approvedProof?.reviewedById].filter(Boolean))
+    const provenanceActors = new Set([payout.releasedById, approvedProof?.reviewedById].filter(Boolean))
     // D2.1: fail closed on missing provenance. Dual control cannot be established if no verifier/releaser is on
     // record, so refuse rather than let a single admin through — the counterpart to D1's no-live-fallback rule.
-    if (priorActors.size === 0) {
+    if (provenanceActors.size === 0) {
       const error = new Error('Cannot disburse a payout with no verifier/releaser on record.')
       error.statusCode = 403
       error.code = 'PAYOUT_PROVENANCE_REQUIRED'
       error.expose = true
       throw error
     }
-    if (priorActors.has(context.user.id)) {
-      const error = new Error('A different admin from the verifier/releaser must disburse this payout.')
+    const dualControlActors = new Set([...provenanceActors, matchedReconciliation.matchedById].filter(Boolean))
+    if (dualControlActors.has(context.user.id)) {
+      const error = new Error('A different admin from the verifier/releaser/reconciler must disburse this payout.')
       error.statusCode = 403
       error.code = 'PAYOUT_DUAL_CONTROL_REQUIRED'
       error.expose = true

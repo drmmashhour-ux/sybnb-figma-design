@@ -4,7 +4,7 @@ import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken, hashPassword } from '../../server/lib/security.mjs'
 import { approvePaymentProof } from '../../server/lib/finance-ledger.mjs'
 import { PAYOUT_AUDIT_ACTIONS } from '../../server/lib/host-payout.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
+import { cleanupTestUsers, seedMatchedReconciliation, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
 
 // D1 — the payout DESTINATION must be frozen at verify (Payout creation) and never re-read live at disburse.
 // (a) A host who changes User.payoutMethod after verify must NOT be able to redirect the disbursement.
@@ -59,6 +59,7 @@ describe('payout destination freeze (D1)', () => {
     listingId = listing.id
   })
   afterAll(async () => {
+    await db().reconciliationRecord.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {})
     await db().payout.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {})
     await db().payment.deleteMany({ where: { bookingId: { in: bookingIds } } }).catch(() => {})
     await db().walletEntry.deleteMany({ where: { referenceId: { in: bookingIds } } }).catch(() => {})
@@ -71,6 +72,7 @@ describe('payout destination freeze (D1)', () => {
 
   it('(a) a host payoutMethod change after verify is IGNORED at disburse (funds target the frozen snapshot)', async () => {
     const booking = await settledBooking(FROZEN_METHOD) // verify freezes sham_cash
+    await seedMatchedReconciliation({ bookingId: booking.id, matchedById: verifierId }) // Fix E gate: reconciled by a distinct admin
     await db().user.update({ where: { id: hostId }, data: { payoutMethod: REDIRECTED_METHOD } }) // host tries to redirect
     const res = await disburse(booking.id)
     expect(res.status).toBe(201)

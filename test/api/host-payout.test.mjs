@@ -2,7 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken, hashPassword } from '../../server/lib/security.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
+import { cleanupTestUsers, seedMatchedReconciliation, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
 import { PAYOUT_AUDIT_ACTIONS } from '../../server/lib/host-payout.mjs'
 
 // SYB-011 — governed manual host payout support: registration (write path + masked read) and the
@@ -67,6 +67,8 @@ describe('SYB-011 — admin disbursement lifecycle recording', () => {
     // D1: disburse now reads the FROZEN destination snapshot on the payout, never the live host method.
     // Freeze sham_cash here so these lifecycle tests exercise disbursement (not the missing-destination guard).
     await db().payout.create({ data: { bookingId: booking.id, hostId: host.user.id, amountMinor: 50_00, currency: 'USD', status: 'PENDING_HOLD', releasedById: releaser.user.id, destinationSnapshot: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
+    // Fix E: disburse requires a MATCHED received-funds record; reconciler (releaser) is distinct from the disbursing admin.
+    await seedMatchedReconciliation({ bookingId: booking.id, matchedById: releaser.user.id, grossMinor: 50_00 })
   })
   afterAll(async () => { await cleanupTestUsers() })
 

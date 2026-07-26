@@ -2,7 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken, hashPassword } from '../../server/lib/security.mjs'
-import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
+import { cleanupTestUsers, seedMatchedReconciliation, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../support/testServer.mjs'
 import { releaseAbandonedHolds } from '../../server/lib/booking-lifecycle.mjs'
 import { NOTIFICATION_AUDIT_ACTION } from '../../server/lib/notifications.mjs'
 
@@ -48,6 +48,8 @@ describe('SYB-003 — notifications wired to authoritative events (best-effort, 
     const b = await db().booking.create({ data: { listingId: listing.id, guestId: guest.user.id, status: 'COMPLETED', amountMinor: 50_00, currency: 'USD' } })
     // D1: disburse requires a frozen destination snapshot on the payout — provide one so this notification test disburses.
     await db().payout.create({ data: { bookingId: b.id, hostId: host.user.id, amountMinor: 50_00, currency: 'USD', status: 'PENDING_HOLD', releasedById: releaser.user.id, destinationSnapshot: { type: 'sham_cash', receiverName: 'Omar', phone: '0988', version: 1 } } })
+    // Fix E: disburse requires a MATCHED received-funds record; reconciler (releaser) is distinct from the disbursing admin.
+    await seedMatchedReconciliation({ bookingId: b.id, matchedById: releaser.user.id, grossMinor: 50_00 })
     const res = await request(app).post(`/api/admin/payouts/${b.id}/disburse`).set('Authorization', `Bearer ${admin.token}`).send({ transition: 'INITIATED', reason: 'notify test' })
     expect(res.status).toBe(201) // workflow completed regardless of delivery
     const delivery = await deliveryFor(b.id)
