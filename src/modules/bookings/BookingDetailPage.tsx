@@ -4,6 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   confirmStripePayment,
   createStripeCheckoutSession,
+  fetchCountryConfig,
   fetchPrototypeBooking,
   fetchStripePaymentStatus,
   submitBookingContact,
@@ -12,9 +13,11 @@ import {
   type PlatformListing,
   type PlatformListingReview,
   type PlatformPaymentProof,
+  type PlatformPilotScope,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
+import { isCardPaymentOffered } from '../../shared/booking/pilotScopeUi'
 import { guestFeeSummary } from './guestFeeSummary'
 import { BookingCancelDispute } from './BookingCancelDispute'
 
@@ -174,6 +177,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const [reviewStatus, setReviewStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [reviewError, setReviewError] = useState('')
   const [stripeConfigured, setStripeConfigured] = useState(false)
+  const [pilotScope, setPilotScope] = useState<PlatformPilotScope | null>(null)
   const [cardState, setCardState] = useState<'idle' | 'starting' | 'confirming' | 'error'>('idle')
   const [cardError, setCardError] = useState('')
   const [contactName, setContactName] = useState('')
@@ -190,6 +194,14 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     fetchStripePaymentStatus()
       .then((result) => setStripeConfigured(result.configured))
       .catch(() => setStripeConfigured(false))
+  }, [])
+
+  // Section B2: the Sham-Cash-only pilot hides the card option (card payment is deferred). Driven by the
+  // server scope so re-enabling is a config change; a failed fetch leaves the full feature set.
+  useEffect(() => {
+    fetchCountryConfig('SY')
+      .then((config) => setPilotScope(config.scope ?? null))
+      .catch(() => setPilotScope(null))
   }, [])
 
   useEffect(() => {
@@ -350,7 +362,11 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
       )
     }
 
-    if (!stripeConfigured) {
+    // Section B2: hide the card option in the Sham-Cash-only pilot (card deferred) — fall through to the
+    // wallet-only pay button, same as when Stripe isn't configured. The server also refuses the card
+    // endpoint (B1), so this is the UI half of a defense-in-depth pair.
+    const cardPaymentOffered = isCardPaymentOffered(pilotScope)
+    if (!stripeConfigured || !cardPaymentOffered) {
       return (
         <button style={styles.primaryButton} disabled={cardState === 'confirming'} onClick={() => (window.location.hash = paymentRoute)}>
           {t.pay}

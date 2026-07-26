@@ -2509,16 +2509,25 @@ export async function resolveDispute(id: string, input: { decision: 'REFUND' | '
   return response.dispute
 }
 
-// Per-country config (public) — used to show the exact flat cancellation fee in the confirm dialog.
+// Sham-Cash-only pilot capabilities (Section B) — the server (server/lib/pilot-scope.mjs) reports which
+// deferred paths the UI must hide/reroute. Undefined = full feature set (non-pilot / older server).
+export type PlatformPilotScope = {
+  shamCashOnly: boolean
+  cardPaymentAvailable: boolean
+  selfServeCancellation: boolean
+}
+// Per-country config (public) — used to show the exact flat cancellation fee in the confirm dialog, and
+// (Section B) to carry the pilot scope so the guest UI hides card payment + routes cancellation to support.
 export type PlatformCountryConfig = {
   code: string
   currency: string
   strLateCancelFee?: { feeMinor: number; feeMinorUsd: number }
   disputeWindowHours?: number
+  scope?: PlatformPilotScope
 }
 export async function fetchCountryConfig(code = 'SY') {
-  const response = await apiRequest<{ ok: true; country: PlatformCountryConfig }>(`/api/config/country/${code}`)
-  return response.country
+  const response = await apiRequest<{ ok: true; country: PlatformCountryConfig; scope?: PlatformPilotScope }>(`/api/config/country/${code}`)
+  return { ...response.country, scope: response.scope }
 }
 
 // ---- Store-compliance: account deletion, report content, block users (Phase 2 store-readiness) ----

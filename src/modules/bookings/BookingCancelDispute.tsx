@@ -5,6 +5,7 @@ import { moneyText } from '../../shared/i18n/display'
 import { cancellationCutoffDate, freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { guestFeeSummary } from './guestFeeSummary'
 import { OpenDisputeForm } from '../disputes/OpenDisputeForm'
+import { isSelfServeCancellationOffered } from '../../shared/booking/pilotScopeUi'
 
 // STR guest cancellation + dispute entry point on the booking detail screen.
 // - CONFIRMED/REQUESTED booking → policy + Cancel with a confirm dialog stating refund & withheld fee.
@@ -27,6 +28,7 @@ const copy = {
     keep: 'تراجع',
     cancelledTitle: 'تم إلغاء الحجز',
     genericError: 'تعذر إلغاء الحجز، حاول مجددًا.',
+    pilotCancelNote: 'يتم التعامل مع الإلغاء عبر الدعم خلال المرحلة التجريبية. أرسل طلبًا أدناه وسيقوم المشرف بمعالجة الإلغاء وأي استرداد.',
   },
   en: {
     heading: 'Cancel booking',
@@ -41,6 +43,7 @@ const copy = {
     keep: 'Keep booking',
     cancelledTitle: 'Booking cancelled',
     genericError: 'Could not cancel the booking. Please try again.',
+    pilotCancelNote: 'Cancellation is handled by support during the pilot. Open a request below and an admin will process your cancellation and any refund.',
   },
 }
 
@@ -102,6 +105,19 @@ export function BookingCancelDispute({ booking, lang, onChanged }: { booking: Pl
   }
 
   if (!CANCELLABLE.includes(booking.status)) return null
+
+  // Section B2: in the Sham-Cash-only pilot the automated self-serve cancel is deferred (its money-movement
+  // is not yet fully tested). Route to the admin-handled path — open a dispute / contact support — so a
+  // cancellation can still happen manually and no one is trapped. Never renders the automated cancel button.
+  if (!isSelfServeCancellationOffered(country?.scope)) {
+    return (
+      <section style={styles.box} dir={isAr ? 'rtl' : 'ltr'}>
+        <h3 style={styles.title}>{t.heading}</h3>
+        <p style={styles.policy}>{t.pilotCancelNote}</p>
+        <OpenDisputeForm lang={lang} bookingId={booking.id} />
+      </section>
+    )
+  }
 
   return (
     <section style={styles.box} dir={isAr ? 'rtl' : 'ltr'}>
