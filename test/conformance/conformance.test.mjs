@@ -77,6 +77,16 @@ for (const fx of FIXTURES) {
       expect(s.paidWithoutRef, `payment without a settlement reference was accepted (status ${s.status}, code ${s.rejectionCode})`).toBe(false)
     })
 
+    runOr(fx.supports.frozenTerms, 'C7 frozen-terms: an issued booking keeps its commission terms after a later rate change', fx.skipReason?.frozenTerms, async () => {
+      const f = await fx.frozenTerms(ctx)
+      expect(f.issuedRateParts, 'booking issued at the 13% rate (parts-per-million)').toBe(130_000)
+      expect(f.issuedCommissionMinor, 'issued commission = 13% of the 120.00 base').toBe(15_60)
+      expect(f.liveRateNow, 'the LIVE rate genuinely changed to 25%').toBeCloseTo(0.25)
+      expect(f.stillFrozenRateParts, 'the frozen Payment rate is unchanged after the policy change').toBe(130_000)
+      expect(f.stillFrozenCommissionMinor, 'the frozen commission amount is unchanged').toBe(15_60)
+      expect(f.statementCommissionMinor, 'the statement renders the frozen 13% commission, NOT the new 25%').toBe(15_60)
+    })
+
     runOr(fx.supports.auditAppendOnly, 'C9 append-only audit on money/config/consent (config change appends before/after; no mutation path)', fx.skipReason?.auditAppendOnly, async () => {
       const a = await fx.auditAppendOnly(ctx)
       expect(a.configChangeAppended, 'a config/rate change appends an audit row').toBe(true)
@@ -92,7 +102,7 @@ afterAll(async () => {
 
 // ---- PENDING — the rest of the CORE contract, documented + tied to the A-item that will fill each ----
 describe('CONFORMANCE · pending invariants (documented; grow with the A-items)', () => {
-  it.skip('C7 frozen-terms: a booking\'s commission terms are immutable once set  [→ A-item: frozen M5 records]', () => {})
+  // C7 frozen-terms — NOW LIVE: wired per-fixture above (Stays proves it; Ride scoped-skips read-only).
   it.skip('C8 no-double-book: two concurrent bookings for one slot cannot both confirm  [→ A-item: H5 concurrency]', () => {})
   // C9 append-only audit — NOW LIVE (A6.3): wired per-fixture above (Stays proves it; Ride skips read-only).
   it.skip('C5b sandbox ref rejected in prod: a test/sandbox settlement ref is refused under NODE_ENV=production  [→ A-item: prod settlement guard]', () => {})

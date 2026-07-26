@@ -2,7 +2,8 @@ import request from 'supertest'
 import { fileURLToPath } from 'node:url'
 import { db } from '../../../server/lib/prisma.mjs'
 import { createSessionToken, hashPassword } from '../../../server/lib/security.mjs'
-import { platformFee } from '../../../server/lib/finance-ledger.mjs'
+import { approvePaymentProof, platformFee, strCommissionRateForBooking } from '../../../server/lib/finance-ledger.mjs'
+import { buildStayStatement } from '../../../server/lib/stay-statements.mjs'
 import { findAuditMutationPaths } from '../contract.mjs'
 import { testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode } from '../../support/testServer.mjs'
 
@@ -17,7 +18,7 @@ function isoDay(offset) {
 
 export const staysFixture = {
   name: 'stays',
-  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true },
+  supports: { leak: true, authz: true, commissionTaxInvariant: true, jurisdictionFailClosed: true, settlementRef: true, auditAppendOnly: true, frozenTerms: true },
 
   async setup() {
     const app = testApp()
@@ -62,6 +63,15 @@ export const staysFixture = {
 
   async teardown(ctx) {
     if (!ctx) return
+    if (ctx.c7) {
+      await db().payout.deleteMany({ where: { bookingId: ctx.c7.bookingId } }).catch(() => {})
+      await db().payment.deleteMany({ where: { bookingId: ctx.c7.bookingId } }).catch(() => {})
+      await db().walletEntry.deleteMany({ where: { referenceId: ctx.c7.bookingId } }).catch(() => {})
+      await db().paymentProof.deleteMany({ where: { bookingId: ctx.c7.bookingId } }).catch(() => {})
+      await db().booking.deleteMany({ where: { id: ctx.c7.bookingId } }).catch(() => {})
+      await db().listing.deleteMany({ where: { id: ctx.c7.listingId } }).catch(() => {})
+      await db().jurisdictionCommissionPolicy.deleteMany({ where: { country: ctx.c7.country } }).catch(() => {})
+    }
     if (ctx.c9PolicyId) {
       await db().adminAuditLog.deleteMany({ where: { entityId: ctx.c9PolicyId } }).catch(() => {})
       await db().jurisdictionCommissionPolicy.delete({ where: { id: ctx.c9PolicyId } }).catch(() => {})
@@ -114,6 +124,43 @@ export const staysFixture = {
     return {
       chargedWhileUnconfirmed: (taxLine.status && taxLine.status !== 'NONE') || collected > 0,
       legalReviewStatus: feed.body?.legalReviewStatus,
+    }
+  },
+
+  async frozenTerms(ctx) {
+    // C7 — an ISSUED booking's commission terms are frozen at settlement (M5 Payment record + termsSnapshot)
+    // and never restated by a later policy change. Settle a booking at the default 13% in a throwaway
+    // jurisdiction (deterministic split: gross 120.00 = rent 100.00 + cleaning 20.00 → 13% = 15.60), then
+    // activate a DIFFERENT live rate (25%) and prove the frozen Payment AND the rendered statement still
+    // show the original 13%. Cleaned up in teardown via ctx.c7.
+    const country = `ZF${String(Date.now()).slice(-6)}`
+    const listing = await db().listing.create({
+      data: { ownerId: ctx.host.id, division: 'STAYS', titleAr: 'C7', priceMinor: 100_00, currency: 'USD', status: 'APPROVED', instantBookEnabled: false, metadata: { country, cleaningFeeMinor: 20_00 } },
+    })
+    const booking = await db().booking.create({ data: { listingId: listing.id, guestId: ctx.guest.id, status: 'PAYMENT_PENDING', amountMinor: 120_00, currency: 'USD' } })
+    const proof = await db().paymentProof.create({ data: { bookingId: booking.id, userId: ctx.guest.id, provider: 'stripe', providerRef: 'pi_c7', status: 'PENDING_ADMIN_REVIEW', amountMinor: 120_00, currency: 'USD' } })
+    await db().$transaction((tx) => approvePaymentProof(tx, { proofId: proof.id, actorUserId: ctx.admin.id }))
+    ctx.c7 = { country, listingId: listing.id, bookingId: booking.id }
+
+    const issued = await db().payment.findUnique({ where: { bookingId: booking.id } })
+
+    // Activate a DIFFERENT live rate (25%) for this jurisdiction, effective before the booking.
+    await db().jurisdictionCommissionPolicy.create({
+      data: { country, serviceType: 'STAY', policyType: 'FLAT', flatRateParts: 250_000, effectiveFrom: new Date('2020-01-01'), active: true, legallyReviewedById: ctx.admin.id, legallyReviewedAt: new Date() },
+    })
+    const withListing = await db().booking.findUnique({ where: { id: booking.id }, include: { listing: true } })
+    const liveRate = await strCommissionRateForBooking(db(), withListing)
+    const statement = await buildStayStatement(db(), { hostId: ctx.host.id, periodType: 'ANNUAL', periodStart: new Date('2020-01-01'), periodEnd: new Date('2999-01-01') })
+    const line = statement.lines.find((l) => l.bookingId === booking.id)
+    const stillFrozen = await db().payment.findUnique({ where: { bookingId: booking.id } })
+
+    return {
+      issuedRateParts: issued?.commissionRateParts,
+      issuedCommissionMinor: issued?.commissionAmountMinor,
+      liveRateNow: liveRate,
+      stillFrozenRateParts: stillFrozen?.commissionRateParts,
+      stillFrozenCommissionMinor: stillFrozen?.commissionAmountMinor,
+      statementCommissionMinor: line?.commissionMinor,
     }
   },
 
