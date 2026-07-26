@@ -4,6 +4,7 @@ import { approvePaymentProof, bookingFinanceSplit, makeStrCommissionRateResolver
 import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { recordPayoutTransition } from '../lib/host-payout.mjs'
 import { matchReconciliation, RECONCILIATION_STATUS } from '../lib/reconciliation.mjs'
+import { compileReconciliationQueue } from '../lib/reconciliation-queue.mjs'
 import { bookingTrackUrl, notify } from '../lib/notifications.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
@@ -193,6 +194,16 @@ export async function handleAdmin(req, res, url, context) {
   // number. The authoritative `facts` are always returned from the records; the `narrative` is best-effort
   // AI phrasing when configured, otherwise a deterministic template over the same facts. Advisory + admin-
   // reviewed (this endpoint takes no action). Admin-only.
+  // Fix E — the reconciliation queue: payments needing attention (unreconciled-eligible + MISMATCH with
+  // reason), fully MATCHED excluded. ADMIN-only, read-only — it never mutates a record. Amounts/refs/status
+  // only (no PII beyond the existing admin views).
+  if (url.pathname === '/api/admin/reconciliation-queue') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN'])
+    const queue = await compileReconciliationQueue(db())
+    return json(res, 200, { ok: true, items: queue.items, counts: { mismatch: queue.mismatchCount, unreconciled: queue.unreconciledCount } })
+  }
+
   if (url.pathname === '/api/admin/daily-report') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
