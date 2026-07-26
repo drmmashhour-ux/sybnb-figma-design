@@ -840,6 +840,9 @@ model Payout {
   // and disburse refuses a null destination (403 PAYOUT_DESTINATION_MISSING) rather than falling back to live.
   destinationSnapshot    Json?   @map("destination_snapshot")
   destinationFingerprint String? @map("destination_fingerprint")
+  // D2: the admin who actually disbursed (moved money off-platform). Recorded for maker!=checker audit
+  // symmetry with releasedById/PaymentProof.reviewedById; disburse refuses an actor equal to either of those.
+  disbursedById String?  @map("disbursed_by_id")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

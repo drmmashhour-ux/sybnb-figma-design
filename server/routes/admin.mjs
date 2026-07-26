@@ -443,6 +443,22 @@ export async function handleAdmin(req, res, url, context) {
     const hostOwner = booking.listing?.owner
     const methodType = destination.type
 
+    // D2: maker != checker. The disbursing admin must differ from BOTH the admin who released this payout
+    // (Payout.releasedById) and the admin who verified the booking's payment (approved PaymentProof.reviewedById).
+    // A single admin who could verify/release AND disburse could move money to a destination no second party saw.
+    const approvedProof = await db().paymentProof.findFirst({
+      where: { bookingId: payoutDisburseMatch[1], status: 'APPROVED' },
+      select: { reviewedById: true },
+    })
+    const priorActors = new Set([payout.releasedById, approvedProof?.reviewedById].filter(Boolean))
+    if (priorActors.has(context.user.id)) {
+      const error = new Error('A different admin from the verifier/releaser must disburse this payout.')
+      error.statusCode = 403
+      error.code = 'PAYOUT_DUAL_CONTROL_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
     const transition = String(body.transition || '').toUpperCase()
     const entry = await recordPayoutTransition(db(), {
       transition,
@@ -455,6 +471,9 @@ export async function handleAdmin(req, res, url, context) {
       reason: body.reason,
       reconciliationNote: body.reconciliationNote,
     })
+
+    // D2: stamp the disbursing actor on the payout (audit symmetry with releasedById/reviewedById).
+    await db().payout.update({ where: { bookingId: payoutDisburseMatch[1] }, data: { disbursedById: context.user.id } })
 
     // SYB-003: notify the host on the states they care about, best-effort AFTER the record commits.
     if ((transition === 'INITIATED' || transition === 'COMPLETED') && hostOwner?.id) {

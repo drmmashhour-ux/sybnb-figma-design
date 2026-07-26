@@ -18,6 +18,7 @@ describe('payout destination freeze (D1)', () => {
   let app
   let adminId
   let adminToken
+  let verifierId // D2: a distinct admin verifies the payment, so the disbursing admin can pass dual control
   let guestId
   let hostId
   let listingId
@@ -36,7 +37,7 @@ describe('payout destination freeze (D1)', () => {
     const booking = await db().booking.create({ data: { listingId, guestId, status: 'PAYMENT_PENDING', amountMinor: 120_00, currency: 'USD' } })
     bookingIds.push(booking.id)
     const proof = await db().paymentProof.create({ data: { bookingId: booking.id, userId: guestId, provider: 'stripe', providerRef: `pi_d1_${booking.id.slice(0, 8)}`, status: 'PENDING_ADMIN_REVIEW', amountMinor: 120_00, currency: 'USD' } })
-    await db().$transaction((tx) => approvePaymentProof(tx, { proofId: proof.id, actorUserId: adminId }))
+    await db().$transaction((tx) => approvePaymentProof(tx, { proofId: proof.id, actorUserId: verifierId }))
     return booking
   }
 
@@ -51,6 +52,7 @@ describe('payout destination freeze (D1)', () => {
     const admin = await mkUser('ADMIN', 'd1-admin')
     adminId = admin.id
     adminToken = admin.token
+    verifierId = (await mkUser('ADMIN', 'd1-verifier')).id
     guestId = (await mkUser('GUEST', 'd1-guest')).id
     hostId = (await mkUser('HOST', 'd1-host')).id
     const listing = await db().listing.create({ data: { ownerId: hostId, division: 'STAYS', titleAr: 'D1', priceMinor: 100_00, currency: 'USD', status: 'APPROVED', instantBookEnabled: false, metadata: { country: 'SY' } } })
