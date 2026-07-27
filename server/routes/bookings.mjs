@@ -8,6 +8,7 @@ import {
   strCommissionRateForBooking,
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { checkRateLimit, clientIp } from '../lib/rate-limit.mjs'
 import { computeGuestBookingTotalMinor, computeStayTotalMinor } from '../lib/pricing.mjs'
 import { amountToRoundedUsd, stayQuoteToRoundedUsd } from '../lib/currency.mjs'
 import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
@@ -21,6 +22,21 @@ import { DELIVERY_STATUS, bookingTrackUrl, notify } from '../lib/notifications.m
 // POST /api/auth/checkout-guest) -- only overwritten by the real name below if it's still exactly
 // this placeholder, so a guest who registered normally with their own chosen name is never clobbered.
 const FRICTIONLESS_GUEST_PLACEHOLDER_NAME = 'SYBNB Guest'
+
+// F6 — the public ref+phone booking lookup is unauthenticated, so a leaked confirmation ref could be used to
+// brute-force the guest's phone. Two fail-closed limiters (S3): per-IP caps a single attacker's throughput,
+// and per-ref caps total guessing against one confirmation number even across rotating IPs. Both are tight —
+// a legitimate guest checks their own trip only a handful of times. Env-overridable via RATE_LIMIT_<name>_*.
+const BOOKING_LOOKUP_PER_IP = { name: 'BOOKING_LOOKUP_PER_IP', max: 10, windowMs: 15 * 60 * 1000 }
+const BOOKING_LOOKUP_PER_REF = { name: 'BOOKING_LOOKUP_PER_REF', max: 5, windowMs: 15 * 60 * 1000 }
+
+function lookupRateLimited(res, result) {
+  res.setHeader('retry-after', String(result.retryAfterSeconds))
+  return json(res, 429, {
+    ok: false,
+    error: { code: 'RATE_LIMITED', message: `Too many lookup attempts. Try again in ${result.retryAfterSeconds} seconds.` },
+  })
+}
 
 // Must match src/shared/booking/cancellationPolicy.ts's STANDARD_FREE_CANCELLATION_DAYS_BEFORE_CHECKIN
 // -- that frontend module only computes the *displayed* cutoff date; this is what was actually
@@ -384,6 +400,11 @@ export async function handleBookings(req, res, url, context) {
   // Rate-limited (server/index.mjs RATE_LIMIT_RULES) since it's unauthenticated and phone-guessable.
   if (url.pathname === '/api/bookings/lookup') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+
+    // F6: per-IP throttle BEFORE any parsing/DB work, so a flood can't force lookups. Fail-closed (S3).
+    const perIp = await checkRateLimit({ bucketKey: `ip:${clientIp(req)}`, name: BOOKING_LOOKUP_PER_IP.name, defaultMax: BOOKING_LOOKUP_PER_IP.max, defaultWindowMs: BOOKING_LOOKUP_PER_IP.windowMs, failMode: 'closed' })
+    if (!perIp.allowed) return lookupRateLimited(res, perIp)
+
     const refHex = String(url.searchParams.get('ref') || '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 12)
     const phone = assertValidPhone(url.searchParams.get('phone'), 'phone')
     if (!refHex || refHex.length < 8 || !phone) {
@@ -393,6 +414,12 @@ export async function handleBookings(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    // F6: per-ref throttle so a single confirmation number can't be brute-forced for the guest's phone even
+    // across rotating IPs. Runs after input validation (a malformed ref never consumes the counter). Fail-closed.
+    const perRef = await checkRateLimit({ bucketKey: `ref:${refHex}`, name: BOOKING_LOOKUP_PER_REF.name, defaultMax: BOOKING_LOOKUP_PER_REF.max, defaultWindowMs: BOOKING_LOOKUP_PER_REF.windowMs, failMode: 'closed' })
+    if (!perRef.allowed) return lookupRateLimited(res, perRef)
+
     const idPrefix = refHex.length > 8 ? `${refHex.slice(0, 8)}-${refHex.slice(8, 12)}` : refHex
     const normalizedPhone = phone.replace(/[\s()-]/g, '')
 
