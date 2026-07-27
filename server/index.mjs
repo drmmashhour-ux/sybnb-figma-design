@@ -4,7 +4,7 @@ import { API_ENDPOINTS, PLATFORM_SECURITY_RULES } from './contracts.mjs'
 import { getAuthContext } from './lib/auth-context.mjs'
 import { loadEnv, validateProductionConfig } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
-import { checkRateLimit, clientIp } from './lib/rate-limit.mjs'
+import { checkRateLimit, checkRateLimitDb, clientIp } from './lib/rate-limit.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { applySecurityHeaders } from './lib/security-headers.mjs'
 import { handleAccommodations } from './routes/accommodations.mjs'
@@ -26,6 +26,20 @@ import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleWallet } from './routes/wallet.mjs'
 
 loadEnv()
+
+// Last-resort process guards (L5). Every request is already wrapped in try/catch (handleRequest) and
+// no route leaves a floating promise, so these should never fire — but a future stray rejection must
+// not silently crash the process. Log and keep serving. Registered once (guarded against duplicate
+// registration if this module is imported more than once, e.g. dev + serverless entry points).
+if (!globalThis.__sybnbProcessGuardsInstalled) {
+  globalThis.__sybnbProcessGuardsInstalled = true
+  process.on('unhandledRejection', (reason) => {
+    console.error('[sybnb] unhandledRejection:', reason)
+  })
+  process.on('uncaughtException', (error) => {
+    console.error('[sybnb] uncaughtException:', error)
+  })
+}
 
 const PORT = Number(process.env.API_PORT || 3051)
 const HOST = process.env.API_HOST || '127.0.0.1'
@@ -69,6 +83,9 @@ const RATE_LIMIT_RULES = [
   { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true },
   { name: 'PAYMENT_PROOF', method: 'POST', pattern: /^\/api\/payments\/(seller-plan-proof|local-wallet-proof)$/, max: 10, windowMs: 60 * 1000, byUser: true },
+  // Defense-in-depth over the per-gift 3-try lockout (wallet.mjs): a per-user cap bounds code
+  // enumeration across many different gift ids, which the per-gift counter alone can't see.
+  { name: 'GIFT_CLAIM', method: 'POST', pattern: /^\/api\/wallet\/gifts\/[^/]+\/claim$/, max: 20, windowMs: 15 * 60 * 1000, byUser: true },
   { name: 'ADMIN_DECISION', method: 'PATCH', pattern: /^\/api\/admin\/review-queue\/[^/]+\/[^/]+$/, max: 60, windowMs: 60 * 1000, byUser: true },
   { name: 'DOCUMENT_ACCESS', method: 'GET', pattern: /^\/api\/(admin\/id-document|me\/id-document)\/[^/]+(\/file)?$/, max: 30, windowMs: 60 * 1000, byUser: true },
   { name: 'GEOCODING', method: 'POST', pattern: /^\/api\/sr\/(quote|rides)$/, max: 20, windowMs: 60 * 1000, byUser: true },
@@ -118,7 +135,11 @@ export async function handleRequest(req, res) {
       // throttle every user behind it); unauthenticated ones (login, register, public search) are
       // limited per-IP, since there's no account yet to key on.
       const bucketKey = rule.byUser && context?.user ? `user:${context.user.id}` : `ip:${clientIp(req)}`
-      const result = checkRateLimit({ bucketKey, name: rule.name, defaultMax: rule.max, defaultWindowMs: rule.windowMs })
+      const limitArgs = { bucketKey, name: rule.name, defaultMax: rule.max, defaultWindowMs: rule.windowMs }
+      // Shared DB counter on serverless/multi-instance (RATE_LIMIT_STORE=db); in-memory otherwise.
+      // Read at call time (not a module const) so it reflects the env loadEnv() populated from .env.
+      const result =
+        process.env.RATE_LIMIT_STORE === 'db' ? await checkRateLimitDb(limitArgs) : checkRateLimit(limitArgs)
       if (!result.allowed) {
         res.setHeader('retry-after', String(result.retryAfterSeconds))
         return json(res, 429, {

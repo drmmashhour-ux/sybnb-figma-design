@@ -99,13 +99,17 @@ be used in development/testing.
 
 ## Production recommendation
 
-**Do not represent this limiter as globally enforced in a multi-instance deployment.** It is
-correct and effective for the current single-process deployment. Before running more than one API
-instance (horizontal scaling, multi-container, multi-region), replace the in-memory `Map` with a
-shared store (Redis `INCR`+`EXPIRE` or equivalent) behind the same `checkRateLimit()` interface —
-the rule table and policy (which endpoints, what limits, byUser vs. by-IP) does not need to change,
-only the storage backend. Treat distributed rate limiting as a **hard prerequisite for
-multi-instance deployment**, not an optional hardening step.
+**Multi-instance / serverless deployments must set `RATE_LIMIT_STORE=db`.** The default in-memory
+`Map` is correct only for a single process; each instance would otherwise keep its own counter and a
+client would get a fresh limit per instance. Setting `RATE_LIMIT_STORE=db` switches the limiter to a
+shared Postgres counter (`rate_limit_hits` table, `checkRateLimitDb()`), which enforces the exact same
+rule table and policy (which endpoints, what limits, byUser vs. by-IP) across every instance — a single
+atomic upsert per hit both resets an expired window and increments a live one, so concurrent requests
+across instances can't miscount. The window's seconds-to-reset is computed in-DB against `now()`, so the
+`retry-after` header is correct regardless of the database session timezone. Expired rows are swept
+opportunistically (~1% of hits). Treat `RATE_LIMIT_STORE=db` as a **hard prerequisite for any
+multi-instance deployment** (including Vercel serverless), not an optional hardening step. An external
+store (Redis `INCR`+`EXPIRE`) remains a valid alternative behind the same interface if desired later.
 
 ## Testing
 

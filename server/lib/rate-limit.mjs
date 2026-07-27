@@ -1,10 +1,11 @@
-// Configurable, in-memory sliding-window rate limiter.
-//
-// Single-instance only: buckets live in this process's memory. This is documented explicitly
-// (see docs/security/SYBNB_V6_RATE_LIMIT_POLICY.md) rather than silently assumed — running more
-// than one API process/container behind a load balancer would let a client get a fresh limit per
-// instance. A production multi-instance deployment needs a shared store (Redis or equivalent)
-// instead of this module. The policy (which endpoints, what limits) carries over unchanged.
+// Configurable rate limiter with two interchangeable stores:
+//   - default: in-memory (this process only) — fast, zero-dependency, used for local/dev and tests.
+//   - RATE_LIMIT_STORE=db: a shared Postgres counter (checkRateLimitDb) so limits hold across every
+//     API instance. REQUIRED on serverless/multi-instance (e.g. Vercel), where each function instance
+//     has its own memory and the in-memory buckets would give a client a fresh limit per instance.
+// Both stores share the same config/validation helpers and return the exact same result shape; the
+// caller (server/index.mjs) picks the store once from RATE_LIMIT_STORE. See
+// docs/security/SYBNB_V6_RATE_LIMIT_POLICY.md. The policy (which endpoints, what limits) is unchanged.
 //
 // Client identification: only trusts a proxy-supplied IP (X-Forwarded-For) when explicitly
 // configured to via TRUST_PROXY=1, so a client can't just set that header themselves to reset
@@ -12,6 +13,8 @@
 // direct-exposed deployment). The production origin must reject direct public traffic (only
 // accept connections from the trusted proxy/load balancer) whenever TRUST_PROXY=1 is set —
 // otherwise an external client could still forge X-Forwarded-For directly against the origin.
+
+import { db } from './prisma.mjs'
 
 const buckets = new Map()
 
@@ -131,6 +134,59 @@ export function checkRateLimit({ bucketKey, name, defaultMax, defaultWindowMs })
 
   existing.count += 1
   return { allowed: true, remaining: max - existing.count, resetAt: existing.resetAt, retryAfterSeconds: 0 }
+}
+
+// DB-backed fixed-window limiter (RATE_LIMIT_STORE=db). Same interface and return shape as
+// checkRateLimit, but the counter lives in a shared table so the limit is enforced across every API
+// instance. A SINGLE atomic upsert both resets an expired window and increments within a live one, so
+// concurrent requests across instances can't miscount (no read-then-write race). Async, so the caller
+// awaits it. The in-memory path stays synchronous and unchanged for local/dev/tests.
+export async function checkRateLimitDb({ bucketKey, name, defaultMax, defaultWindowMs }, client = db()) {
+  if (process.env.DISABLE_RATE_LIMIT === '1') {
+    return { allowed: true, remaining: Infinity, resetAt: 0, retryAfterSeconds: 0 }
+  }
+
+  const { max, windowMs } = limitConfig(name, defaultMax, defaultWindowMs)
+  const key = `${name}:${bucketKey}`
+
+  // secondsToReset is computed in-DB against now() so it never depends on the DB session timezone
+  // (reset_at is a naive `timestamp`; comparing/subtracting via now()::timestamp keeps both operands
+  // in the same frame). resetAt is then derived in JS as an offset from local now, so both fields are
+  // correct regardless of the server's / database's timezone.
+  const rows = await client.$queryRaw`
+    INSERT INTO rate_limit_hits ("key", "count", "reset_at")
+    VALUES (${key}, 1, now() + (${windowMs}::int * interval '1 millisecond'))
+    ON CONFLICT ("key") DO UPDATE SET
+      "count" = CASE WHEN rate_limit_hits."reset_at" <= now() THEN 1 ELSE rate_limit_hits."count" + 1 END,
+      "reset_at" = CASE WHEN rate_limit_hits."reset_at" <= now()
+                        THEN now() + (${windowMs}::int * interval '1 millisecond')
+                        ELSE rate_limit_hits."reset_at" END
+    RETURNING "count" AS "count",
+              CEIL(EXTRACT(EPOCH FROM ("reset_at" - now()::timestamp)))::int AS "secondsToReset"
+  `
+  const row = rows[0]
+  const count = Number(row.count)
+  const secondsToReset = Math.max(0, Number(row.secondsToReset) || 0)
+  const resetAt = Date.now() + secondsToReset * 1000
+
+  if (count > max) {
+    return {
+      allowed: false,
+      remaining: 0,
+      resetAt,
+      retryAfterSeconds: Math.max(1, secondsToReset),
+    }
+  }
+
+  // Opportunistic cleanup (~1% of allowed calls) so one-off IP keys don't accumulate forever without
+  // a scheduler — mirrors the in-memory sweeper's intent. Cheap and best-effort; never blocks a hit.
+  if (Math.random() < 0.01) {
+    client
+      .$executeRaw`DELETE FROM rate_limit_hits WHERE "reset_at" < now() - interval '1 hour'`
+      .catch(() => {})
+  }
+
+  return { allowed: true, remaining: Math.max(0, max - count), resetAt, retryAfterSeconds: 0 }
 }
 
 // Test-only: clears all buckets between test cases so one test's limit exhaustion doesn't bleed
