@@ -8,6 +8,7 @@ import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes, PHOTO_REQUIRED_DIVISIONS } from '../lib/listing-attributes.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
 import { haversineKm, isValidCoords } from '../lib/sr-geocoding.mjs'
+import { expireStalePaymentPendingBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
 import {
   MAX_LISTING_PHOTOS,
@@ -384,6 +385,10 @@ export async function handleListings(req, res, url, context) {
     const from = parseDateOnly(url.searchParams.get('from')) || new Date()
     const toRaw = parseDateOnly(url.searchParams.get('to'))
     const to = toRaw || new Date(from.getTime() + 1000 * 60 * 60 * 24 * 90)
+
+    // Free up dates held by abandoned (never-paid) PAYMENT_PENDING bookings before reporting the
+    // calendar, so a guest never sees squatted nights as unavailable.
+    await expireStalePaymentPendingBookings({ listingId })
 
     const [listing, blockedRows, priceRows, activeBookings] = await Promise.all([
       // SECURITY (S8 — IDOR): only APPROVED listings expose availability publicly. Without the status

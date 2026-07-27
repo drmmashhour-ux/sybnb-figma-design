@@ -10,6 +10,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
 import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
+import { expireStalePaymentPendingBookings } from '../lib/booking-lifecycle.mjs'
 
 // Must match src/shared/booking/cancellationPolicy.ts's STANDARD_FREE_CANCELLATION_DAYS_BEFORE_CHECKIN
 // -- that frontend module only computes the *displayed* cutoff date; this is what was actually
@@ -403,6 +404,11 @@ export async function handleBookings(req, res, url, context) {
   // wallet gifts, adapted here since there's no single row to re-check inside a WHERE clause.
   const booking = await db().$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${listing.id}))`
+
+    // Release dates squatted by abandoned PAYMENT_PENDING bookings on THIS listing before testing
+    // overlap, so a never-paid pending booking can't permanently block new guests. Runs inside the
+    // same advisory-locked transaction as the overlap check, so the reap + check are atomic.
+    await expireStalePaymentPendingBookings({ listingId: listing.id }, tx)
 
     if (checkIn && checkOut) {
       const [overlappingBooking, blockedDate] = await Promise.all([
