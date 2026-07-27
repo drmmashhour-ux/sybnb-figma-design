@@ -2075,6 +2075,35 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (decision !== 'APPROVED') {
     const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
     if (approvedPayment) {
+      // F2: refund maker-checker + Payout-state coupling. This wallet-reversal refund is a money-out, so the
+      // approving admin must not be any prior money-actor on the payout (releaser / payment-verifier /
+      // reconciler / disburser) or the booking guest — otherwise a single actor could move and then reverse the
+      // same funds. And an already-DISBURSED payout may only be refunded if its disbursed funds are recoverable
+      // via clawback (a RELEASE wallet entry to reverse below); with nothing to claw back, a full refund would
+      // exceed (received - already-disbursed), so it is rejected rather than silently paid past the cap. The
+      // whole review runs in the caller's $transaction, so either throw rolls back the cancel + refund atomically.
+      const payout = await tx.payout.findUnique({ where: { bookingId: existing.id } })
+      const approvedProofRow = await tx.paymentProof.findFirst({ where: { bookingId: existing.id, status: 'APPROVED' }, select: { reviewedById: true } })
+      const matchedRow = await tx.reconciliationRecord.findFirst({ where: { bookingId: existing.id, status: 'MATCHED' }, select: { matchedById: true } })
+      const refundMoneyActors = new Set([payout?.releasedById, payout?.disbursedById, approvedProofRow?.reviewedById, matchedRow?.matchedById, existing.guestId].filter(Boolean))
+      if (refundMoneyActors.has(actorUserId)) {
+        const error = new Error('A different admin from the payout money-actors (releaser/verifier/reconciler/disburser) or the booking guest must approve this refund.')
+        error.statusCode = 403
+        error.code = 'REFUND_DUAL_CONTROL_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      if (payout?.disbursedById) {
+        const releaseEntry = await tx.walletEntry.findFirst({ where: { referenceType: 'booking_payout', referenceId: existing.id, type: 'RELEASE' } })
+        if (!releaseEntry) {
+          const error = new Error('This payout was already disbursed and cannot be clawed back — the refund would exceed the recoverable amount. Recover the disbursed funds first.')
+          error.statusCode = 422
+          error.code = 'REFUND_EXCEEDS_RECOVERABLE'
+          error.expose = true
+          throw error
+        }
+      }
+
       const split = bookingFinanceSplit(existing, approvedPayment.amountMinor, await strCommissionRateForBooking(tx, existing))
       const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
 
