@@ -75,6 +75,12 @@ a {
 
 .app-shell {
   min-height: 100vh;
+  /* The app shell must never scroll horizontally: stray sub-pixel/RTL overflow (e.g. the scaled
+     nav logo, edge-to-edge media) was pushing the page ~77px wider than the viewport on narrow
+     screens (~412px). `overflow-x: clip` contains it without creating a scroll container, so it
+     does not affect vertical scrolling or sticky positioning the way `overflow: hidden` would. */
+  max-width: 100%;
+  overflow-x: clip;
   background:
     linear-gradient(180deg, rgba(82, 108, 255, 0.1), transparent 420px),
     radial-gradient(circle at 80% 10%, rgba(213, 169, 21, 0.12), transparent 240px),
