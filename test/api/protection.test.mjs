@@ -241,10 +241,12 @@ describe('Consumer protection: country config + dispute/refund', () => {
 
       const { bookingId, guestId, guestToken } = await setUpConfirmedPaidBooking(admin.id, 'bk-dispute')
 
-      // Guest opens a dispute on the confirmed booking; admin refunds it.
+      // Guest opens a dispute on the confirmed booking; a DISTINCT admin refunds it — F2.1 forbids the payment
+      // verifier (admin, above) from also approving the refund, so a second adjudicating admin resolves it.
+      const resolverToken = await bootstrapAdmin('bk-dispute-resolver')
       const dispute = (await request(app).post('/api/disputes').set('Authorization', `Bearer ${guestToken}`).send({ bookingId, reason: 'host misrepresented the stay' })).body.dispute
       expect(dispute.subjectType).toBe('STR_BOOKING')
-      const resolve = await request(app).patch(`/api/admin/disputes/${dispute.id}`).set('Authorization', `Bearer ${adminToken}`).send({ decision: 'REFUND', note: 'valid complaint' })
+      const resolve = await request(app).patch(`/api/admin/disputes/${dispute.id}`).set('Authorization', `Bearer ${resolverToken}`).send({ decision: 'REFUND', note: 'valid complaint' })
       expect(resolve.status).toBe(200)
       expect(resolve.body.dispute.status).toBe('RESOLVED_REFUNDED')
 

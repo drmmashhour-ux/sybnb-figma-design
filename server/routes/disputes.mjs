@@ -92,6 +92,24 @@ export async function handleDisputes(req, res, url, context) {
       fail('You cannot approve a refund on a dispute you opened. A different admin must review it.', 403, 'DISPUTE_SELF_APPROVAL_FORBIDDEN')
     }
 
+    // F2.1: uniform money-out maker-checker. Beyond the opener != approver rule above (Fix C), the admin
+    // approving this refund must not be any prior money-actor on the booking's payout (releaser / payment
+    // verifier / reconciler / disburser) or the booking guest — the same exclusion the review-queue refund
+    // path enforces (Fix F2). Booking disputes only (dispute.bookingId); the frozen SR/ride dispute path is
+    // left untouched, as Fix C is.
+    if (dispute.bookingId) {
+      const [payoutRow, approvedProofRow, matchedRow, bookingRow] = await Promise.all([
+        db().payout.findUnique({ where: { bookingId: dispute.bookingId }, select: { releasedById: true, disbursedById: true } }),
+        db().paymentProof.findFirst({ where: { bookingId: dispute.bookingId, status: 'APPROVED' }, select: { reviewedById: true } }),
+        db().reconciliationRecord.findFirst({ where: { bookingId: dispute.bookingId, status: 'MATCHED' }, select: { matchedById: true } }),
+        db().booking.findUnique({ where: { id: dispute.bookingId }, select: { guestId: true } }),
+      ])
+      const refundMoneyActors = new Set([payoutRow?.releasedById, payoutRow?.disbursedById, approvedProofRow?.reviewedById, matchedRow?.matchedById, bookingRow?.guestId].filter(Boolean))
+      if (refundMoneyActors.has(context.user.id)) {
+        fail('A different admin from the payout money-actors (releaser/verifier/reconciler/disburser) or the booking guest must approve this refund.', 403, 'REFUND_DUAL_CONTROL_REQUIRED')
+      }
+    }
+
     // REFUND: credit the customer's wallet, capped at what they actually paid.
     const subject = await disputeSubject(dispute)
     if (!subject) fail('The item this dispute refers to no longer exists.', 409, 'DISPUTE_SUBJECT_MISSING')
