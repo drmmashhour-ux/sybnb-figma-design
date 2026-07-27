@@ -81,6 +81,17 @@ export function maskPayoutMethod(method) {
   return out
 }
 
+// F7 — the minimal, PII-free view of a payout method for the CHANGE audit trail: the method TYPE plus a masked
+// last-3 of the destination identifier only. NEVER the receiver name, full phone, or full account — those are
+// PII and must never land in the append-only audit log (unlike maskPayoutMethod, which keeps the receiver name
+// for the host's own UI). null method (e.g. first-ever set) -> { type: null, masked: null }.
+export function payoutMethodAuditView(method) {
+  if (!method || typeof method !== 'object') return { type: null, masked: null }
+  const id = String(method.phone || method.accountRef || '')
+  const masked = id ? (id.length <= 3 ? '•••' : `••••${id.slice(-3)}`) : null
+  return { type: method.type || null, masked }
+}
+
 // F1 — disburse idempotency state machine. Each transition atomically moves Payout.status from a set of
 // permitted "from" states to a single "to" state (server/routes/admin.mjs), so a retried/double-clicked
 // transition finds the row already moved (updateMany affected 0) and is rejected instead of recording a

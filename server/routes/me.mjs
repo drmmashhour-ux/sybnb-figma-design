@@ -5,7 +5,7 @@ import { completeExpiredBookings, releaseAbandonedHolds } from '../lib/booking-l
 import { expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 import { ID_DOCUMENT_CATEGORY, deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { privateDocumentDownloadHeaders } from '../lib/private-document-download.mjs'
-import { maskPayoutMethod, normalizePayoutMethod } from '../lib/host-payout.mjs'
+import { maskPayoutMethod, normalizePayoutMethod, payoutMethodAuditView } from '../lib/host-payout.mjs'
 import { approximateLocation, exactLocation, bookingRevealsExactLocation } from '../lib/listing-location.mjs'
 
 // A booking still owing something to the counterparty, or a ride still in flight, blocks account closure.
@@ -149,8 +149,22 @@ export async function handleMe(req, res, url, context) {
     }
     if (req.method === 'PATCH') {
       const body = await readJson(req)
-      const normalized = normalizePayoutMethod(body)
+      const normalized = normalizePayoutMethod(body) // throws (400) on invalid -> nothing below runs, no audit row
+      const existing = await db().user.findUnique({ where: { id: context.user.id }, select: { payoutMethod: true } })
       await db().user.update({ where: { id: context.user.id }, data: { payoutMethod: normalized } })
+      // F7: append-only audit of the change — actor + old->new method TYPE + masked last-3 only, NEVER the raw
+      // account/phone/name. D1 already blocks money-redirect (payout freezes the destination at verify); this is
+      // forensic/insider-detection traceability. Written AFTER the successful update so a rejected change logs nothing.
+      await db().adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'PAYOUT_METHOD_CHANGED',
+          entityType: 'users',
+          entityId: context.user.id,
+          before: payoutMethodAuditView(existing?.payoutMethod),
+          after: payoutMethodAuditView(normalized),
+        },
+      })
       // Echo the MASKED method — never the raw destination — so the host confirms without re-exposing it.
       return json(res, 200, { ok: true, payoutMethod: maskPayoutMethod(normalized) })
     }
