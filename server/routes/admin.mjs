@@ -2,7 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, makeStrCommissionRateResolver, originalAdminShareRecipient, recordWalletEntry, resolveStrCommissionRate, strCommissionRateForBooking } from '../lib/finance-ledger.mjs'
 import { adminReleaseHold, completeExpiredBookings, isPayoutEligible, payoutEligibleAt, releaseAbandonedHolds, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
-import { recordPayoutTransition } from '../lib/host-payout.mjs'
+import { recordPayoutTransition, assertPayoutTransitionInput, DISBURSE_STATUS_TRANSITIONS } from '../lib/host-payout.mjs'
 import { matchReconciliation, RECONCILIATION_STATUS } from '../lib/reconciliation.mjs'
 import { compileReconciliationQueue } from '../lib/reconciliation-queue.mjs'
 import { bookingTrackUrl, notify } from '../lib/notifications.mjs'
@@ -579,20 +579,40 @@ export async function handleAdmin(req, res, url, context) {
     }
 
     const transition = String(body.transition || '').toUpperCase()
-    const entry = await recordPayoutTransition(db(), {
-      transition,
-      actorUserId: context.user.id,
-      actorRoles: context.roles,
-      entityId: booking.id,
-      hostUserId: hostOwner?.id || null,
-      method: methodType,
-      reference: body.reference,
-      reason: body.reason,
-      reconciliationNote: body.reconciliationNote,
-    })
+    // Validate the transition input BEFORE the atomic claim, so a bad request (unknown transition, missing
+    // reason/reference) is a 400 that never advances the payout status.
+    assertPayoutTransitionInput({ transition, reason: body.reason, reference: body.reference })
 
-    // D2: stamp the disbursing actor on the payout (audit symmetry with releasedById/reviewedById).
-    await db().payout.update({ where: { bookingId: payoutDisburseMatch[1] }, data: { disbursedById: context.user.id } })
+    // F1: atomically claim the payout for this transition. The conditional updateMany matches the row only
+    // while it is in a permitted "from" state; a retried/concurrent duplicate finds it already moved
+    // (count 0) and is rejected 409, so the transition is recorded AT MOST ONCE. The audit write shares the
+    // transaction, so any failure rolls the status change back. The disbursing actor is stamped in the same
+    // update (audit symmetry with releasedById/reviewedById). Runs AFTER the D1/E/D2.1/D2 guards.
+    const step = DISBURSE_STATUS_TRANSITIONS[transition]
+    const entry = await db().$transaction(async (tx) => {
+      const claimed = await tx.payout.updateMany({
+        where: { bookingId: payoutDisburseMatch[1], status: { in: step.from } },
+        data: { status: step.to, disbursedById: context.user.id },
+      })
+      if (claimed.count !== 1) {
+        const error = new Error('This payout has already been disbursed or is mid-disbursement.')
+        error.statusCode = 409
+        error.code = 'PAYOUT_ALREADY_IN_PROGRESS'
+        error.expose = true
+        throw error
+      }
+      return recordPayoutTransition(tx, {
+        transition,
+        actorUserId: context.user.id,
+        actorRoles: context.roles,
+        entityId: booking.id,
+        hostUserId: hostOwner?.id || null,
+        method: methodType,
+        reference: body.reference,
+        reason: body.reason,
+        reconciliationNote: body.reconciliationNote,
+      })
+    })
 
     // SYB-003: notify the host on the states they care about, best-effort AFTER the record commits.
     if ((transition === 'INITIATED' || transition === 'COMPLETED') && hostOwner?.id) {

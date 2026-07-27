@@ -857,7 +857,7 @@ model Payout {
   hostId       String    @map("host_id")
   amountMinor  Int       @map("amount_minor") // frozen host net payout
   currency     String
-  status       String    @default("PENDING_HOLD") // PENDING_HOLD | ELIGIBLE | RELEASED | REVERSED
+  status       String    @default("PENDING_HOLD") // PENDING_HOLD | ELIGIBLE | RELEASED | REVERSED | DISBURSING | DISBURSED | DISPUTED (F1 disburse lifecycle)
   releaseDate  DateTime? @map("release_date")
   releasedById String?   @map("released_by_id")
   source       String    @default("live") // 'live' | 'backfill'

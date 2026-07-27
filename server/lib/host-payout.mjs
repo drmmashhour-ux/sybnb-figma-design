@@ -81,6 +81,29 @@ export function maskPayoutMethod(method) {
   return out
 }
 
+// F1 — disburse idempotency state machine. Each transition atomically moves Payout.status from a set of
+// permitted "from" states to a single "to" state (server/routes/admin.mjs), so a retried/double-clicked
+// transition finds the row already moved (updateMany affected 0) and is rejected instead of recording a
+// duplicate. INITIATED claims a pre-disburse payout; COMPLETED/FAILED close out an in-progress one.
+export const DISBURSE_STATUS_TRANSITIONS = {
+  INITIATED: { from: ['PENDING_HOLD', 'ELIGIBLE', 'RELEASED'], to: 'DISBURSING' },
+  COMPLETED: { from: ['DISBURSING'], to: 'DISBURSED' },
+  FAILED: { from: ['DISBURSING'], to: 'RELEASED' }, // revert so a failed send can be retried
+  DISPUTED: { from: ['DISBURSING', 'DISBURSED'], to: 'DISPUTED' },
+}
+
+// Validates the transition input WITHOUT writing anything, so the disburse handler can reject a bad request
+// (400) before it atomically claims the payout — a validation failure must never advance the payout status.
+export function assertPayoutTransitionInput({ transition, reason, reference }) {
+  if (!PAYOUT_AUDIT_ACTIONS[transition]) throw payoutError('Unknown payout transition.', 'PAYOUT_TRANSITION_INVALID')
+  if (!String(reason || '').trim()) throw payoutError('A reason is required to record a payout transition.', 'PAYOUT_REASON_REQUIRED')
+  // COMPLETED must carry the concrete disbursement evidence — reference + method — so it can never claim
+  // "paid" without a recorded reference.
+  if (transition === 'COMPLETED' && !String(reference || '').trim()) {
+    throw payoutError('A payout reference is required to record completion.', 'PAYOUT_REFERENCE_REQUIRED')
+  }
+}
+
 /**
  * Records one staff disbursement-lifecycle transition as an AdminAuditLog event. Requires actor, role,
  * timestamp, method, reference, reason, reconciliation note and policy version. entityId is the wallet
@@ -88,14 +111,8 @@ export function maskPayoutMethod(method) {
  * payout with no record is indistinguishable from one that never happened — so a failure propagates.
  */
 export async function recordPayoutTransition(db, { transition, actorUserId, actorRoles, entityId, hostUserId, method, reference, reason, reconciliationNote }) {
+  assertPayoutTransitionInput({ transition, reason, reference })
   const action = PAYOUT_AUDIT_ACTIONS[transition]
-  if (!action) throw payoutError('Unknown payout transition.', 'PAYOUT_TRANSITION_INVALID')
-  if (!String(reason || '').trim()) throw payoutError('A reason is required to record a payout transition.', 'PAYOUT_REASON_REQUIRED')
-  // COMPLETED must carry the concrete disbursement evidence — reference + method — so it can never claim
-  // "paid" without a recorded reference.
-  if (transition === 'COMPLETED' && !String(reference || '').trim()) {
-    throw payoutError('A payout reference is required to record completion.', 'PAYOUT_REFERENCE_REQUIRED')
-  }
   return db.adminAuditLog.create({
     data: {
       actorUserId: actorUserId || null,
