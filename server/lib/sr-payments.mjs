@@ -1,5 +1,5 @@
 import { idempotencyKey } from './security.mjs'
-import { recordWalletEntry } from './finance-ledger.mjs'
+import { recordWalletEntry, lockWalletForSpend } from './finance-ledger.mjs'
 
 // Platform keeps 15% of every SR ride; the driver keeps 85%. The commission is a finance/admin
 // figure only — it is derived here and recorded to the ledger, and never placed on any rider-facing
@@ -102,6 +102,9 @@ export async function chargeCompletedRide(tx, ride) {
   const fareMinor = Math.max(0, Math.round(ride?.fareMinor || 0))
   if (!ride || !fareMinor) return { charged: false, reason: 'no_fare' }
 
+  // Serialize concurrent spends on this rider's wallet before the balance re-check below.
+  await lockWalletForSpend(tx, ride.riderId, ride.currency)
+
   const chargeKey = idempotencyKey(['sr-ride-fare', ride.id])
   const already = await tx.walletEntry.findUnique({ where: { idempotencyKey: chargeKey } })
   if (already) return { charged: false, reason: 'already_charged' }
@@ -196,6 +199,9 @@ export async function tipCompletedRide(tx, ride, tipMinor) {
     throw error
   }
 
+  // Serialize concurrent spends on this rider's wallet before the balance re-check below.
+  await lockWalletForSpend(tx, ride.riderId, ride.currency)
+
   // one tip per ride
   const tipKey = idempotencyKey(['sr-ride-tip', ride.id])
   const already = await tx.walletEntry.findUnique({ where: { idempotencyKey: tipKey } })
@@ -251,6 +257,9 @@ export async function tipCompletedRide(tx, ride, tipMinor) {
 export async function chargeRiderCancellationFee(tx, ride, feeMinor) {
   const amount = Math.max(0, Math.round(feeMinor || 0))
   if (!ride || !ride.driverId || amount <= 0) return { charged: false, reason: 'no_fee' }
+
+  // Serialize concurrent spends on this rider's wallet before the balance re-check below.
+  await lockWalletForSpend(tx, ride.riderId, ride.currency)
 
   const key = idempotencyKey(['sr-cancel-fee', ride.id])
   const already = await tx.walletEntry.findUnique({ where: { idempotencyKey: key } })

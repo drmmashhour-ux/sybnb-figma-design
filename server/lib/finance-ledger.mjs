@@ -75,6 +75,19 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   }
 }
 
+// CONCURRENCY: serialize all balance-gated spends on a single wallet. Every spend path (gift-send,
+// SR fare / tip / cancellation fee) reads cachedBalanceMinor, checks affordability, then writes a
+// DEBIT — a read-then-write that, under Postgres' default READ COMMITTED, lets two *different*
+// concurrent spends both pass the check on the same balance and overdraw the wallet. (Per-operation
+// idempotency keys stop the *same* op double-applying, but not two distinct ops racing.) Acquiring
+// this per-(user,currency) advisory lock at the very top of each spend transaction forces those ops
+// to run one at a time; it is transaction-scoped, so Postgres releases it automatically at commit or
+// rollback. Keyed in its own "wallet:" namespace so it never aliases the ride/driver/listing locks.
+export async function lockWalletForSpend(tx, userId, currency) {
+  if (!userId || !currency) return
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`wallet:${userId}:${currency}`}))`
+}
+
 export async function recordWalletEntry(tx, {
   userId,
   type,

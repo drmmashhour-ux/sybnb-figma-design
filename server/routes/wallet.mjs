@@ -4,6 +4,7 @@ import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { roundUsdUpToStep } from '../lib/currency.mjs'
 import { riderAvailableBalanceMinor } from '../lib/sr-payments.mjs'
+import { lockWalletForSpend } from '../lib/finance-ledger.mjs'
 import { debitGiftFromSender, refundGiftToSender, expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 
 // SR cashless top-up (016): sane per-top-up ceiling (whole currency units).
@@ -119,6 +120,9 @@ export async function handleWallet(req, res, url, context) {
     // recipient is credited on claim; the sender is refunded on any non-claimed terminal state. Create +
     // debit run in one transaction so a gift row can never exist without its matching sender DEBIT.
     const gift = await db().$transaction(async (tx) => {
+      // Serialize concurrent spends on the sender's wallet before the available-balance check, so two
+      // simultaneous gifts (or a gift racing an SR charge) can't both pass on the same balance.
+      await lockWalletForSpend(tx, context.user.id, currency)
       const available = await riderAvailableBalanceMinor(tx, { riderId: context.user.id, currency, excludeRideId: null })
       if (available < amountMinor) {
         const error = new Error('Your wallet balance is not enough to send this gift.')
@@ -161,6 +165,23 @@ export async function handleWallet(req, res, url, context) {
     })
 
     if (!gift) {
+      const error = new Error('Gift was not found.')
+      error.statusCode = 404
+      error.code = 'GIFT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // PRIVACY (L1): a gift's amount, message and parties are private to the two people involved. Only
+    // the sender, or the intended recipient (matched by claimed recipientUserId or by the recipient
+    // phone hash), may preview it. Anyone else gets the same 404 as a non-existent gift, so an
+    // unrelated authenticated user can't confirm a gift id exists, let alone read its details.
+    const viewer = context.user
+    const isSender = gift.senderUserId === viewer.id
+    const isRecipient =
+      (gift.recipientUserId && gift.recipientUserId === viewer.id) ||
+      (viewer.phoneHash && viewer.phoneHash === gift.recipientPhoneHash)
+    if (!isSender && !isRecipient) {
       const error = new Error('Gift was not found.')
       error.statusCode = 404
       error.code = 'GIFT_NOT_FOUND'
