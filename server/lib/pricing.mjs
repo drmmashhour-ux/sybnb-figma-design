@@ -1,4 +1,5 @@
 import { db } from './prisma.mjs'
+import { assertAmountWithinLimit } from './currency.mjs'
 
 // Must match server/lib/finance-ledger.mjs's STR_CLEANING_RATE -- this is the same 5% cleaning-share
 // convention, duplicated here (rather than imported) so the pre-booking quote preview never has to
@@ -42,6 +43,7 @@ export function computeGuestBookingTotalMinor({ nightlySubtotalMinor, listingMet
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor')
   const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
   const amountMinor = Math.max(0, Math.round(nightlySubtotalMinor || 0)) + cleaningFeeMinor + extraFeesMinor
+  assertAmountWithinLimit(amountMinor, 'booking total') // F5: reject an over-int4 gross cleanly, before any DB write
   return { nightlySubtotalMinor: Math.max(0, Math.round(nightlySubtotalMinor || 0)), cleaningFeeMinor, extraFeesMinor, amountMinor }
 }
 
@@ -96,6 +98,7 @@ export async function computeStayTotalMinor(listing, checkIn, checkOut) {
     priceMinor: overrideByDate.get(date) ?? listing.priceMinor,
   }))
   const totalMinor = perNight.reduce((sum, night) => sum + night.priceMinor, 0)
+  assertAmountWithinLimit(totalMinor, 'stay total') // F5: covers the non-short-stay path (amountMinor == this subtotal)
 
   return { totalMinor, nights: nights.length, perNight }
 }

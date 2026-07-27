@@ -13,6 +13,25 @@ export const SYP_PER_USD = 15000
 // only ever applied to USD; SYP amounts are untouched.
 export const USD_ROUNDING_STEP = 5
 
+// F5 — money amountMinor columns are PostgreSQL int4 (max 2,147,483,647). A gross above that fails as a raw
+// "integer out of range" DB error (500) when persisted. This cap sits safely BELOW int4 max with margin, so a
+// gross that would overflow (or leave no headroom for its derived slices) is rejected at the compute boundary
+// with a clean 422 before any write. Centralized here (the one money model, C3) so every money path shares it.
+// NOTE: this is an app-layer graceful-degradation guard; widening the columns to BigInt is a separate scheduled task.
+export const MAX_SAFE_AMOUNT_MINOR = 2_000_000_000
+
+// Throws a clean 422 AMOUNT_EXCEEDS_LIMIT if a computed money amount would exceed the safe cap. Guarding the
+// gross is sufficient — fees/commission/payout are slices <= gross. `label` names the amount in the message.
+export function assertAmountWithinLimit(amountMinor, label = 'amount') {
+  if (Number.isFinite(amountMinor) && amountMinor > MAX_SAFE_AMOUNT_MINOR) {
+    const error = new Error(`This ${label} exceeds the maximum amount SYBNB can process.`)
+    error.statusCode = 422
+    error.code = 'AMOUNT_EXCEEDS_LIMIT'
+    error.expose = true
+    throw error
+  }
+}
+
 export function convertSypMinorToUsd(sypAmountMinor) {
   return Math.max(0, sypAmountMinor || 0) / SYP_PER_USD
 }
