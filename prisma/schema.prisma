@@ -1,10 +1,1360 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+model User {
+  id                                                                              String                             @id @default(uuid())
+  email                                                                           String?                            @unique
+  phoneHash                                                                       String?                            @unique @map("phone_hash")
+  passwordHash                                                                    String?                            @map("password_hash")
+  displayName                                                                     String                             @map("display_name")
+  locale                                                                          String                             @default("ar-SY")
+  status                                                                          AccountStatus                      @default(ACTIVE)
+  idDocumentRef                                                                   String?                            @map("id_document_ref")
+  idDocumentSubmittedAt                                                           DateTime?                          @map("id_document_submitted_at")
+  idDocumentMimeType                                                              String?                            @map("id_document_mime_type")
+  idDocumentStatus                                                                IdDocumentStatus?                  @map("id_document_status")
+  idDocumentReviewedById                                                          String?                            @map("id_document_reviewed_by_id")
+  idDocumentReviewedAt                                                            DateTime?                          @map("id_document_reviewed_at")
+  payoutMethod                                                                    Json?                              @map("payout_method")
+  sessionVersion                                                                  Int                                @default(0) @map("session_version")
+  referralCode                                                                    String                             @unique @map("referral_code")
+  createdAt                                                                       DateTime                           @default(now()) @map("created_at")
+  updatedAt                                                                       DateTime                           @updatedAt @map("updated_at")
+  deletedAt                                                                       DateTime?                          @map("deleted_at")
+  isDemo                                                                          Boolean                            @default(false) @map("is_demo")
+  accommodations                                                                  Accommodation[]                    @relation("AccommodationOwner")
+  auditLogs                                                                       AdminAuditLog[]                    @relation("AuditActor")
+  auctionBids                                                                     Bid[]                              @relation("AuctionBidder")
+  bookings                                                                        Booking[]                          @relation("BookingGuest")
+  disputesOpened                                                                  Dispute[]                          @relation("DisputeOpener")
+  driverCancellations                                                             DriverCancellation[]               @relation("DriverCancellationDriver")
+  driverDocuments                                                                 DriverDocument[]                   @relation("DriverDocumentOwner")
+  driverDocumentsReviewed                                                         DriverDocument[]                   @relation("DriverDocumentReviewer")
+  driverProfile                                                                   DriverProfile?
+  driverVehicles                                                                  DriverVehicle[]                    @relation("DriverVehicleOwner")
+  hostInsights                                                                    HostInsight[]                      @relation("HostInsightOwner")
+  jurisdiction_compliance_profiles                                                jurisdiction_compliance_profiles[]
+  listing_documents_listing_documents_legal_hold_set_by_idTousers                 listing_documents[]                @relation("listing_documents_legal_hold_set_by_idTousers")
+  listing_documents_listing_documents_reviewed_by_idTousers                       listing_documents[]                @relation("listing_documents_reviewed_by_idTousers")
+  listingReviews                                                                  ListingReview[]                    @relation("ReviewGuest")
+  listings                                                                        Listing[]                          @relation("ListingOwner")
+  listingInquiries                                                                MessageThread[]                    @relation("ListingInquiryGuest")
+  sentMessages                                                                    Message[]                          @relation("MessageSender")
+  part_xx_records                                                                 part_xx_records[]
+  paymentProofs                                                                   PaymentProof[]                     @relation("PaymentPayer")
+  payouts                                                                         payouts[]
+  quebec_driver_documents_quebec_driver_documents_legal_hold_set_by_idTousers     quebec_driver_documents[]          @relation("quebec_driver_documents_legal_hold_set_by_idTousers")
+  quebec_driver_documents_quebec_driver_documents_reviewed_by_idTousers           quebec_driver_documents[]          @relation("quebec_driver_documents_reviewed_by_idTousers")
+  quebec_driver_onboarding_quebec_driver_onboarding_assigned_reviewer_idTousers   quebec_driver_onboarding[]         @relation("quebec_driver_onboarding_assigned_reviewer_idTousers")
+  quebec_driver_onboarding_quebec_driver_onboarding_reviewed_by_idTousers         quebec_driver_onboarding[]         @relation("quebec_driver_onboarding_reviewed_by_idTousers")
+  quebec_vehicle_documents_quebec_vehicle_documents_legal_hold_set_by_idTousers   quebec_vehicle_documents[]         @relation("quebec_vehicle_documents_legal_hold_set_by_idTousers")
+  quebec_vehicle_documents_quebec_vehicle_documents_reviewed_by_idTousers         quebec_vehicle_documents[]         @relation("quebec_vehicle_documents_reviewed_by_idTousers")
+  quebec_vehicle_onboarding_quebec_vehicle_onboarding_assigned_reviewer_idTousers quebec_vehicle_onboarding[]        @relation("quebec_vehicle_onboarding_assigned_reviewer_idTousers")
+  quebec_vehicle_onboarding_quebec_vehicle_onboarding_reviewed_by_idTousers       quebec_vehicle_onboarding[]        @relation("quebec_vehicle_onboarding_reviewed_by_idTousers")
+  referredAs                                                                      Referral?                          @relation("ReferralReferee")
+  referralsMade                                                                   Referral[]                         @relation("ReferralReferrer")
+  rideMessagesSent                                                                RideMessage[]                      @relation("RideMessageSender")
+  rideRatingsReceived                                                             RideRating[]                       @relation("RideRatingRated")
+  rideRatingsGiven                                                                RideRating[]                       @relation("RideRatingRater")
+  driverRideMatches                                                               RideRequest[]                      @relation("RideDriver")
+  rideRequests                                                                    RideRequest[]                      @relation("RideRider")
+  sellerProfile                                                                   SellerProfile?
+  sellerReviewsWritten                                                            SellerReview[]                     @relation("SellerReviewBuyer")
+  sellerReviewsReceived                                                           SellerReview[]                     @relation("SellerReviewSeller")
+  sellerPurchases                                                                 SellerSale[]                       @relation("SellerSaleBuyer")
+  sellerSalesMade                                                                 SellerSale[]                       @relation("SellerSaleSeller")
+  sosEventsRaised                                                                 SosEvent[]                         @relation("SosRaisedBy")
+  sosEventsResolved                                                               SosEvent[]                         @relation("SosResolvedBy")
+  tax_profiles_tax_profiles_user_idTousers                                        tax_profiles[]                     @relation("tax_profiles_user_idTousers")
+  tax_profiles_tax_profiles_verified_by_idTousers                                 tax_profiles[]                     @relation("tax_profiles_verified_by_idTousers")
+  threadDocumentsUploaded                                                         ThreadDocument[]                   @relation("ThreadDocumentUploader")
+  roles                                                                           UserRole[]
+  claimedGifts                                                                    WalletGift[]                       @relation("GiftRecipient")
+  sentGifts                                                                       WalletGift[]                       @relation("GiftSender")
+  wallets                                                                         Wallet[]
+
+  @@map("users")
+}
+
+model Referral {
+  id                  String         @id @default(uuid())
+  referrerUserId      String         @map("referrer_user_id")
+  refereeUserId       String         @unique @map("referee_user_id")
+  status              ReferralStatus @default(PENDING)
+  qualifyingBookingId String?        @map("qualifying_booking_id")
+  rewardedAt          DateTime?      @map("rewarded_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  referee             User           @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: Cascade)
+  referrer            User           @relation("ReferralReferrer", fields: [referrerUserId], references: [id])
+
+  @@index([referrerUserId, status])
+  @@map("referrals")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  role      RoleName
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@index([role])
+  @@map("user_roles")
+}
+
+model SellerProfile {
+  id             String        @id @default(uuid())
+  userId         String        @unique @map("user_id")
+  legalName      String        @map("legal_name")
+  sellerType     String        @map("seller_type")
+  documentStatus ListingStatus @default(DRAFT) @map("document_status")
+  planCode       String?       @map("plan_code")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("seller_profiles")
+}
+
+model DriverProfile {
+  id                       String                    @id @default(uuid())
+  userId                   String                    @unique @map("user_id")
+  licenseHash              String?                   @map("license_hash")
+  vehicleMake              String?                   @map("vehicle_make")
+  vehicleModel             String?                   @map("vehicle_model")
+  vehiclePlate             String?                   @map("vehicle_plate")
+  active                   Boolean                   @default(false)
+  lastLocationGeo          Unsupported("geometry")?  @map("last_location_geo")
+  payoutMethod             String?                   @map("payout_method")
+  payoutAccountRef         String?                   @map("payout_account_ref")
+  createdAt                DateTime                  @default(now()) @map("created_at")
+  updatedAt                DateTime                  @updatedAt @map("updated_at")
+  country                  String                    @default("SY")
+  user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quebec_driver_onboarding quebec_driver_onboarding?
+
+  @@map("driver_profiles")
+}
+
+model Location {
+  id           String                   @id @default(uuid())
+  country      String                   @default("SY")
+  governorate  String
+  city         String
+  area         String?
+  street       String?
+  addressLine  String?                  @map("address_line")
+  geo          Unsupported("geometry")?
+  createdAt    DateTime                 @default(now()) @map("created_at")
+  listings     Listing[]
+  dropoffRides RideRequest[]            @relation("RideDropoff")
+  pickupRides  RideRequest[]            @relation("RidePickup")
+
+  @@index([governorate, city])
+  @@map("locations")
+}
+
+model Listing {
+  id                 String                @id @default(uuid())
+  ownerId            String                @map("owner_id")
+  locationId         String?               @map("location_id")
+  accommodationId    String?               @map("accommodation_id")
+  division           ListingDivision
+  titleAr            String                @map("title_ar")
+  titleEn            String?               @map("title_en")
+  description        String?
+  status             ListingStatus         @default(DRAFT)
+  priceMinor         Int                   @map("price_minor")
+  currency           String                @default("SYP")
+  instantBookEnabled Boolean               @default(false) @map("instant_book_enabled")
+  expiresAt          DateTime?             @map("expires_at")
+  metadata           Json                  @default("{}")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  auction            Auction?
+  bookings           Booking[]
+  hostInsights       HostInsight[]
+  availability       ListingAvailability[]
+  listing_documents  listing_documents[]
+  media              ListingMedia[]
+  reviews            ListingReview[]
+  accommodation      Accommodation?        @relation(fields: [accommodationId], references: [id])
+  location           Location?             @relation(fields: [locationId], references: [id])
+  owner              User                  @relation("ListingOwner", fields: [ownerId], references: [id])
+  inquiryThreads     MessageThread[]
+  sales              SellerSale[]
+
+  @@index([division, status])
+  @@index([ownerId])
+  @@index([accommodationId])
+  @@map("listings")
+}
+
+model Accommodation {
+  id          String               @id @default(uuid())
+  ownerId     String               @map("owner_id")
+  titleAr     String               @map("title_ar")
+  titleEn     String?              @map("title_en")
+  description String?
+  governorate String
+  city        String
+  area        String?
+  address     String?
+  status      ListingStatus        @default(DRAFT)
+  metadata    Json                 @default("{}")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+  media       AccommodationMedia[]
+  owner       User                 @relation("AccommodationOwner", fields: [ownerId], references: [id])
+  listings    Listing[]
+
+  @@index([ownerId])
+  @@map("accommodations")
+}
+
+model AccommodationMedia {
+  id              String        @id @default(uuid())
+  accommodationId String        @map("accommodation_id")
+  url             String
+  kind            String
+  sortOrder       Int           @default(0) @map("sort_order")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  accommodation   Accommodation @relation(fields: [accommodationId], references: [id], onDelete: Cascade)
+
+  @@index([accommodationId])
+  @@map("accommodation_media")
+}
+
+model HostInsight {
+  id          String    @id @default(uuid())
+  hostId      String    @map("host_id")
+  listingId   String?   @map("listing_id")
+  kind        String    @default("PRICING_GAP")
+  facts       Json      @default("{}")
+  messageAr   String    @map("message_ar")
+  messageEn   String?   @map("message_en")
+  aiProvider  String?   @map("ai_provider")
+  aiModel     String?   @map("ai_model")
+  readAt      DateTime? @map("read_at")
+  emailSentAt DateTime? @map("email_sent_at")
+  emailError  String?   @map("email_error")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  host        User      @relation("HostInsightOwner", fields: [hostId], references: [id])
+  listing     Listing?  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([hostId, createdAt])
+  @@index([listingId])
+  @@map("host_insights")
+}
+
+model Auction {
+  id                        String        @id @default(uuid())
+  listingId                 String        @unique @map("listing_id")
+  status                    AuctionStatus @default(OPEN)
+  startingPriceMinor        Int           @map("starting_price_minor")
+  reservePriceMinor         Int?          @map("reserve_price_minor")
+  reserveMet                Boolean       @default(false) @map("reserve_met")
+  minIncrementMinor         Int           @map("min_increment_minor")
+  currentPriceMinor         Int           @map("current_price_minor")
+  currentBidderId           String?       @map("current_bidder_id")
+  currentMaxProxyMinor      Int?          @map("current_max_proxy_minor")
+  startsAt                  DateTime      @default(now()) @map("starts_at")
+  endsAt                    DateTime      @map("ends_at")
+  antiSnipeWindowSeconds    Int           @default(120) @map("anti_snipe_window_seconds")
+  antiSnipeExtensionSeconds Int           @default(120) @map("anti_snipe_extension_seconds")
+  endedAt                   DateTime?     @map("ended_at")
+  winnerBidderId            String?       @map("winner_bidder_id")
+  winnerNotifiedAt          DateTime?     @map("winner_notified_at")
+  winnerEmailError          String?       @map("winner_email_error")
+  createdAt                 DateTime      @default(now()) @map("created_at")
+  updatedAt                 DateTime      @updatedAt @map("updated_at")
+  listing                   Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  bids                      Bid[]
+
+  @@index([status, endsAt])
+  @@map("auctions")
+}
+
+model Bid {
+  id                  String   @id @default(uuid())
+  auctionId           String   @map("auction_id")
+  bidderId            String   @map("bidder_id")
+  maxProxyMinor       Int      @map("max_proxy_minor")
+  visiblePriceAtMinor Int      @map("visible_price_at_minor")
+  isWinningBid        Boolean  @default(false) @map("is_winning_bid")
+  createdAt           DateTime @default(now()) @map("created_at")
+  auction             Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  bidder              User     @relation("AuctionBidder", fields: [bidderId], references: [id])
+
+  @@index([auctionId, createdAt])
+  @@index([bidderId])
+  @@map("bids")
+}
+
+model EmailVerificationCode {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String    @map("code_hash")
+  purpose    String    @default("guest-signup")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([email, purpose])
+  @@map("email_verification_codes")
+}
+
+model PhoneVerificationCode {
+  id         String    @id @default(uuid())
+  phone      String
+  codeHash   String    @map("code_hash")
+  purpose    String    @default("guest-signup")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([phone, purpose])
+  @@map("phone_verification_codes")
+}
+
+model ListingAvailability {
+  id                 String             @id @default(uuid())
+  listingId          String             @map("listing_id")
+  date               DateTime           @db.Date
+  status             AvailabilityStatus @default(BLOCKED)
+  priceOverrideMinor Int?               @map("price_override_minor")
+  note               String?
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  listing            Listing            @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, date])
+  @@index([listingId, date])
+  @@map("listing_availability")
+}
+
+model ListingMedia {
+  id        String   @id @default(uuid())
+  listingId String   @map("listing_id")
+  url       String
+  kind      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@map("listing_media")
+}
+
+model Booking {
+  id                String         @id @default(uuid())
+  listingId         String         @map("listing_id")
+  guestId           String         @map("guest_id")
+  status            BookingStatus  @default(REQUESTED)
+  checkIn           DateTime?      @map("check_in")
+  checkOut          DateTime?      @map("check_out")
+  amountMinor       Int            @map("amount_minor")
+  currency          String         @default("SYP")
+  metadata          Json           @default("{}")
+  guestCheckedInAt  DateTime?      @map("guest_checked_in_at")
+  guestCheckedOutAt DateTime?      @map("guest_checked_out_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  guest             User           @relation("BookingGuest", fields: [guestId], references: [id])
+  listing           Listing        @relation(fields: [listingId], references: [id])
+  disputes          Dispute[]
+  review            ListingReview?
+  messageThread     MessageThread?
+  payments          PaymentProof[]
+  legacyPayment     payments?
+  legacyPayout      payouts?
+
+  @@index([guestId, status])
+  @@index([listingId, status])
+  @@map("bookings")
+}
+
+model PaymentProof {
+  id            String        @id @default(uuid())
+  bookingId     String?       @map("booking_id")
+  userId        String        @map("user_id")
+  provider      String
+  status        PaymentStatus @default(PENDING_PROOF)
+  amountMinor   Int           @map("amount_minor")
+  currency      String        @default("SYP")
+  proofAssetUrl String?       @map("proof_asset_url")
+  providerRef   String?       @map("provider_ref")
+  adminNote     String?       @map("admin_note")
+  reviewedById  String?       @map("reviewed_by_id")
+  reviewedAt    DateTime?     @map("reviewed_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  booking       Booking?      @relation(fields: [bookingId], references: [id])
+  payer         User          @relation("PaymentPayer", fields: [userId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@map("payment_proofs")
+}
+
+model ListingReview {
+  id              String    @id @default(uuid())
+  listingId       String    @map("listing_id")
+  bookingId       String    @unique @map("booking_id")
+  guestId         String    @map("guest_id")
+  rating          Int
+  comment         String?
+  hiddenAt        DateTime? @map("hidden_at")
+  hiddenByAdminId String?   @map("hidden_by_admin_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  booking         Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  guest           User      @relation("ReviewGuest", fields: [guestId], references: [id])
+  listing         Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, hiddenAt])
+  @@map("listing_reviews")
+}
+
+model SellerSale {
+  id        String        @id @default(uuid())
+  listingId String        @map("listing_id")
+  sellerId  String        @map("seller_id")
+  buyerId   String        @map("buyer_id")
+  createdAt DateTime      @default(now()) @map("created_at")
+  review    SellerReview?
+  buyer     User          @relation("SellerSaleBuyer", fields: [buyerId], references: [id])
+  listing   Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  seller    User          @relation("SellerSaleSeller", fields: [sellerId], references: [id])
+
+  @@unique([listingId, buyerId])
+  @@index([sellerId])
+  @@map("seller_sales")
+}
+
+model SellerReview {
+  id        String     @id @default(uuid())
+  saleId    String     @unique @map("sale_id")
+  sellerId  String     @map("seller_id")
+  buyerId   String     @map("buyer_id")
+  rating    Int
+  comment   String?
+  hiddenAt  DateTime?  @map("hidden_at")
+  createdAt DateTime   @default(now()) @map("created_at")
+  buyer     User       @relation("SellerReviewBuyer", fields: [buyerId], references: [id])
+  sale      SellerSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  seller    User       @relation("SellerReviewSeller", fields: [sellerId], references: [id])
+
+  @@index([sellerId, hiddenAt])
+  @@map("seller_reviews")
+}
+
+model MessageThread {
+  id        String           @id @default(uuid())
+  bookingId String?          @unique @map("booking_id")
+  listingId String?          @map("listing_id")
+  guestId   String?          @map("guest_id")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+  booking   Booking?         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  guest     User?            @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
+  listing   Listing?         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  documents ThreadDocument[]
+
+  @@unique([listingId, guestId])
+  @@map("message_threads")
+}
+
+model Message {
+  id           String            @id @default(uuid())
+  threadId     String            @map("thread_id")
+  senderUserId String            @map("sender_user_id")
+  senderRole   MessageSenderRole @map("sender_role")
+  body         String
+  createdAt    DateTime          @default(now()) @map("created_at")
+  sender       User              @relation("MessageSender", fields: [senderUserId], references: [id])
+  thread       MessageThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@map("messages")
+}
+
+model ThreadDocument {
+  id               String        @id @default(uuid())
+  threadId         String        @map("thread_id")
+  uploaderUserId   String        @map("uploader_user_id")
+  assetUrl         String        @map("asset_url")
+  mimeType         String        @map("mime_type")
+  originalFilename String?       @map("original_filename")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  thread           MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  uploader         User          @relation("ThreadDocumentUploader", fields: [uploaderUserId], references: [id])
+
+  @@index([threadId, createdAt])
+  @@map("thread_documents")
+}
+
+model Wallet {
+  id                 String        @id @default(uuid())
+  userId             String        @map("user_id")
+  currency           String        @default("SYP")
+  cachedBalanceMinor Int           @default(0) @map("cached_balance_minor")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+  entries            WalletEntry[]
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, currency])
+  @@map("wallets")
+}
+
+model WalletEntry {
+  id             String          @id @default(uuid())
+  walletId       String          @map("wallet_id")
+  type           WalletEntryType
+  amountMinor    Int             @map("amount_minor")
+  currency       String          @default("SYP")
+  referenceType  String          @map("reference_type")
+  referenceId    String          @map("reference_id")
+  idempotencyKey String          @unique @map("idempotency_key")
+  note           String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  metadata       Json            @default("{}")
+  wallet         Wallet          @relation(fields: [walletId], references: [id])
+
+  @@index([walletId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("wallet_entries")
+}
+
+model WalletGift {
+  id                 String     @id @default(uuid())
+  senderUserId       String     @map("sender_user_id")
+  recipientUserId    String?    @map("recipient_user_id")
+  recipientPhoneHash String     @map("recipient_phone_hash")
+  amountMinor        Int        @map("amount_minor")
+  currency           String     @default("SYP")
+  message            String?
+  status             GiftStatus @default(CREATED)
+  claimAttemptCount  Int        @default(0) @map("claim_attempt_count")
+  lockedUntil        DateTime?  @map("locked_until")
+  expiresAt          DateTime   @map("expires_at")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+  recipient          User?      @relation("GiftRecipient", fields: [recipientUserId], references: [id])
+  sender             User       @relation("GiftSender", fields: [senderUserId], references: [id])
+
+  @@index([recipientPhoneHash, status])
+  @@index([senderUserId, createdAt])
+  @@map("wallet_gifts")
+}
+
+// Cross-instance rate-limit counter (fixed window). Used only when RATE_LIMIT_STORE=db (serverless /
+// multi-instance), so the per-endpoint limits hold across all API instances instead of resetting per
+// process. One row per (rule, bucket-key); the reset window is stored on the row and refreshed
+// atomically on each hit. In-memory is still the default for local/dev and the unit tests.
+model RateLimitHit {
+  key     String   @id
+  count   Int      @default(0)
+  resetAt DateTime @map("reset_at")
+
+  @@index([resetAt])
+  @@map("rate_limit_hits")
+}
+
+model OtpAttemptLock {
+  id            String    @id @default(uuid())
+  purpose       String
+  subjectHash   String    @map("subject_hash")
+  attemptCount  Int       @default(0) @map("attempt_count")
+  lockedUntil   DateTime? @map("locked_until")
+  lastAttemptAt DateTime? @map("last_attempt_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([purpose, subjectHash])
+  @@map("otp_attempt_locks")
+}
+
+model RideRequest {
+  id                   String                   @id @default(uuid())
+  riderId              String                   @map("rider_id")
+  driverId             String?                  @map("driver_id")
+  pickupLocationId     String?                  @map("pickup_location_id")
+  dropoffLocationId    String?                  @map("dropoff_location_id")
+  status               RideStatus               @default(REQUESTED)
+  requestedAt          DateTime                 @default(now()) @map("requested_at")
+  fareMinor            Int?                     @map("fare_minor")
+  currency             String                   @default("SYP")
+  pickupGeo            Unsupported("geometry")? @map("pickup_geo")
+  dropoffGeo           Unsupported("geometry")? @map("dropoff_geo")
+  metadata             Json                     @default("{}")
+  updatedAt            DateTime                 @updatedAt @map("updated_at")
+  lastLocationGeo      Unsupported("geometry")? @map("last_location_geo")
+  lastLocationAt       DateTime?                @map("last_location_at")
+  shareToken           String?                  @unique @map("share_token")
+  shareTokenCreatedAt  DateTime?                @map("share_token_created_at")
+  pickupPin            String?                  @map("pickup_pin")
+  pickupVerifiedAt     DateTime?                @map("pickup_verified_at")
+  pinAttempts          Int                      @default(0) @map("pin_attempts")
+  driverMatchedAt      DateTime?                @map("driver_matched_at")
+  cancelledAt          DateTime?                @map("cancelled_at")
+  cancelledByRole      String?                  @map("cancelled_by_role")
+  cancelReason         String?                  @map("cancel_reason")
+  cancellationFeeMinor Int?                     @map("cancellation_fee_minor")
+  disputes             Dispute[]
+  driverCancellations  DriverCancellation[]
+  messages             RideMessage[]
+  ratings              RideRating[]
+  driver               User?                    @relation("RideDriver", fields: [driverId], references: [id])
+  dropoffLocation      Location?                @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
+  pickupLocation       Location?                @relation("RidePickup", fields: [pickupLocationId], references: [id])
+  rider                User                     @relation("RideRider", fields: [riderId], references: [id])
+  sosEvents            SosEvent[]
+
+  @@index([status, requestedAt])
+  @@index([driverId, status])
+  @@map("ride_requests")
+}
+
+model AdminAuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?  @map("actor_user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  before      Json?
+  after       Json?
+  ipHash      String?  @map("ip_hash")
+  createdAt   DateTime @default(now()) @map("created_at")
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("admin_audit_logs")
+}
+
+model SosEvent {
+  id             String      @id @default(uuid())
+  rideId         String      @map("ride_id")
+  raisedByUserId String      @map("raised_by_user_id")
+  raisedByRole   SosRole     @map("raised_by_role")
+  lat            Float?
+  lng            Float?
+  note           String?
+  status         SosStatus   @default(OPEN)
+  resolvedById   String?     @map("resolved_by_id")
+  resolvedAt     DateTime?   @map("resolved_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  raisedBy       User        @relation("SosRaisedBy", fields: [raisedByUserId], references: [id])
+  resolvedBy     User?       @relation("SosResolvedBy", fields: [resolvedById], references: [id])
+  ride           RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([rideId])
+  @@map("sos_events")
+}
+
+model DriverDocument {
+  id           String             @id @default(uuid())
+  driverUserId String             @map("driver_user_id")
+  type         DriverDocumentType
+  assetUrl     String             @map("asset_url")
+  mimeType     String?            @map("mime_type")
+  status       IdDocumentStatus   @default(PENDING_REVIEW)
+  reviewedById String?            @map("reviewed_by_id")
+  reviewedAt   DateTime?          @map("reviewed_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  driver       User               @relation("DriverDocumentOwner", fields: [driverUserId], references: [id], onDelete: Cascade)
+  reviewer     User?              @relation("DriverDocumentReviewer", fields: [reviewedById], references: [id])
+
+  @@unique([driverUserId, type])
+  @@index([status])
+  @@map("driver_documents")
+}
+
+model RideMessage {
+  id           String              @id @default(uuid())
+  rideId       String              @map("ride_id")
+  senderUserId String              @map("sender_user_id")
+  senderRole   RideParticipantRole @map("sender_role")
+  body         String
+  createdAt    DateTime            @default(now()) @map("created_at")
+  ride         RideRequest         @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  sender       User                @relation("RideMessageSender", fields: [senderUserId], references: [id])
+
+  @@index([rideId, createdAt])
+  @@map("ride_messages")
+}
+
+model RideRating {
+  id          String              @id @default(uuid())
+  rideId      String              @map("ride_id")
+  raterUserId String              @map("rater_user_id")
+  ratedUserId String              @map("rated_user_id")
+  raterRole   RideParticipantRole @map("rater_role")
+  stars       Int
+  safetyFlag  Boolean             @default(false) @map("safety_flag")
+  comment     String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+  rated       User                @relation("RideRatingRated", fields: [ratedUserId], references: [id])
+  rater       User                @relation("RideRatingRater", fields: [raterUserId], references: [id])
+  ride        RideRequest         @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@unique([rideId, raterUserId])
+  @@index([ratedUserId, safetyFlag])
+  @@index([raterUserId, safetyFlag])
+  @@map("ride_ratings")
+}
+
+model DriverCancellation {
+  id        String      @id @default(uuid())
+  rideId    String      @map("ride_id")
+  driverId  String      @map("driver_id")
+  reason    String?
+  createdAt DateTime    @default(now()) @map("created_at")
+  driver    User        @relation("DriverCancellationDriver", fields: [driverId], references: [id])
+  ride      RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([driverId])
+  @@index([rideId])
+  @@map("driver_cancellations")
+}
+
+model DriverVehicle {
+  id                        String                     @id @default(uuid())
+  driverId                  String                     @map("driver_id")
+  make                      String
+  model                     String
+  year                      Int
+  plate                     String
+  color                     String?
+  category                  String
+  status                    IdDocumentStatus           @default(PENDING_REVIEW)
+  reviewedById              String?                    @map("reviewed_by_id")
+  reviewedAt                DateTime?                  @map("reviewed_at")
+  reviewNote                String?                    @map("review_note")
+  createdAt                 DateTime                   @default(now()) @map("created_at")
+  updatedAt                 DateTime                   @updatedAt @map("updated_at")
+  country                   String                     @default("SY")
+  driver                    User                       @relation("DriverVehicleOwner", fields: [driverId], references: [id])
+  quebec_vehicle_onboarding quebec_vehicle_onboarding?
+
+  @@index([driverId, status])
+  @@map("driver_vehicles")
+}
+
+model Dispute {
+  id             String        @id @default(uuid())
+  subjectType    String        @map("subject_type")
+  rideId         String?       @map("ride_id")
+  bookingId      String?       @map("booking_id")
+  openedByUserId String        @map("opened_by_user_id")
+  reason         String
+  status         DisputeStatus @default(OPEN)
+  refundMinor    Int?          @map("refund_minor")
+  currency       String?
+  resolutionNote String?       @map("resolution_note")
+  resolvedById   String?       @map("resolved_by_id")
+  resolvedAt     DateTime?     @map("resolved_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  booking        Booking?      @relation(fields: [bookingId], references: [id])
+  openedBy       User          @relation("DisputeOpener", fields: [openedByUserId], references: [id])
+  ride           RideRequest?  @relation(fields: [rideId], references: [id])
+
+  @@index([status])
+  @@index([openedByUserId])
+  @@map("disputes")
+}
+
+model Garage {
+  id           String   @id @default(uuid())
+  country      String
+  city         String
+  name         String
+  lat          Float?
+  lng          Float?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  destRoutes   Route[]  @relation("RouteDest")
+  originRoutes Route[]  @relation("RouteOrigin")
+
+  @@index([country, city])
+  @@map("garages")
+}
+
+model Route {
+  id                String             @id @default(uuid())
+  originGarageId    String             @map("origin_garage_id")
+  destGarageId      String             @map("dest_garage_id")
+  distanceKm        Int?               @map("distance_km")
+  estMinutes        Int?               @map("est_minutes")
+  active            Boolean            @default(true)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  tariffs           RouteTariff[]
+  destGarage        Garage             @relation("RouteDest", fields: [destGarageId], references: [id])
+  originGarage      Garage             @relation("RouteOrigin", fields: [originGarageId], references: [id])
+  trips             ServiceTrip[]
+  tariffAdjustments TariffAdjustment[]
+
+  @@index([originGarageId])
+  @@index([destGarageId])
+  @@map("routes")
+}
+
+model RouteTariff {
+  id                String   @id @default(uuid())
+  routeId           String   @map("route_id")
+  tier              String
+  perSeatMinor      Int      @map("per_seat_minor")
+  wholeVehicleMinor Int      @map("whole_vehicle_minor")
+  currency          String   @default("USD")
+  locked            Boolean  @default(false)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  route             Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, tier])
+  @@map("route_tariffs")
+}
+
+model TariffAdjustment {
+  id              String       @id @default(uuid())
+  scope           TariffScope
+  routeId         String?      @map("route_id")
+  operatorId      String?      @map("operator_id")
+  tier            String?
+  effectiveFrom   DateTime     @map("effective_from")
+  effectiveTo     DateTime     @map("effective_to")
+  reason          TariffReason
+  kind            TariffKind
+  value           Int
+  priority        Int          @default(0)
+  createdByUserId String       @map("created_by_user_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  operator        Operator?    @relation(fields: [operatorId], references: [id])
+  route           Route?       @relation(fields: [routeId], references: [id])
+
+  @@index([routeId])
+  @@index([operatorId])
+  @@index([effectiveFrom, effectiveTo])
+  @@map("tariff_adjustments")
+}
+
+model Operator {
+  id                String             @id @default(uuid())
+  name              String
+  type              OperatorType
+  country           String
+  contactPhone      String?            @map("contact_phone")
+  status            String             @default("PENDING")
+  verified          Boolean            @default(false)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  trips             ServiceTrip[]
+  tariffAdjustments TariffAdjustment[]
+
+  @@index([country, status])
+  @@map("operators")
+}
+
+model ServiceTrip {
+  id                String            @id @default(uuid())
+  routeId           String            @map("route_id")
+  tier              String
+  operatorId        String?           @map("operator_id")
+  driverUserId      String?           @map("driver_user_id")
+  vehicleId         String?           @map("vehicle_id")
+  capacity          Int
+  seatsAvailable    Int               @map("seats_available")
+  seatMap           Json?             @map("seat_map")
+  status            ServiceTripStatus @default(FORMING)
+  departureMode     DepartureMode     @map("departure_mode")
+  scheduledDepartAt DateTime?         @map("scheduled_depart_at")
+  departedAt        DateTime?         @map("departed_at")
+  perSeatMinor      Int               @map("per_seat_minor")
+  currency          String            @default("USD")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  seatBookings      SeatBooking[]
+  operator          Operator?         @relation(fields: [operatorId], references: [id])
+  route             Route             @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@index([routeId, status])
+  @@index([operatorId])
+  @@map("service_trips")
+}
+
+model SeatBooking {
+  id            String            @id @default(uuid())
+  serviceTripId String            @map("service_trip_id")
+  riderUserId   String            @map("rider_user_id")
+  seatCount     Int               @default(1) @map("seat_count")
+  seatLabels    String[]          @map("seat_labels")
+  amountMinor   Int               @map("amount_minor")
+  currency      String            @default("USD")
+  ticketCode    String            @unique @map("ticket_code")
+  status        SeatBookingStatus @default(RESERVED)
+  boardedAt     DateTime?         @map("boarded_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  serviceTrip   ServiceTrip       @relation(fields: [serviceTripId], references: [id], onDelete: Cascade)
+
+  @@index([serviceTripId])
+  @@index([riderUserId])
+  @@map("seat_bookings")
+}
+
+model Report {
+  id             String            @id @default(uuid())
+  reporterUserId String            @map("reporter_user_id")
+  subjectType    ReportSubjectType @map("subject_type")
+  subjectId      String            @map("subject_id")
+  reason         String
+  note           String?
+  status         ReportStatus      @default(OPEN)
+  resolutionNote String?           @map("resolution_note")
+  resolvedById   String?           @map("resolved_by_id")
+  resolvedAt     DateTime?         @map("resolved_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([subjectType, subjectId])
+  @@index([reporterUserId])
+  @@map("reports")
+}
+
+model UserBlock {
+  id            String   @id @default(uuid())
+  blockerUserId String   @map("blocker_user_id")
+  blockedUserId String   @map("blocked_user_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([blockerUserId, blockedUserId])
+  @@index([blockedUserId])
+  @@map("user_blocks")
+}
+
+model compliance_feature_flags {
+  id             String    @id
+  key            String    @unique
+  enabled        Boolean   @default(false)
+  note           String?
+  approved_by_id String?
+  approved_at    DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime
+}
+
+model jurisdiction_commission_policies {
+  id                     String                    @id
+  country                String?
+  province               String?
+  service_type           jurisdiction_service_type
+  policy_type            String
+  flat_rate_parts        Int?
+  tiers                  Json?
+  effective_from         DateTime
+  effective_to           DateTime?
+  active                 Boolean                   @default(false)
+  legally_reviewed_by_id String?
+  legally_reviewed_at    DateTime?
+  note                   String?
+  created_at             DateTime                  @default(now())
+  updated_at             DateTime
+
+  @@index([country, province, service_type, effective_from])
+}
+
+model jurisdiction_compliance_profiles {
+  id                            String                         @id
+  division                      jurisdiction_division
+  country_code                  String
+  region_code                   String                         @default("")
+  status                        jurisdiction_compliance_status @default(PENDING)
+  tourism_required              Boolean                        @default(false)
+  tourism_satisfied             Boolean                        @default(false)
+  tourism_notes                 String?
+  transport_required            Boolean                        @default(false)
+  transport_satisfied           Boolean                        @default(false)
+  transport_notes               String?
+  tax_required                  Boolean                        @default(false)
+  tax_satisfied                 Boolean                        @default(false)
+  tax_notes                     String?
+  platform_required             Boolean                        @default(false)
+  platform_satisfied            Boolean                        @default(false)
+  platform_notes                String?
+  reviewed_by_id                String?
+  reviewed_at                   DateTime?
+  created_at                    DateTime                       @default(now())
+  updated_at                    DateTime
+  operator_respondent_name      String?
+  operator_respondent_contact   String?
+  operator_dispatcher_name      String?
+  operator_dispatcher_contact   String?
+  operator_insurance_reference  String?
+  operator_authorization_number String?
+  users                         User?                          @relation(fields: [reviewed_by_id], references: [id])
+
+  @@unique([division, country_code, region_code])
+}
+
+model jurisdiction_tax_rates {
+  id                     String                        @id
+  country                String
+  province               String?
+  municipality           String?
+  service_type           jurisdiction_service_type
+  tax_type               jurisdiction_tax_type
+  rate_parts             Int
+  calculation_base       jurisdiction_calculation_base
+  collector_type         jurisdiction_collector_type
+  rounding_rule          String                        @default("ROUND_HALF_UP")
+  effective_from         DateTime
+  effective_to           DateTime?
+  active                 Boolean                       @default(false)
+  legally_reviewed_by_id String?
+  legally_reviewed_at    DateTime?
+  source_url             String?
+  note                   String?
+  created_at             DateTime                      @default(now())
+  updated_at             DateTime
+
+  @@index([country, province, municipality, service_type, tax_type, effective_from])
+}
+
+model listing_documents {
+  id                                                  String                  @id
+  listing_id                                          String
+  type                                                listing_document_type
+  asset_url                                           String?
+  mime_type                                           String?
+  reviewed_by_id                                      String?
+  reviewed_at                                         DateTime?
+  created_at                                          DateTime                @default(now())
+  updated_at                                          DateTime
+  deleted_at                                          DateTime?
+  expires_at                                          DateTime?
+  legal_hold                                          Boolean                 @default(false)
+  legal_hold_reason                                   String?
+  legal_hold_set_at                                   DateTime?
+  legal_hold_set_by_id                                String?
+  retention_delete_after                              DateTime?
+  status                                              listing_document_status @default(PENDING_REVIEW)
+  version                                             Int                     @default(1)
+  is_current                                          Boolean                 @default(true)
+  replaces_id                                         String?                 @unique
+  users_listing_documents_legal_hold_set_by_idTousers User?                   @relation("listing_documents_legal_hold_set_by_idTousers", fields: [legal_hold_set_by_id], references: [id])
+  listings                                            Listing                 @relation(fields: [listing_id], references: [id], onDelete: Cascade)
+  listing_documents                                   listing_documents?      @relation("listing_documentsTolisting_documents", fields: [replaces_id], references: [id])
+  other_listing_documents                             listing_documents?      @relation("listing_documentsTolisting_documents")
+  users_listing_documents_reviewed_by_idTousers       User?                   @relation("listing_documents_reviewed_by_idTousers", fields: [reviewed_by_id], references: [id])
+
+  @@unique([listing_id, type, version])
+  @@index([listing_id, type, is_current])
+  @@index([retention_delete_after])
+  @@index([status])
+}
+
+model part_xx_filings {
+  id                    String                @id
+  year                  Int
+  quarter               Int
+  status                part_xx_filing_status @default(DRAFT)
+  t619_transmission_ref String?
+  submitted_xml         String?
+  cra_response          Json?
+  submitted_at          DateTime?
+  submitted_by_id       String?
+  accepted_at           DateTime?
+  error_details         Json?
+  correction_of_id      String?
+  created_at            DateTime              @default(now())
+  updated_at            DateTime
+  part_xx_records       part_xx_records[]
+}
+
+model part_xx_records {
+  id                        String                @id
+  seller_id                 String
+  activity_type             part_xx_activity_type
+  year                      Int
+  quarter                   Int
+  gross_consideration_minor Int
+  currency                  String                @default("USD")
+  activity_count            Int
+  platform_fees_minor       Int
+  taxes_withheld_minor      Int                   @default(0)
+  refunds_minor             Int                   @default(0)
+  property_address          String?
+  status                    part_xx_filing_status @default(DRAFT)
+  filing_id                 String?
+  created_at                DateTime              @default(now())
+  updated_at                DateTime
+  part_xx_filings           part_xx_filings?      @relation(fields: [filing_id], references: [id])
+  users                     User                  @relation(fields: [seller_id], references: [id])
+
+  @@unique([seller_id, activity_type, year, quarter])
+}
+
+model payments {
+  id                      String   @id
+  booking_id              String   @unique
+  gross_minor             Int
+  accommodation_minor     Int      @default(0)
+  cleaning_fee_minor      Int      @default(0)
+  extra_fees_minor        Int      @default(0)
+  processing_fee_minor    Int      @default(0)
+  commission_base_minor   Int
+  commission_rate_parts   Int
+  commission_amount_minor Int
+  host_payout_minor       Int
+  tax_components          Json     @default("[]")
+  tax_total_minor         Int      @default(0)
+  currency                String
+  settlement_ref          String
+  base_version            String
+  status                  String   @default("SETTLED")
+  source                  String   @default("live")
+  settled_at              DateTime @default(now())
+  created_at              DateTime @default(now())
+  updated_at              DateTime
+  bookings                Booking  @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+
+  @@index([status, settled_at])
+}
+
+model payouts {
+  id             String    @id
+  booking_id     String    @unique
+  host_id        String
+  amount_minor   Int
+  currency       String
+  status         String    @default("PENDING_HOLD")
+  release_date   DateTime?
+  released_by_id String?
+  source         String    @default("live")
+  created_at     DateTime  @default(now())
+  updated_at     DateTime
+  bookings       Booking   @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+  users          User      @relation(fields: [host_id], references: [id])
+
+  @@index([host_id, status])
+  @@index([status, release_date])
+}
+
+model pricing_snapshots {
+  id           String   @id
+  subject_type String
+  subject_id   String
+  country      String
+  province     String?
+  breakdown    Json
+  created_at   DateTime @default(now())
+
+  @@index([subject_type, subject_id])
+}
+
+model quebec_driver_documents {
+  id                                                        String                      @id
+  onboarding_user_id                                        String
+  type                                                      quebec_driver_document_type
+  version                                                   Int                         @default(1)
+  is_current                                                Boolean                     @default(true)
+  replaces_id                                               String?                     @unique
+  asset_url                                                 String?
+  mime_type                                                 String?
+  status                                                    listing_document_status     @default(PENDING_REVIEW)
+  issuer                                                    String?
+  issued_at                                                 DateTime?
+  expires_at                                                DateTime?
+  uploaded_at                                               DateTime                    @default(now())
+  reviewed_by_id                                            String?
+  reviewed_at                                               DateTime?
+  rejection_reason                                          String?
+  malware_scan_status                                       malware_scan_status         @default(PENDING)
+  retention_delete_after                                    DateTime?
+  legal_hold                                                Boolean                     @default(false)
+  legal_hold_reason                                         String?
+  legal_hold_set_by_id                                      String?
+  legal_hold_set_at                                         DateTime?
+  deleted_at                                                DateTime?
+  created_at                                                DateTime                    @default(now())
+  updated_at                                                DateTime
+  users_quebec_driver_documents_legal_hold_set_by_idTousers User?                       @relation("quebec_driver_documents_legal_hold_set_by_idTousers", fields: [legal_hold_set_by_id], references: [id])
+  quebec_driver_onboarding                                  quebec_driver_onboarding    @relation(fields: [onboarding_user_id], references: [user_id], onDelete: Cascade)
+  quebec_driver_documents                                   quebec_driver_documents?    @relation("quebec_driver_documentsToquebec_driver_documents", fields: [replaces_id], references: [id])
+  other_quebec_driver_documents                             quebec_driver_documents?    @relation("quebec_driver_documentsToquebec_driver_documents")
+  users_quebec_driver_documents_reviewed_by_idTousers       User?                       @relation("quebec_driver_documents_reviewed_by_idTousers", fields: [reviewed_by_id], references: [id])
+
+  @@index([onboarding_user_id, type, is_current])
+  @@index([retention_delete_after])
+  @@index([status])
+}
+
+model quebec_driver_onboarding {
+  id                                                         String                          @id
+  user_id                                                    String                          @unique
+  status                                                     quebec_driver_onboarding_status @default(DRAFT)
+  license_number_encrypted                                   String?
+  license_expires_at                                         DateTime?
+  police_check_expires_at                                    DateTime?
+  training_completed_at                                      DateTime?
+  status_reason                                              String?
+  reviewed_by_id                                             String?
+  reviewed_at                                                DateTime?
+  created_at                                                 DateTime                        @default(now())
+  updated_at                                                 DateTime
+  legal_name_encrypted                                       String?
+  legal_name_last4                                           String?
+  age_eligibility_confirmed                                  Boolean                         @default(false)
+  license_class                                              String?
+  driving_experience_confirmed                               Boolean                         @default(false)
+  driving_experience_confirmed_at                            DateTime?
+  french_attestation_confirmed                               Boolean                         @default(false)
+  french_attestation_confirmed_at                            DateTime?
+  gst_status                                                 quebec_compliance_item_status   @default(NOT_STARTED)
+  qst_status                                                 quebec_compliance_item_status   @default(NOT_STARTED)
+  operator_file_status                                       quebec_compliance_item_status   @default(NOT_STARTED)
+  sev_srs_status                                             quebec_compliance_item_status   @default(NOT_STARTED)
+  assigned_reviewer_id                                       String?
+  version                                                    Int                             @default(1)
+  quebec_driver_documents                                    quebec_driver_documents[]
+  users_quebec_driver_onboarding_assigned_reviewer_idTousers User?                           @relation("quebec_driver_onboarding_assigned_reviewer_idTousers", fields: [assigned_reviewer_id], references: [id])
+  users_quebec_driver_onboarding_reviewed_by_idTousers       User?                           @relation("quebec_driver_onboarding_reviewed_by_idTousers", fields: [reviewed_by_id], references: [id])
+  driver_profiles                                            DriverProfile                   @relation(fields: [user_id], references: [userId], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model quebec_vehicle_documents {
+  id                                                         String                       @id
+  onboarding_vehicle_id                                      String
+  type                                                       quebec_vehicle_document_type
+  version                                                    Int                          @default(1)
+  is_current                                                 Boolean                      @default(true)
+  replaces_id                                                String?                      @unique
+  asset_url                                                  String?
+  mime_type                                                  String?
+  status                                                     listing_document_status      @default(PENDING_REVIEW)
+  issuer                                                     String?
+  issued_at                                                  DateTime?
+  expires_at                                                 DateTime?
+  uploaded_at                                                DateTime                     @default(now())
+  reviewed_by_id                                             String?
+  reviewed_at                                                DateTime?
+  rejection_reason                                           String?
+  malware_scan_status                                        malware_scan_status          @default(PENDING)
+  retention_delete_after                                     DateTime?
+  legal_hold                                                 Boolean                      @default(false)
+  legal_hold_reason                                          String?
+  legal_hold_set_by_id                                       String?
+  legal_hold_set_at                                          DateTime?
+  deleted_at                                                 DateTime?
+  created_at                                                 DateTime                     @default(now())
+  updated_at                                                 DateTime
+  users_quebec_vehicle_documents_legal_hold_set_by_idTousers User?                        @relation("quebec_vehicle_documents_legal_hold_set_by_idTousers", fields: [legal_hold_set_by_id], references: [id])
+  quebec_vehicle_onboarding                                  quebec_vehicle_onboarding    @relation(fields: [onboarding_vehicle_id], references: [vehicle_id], onDelete: Cascade)
+  quebec_vehicle_documents                                   quebec_vehicle_documents?    @relation("quebec_vehicle_documentsToquebec_vehicle_documents", fields: [replaces_id], references: [id])
+  other_quebec_vehicle_documents                             quebec_vehicle_documents?    @relation("quebec_vehicle_documentsToquebec_vehicle_documents")
+  users_quebec_vehicle_documents_reviewed_by_idTousers       User?                        @relation("quebec_vehicle_documents_reviewed_by_idTousers", fields: [reviewed_by_id], references: [id])
+
+  @@index([onboarding_vehicle_id, type, is_current], map: "quebec_vehicle_documents_onboarding_vehicle_id_type_is_curre_id")
+  @@index([retention_delete_after])
+  @@index([status])
+}
+
+model quebec_vehicle_onboarding {
+  id                                                          String                           @id
+  vehicle_id                                                  String                           @unique
+  status                                                      quebec_vehicle_onboarding_status @default(DRAFT)
+  registration_expires_at                                     DateTime?
+  insurance_expires_at                                        DateTime?
+  inspection_expires_at                                       DateTime?
+  status_reason                                               String?
+  reviewed_by_id                                              String?
+  reviewed_at                                                 DateTime?
+  created_at                                                  DateTime                         @default(now())
+  updated_at                                                  DateTime
+  vin_encrypted                                               String?
+  vin_last4                                                   String?
+  odometer_km                                                 Int?
+  door_count                                                  Int?
+  seat_count                                                  Int?
+  accessibility_info                                          Json?
+  assigned_reviewer_id                                        String?
+  version                                                     Int                              @default(1)
+  quebec_vehicle_documents                                    quebec_vehicle_documents[]
+  users_quebec_vehicle_onboarding_assigned_reviewer_idTousers User?                            @relation("quebec_vehicle_onboarding_assigned_reviewer_idTousers", fields: [assigned_reviewer_id], references: [id])
+  users_quebec_vehicle_onboarding_reviewed_by_idTousers       User?                            @relation("quebec_vehicle_onboarding_reviewed_by_idTousers", fields: [reviewed_by_id], references: [id])
+  driver_vehicles                                             DriverVehicle                    @relation(fields: [vehicle_id], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+
+model tax_profiles {
+  id                                       String                    @id
+  user_id                                  String
+  subject_type                             tax_profile_subject_type
+  legal_first_name                         String
+  legal_last_name                          String
+  legal_business_name                      String?
+  business_type                            tax_profile_business_type @default(INDIVIDUAL)
+  date_of_birth                            DateTime?
+  address_line1                            String
+  address_line2                            String?
+  city                                     String
+  region                                   String
+  postal_code                              String
+  country                                  String
+  tax_residence_country                    String
+  tax_residence_region                     String?
+  tax_identifier_type                      tax_identifier_type
+  tax_identifier_ciphertext                String
+  tax_identifier_last4                     String
+  gst_registered                           Boolean                   @default(false)
+  gst_number                               String?
+  qst_registered                           Boolean                   @default(false)
+  qst_number                               String?
+  neq_number                               String?
+  payout_account_ciphertext                String?
+  payout_account_last4                     String?
+  gst_qst_treatment                        gst_qst_treatment?
+  gst_qst_treatment_effective_at           DateTime?
+  gst_qst_treatment_decided_by_id          String?
+  gst_qst_treatment_decided_at             DateTime?
+  consent_regulatory_reporting             Boolean                   @default(false)
+  certified_accurate                       Boolean                   @default(false)
+  certified_accurate_at                    DateTime?
+  verification_status                      IdDocumentStatus          @default(PENDING_REVIEW)
+  verification_source                      String?
+  verified_at                              DateTime?
+  verified_by_id                           String?
+  created_at                               DateTime                  @default(now())
+  updated_at                               DateTime
+  users_tax_profiles_user_idTousers        User                      @relation("tax_profiles_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade)
+  users_tax_profiles_verified_by_idTousers User?                     @relation("tax_profiles_verified_by_idTousers", fields: [verified_by_id], references: [id])
+
+  @@unique([user_id, subject_type])
 }
 
 enum AccountStatus {
@@ -130,278 +1480,11 @@ enum MessageSenderRole {
   @@map("message_sender_role")
 }
 
-model User {
-  id           String        @id @default(uuid())
-  email        String?       @unique
-  phoneHash    String?       @unique @map("phone_hash")
-  passwordHash String?       @map("password_hash")
-  displayName  String        @map("display_name")
-  locale       String        @default("ar-SY")
-  status       AccountStatus @default(ACTIVE)
-  idDocumentRef String?      @map("id_document_ref")
-  idDocumentSubmittedAt DateTime? @map("id_document_submitted_at")
-  idDocumentMimeType String? @map("id_document_mime_type")
-  idDocumentStatus IdDocumentStatus? @map("id_document_status")
-  idDocumentReviewedById String? @map("id_document_reviewed_by_id")
-  idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
-  // How this user is paid out (host stay payouts / seller payouts). Free-form JSON, e.g.
-  // { type: 'sham_cash', phone, receiverName }. Surfaced ONLY to admin payout reminders
-  // (see routes/admin.mjs /api/admin/payouts) — never to guests or hosts of other accounts.
-  payoutMethod Json?      @map("payout_method")
-  // Bumped on logout and on password reset; embedded as a claim in every session token and
-  // checked on every request (server/lib/auth-context.mjs). A stateless HMAC-signed token has no
-  // other way to be revoked before its 7-day expiry -- this is the whole mechanism (security audit
-  // finding F-02).
-  sessionVersion Int         @default(0) @map("session_version")
-  // Shareable referral code, generated once at account creation (server/lib/referrals.mjs). Every
-  // user has one, whether or not they ever refer anyone -- generated lazily would need a
-  // read-then-write race guard for no benefit, since it's nearly free to always have one.
-  referralCode String        @unique @map("referral_code")
-  // Store-readiness (024): in-app account deletion anonymizes the row and stamps deletedAt / status=CLOSED
-  // rather than hard-deleting it, so wallet-ledger + audit references survive against an anonymized subject.
-  deletedAt    DateTime?     @map("deleted_at")
-  // Reviewer demo accounts (024): App Store / Play reviewers log into these pre-verified accounts. Flagged
-  // so they can be recognized (and excluded from real metrics); they carry no admin role.
-  isDemo       Boolean       @default(false) @map("is_demo")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-
-  roles             UserRole[]
-  sellerProfile     SellerProfile?
-  driverProfile     DriverProfile?
-  listings          Listing[]         @relation("ListingOwner")
-  bookings          Booking[]         @relation("BookingGuest")
-  wallets           Wallet[]
-  sentGifts         WalletGift[]      @relation("GiftSender")
-  claimedGifts      WalletGift[]      @relation("GiftRecipient")
-  rideRequests      RideRequest[]     @relation("RideRider")
-  driverRideMatches RideRequest[]     @relation("RideDriver")
-  auditLogs         AdminAuditLog[]   @relation("AuditActor")
-  listingReviews    ListingReview[]   @relation("ReviewGuest")
-  sentMessages      Message[]         @relation("MessageSender")
-  paymentProofs     PaymentProof[]    @relation("PaymentPayer")
-  listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
-  accommodations    Accommodation[]   @relation("AccommodationOwner")
-  hostInsights      HostInsight[]     @relation("HostInsightOwner")
-  auctionBids       Bid[]             @relation("AuctionBidder")
-  referralsMade     Referral[]        @relation("ReferralReferrer")
-  referredAs        Referral?         @relation("ReferralReferee")
-  // SR safety/trust layers (014/015)
-  sosEventsRaised         SosEvent[]       @relation("SosRaisedBy")
-  sosEventsResolved       SosEvent[]       @relation("SosResolvedBy")
-  driverDocuments         DriverDocument[] @relation("DriverDocumentOwner")
-  driverDocumentsReviewed DriverDocument[] @relation("DriverDocumentReviewer")
-  rideMessagesSent        RideMessage[]    @relation("RideMessageSender")
-  rideRatingsGiven        RideRating[]     @relation("RideRatingRater")
-  rideRatingsReceived     RideRating[]     @relation("RideRatingRated")
-  sellerSalesMade         SellerSale[]     @relation("SellerSaleSeller")
-  sellerPurchases         SellerSale[]     @relation("SellerSaleBuyer")
-  sellerReviewsReceived   SellerReview[]   @relation("SellerReviewSeller")
-  sellerReviewsWritten    SellerReview[]   @relation("SellerReviewBuyer")
-  driverCancellations     DriverCancellation[] @relation("DriverCancellationDriver")
-  driverVehicles          DriverVehicle[]      @relation("DriverVehicleOwner")
-  disputesOpened          Dispute[]            @relation("DisputeOpener")
-  threadDocumentsUploaded ThreadDocument[]     @relation("ThreadDocumentUploader")
-
-  @@map("users")
-}
-
 enum ReferralStatus {
   PENDING
   REWARDED
 
   @@map("referral_status")
-}
-
-// Double-sided referral program (riders/hosts/drivers bring new users, both sides get rewarded --
-// same "give X, get Y" shape as Lyft/Uber's referral programs). The referee's signup bonus is
-// credited immediately at registration (server/routes/auth.mjs); the referrer's reward is only
-// credited once the referee completes their first *paid* STR booking (server/lib/referrals.mjs),
-// not merely on signup -- otherwise this would be trivially farmable with throwaway accounts that
-// never generate any real revenue.
-model Referral {
-  id                  String         @id @default(uuid())
-  referrerUserId      String         @map("referrer_user_id")
-  refereeUserId       String         @unique @map("referee_user_id")
-  status              ReferralStatus @default(PENDING)
-  qualifyingBookingId String?        @map("qualifying_booking_id")
-  rewardedAt          DateTime?      @map("rewarded_at")
-  createdAt           DateTime       @default(now()) @map("created_at")
-
-  referrer User @relation("ReferralReferrer", fields: [referrerUserId], references: [id])
-  referee  User @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: Cascade)
-
-  @@index([referrerUserId, status])
-  @@map("referrals")
-}
-
-model UserRole {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  role      RoleName
-  createdAt DateTime @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, role])
-  @@index([role])
-  @@map("user_roles")
-}
-
-model SellerProfile {
-  id             String        @id @default(uuid())
-  userId         String        @unique @map("user_id")
-  legalName      String        @map("legal_name")
-  sellerType     String        @map("seller_type")
-  documentStatus ListingStatus @default(DRAFT) @map("document_status")
-  planCode       String?       @map("plan_code")
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("seller_profiles")
-}
-
-model DriverProfile {
-  id              String   @id @default(uuid())
-  userId          String   @unique @map("user_id")
-  licenseHash     String?  @map("license_hash")
-  vehicleMake     String?  @map("vehicle_make")
-  vehicleModel    String?  @map("vehicle_model")
-  vehiclePlate    String?  @map("vehicle_plate")
-  active          Boolean  @default(false)
-  lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
-  // SR money model (016): where the driver's SR earnings are paid out (Sham Cash).
-  payoutMethod     String? @map("payout_method")
-  payoutAccountRef String? @map("payout_account_ref")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("driver_profiles")
-}
-
-model Location {
-  id          String   @id @default(uuid())
-  country    String   @default("SY")
-  governorate String
-  city        String
-  area        String?
-  street      String?
-  addressLine String?  @map("address_line")
-  geo         Unsupported("geometry(Point,4326)")?
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  listings       Listing[]
-  pickupRides    RideRequest[] @relation("RidePickup")
-  dropoffRides   RideRequest[] @relation("RideDropoff")
-
-  @@index([governorate, city])
-  @@map("locations")
-}
-
-model Listing {
-  id          String          @id @default(uuid())
-  ownerId     String          @map("owner_id")
-  locationId  String?         @map("location_id")
-  accommodationId String?     @map("accommodation_id")
-  division    ListingDivision
-  titleAr     String          @map("title_ar")
-  titleEn     String?         @map("title_en")
-  description String?
-  status      ListingStatus   @default(DRAFT)
-  priceMinor  Int             @map("price_minor")
-  currency    String          @default("SYP")
-  instantBookEnabled Boolean  @default(false) @map("instant_book_enabled")
-  expiresAt   DateTime?       @map("expires_at")
-  metadata    Json            @default("{}")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-
-  owner          User                  @relation("ListingOwner", fields: [ownerId], references: [id])
-  location       Location?             @relation(fields: [locationId], references: [id])
-  accommodation  Accommodation?        @relation(fields: [accommodationId], references: [id])
-  media          ListingMedia[]
-  bookings       Booking[]
-  availability   ListingAvailability[]
-  reviews        ListingReview[]
-  inquiryThreads MessageThread[]
-  hostInsights   HostInsight[]
-  sales          SellerSale[]
-  auction        Auction?
-
-  @@index([division, status])
-  @@index([ownerId])
-  @@index([accommodationId])
-  @@map("listings")
-}
-
-// Groups multiple STAYS room-type Listings under one physical property (a hotel-like host's
-// Studio/Suite/Double-Queen etc.), so shared location/documents/photos aren't re-collected per
-// room type. Each child Listing keeps its own independent price, availability, and bookings.
-model Accommodation {
-  id          String        @id @default(uuid())
-  ownerId     String        @map("owner_id")
-  titleAr     String        @map("title_ar")
-  titleEn     String?       @map("title_en")
-  description String?
-  governorate String
-  city        String
-  area        String?
-  address     String?
-  status      ListingStatus @default(DRAFT)
-  metadata    Json          @default("{}")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-
-  owner    User                 @relation("AccommodationOwner", fields: [ownerId], references: [id])
-  listings Listing[]
-  media    AccommodationMedia[]
-
-  @@index([ownerId])
-  @@map("accommodations")
-}
-
-model AccommodationMedia {
-  id              String   @id @default(uuid())
-  accommodationId String   @map("accommodation_id")
-  url             String
-  kind            String
-  sortOrder       Int      @default(0) @map("sort_order")
-  createdAt       DateTime @default(now()) @map("created_at")
-
-  accommodation Accommodation @relation(fields: [accommodationId], references: [id], onDelete: Cascade)
-
-  @@index([accommodationId])
-  @@map("accommodation_media")
-}
-
-// AI-generated pricing/availability insight for a host, e.g. "you have N open nights next month
-// with no discount set." Generation is a manual, host-triggered action (real per-call AI cost),
-// not opportunistic — see server/lib/host-insights.mjs.
-model HostInsight {
-  id           String    @id @default(uuid())
-  hostId       String    @map("host_id")
-  listingId    String?   @map("listing_id")
-  kind         String    @default("PRICING_GAP")
-  facts        Json      @default("{}")
-  messageAr    String    @map("message_ar")
-  messageEn    String?   @map("message_en")
-  aiProvider   String?   @map("ai_provider")
-  aiModel      String?   @map("ai_model")
-  readAt       DateTime? @map("read_at")
-  emailSentAt  DateTime? @map("email_sent_at")
-  emailError   String?   @map("email_error")
-  createdAt    DateTime  @default(now()) @map("created_at")
-
-  host    User     @relation("HostInsightOwner", fields: [hostId], references: [id])
-  listing Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@index([hostId, createdAt])
-  @@index([listingId])
-  @@map("host_insights")
 }
 
 enum AuctionStatus {
@@ -412,445 +1495,6 @@ enum AuctionStatus {
   @@map("auction_status")
 }
 
-// Carcad (CARS division) online auctions (026). One row per CARS listing the dealer chose to sell
-// via auction instead of a fixed price -- listingId is unique + required: an auction always
-// belongs to exactly one listing, and a listing has at most one auction, ever (no re-auctioning;
-// a dealer who wants to re-run it creates a new listing). Additive to Listing the same way
-// HostInsight is: no existing Listing columns touched, just the one `auction Auction?` reverse
-// relation above.
-model Auction {
-  id                 String        @id @default(uuid())
-  listingId          String        @unique @map("listing_id")
-  status             AuctionStatus @default(OPEN)
-
-  startingPriceMinor Int           @map("starting_price_minor")
-  reservePriceMinor  Int?          @map("reserve_price_minor")
-  reserveMet         Boolean       @default(false) @map("reserve_met")
-  minIncrementMinor  Int           @map("min_increment_minor")
-
-  // Visible "price to beat" -- always startingPriceMinor (no bids yet) or one increment above the
-  // second-highest bidder's max (classic eBay proxy display). Recomputed on every bid.
-  currentPriceMinor  Int           @map("current_price_minor")
-  // Hidden leader state -- currentBidderId/currentMaxProxyMinor must NEVER be serialized into any
-  // API response a buyer/seller can read directly (currentMaxProxyMinor especially -- it's the one
-  // piece of data proxy bidding exists to hide). Only a derived "you are the highest bidder"
-  // boolean is ever exposed, and only to that bidder themselves.
-  currentBidderId      String?     @map("current_bidder_id")
-  currentMaxProxyMinor Int?        @map("current_max_proxy_minor")
-
-  startsAt   DateTime  @default(now()) @map("starts_at")
-  endsAt     DateTime  @map("ends_at")
-  // Anti-snipe: a bid placed inside the trailing window pushes endsAt forward by the extension
-  // amount, never backward. Stored per-auction (not a global constant) for future tunability.
-  antiSnipeWindowSeconds    Int    @default(120) @map("anti_snipe_window_seconds")
-  antiSnipeExtensionSeconds Int    @default(120) @map("anti_snipe_extension_seconds")
-
-  endedAt          DateTime? @map("ended_at")
-  winnerBidderId   String?   @map("winner_bidder_id")
-  winnerNotifiedAt DateTime? @map("winner_notified_at")
-  winnerEmailError String?   @map("winner_email_error")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  bids    Bid[]
-
-  @@index([status, endsAt])
-  @@map("auctions")
-}
-
-// Append-only bid history -- every bid is a new row, never mutated. visiblePriceAtMinor is a
-// snapshot of what Auction.currentPriceMinor became as a RESULT of this bid (for audit/history
-// display without exposing anyone's actual max). isWinningBid is a convenience denormalization for
-// cheap "highlight the leading bid" queries; the real source of truth for who's winning is always
-// Auction.currentBidderId, and both are updated together in the same bid transaction.
-model Bid {
-  id                  String   @id @default(uuid())
-  auctionId           String   @map("auction_id")
-  bidderId            String   @map("bidder_id")
-  maxProxyMinor       Int      @map("max_proxy_minor")
-  visiblePriceAtMinor Int      @map("visible_price_at_minor")
-  isWinningBid        Boolean  @default(false) @map("is_winning_bid")
-  createdAt           DateTime @default(now()) @map("created_at")
-
-  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
-  bidder  User    @relation("AuctionBidder", fields: [bidderId], references: [id])
-
-  @@index([auctionId, createdAt])
-  @@index([bidderId])
-  @@map("bids")
-}
-
-// Real, server-verified email one-time codes for pre-registration guest identity checks (replaces
-// the old client-only phone-code simulation in GuestAccountPage). code_hash is a fast HMAC, not a
-// slow KDF — matching the 6-digit/short-TTL/attempt-limited nature of an OTP, not a password.
-model EmailVerificationCode {
-  id         String    @id @default(uuid())
-  email      String
-  codeHash   String    @map("code_hash")
-  purpose    String    @default("guest-signup")
-  expiresAt  DateTime  @map("expires_at")
-  consumedAt DateTime? @map("consumed_at")
-  attempts   Int       @default(0)
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  @@index([email, purpose])
-  @@map("email_verification_codes")
-}
-
-// SMS/phone one-time codes (022) — same OTP security model as EmailVerificationCode, delivered by SMS.
-// Sign-up / sign-in accepts a recently-verified email OR phone, so users can verify by whichever channel.
-model PhoneVerificationCode {
-  id         String    @id @default(uuid())
-  phone      String
-  codeHash   String    @map("code_hash")
-  purpose    String    @default("guest-signup")
-  expiresAt  DateTime  @map("expires_at")
-  consumedAt DateTime? @map("consumed_at")
-  attempts   Int       @default(0)
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  @@index([phone, purpose])
-  @@map("phone_verification_codes")
-}
-
-model ListingAvailability {
-  id                 String              @id @default(uuid())
-  listingId          String              @map("listing_id")
-  date               DateTime            @db.Date
-  status             AvailabilityStatus  @default(BLOCKED)
-  priceOverrideMinor Int?                @map("price_override_minor")
-  note               String?
-  createdAt          DateTime            @default(now()) @map("created_at")
-  updatedAt          DateTime            @updatedAt @map("updated_at")
-
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@unique([listingId, date])
-  @@index([listingId, date])
-  @@map("listing_availability")
-}
-
-model ListingMedia {
-  id        String   @id @default(uuid())
-  listingId String   @map("listing_id")
-  url       String
-  kind      String
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-
-  @@index([listingId])
-  @@map("listing_media")
-}
-
-model Booking {
-  id          String        @id @default(uuid())
-  listingId   String        @map("listing_id")
-  guestId     String        @map("guest_id")
-  status      BookingStatus @default(REQUESTED)
-  checkIn     DateTime?     @map("check_in")
-  checkOut    DateTime?     @map("check_out")
-  amountMinor Int           @map("amount_minor")
-  currency    String        @default("SYP")
-  metadata    Json          @default("{}")
-  guestCheckedInAt  DateTime? @map("guest_checked_in_at")
-  guestCheckedOutAt DateTime? @map("guest_checked_out_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-
-  listing  Listing       @relation(fields: [listingId], references: [id])
-  guest    User          @relation("BookingGuest", fields: [guestId], references: [id])
-  payments PaymentProof[]
-  review   ListingReview?
-  messageThread MessageThread?
-  disputes Dispute[]
-
-  @@index([guestId, status])
-  @@index([listingId, status])
-  @@map("bookings")
-}
-
-model PaymentProof {
-  id              String        @id @default(uuid())
-  bookingId       String?       @map("booking_id")
-  userId          String        @map("user_id")
-  provider        String
-  status          PaymentStatus @default(PENDING_PROOF)
-  amountMinor     Int           @map("amount_minor")
-  currency        String        @default("SYP")
-  proofAssetUrl   String?       @map("proof_asset_url")
-  providerRef     String?       @map("provider_ref")
-  adminNote       String?       @map("admin_note")
-  reviewedById    String?       @map("reviewed_by_id")
-  reviewedAt      DateTime?     @map("reviewed_at")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-
-  booking Booking? @relation(fields: [bookingId], references: [id])
-  payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
-
-  @@index([status, createdAt])
-  @@index([userId])
-  @@map("payment_proofs")
-}
-
-model ListingReview {
-  id              String    @id @default(uuid())
-  listingId       String    @map("listing_id")
-  bookingId       String    @unique @map("booking_id")
-  guestId         String    @map("guest_id")
-  rating          Int
-  comment         String?
-  hiddenAt        DateTime? @map("hidden_at")
-  hiddenByAdminId String?   @map("hidden_by_admin_id")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  guest   User    @relation("ReviewGuest", fields: [guestId], references: [id])
-
-  @@index([listingId, hiddenAt])
-  @@map("listing_reviews")
-}
-
-// Marketplace seller reputation (Block 3). Unlike STAYS (reviewed off a completed Booking), cars/
-// property/goods are contact-based, so a review is gated on the SELLER first confirming a real sale
-// to a specific buyer. SellerSale is that confirmation; SellerReview is the buyer's one rating of it.
-model SellerSale {
-  id        String   @id @default(uuid())
-  listingId String   @map("listing_id")
-  sellerId  String   @map("seller_id")
-  buyerId   String   @map("buyer_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  listing Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  seller  User          @relation("SellerSaleSeller", fields: [sellerId], references: [id])
-  buyer   User          @relation("SellerSaleBuyer", fields: [buyerId], references: [id])
-  review  SellerReview?
-
-  // One confirmed sale per (listing, buyer) — a seller can't stack multiple review-grants on one buyer.
-  @@unique([listingId, buyerId])
-  @@index([sellerId])
-  @@map("seller_sales")
-}
-
-model SellerReview {
-  id        String    @id @default(uuid())
-  saleId    String    @unique @map("sale_id")
-  sellerId  String    @map("seller_id")
-  buyerId   String    @map("buyer_id")
-  rating    Int
-  comment   String?
-  hiddenAt  DateTime? @map("hidden_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-
-  sale   SellerSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  seller User       @relation("SellerReviewSeller", fields: [sellerId], references: [id])
-  buyer  User       @relation("SellerReviewBuyer", fields: [buyerId], references: [id])
-
-  @@index([sellerId, hiddenAt])
-  @@map("seller_reviews")
-}
-
-model MessageThread {
-  id        String   @id @default(uuid())
-  bookingId String?  @unique @map("booking_id")
-  listingId String?  @map("listing_id")
-  guestId   String?  @map("guest_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  listing  Listing?  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  guest    User?     @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
-  messages  Message[]
-  documents ThreadDocument[]
-
-  @@unique([listingId, guestId])
-  @@map("message_threads")
-}
-
-model Message {
-  id           String            @id @default(uuid())
-  threadId     String            @map("thread_id")
-  senderUserId String            @map("sender_user_id")
-  senderRole   MessageSenderRole @map("sender_role")
-  body         String
-  createdAt    DateTime          @default(now()) @map("created_at")
-
-  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  sender User          @relation("MessageSender", fields: [senderUserId], references: [id])
-
-  @@index([threadId, createdAt])
-  @@map("messages")
-}
-
-// Real per-thread document uploads (025) -- replaces the previous behavior where "uploading" a
-// rental/purchase-request document on the Rentals/Buy page only captured the filename and pasted
-// it into a chat message, never storing the actual file. Attached to a MessageThread (shared by
-// booking threads and listing-inquiry threads) so it works for any thread-based conversation, but
-// today only the listing-inquiry thread routes (server/routes/messages.mjs) write/read it.
-model ThreadDocument {
-  id               String   @id @default(uuid())
-  threadId         String   @map("thread_id")
-  uploaderUserId   String   @map("uploader_user_id")
-  assetUrl         String   @map("asset_url")
-  mimeType         String   @map("mime_type")
-  originalFilename String?  @map("original_filename")
-  createdAt        DateTime @default(now()) @map("created_at")
-
-  thread   MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  uploader User          @relation("ThreadDocumentUploader", fields: [uploaderUserId], references: [id])
-
-  @@index([threadId, createdAt])
-  @@map("thread_documents")
-}
-
-model Wallet {
-  id                String   @id @default(uuid())
-  userId            String   @map("user_id")
-  currency          String   @default("SYP")
-  cachedBalanceMinor Int     @default(0) @map("cached_balance_minor")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
-
-  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entries WalletEntry[]
-
-  @@unique([userId, currency])
-  @@map("wallets")
-}
-
-model WalletEntry {
-  id              String          @id @default(uuid())
-  walletId        String          @map("wallet_id")
-  type            WalletEntryType
-  amountMinor     Int             @map("amount_minor")
-  currency        String          @default("SYP")
-  referenceType   String          @map("reference_type")
-  referenceId     String          @map("reference_id")
-  idempotencyKey  String          @unique @map("idempotency_key")
-  note            String?
-  createdAt       DateTime        @default(now()) @map("created_at")
-
-  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
-
-  @@index([walletId, createdAt])
-  @@index([referenceType, referenceId])
-  @@map("wallet_entries")
-}
-
-model WalletGift {
-  id                     String     @id @default(uuid())
-  senderUserId            String     @map("sender_user_id")
-  recipientUserId         String?    @map("recipient_user_id")
-  recipientPhoneHash      String     @map("recipient_phone_hash")
-  amountMinor             Int        @map("amount_minor")
-  currency                String     @default("SYP")
-  message                 String?
-  status                  GiftStatus @default(CREATED)
-  claimAttemptCount       Int        @default(0) @map("claim_attempt_count")
-  lockedUntil             DateTime?  @map("locked_until")
-  expiresAt               DateTime   @map("expires_at")
-  createdAt               DateTime   @default(now()) @map("created_at")
-  updatedAt               DateTime   @updatedAt @map("updated_at")
-
-  sender    User  @relation("GiftSender", fields: [senderUserId], references: [id])
-  recipient User? @relation("GiftRecipient", fields: [recipientUserId], references: [id])
-
-  @@index([recipientPhoneHash, status])
-  @@index([senderUserId, createdAt])
-  @@map("wallet_gifts")
-}
-
-model OtpAttemptLock {
-  id             String   @id @default(uuid())
-  purpose        String
-  subjectHash    String   @map("subject_hash")
-  attemptCount   Int      @default(0) @map("attempt_count")
-  lockedUntil    DateTime? @map("locked_until")
-  lastAttemptAt  DateTime? @map("last_attempt_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  @@unique([purpose, subjectHash])
-  @@map("otp_attempt_locks")
-}
-
-model RideRequest {
-  id              String     @id @default(uuid())
-  riderId          String     @map("rider_id")
-  driverId         String?    @map("driver_id")
-  pickupLocationId String?    @map("pickup_location_id")
-  dropoffLocationId String?   @map("dropoff_location_id")
-  status          RideStatus @default(REQUESTED)
-  requestedAt     DateTime   @default(now()) @map("requested_at")
-  fareMinor       Int?       @map("fare_minor")
-  currency        String     @default("SYP")
-  pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
-  dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
-  metadata        Json       @default("{}")
-  updatedAt       DateTime   @updatedAt @map("updated_at")
-
-  // SR safety layer (014): live driver location during a trip + trip-share token.
-  lastLocationGeo     Unsupported("geometry(Point,4326)")? @map("last_location_geo")
-  lastLocationAt      DateTime? @map("last_location_at")
-  shareToken          String?   @unique @map("share_token")
-  shareTokenCreatedAt DateTime? @map("share_token_created_at")
-
-  // SR pickup PIN (017): rider-visible 4-digit code the driver enters to confirm the correct rider.
-  pickupPin        String?   @map("pickup_pin")
-  pickupVerifiedAt DateTime? @map("pickup_verified_at")
-  pinAttempts      Int       @default(0) @map("pin_attempts")
-
-  // SR cancellation layer (019): when a driver was matched (grace-window anchor for rider cancels) and
-  // the cancellation outcome (who cancelled, why, and any fee charged).
-  driverMatchedAt      DateTime? @map("driver_matched_at")
-  cancelledAt          DateTime? @map("cancelled_at")
-  cancelledByRole      String?   @map("cancelled_by_role")
-  cancelReason         String?   @map("cancel_reason")
-  cancellationFeeMinor Int?      @map("cancellation_fee_minor")
-
-  rider          User      @relation("RideRider", fields: [riderId], references: [id])
-  driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
-  pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
-  dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
-
-  // SR safety/trust layers (014/015): SOS events, masked ride messaging, two-way ratings.
-  sosEvents SosEvent[]
-  messages  RideMessage[]
-  ratings   RideRating[]
-  driverCancellations DriverCancellation[]
-  disputes  Dispute[]
-
-  @@index([status, requestedAt])
-  @@index([driverId, status])
-  @@map("ride_requests")
-}
-
-model AdminAuditLog {
-  id          String   @id @default(uuid())
-  actorUserId String?  @map("actor_user_id")
-  action      String
-  entityType  String   @map("entity_type")
-  entityId    String   @map("entity_id")
-  before      Json?
-  after       Json?
-  ipHash      String?  @map("ip_hash")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
-
-  @@index([entityType, entityId, createdAt])
-  @@index([actorUserId, createdAt])
-  @@map("admin_audit_logs")
-}
-
-// ============ SR safety layer (014) ============
 enum SosRole {
   RIDER
   DRIVER
@@ -865,33 +1509,12 @@ enum SosStatus {
   @@map("sos_status")
 }
 
-model SosEvent {
-  id             String    @id @default(uuid())
-  rideId         String    @map("ride_id")
-  raisedByUserId String    @map("raised_by_user_id")
-  raisedByRole   SosRole   @map("raised_by_role")
-  lat            Float?
-  lng            Float?
-  note           String?
-  status         SosStatus @default(OPEN)
-  resolvedById   String?   @map("resolved_by_id")
-  resolvedAt     DateTime? @map("resolved_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-
-  ride       RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
-  raisedBy   User        @relation("SosRaisedBy", fields: [raisedByUserId], references: [id])
-  resolvedBy User?       @relation("SosResolvedBy", fields: [resolvedById], references: [id])
-
-  @@index([status, createdAt])
-  @@index([rideId])
-  @@map("sos_events")
-}
-
-// ============ SR trust layer (015) ============
 enum DriverDocumentType {
   LICENSE
   VEHICLE_REGISTRATION
   INSURANCE
+  SAAQ_AUTHORIZED_DRIVER_PERMIT
+  CRIMINAL_RECORD_CHECK
 
   @@map("driver_document_type")
 }
@@ -903,104 +1526,6 @@ enum RideParticipantRole {
   @@map("ride_participant_role")
 }
 
-model DriverDocument {
-  id           String             @id @default(uuid())
-  driverUserId String             @map("driver_user_id")
-  type         DriverDocumentType
-  assetUrl     String             @map("asset_url")
-  mimeType     String?            @map("mime_type")
-  status       IdDocumentStatus   @default(PENDING_REVIEW)
-  reviewedById String?            @map("reviewed_by_id")
-  reviewedAt   DateTime?          @map("reviewed_at")
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @updatedAt @map("updated_at")
-
-  driver   User  @relation("DriverDocumentOwner", fields: [driverUserId], references: [id], onDelete: Cascade)
-  reviewer User? @relation("DriverDocumentReviewer", fields: [reviewedById], references: [id])
-
-  @@unique([driverUserId, type])
-  @@index([status])
-  @@map("driver_documents")
-}
-
-model RideMessage {
-  id           String              @id @default(uuid())
-  rideId       String              @map("ride_id")
-  senderUserId String              @map("sender_user_id")
-  senderRole   RideParticipantRole @map("sender_role")
-  body         String
-  createdAt    DateTime            @default(now()) @map("created_at")
-
-  ride   RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
-  sender User        @relation("RideMessageSender", fields: [senderUserId], references: [id])
-
-  @@index([rideId, createdAt])
-  @@map("ride_messages")
-}
-
-model RideRating {
-  id          String              @id @default(uuid())
-  rideId      String              @map("ride_id")
-  raterUserId String              @map("rater_user_id")
-  ratedUserId String              @map("rated_user_id")
-  raterRole   RideParticipantRole @map("rater_role")
-  stars       Int
-  safetyFlag  Boolean             @default(false) @map("safety_flag")
-  comment     String?
-  createdAt   DateTime            @default(now()) @map("created_at")
-
-  ride  RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
-  rater User        @relation("RideRatingRater", fields: [raterUserId], references: [id])
-  rated User        @relation("RideRatingRated", fields: [ratedUserId], references: [id])
-
-  @@unique([rideId, raterUserId])
-  @@index([ratedUserId, safetyFlag])
-  @@index([raterUserId, safetyFlag])
-  @@map("ride_ratings")
-}
-
-// SR cancellation accountability (019): one row per driver-initiated cancellation. Feeds the driver's
-// cancellation count (admin visibility) and blocks the cancelling driver from re-claiming that same ride.
-model DriverCancellation {
-  id        String   @id @default(uuid())
-  rideId    String   @map("ride_id")
-  driverId  String   @map("driver_id")
-  reason    String?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  ride   RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
-  driver User        @relation("DriverCancellationDriver", fields: [driverId], references: [id])
-
-  @@index([driverId])
-  @@index([rideId])
-  @@map("driver_cancellations")
-}
-
-// SR fleet (020): a driver's registered vehicle record. Carries the model year, which the age gate
-// enforces per ride tier (standard/Economy ≤ 10 years, premium tiers newer — see server/lib/fleet.mjs).
-// Admin-reviewed before it can be used. A driver may register more than one vehicle.
-model DriverVehicle {
-  id           String           @id @default(uuid())
-  driverId     String           @map("driver_id")
-  make         String
-  model        String
-  year         Int
-  plate        String
-  color        String?
-  category     String // 'SR Economy' | 'SR Comfort' | 'SR SUV'
-  status       IdDocumentStatus @default(PENDING_REVIEW)
-  reviewedById String?          @map("reviewed_by_id")
-  reviewedAt   DateTime?        @map("reviewed_at")
-  reviewNote   String?          @map("review_note")
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
-
-  driver User @relation("DriverVehicleOwner", fields: [driverId], references: [id])
-
-  @@index([driverId, status])
-  @@map("driver_vehicles")
-}
-
 enum DisputeStatus {
   OPEN
   RESOLVED_REFUNDED
@@ -1008,45 +1533,6 @@ enum DisputeStatus {
 
   @@map("dispute_status")
 }
-
-// Consumer-protection dispute/refund (021): a customer opens a dispute on a completed SR ride or STR
-// booking within the country's dispute window; an admin adjudicates and either refunds (idempotent
-// wallet credit, capped at the amount paid) or rejects with a logged reason. The ride/booking link is
-// SetNull so the dispute record survives for audit even if the underlying row is later removed.
-model Dispute {
-  id             String        @id @default(uuid())
-  subjectType    String        @map("subject_type") // 'SR_RIDE' | 'STR_BOOKING'
-  rideId         String?       @map("ride_id")
-  bookingId      String?       @map("booking_id")
-  openedByUserId String        @map("opened_by_user_id")
-  reason         String
-  status         DisputeStatus @default(OPEN)
-  refundMinor    Int?          @map("refund_minor")
-  currency       String?
-  resolutionNote String?       @map("resolution_note")
-  resolvedById   String?       @map("resolved_by_id")
-  resolvedAt     DateTime?     @map("resolved_at")
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
-
-  ride     RideRequest? @relation(fields: [rideId], references: [id], onDelete: SetNull)
-  booking  Booking?     @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  openedBy User         @relation("DisputeOpener", fields: [openedByUserId], references: [id])
-
-  @@index([status])
-  @@index([openedByUserId])
-  @@map("disputes")
-}
-
-// ============================================================================
-// SR Intercity service module (023) — DORMANT SCHEMA ONLY. Tables for garages,
-// routes, variable route tariffs, operators, formable service trips and seat
-// bookings, so the SR v2 Intercity module lands additively later (never a
-// migration against live bookings). No endpoints, no wiring — behavior comes in
-// the v2 build. Cross-module refs (rider/driver/creator user ids, vehicle id)
-// are kept as PLAIN SCALAR ids on purpose so this dormant add-on does not touch
-// User's / DriverVehicle's relation blocks; real relations arrive with v2.
-// ============================================================================
 
 enum OperatorType {
   BUS_COMPANY
@@ -1107,171 +1593,6 @@ enum TariffKind {
   @@map("tariff_kind")
 }
 
-// A physical intercity pickup/drop point (bus station, taxi garage) in a city.
-model Garage {
-  id        String   @id @default(uuid())
-  country   String
-  city      String
-  name      String
-  lat       Float?
-  lng       Float?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  // Two distinct relations to Route (origin + destination) — named on both sides so Prisma can tell
-  // them apart. Each named relation MUST appear exactly twice (once here, once on Route).
-  originRoutes Route[] @relation("RouteOrigin")
-  destRoutes   Route[] @relation("RouteDest")
-
-  @@index([country, city])
-  @@map("garages")
-}
-
-// A directed intercity route between two garages.
-model Route {
-  id             String   @id @default(uuid())
-  originGarageId String   @map("origin_garage_id")
-  destGarageId   String   @map("dest_garage_id")
-  distanceKm     Int?     @map("distance_km")
-  estMinutes     Int?     @map("est_minutes")
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  originGarage      Garage             @relation("RouteOrigin", fields: [originGarageId], references: [id])
-  destGarage        Garage             @relation("RouteDest", fields: [destGarageId], references: [id])
-  tariffs           RouteTariff[]
-  trips             ServiceTrip[]
-  tariffAdjustments TariffAdjustment[]
-
-  @@index([originGarageId])
-  @@index([destGarageId])
-  @@map("routes")
-}
-
-// Base per-tier price for a route: per-seat and whole-vehicle (private hire) amounts.
-model RouteTariff {
-  id               String   @id @default(uuid())
-  routeId          String   @map("route_id")
-  tier             String
-  perSeatMinor     Int      @map("per_seat_minor")
-  wholeVehicleMinor Int     @map("whole_vehicle_minor")
-  currency         String   @default("USD")
-  locked           Boolean  @default(false)
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
-
-  @@unique([routeId, tier])
-  @@map("route_tariffs")
-}
-
-// Dated holiday/season/event price overrides. `value` is a basis-points multiplier when kind =
-// MULTIPLIER (10000 = 1.0x), or a minor amount when kind = ABSOLUTE.
-model TariffAdjustment {
-  id              String       @id @default(uuid())
-  scope           TariffScope
-  routeId         String?      @map("route_id")
-  operatorId      String?      @map("operator_id")
-  tier            String?
-  effectiveFrom   DateTime     @map("effective_from")
-  effectiveTo     DateTime     @map("effective_to")
-  reason          TariffReason
-  kind            TariffKind
-  value           Int
-  priority        Int          @default(0)
-  createdByUserId String       @map("created_by_user_id")
-  createdAt       DateTime     @default(now()) @map("created_at")
-
-  route    Route?    @relation(fields: [routeId], references: [id], onDelete: SetNull)
-  operator Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
-
-  @@index([routeId])
-  @@index([operatorId])
-  @@index([effectiveFrom, effectiveTo])
-  @@map("tariff_adjustments")
-}
-
-// A bus company or taxi fleet that runs service trips.
-model Operator {
-  id           String       @id @default(uuid())
-  name         String
-  type         OperatorType
-  country      String
-  contactPhone String?      @map("contact_phone")
-  status       String       @default("PENDING")
-  verified     Boolean      @default(false)
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
-
-  trips             ServiceTrip[]
-  tariffAdjustments TariffAdjustment[]
-
-  @@index([country, status])
-  @@map("operators")
-}
-
-// A forming/scheduled trip on a route: fills seats (FILL_AND_GO) or departs on a schedule (SCHEDULED).
-// driverUserId / vehicleId / operatorId are scalar refs for now (see module header).
-model ServiceTrip {
-  id                String            @id @default(uuid())
-  routeId           String            @map("route_id")
-  tier              String
-  operatorId        String?           @map("operator_id")
-  driverUserId      String?           @map("driver_user_id")
-  vehicleId         String?           @map("vehicle_id")
-  capacity          Int
-  seatsAvailable    Int               @map("seats_available")
-  seatMap           Json?             @map("seat_map")
-  status            ServiceTripStatus @default(FORMING)
-  departureMode     DepartureMode     @map("departure_mode")
-  scheduledDepartAt DateTime?         @map("scheduled_depart_at")
-  departedAt        DateTime?         @map("departed_at")
-  perSeatMinor      Int               @map("per_seat_minor")
-  currency          String            @default("USD")
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
-
-  route        Route         @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  operator     Operator?     @relation(fields: [operatorId], references: [id], onDelete: SetNull)
-  seatBookings SeatBooking[]
-
-  @@index([routeId, status])
-  @@index([operatorId])
-  @@map("service_trips")
-}
-
-// A rider's seat(s) on a service trip. ticketCode is globally unique (the boarding ticket).
-model SeatBooking {
-  id            String            @id @default(uuid())
-  serviceTripId String            @map("service_trip_id")
-  riderUserId   String            @map("rider_user_id")
-  seatCount     Int               @default(1) @map("seat_count")
-  seatLabels    String[]          @map("seat_labels")
-  amountMinor   Int               @map("amount_minor")
-  currency      String            @default("USD")
-  ticketCode    String            @unique @map("ticket_code")
-  status        SeatBookingStatus @default(RESERVED)
-  boardedAt     DateTime?         @map("boarded_at")
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
-
-  serviceTrip ServiceTrip @relation(fields: [serviceTripId], references: [id], onDelete: Cascade)
-
-  @@index([serviceTripId])
-  @@index([riderUserId])
-  @@map("seat_bookings")
-}
-
-// ============================================================================
-// Store-readiness UGC safety (024) — user reports + user blocks. Required by
-// Apple 1.2 / Google UGC policy: users must be able to report content and block
-// other users. Subject/user references are plain scalar ids (no User relation)
-// so this addition doesn't touch User's relation block.
-// ============================================================================
-
 enum ReportSubjectType {
   LISTING
   REVIEW
@@ -1292,36 +1613,152 @@ enum ReportStatus {
   @@map("report_status")
 }
 
-// A user-filed report against a piece of user-generated content or another user. Admin-triaged.
-model Report {
-  id             String            @id @default(uuid())
-  reporterUserId String            @map("reporter_user_id")
-  subjectType    ReportSubjectType @map("subject_type")
-  subjectId      String            @map("subject_id")
-  reason         String
-  note           String?
-  status         ReportStatus      @default(OPEN)
-  resolutionNote String?           @map("resolution_note")
-  resolvedById   String?           @map("resolved_by_id")
-  resolvedAt     DateTime?         @map("resolved_at")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
-
-  @@index([status, createdAt])
-  @@index([subjectType, subjectId])
-  @@index([reporterUserId])
-  @@map("reports")
+enum gst_qst_treatment {
+  HOST_REGISTERED
+  PLATFORM_COLLECTS
 }
 
-// A directional block: blockerUserId will never be SR-matched with, nor able to message, blockedUserId
-// (enforcement checks both directions). Unique on the ordered pair.
-model UserBlock {
-  id            String   @id @default(uuid())
-  blockerUserId String   @map("blocker_user_id")
-  blockedUserId String   @map("blocked_user_id")
-  createdAt     DateTime @default(now()) @map("created_at")
+enum jurisdiction_calculation_base {
+  ACCOMMODATION_ONLY
+  FARE_BASE
+  TOTAL_BOOKING
+}
 
-  @@unique([blockerUserId, blockedUserId])
-  @@index([blockedUserId])
-  @@map("user_blocks")
+enum jurisdiction_collector_type {
+  PLATFORM
+  HOST_OR_DRIVER
+  DEPENDS_ON_REGISTRATION
+}
+
+enum jurisdiction_compliance_status {
+  PENDING
+  APPROVED
+  BLOCKED
+}
+
+enum jurisdiction_division {
+  STR
+  SR
+}
+
+enum jurisdiction_service_type {
+  RIDE
+  STAY
+}
+
+enum jurisdiction_tax_type {
+  GST
+  QST
+  LODGING
+  REGULATORY_CONTRIBUTION
+}
+
+enum listing_document_status {
+  PENDING_REVIEW
+  ADMIN_REVIEWED_TEST
+  REJECTED
+  EXPIRED
+  DIGITAL_VERIFICATION_PENDING
+  DIGITALLY_VERIFIED
+}
+
+enum listing_document_type {
+  CITQ_CERTIFICATE
+}
+
+enum malware_scan_status {
+  PENDING
+  QUARANTINED
+  NOT_IMPLEMENTED
+  CLEAN
+}
+
+enum part_xx_activity_type {
+  RIDE
+  ACCOMMODATION
+}
+
+enum part_xx_filing_status {
+  DRAFT
+  VALIDATED
+  FILED
+  ACCEPTED
+  REJECTED
+  CORRECTED
+}
+
+enum quebec_compliance_item_status {
+  NOT_STARTED
+  SUBMITTED
+  ADMIN_REVIEWED_TEST
+  REJECTED
+}
+
+enum quebec_driver_document_type {
+  DRIVERS_LICENSE
+  DRIVING_RECORD_ABSTRACT
+  POLICE_BACKGROUND_CHECK
+  SAAQ_AUTHORIZED_DRIVER_PERMIT
+  PROOF_OF_TRAINING_COMPLETION
+  FRENCH_LANGUAGE_ATTESTATION
+  GST_REGISTRATION
+  QST_REGISTRATION
+  REVENU_QUEBEC_OPERATOR_FILE
+  PROOF_OF_IDENTITY
+  PROOF_OF_ADDRESS
+}
+
+enum quebec_driver_onboarding_status {
+  DRAFT
+  IDENTITY_PENDING
+  DRIVER_DOCUMENTS_PENDING
+  POLICE_CHECK_PENDING
+  TRAINING_PENDING
+  TAX_REGISTRATION_PENDING
+  VEHICLE_PENDING
+  INSURANCE_PENDING
+  ADMIN_REVIEW
+  APPROVED_INACTIVE
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  REJECTED
+}
+
+enum quebec_vehicle_document_type {
+  VEHICLE_REGISTRATION
+  PROOF_OF_INSURANCE
+  SAAQ_MECHANICAL_INSPECTION
+  VEHICLE_OWNERSHIP_PROOF
+  ACCESSIBILITY_CERTIFICATION
+  COMMERCIAL_PLATE_REGISTRATION
+  VEHICLE_PHOTO
+}
+
+enum quebec_vehicle_onboarding_status {
+  DRAFT
+  DOCUMENTS_PENDING
+  INSPECTION_PENDING
+  ADMIN_REVIEW
+  APPROVED_INACTIVE
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+  REJECTED
+}
+
+enum tax_identifier_type {
+  SIN
+  TIN
+  OTHER
+}
+
+enum tax_profile_business_type {
+  INDIVIDUAL
+  BUSINESS
+}
+
+enum tax_profile_subject_type {
+  DRIVER
+  HOST
 }
