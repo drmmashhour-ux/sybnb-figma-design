@@ -7,9 +7,29 @@ import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
 import { refundGiftToSender } from '../lib/gift-ledger.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { readDriverDocument } from '../lib/driver-document-storage.mjs'
-import { idempotencyKey } from '../lib/security.mjs'
-import { assertBoundedString } from '../lib/validate.mjs'
+import { hashPassword, idempotencyKey } from '../lib/security.mjs'
+import { assertBoundedString, assertNoUnknownFields, assertValidEmail } from '../lib/validate.mjs'
+import { generateUniqueReferralCode } from '../lib/referrals.mjs'
+import { randomUUID } from 'node:crypto'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+
+// The internal staff roles the HR department manages/creates. Deliberately NOT HOST/DRIVER/SELLER
+// (those self-register through the normal flow) — only privileged back-office roles.
+const STAFF_ROLES = ['ADMIN', 'SUPPORT']
+const STAFF_EMAIL_DOMAIN = '@sybnb.app'
+
+// Surface only what admin needs to push a payout — type, holder, last4. The encrypted number
+// envelope (ciphertext/iv/tag stored in User.payoutMethod) must never reach the admin client.
+function safeHostPayoutMethod(payoutMethod) {
+  if (!payoutMethod || typeof payoutMethod !== 'object' || payoutMethod.type !== 'sham_cash') {
+    return null
+  }
+  return {
+    type: 'sham_cash',
+    accountHolder: payoutMethod.accountHolder || '',
+    last4: payoutMethod.last4 || '',
+  }
+}
 
 function payoutNotEligibleError() {
   const error = new Error(
@@ -74,6 +94,129 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, insights, totals })
   }
 
+  // ---- HR DEPARTMENT — staff/admin directory + creation (owner/super-admin gated) ----
+  if (url.pathname === '/api/admin/staff') {
+    if (req.method === 'GET') {
+      // Reading the staff directory is fine for any back-office role.
+      requireAuth(context, ['ADMIN', 'SUPPORT'])
+      const staff = await db().user.findMany({
+        where: { roles: { some: { role: { in: STAFF_ROLES } } } },
+        select: {
+          id: true,
+          displayName: true,
+          email: true,
+          createdAt: true,
+          roles: { select: { role: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+      })
+      return json(res, 200, {
+        ok: true,
+        staff: staff.map((user) => ({
+          id: user.id,
+          displayName: user.displayName,
+          email: user.email,
+          createdAt: user.createdAt,
+          roles: user.roles.map((entry) => entry.role),
+        })),
+      })
+    }
+
+    if (req.method === 'POST') {
+      // SENSITIVE: creating a privileged account. Restricted to ADMIN — the most-privileged guard
+      // this platform has (ADMIN cannot self-register, so an ADMIN is the effective owner/super-admin).
+      // Deliberately NOT ['ADMIN','SUPPORT'] — SUPPORT must not be able to mint new admins.
+      requireAuth(context, ['ADMIN'])
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['displayName', 'email', 'role'], 'staff body')
+
+      const displayName = assertBoundedString(body.displayName, {
+        fieldName: 'displayName',
+        maxLength: 120,
+        required: true,
+      })
+      const email = assertValidEmail(body.email)
+      if (!email) {
+        const error = new Error('A staff email address is required.')
+        error.statusCode = 400
+        error.code = 'STAFF_EMAIL_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      if (!email.endsWith(STAFF_EMAIL_DOMAIN)) {
+        const error = new Error(`Staff email must be on the ${STAFF_EMAIL_DOMAIN} domain.`)
+        error.statusCode = 400
+        error.code = 'STAFF_EMAIL_DOMAIN_INVALID'
+        error.expose = true
+        throw error
+      }
+      const role = String(body.role || '').toUpperCase()
+      if (!STAFF_ROLES.includes(role)) {
+        const error = new Error(`Staff role must be one of: ${STAFF_ROLES.join(', ')}.`)
+        error.statusCode = 400
+        error.code = 'STAFF_ROLE_INVALID'
+        error.expose = true
+        throw error
+      }
+
+      // The account is created with a random, unusable password. The staff member activates it via
+      // the existing password-reset OTP to their real @sybnb.app mailbox (created separately in
+      // Google Workspace — this endpoint never provisions a mailbox).
+      const passwordHash = hashPassword(`${randomUUID()}${randomUUID()}`)
+
+      try {
+        const created = await db().$transaction(async (tx) => {
+          const referralCode = await generateUniqueReferralCode(tx)
+          return tx.user.create({
+            data: {
+              email,
+              passwordHash,
+              displayName,
+              referralCode,
+              roles: { create: { role } },
+              wallets: { create: { currency: 'SYP' } },
+            },
+            include: { roles: true },
+          })
+        })
+
+        await db().adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'ADMIN_STAFF_CREATED',
+            entityType: 'users',
+            entityId: created.id,
+            before: null,
+            after: { email, role, displayName },
+          },
+        })
+
+        return json(res, 201, {
+          ok: true,
+          staff: {
+            id: created.id,
+            displayName: created.displayName,
+            email: created.email,
+            createdAt: created.createdAt,
+            roles: created.roles.map((entry) => entry.role),
+          },
+        })
+      } catch (error) {
+        if (error?.code === 'P2002') {
+          const conflict = new Error('An account with this email already exists.')
+          conflict.statusCode = 409
+          conflict.code = 'ACCOUNT_ALREADY_EXISTS'
+          conflict.expose = true
+          throw conflict
+        }
+        throw error
+      }
+    }
+
+    return methodNotAllowed(res, ['GET', 'POST'])
+  }
+
   if (url.pathname === '/api/admin/payouts') {
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()
@@ -112,7 +255,7 @@ export async function handleAdmin(req, res, url, context) {
             listingTitle: booking.listing?.titleAr,
             hostId: booking.listing?.ownerId,
             hostName: booking.listing?.owner?.displayName,
-            hostPayoutMethod: booking.listing?.owner?.payoutMethod || null,
+            hostPayoutMethod: safeHostPayoutMethod(booking.listing?.owner?.payoutMethod),
             checkOut: booking.checkOut,
             eligibleAt: payoutEligibleAt(booking.checkOut),
             eligibleNow: isPayoutEligible(booking),

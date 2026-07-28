@@ -1757,11 +1757,41 @@ export type AdminPayout = {
   listingTitle: string | null
   hostId: string | null
   hostName: string | null
+  hostPayoutMethod: { type: 'sham_cash'; accountHolder: string; last4: string } | null
   checkOut: string | null
   eligibleAt: string | null
   eligibleNow: boolean
   hostPayoutMinor: number
   currency: string
+}
+
+export type PlatformStaffMember = {
+  id: string
+  displayName: string
+  email: string | null
+  createdAt: string
+  roles: string[]
+}
+
+// HR directory — users holding a back-office (ADMIN/SUPPORT) role.
+export async function fetchAdminStaff() {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; staff: PlatformStaffMember[] }>('/api/admin/staff', { token }),
+  )
+  return response.staff
+}
+
+// Creates a staff/admin account (ADMIN-gated server-side; @sybnb.app enforced). Does NOT create a
+// mailbox — that is done separately in Google Workspace.
+export async function createAdminStaff(input: { displayName: string; email: string; role: string }) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; staff: PlatformStaffMember }>('/api/admin/staff', {
+      method: 'POST',
+      token,
+      body: input,
+    }),
+  )
+  return response.staff
 }
 
 export async function fetchAdminPayouts() {
