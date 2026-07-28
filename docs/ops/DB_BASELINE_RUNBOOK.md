@@ -37,23 +37,53 @@ the baseline.**
 
 > ⚠️ Take a full backup / snapshot of the prod DB before doing anything below.
 
-### Step 1 — Prove the prod DB matches the new schema (READ-ONLY)
+### Step 1 — Collect READ-ONLY evidence (P1 gate)
+
+Run BOTH of these against production. Neither writes anything (`migrate diff --script` prints SQL, it
+does not execute it; the diagnostic issues only SELECTs). **Do not paste the connection string back.**
 
 ```bash
-# PROD_URL = the production/staging connection string (do not commit it)
-npx prisma migrate diff \
-  --from-url "$PROD_URL" \
-  --to-schema-datamodel prisma/schema.prisma \
-  --exit-code
+# PROD_URL = the production/staging connection string (keep it in your shell only; never commit it)
+
+# (a) Structured read-only diagnostic — id types, migration state, object inventory, FK type-compat.
+DATABASE_URL="$PROD_URL" node scripts/prod-db-diagnose.mjs > prod-diagnose.json
+
+# (b) Full schema delta prod -> repo schema (read-only; --script does NOT apply anything).
+DATABASE_URL="$PROD_URL" npx prisma migrate diff \
+  --from-url "$PROD_URL" --to-schema-datamodel prisma/schema.prisma --script > prod-vs-schema.sql
+
+# (c) Exit-code form for a quick "match / differ" signal (0 = no diff, 2 = differs).
+DATABASE_URL="$PROD_URL" npx prisma migrate diff \
+  --from-url "$PROD_URL" --to-schema-datamodel prisma/schema.prisma --exit-code; echo "exit=$?"
 ```
 
-- **"No difference detected" (exit 0):** prod matches the baseline → safe to baseline (Step 2).
-- **Any differences reported (exit 2):** STOP. The prod DB is not identical to dev. Two common cases:
-  - Prod was built from the **old `uuid` migrations** → its id columns are `uuid`, not `text`.
-    This is a real type mismatch that needs a data-preserving conversion — **do not baseline; bring
-    the diff back for review.**
-  - Prod has a slightly different set of frozen tables/columns. Review each line; only proceed once
-    the diff is empty or every difference is understood and intentionally reconciled.
+**Return `prod-diagnose.json` + `prod-vs-schema.sql` + the exit code.** That is the P1 evidence.
+
+**Known-good reference (the dev DB, post-B1, verified 2026-07-27):**
+| Signal | Healthy value (dev) | RED flag on prod |
+|---|---|---|
+| `id_column_type_distribution` | only `text` (184 cols) | any `uuid` → **old uuid lineage** |
+| `key_table_id_types` | all `text` | any `uuid` |
+| `incompatible_fk_type_pairs` | `[]` (empty) | **non-empty** → text↔uuid FK mismatch (the B1 defect) |
+| `prisma_migrations` | `00000000000000_init_baseline`, `20260727000000_add_rate_limit_hits` | orphaned/unknown rows |
+| base tables / enums / FKs / indexes | 64 / 48 / 96 / 177 | large deltas → investigate via `prod-vs-schema.sql` |
+| `extensions` | `plpgsql`, `postgis` | missing `postgis` |
+
+### Decision tree (interpret the evidence — do NOT act until it points to a branch)
+
+- **Prod ids include `uuid` OR `incompatible_fk_type_pairs` is non-empty →** prod is on the **old uuid
+  lineage**. **STOP. Do NOT baseline, do NOT `migrate resolve`, do NOT deploy.** This needs a
+  data-preserving `uuid → text` conversion (per-table `ALTER … TYPE text USING id::text`, FKs dropped
+  and recreated, with a full backup + a rehearsed rollback). Bring `prod-vs-schema.sql` back for a
+  reviewed conversion plan. **P1 stays RED.**
+- **Prod is all-`text`, `incompatible_fk_type_pairs` empty, AND `prod-vs-schema.sql` is empty (exit 0) →**
+  prod already matches the baseline. Safe to baseline (Step 2). **P1 → GREEN after Step 3 verifies.**
+- **Prod is all-`text` but `prod-vs-schema.sql` is non-empty →** review every statement. Extra frozen
+  tables/columns are expected (they exist in dev too and ARE in the schema now). Only proceed once every
+  line is understood and intentionally reconciled; otherwise **P1 stays RED** pending a plan.
+
+> The diagnostic tool itself is verified: run against the dev DB it returns the "healthy" column above
+> (all-text, empty incompatible-FK set). That is the reference the prod output is compared against.
 
 ### Step 2 — Baseline (only if Step 1 was empty)
 
