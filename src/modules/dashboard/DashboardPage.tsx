@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
+  claimGuestAccount,
   fetchPrototypeOverview,
+  sendEmailVerificationCode,
+  verifyEmailVerificationCode,
   type PlatformOverview,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
@@ -73,6 +76,19 @@ const copy = {
     method: 'الطريقة',
     reviewStatus: 'حالة المراجعة',
     bookingRef: 'رقم الحجز',
+    claimTitle: 'أنشئ حساباً واحفظ رحلاتك',
+    claimBody: 'حوّل جلستك المؤقتة إلى حساب باسمك لتتابع حجوزاتك وتسجّل الدخول من أي جهاز. رحلاتك الحالية ستنتقل معك.',
+    claimEmail: 'بريدك الإلكتروني',
+    claimSendCode: 'أرسل الرمز',
+    claimCode: 'رمز التحقق',
+    claimPassword: 'كلمة المرور',
+    claimName: 'الاسم (اختياري)',
+    claimSubmit: 'أنشئ الحساب',
+    claimSending: 'جار الإرسال...',
+    claimWorking: 'جار الإنشاء...',
+    claimSentMsg: 'أرسلنا رمزاً إلى بريدك.',
+    claimDone: 'تم إنشاء حسابك — رحلاتك محفوظة الآن.',
+    claimError: 'تعذر إكمال العملية.',
   },
   en: {
     back: 'Back to landing',
@@ -134,6 +150,19 @@ const copy = {
     method: 'Method',
     reviewStatus: 'Review status',
     bookingRef: 'Booking ref',
+    claimTitle: 'Create an account to save & follow your trips',
+    claimBody: 'Turn your temporary session into a named account so you can follow your bookings and sign in from any device. Your current trips carry over.',
+    claimEmail: 'Your email',
+    claimSendCode: 'Send code',
+    claimCode: 'Verification code',
+    claimPassword: 'Password',
+    claimName: 'Name (optional)',
+    claimSubmit: 'Create account',
+    claimSending: 'Sending...',
+    claimWorking: 'Creating...',
+    claimSentMsg: 'We sent a code to your email.',
+    claimDone: 'Account created — your trips are saved.',
+    claimError: 'Could not complete that.',
   },
 }
 
@@ -144,9 +173,53 @@ export function DashboardPage({ lang }: Props) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
 
+  // Account-claim ("save & follow your trips") — only shown to an anonymous device guest.
+  const [claimEmail, setClaimEmail] = useState('')
+  const [claimCode, setClaimCode] = useState('')
+  const [claimPassword, setClaimPassword] = useState('')
+  const [claimName, setClaimName] = useState('')
+  const [claimStep, setClaimStep] = useState<'idle' | 'code'>('idle')
+  const [claimBusy, setClaimBusy] = useState(false)
+  const [claimError, setClaimError] = useState('')
+  const [claimNote, setClaimNote] = useState('')
+
   useEffect(() => {
     void loadOverview()
   }, [])
+
+  async function sendClaimCode() {
+    setClaimError('')
+    setClaimNote('')
+    setClaimBusy(true)
+    try {
+      await sendEmailVerificationCode(claimEmail.trim(), 'guest-signup')
+      setClaimStep('code')
+      setClaimNote(t.claimSentMsg)
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+    } finally {
+      setClaimBusy(false)
+    }
+  }
+
+  async function submitClaim() {
+    setClaimError('')
+    setClaimNote('')
+    setClaimBusy(true)
+    try {
+      await verifyEmailVerificationCode(claimEmail.trim(), claimCode.trim(), 'guest-signup')
+      await claimGuestAccount({ email: claimEmail.trim(), password: claimPassword, displayName: claimName.trim() || undefined })
+      setClaimNote(t.claimDone)
+      setClaimStep('idle')
+      setClaimCode('')
+      setClaimPassword('')
+      await loadOverview()
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+    } finally {
+      setClaimBusy(false)
+    }
+  }
 
   async function loadOverview() {
     setStatus('loading')
@@ -185,6 +258,8 @@ export function DashboardPage({ lang }: Props) {
   const activeTitle = activeListing ? labelForListing(activeListing, lang) : ''
   const activeReference = activeBooking?.id ? `BK-${activeBooking.id.slice(0, 4).toUpperCase()}-${activeBooking.id.slice(4, 8).toUpperCase()}` : ''
   const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
+  const guestEmail = (overview?.user as { email?: string | null } | undefined)?.email || ''
+  const isDeviceGuest = guestEmail.endsWith('@device.sybnb.local')
   const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
   const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
   const activeStep = activeBooking ? activeTripStep(overview) : -1
@@ -209,6 +284,63 @@ export function DashboardPage({ lang }: Props) {
       </section>
 
       {status === 'error' && <section style={styles.alert}>{message}</section>}
+
+      {isDeviceGuest && (
+        <section style={styles.claimPanel} aria-label={t.claimTitle}>
+          <div style={styles.claimCopy}>
+            <strong style={styles.claimHeading}>{t.claimTitle}</strong>
+            <span style={styles.claimText}>{t.claimBody}</span>
+          </div>
+          <div style={styles.claimForm}>
+            <input
+              style={styles.claimInput}
+              type="email"
+              dir="ltr"
+              placeholder={t.claimEmail}
+              value={claimEmail}
+              onChange={(e) => setClaimEmail(e.target.value)}
+            />
+            {claimStep === 'idle' ? (
+              <button style={styles.claimButton} disabled={claimBusy || !claimEmail.trim()} onClick={() => void sendClaimCode()}>
+                {claimBusy ? t.claimSending : t.claimSendCode}
+              </button>
+            ) : (
+              <>
+                <input
+                  style={styles.claimInput}
+                  dir="ltr"
+                  inputMode="numeric"
+                  placeholder={t.claimCode}
+                  value={claimCode}
+                  onChange={(e) => setClaimCode(e.target.value)}
+                />
+                <input
+                  style={styles.claimInput}
+                  type="password"
+                  placeholder={t.claimPassword}
+                  value={claimPassword}
+                  onChange={(e) => setClaimPassword(e.target.value)}
+                />
+                <input
+                  style={styles.claimInput}
+                  placeholder={t.claimName}
+                  value={claimName}
+                  onChange={(e) => setClaimName(e.target.value)}
+                />
+                <button
+                  style={styles.claimButton}
+                  disabled={claimBusy || !claimCode.trim() || claimPassword.length < 8}
+                  onClick={() => void submitClaim()}
+                >
+                  {claimBusy ? t.claimWorking : t.claimSubmit}
+                </button>
+              </>
+            )}
+          </div>
+          {claimNote && <p style={styles.claimNoteOk}>{claimNote}</p>}
+          {claimError && <p style={styles.claimNoteErr}>{claimError}</p>}
+        </section>
+      )}
 
       <section style={styles.desktopHero}>
         <div style={styles.tripCard}>
@@ -467,4 +599,13 @@ const styles: Record<string, CSSProperties> = {
   previousTrip: { minHeight: 96, borderRadius: 16, background: '#14141b', padding: 12, display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 14, alignItems: 'center' },
   tripThumb: { width: 90, height: 70, borderRadius: 12, objectFit: 'cover' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 12, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
+  claimPanel: { border: '1px solid rgba(32,210,155,.45)', borderRadius: 18, background: 'linear-gradient(135deg, rgba(32,210,155,.1), rgba(82,104,255,.08))', padding: 20, display: 'grid', gap: 14 },
+  claimCopy: { display: 'grid', gap: 6 },
+  claimHeading: { fontSize: 20, color: '#fff' },
+  claimText: { color: '#b9c0d2', lineHeight: 1.55 },
+  claimForm: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
+  claimInput: { minHeight: 50, flex: '1 1 180px', borderRadius: 10, border: '1px solid #30384d', background: '#0d1320', color: '#fff', padding: '0 14px', fontSize: 15, fontWeight: 700 },
+  claimButton: { minHeight: 50, border: 0, borderRadius: 10, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 22px' },
+  claimNoteOk: { margin: 0, color: '#20d29b', fontWeight: 800 },
+  claimNoteErr: { margin: 0, color: '#ffd1d1', fontWeight: 800 },
 }

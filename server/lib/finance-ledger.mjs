@@ -160,6 +160,17 @@ export async function recordWalletEntry(tx, {
 
 // Shared by the admin manual-review path and any automatic payment confirmation (e.g. Stripe)
 // so both move a payment proof to APPROVED and progress the booking the exact same way.
+// The platform's revenue CREDITs (10% booking commission, non-refundable protection fee, seller-plan
+// fee) must NEVER be silently dropped just because the caller didn't pass an admin actor (e.g. a
+// Stripe auto-approval). Resolve a stable platform account: the given actor if any, else the first
+// ADMIN. Same resolution the SR path uses (resolvePlatformUserId). Returns null only if no admin
+// exists at all (a bootstrapping edge), in which case there is genuinely no account to credit.
+async function resolvePlatformActorId(tx, actorUserId) {
+  if (actorUserId) return actorUserId
+  const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
+  return admin?.userId || null
+}
+
 export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
   const existing = await tx.paymentProof.findUnique({
     where: { id: proofId },
@@ -229,15 +240,17 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       keyParts: ['booking-host-hold', proof.bookingId, proof.id],
       note: 'Host payout is protected until booking confirmation and completion.',
     })
-    if (actorUserId) {
+    // Resolve a platform account so the 10% is credited even when no admin actor was passed.
+    const platformActorId = await resolvePlatformActorId(tx, actorUserId)
+    if (platformActorId) {
       await recordWalletEntry(tx, {
-        userId: actorUserId,
+        userId: platformActorId,
         type: 'CREDIT',
         amountMinor: split.adminShareMinor,
         currency: proof.currency,
         referenceType: 'booking_admin_share',
         referenceId: proof.bookingId,
-        keyParts: ['booking-admin-share', proof.bookingId, proof.id, actorUserId],
+        keyParts: ['booking-admin-share', proof.bookingId, proof.id, platformActorId],
         note: 'SYBNB/admin share collected after verified guest payment.',
       })
       // The cancellation-protection fee (if purchased) is excluded from staySplitBaseMinor above,
@@ -246,13 +259,13 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
       if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
         await recordWalletEntry(tx, {
-          userId: actorUserId,
+          userId: platformActorId,
           type: 'CREDIT',
           amountMinor: split.cancellationProtectionFeeMinor,
           currency: proof.currency,
           referenceType: 'booking_protection_fee',
           referenceId: proof.bookingId,
-          keyParts: ['booking-protection-fee', proof.bookingId, proof.id, actorUserId],
+          keyParts: ['booking-protection-fee', proof.bookingId, proof.id, platformActorId],
           note: 'SYBNB/admin collected the non-refundable cancellation-protection fee.',
         })
       }
@@ -276,15 +289,16 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // real, collected seller-plan revenue was invisible everywhere: admin finance totals, the
     // income projection, all of it. Recorded the same way booking commission is: a CREDIT to the
     // approving admin's own wallet, which is what the revenue-summary rollup reads from.
-    if (actorUserId) {
+    const platformActorId = await resolvePlatformActorId(tx, actorUserId)
+    if (platformActorId) {
       await recordWalletEntry(tx, {
-        userId: actorUserId,
+        userId: platformActorId,
         type: 'CREDIT',
         amountMinor: proof.amountMinor,
         currency: proof.currency,
         referenceType: 'seller_plan_fee',
         referenceId: proof.id,
-        keyParts: ['seller-plan-fee', proof.id, actorUserId],
+        keyParts: ['seller-plan-fee', proof.id, platformActorId],
         note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
       })
     }

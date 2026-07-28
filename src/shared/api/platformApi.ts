@@ -968,6 +968,23 @@ export async function createGuestAccountSession(input: {
   return session
 }
 
+// Upgrades the CURRENT anonymous device-guest session into a real named account WITHOUT losing the
+// device's trip history — the server upgrades the same user row in place, so existing bookings and
+// wallet entries carry over. Requires the device guest session token (proves device ownership) and
+// a just-verified email OTP. After success the stored session becomes the named account.
+export async function claimGuestAccount(input: { email: string; password: string; displayName?: string }) {
+  const guest = await ensurePrototypeGuestSession()
+  const session = await apiRequest<PlatformAuthSession>('/api/auth/claim-guest-account', {
+    method: 'POST',
+    token: guest.token,
+    body: { email: input.email.trim(), password: input.password, displayName: input.displayName?.trim() || undefined },
+  })
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return session
+}
+
 // Real email OTP for the guest-signup gate. Chosen over SMS: no per-message carrier cost, no
 // SMS-gateway account needed. devCode is only ever populated outside production (SMTP is rarely
 // configured in local/dev environments) — never trust it as a UI-visible "success", it's a

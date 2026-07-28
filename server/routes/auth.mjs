@@ -204,6 +204,94 @@ export async function handleAuth(req, res, url, context) {
     })
   }
 
+  // Guest ACCOUNT-CLAIM: an anonymous device-guest turns into a real named account and KEEPS their
+  // trip history. AUTH: requires the device-guest's own session token (so only the holder of THAT
+  // device session can claim THAT device's data — never another user's) AND a recently-verified email
+  // OTP (proves they own the email). The upgrade is done in place on the SAME user row, so bookings
+  // (guestId) and wallet entries (userId) carry over automatically — no cross-user row reassignment.
+  if (url.pathname === '/api/auth/claim-guest-account') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['email', 'password', 'displayName'], 'claim body')
+
+    const email = assertValidEmail(body.email)
+    if (!email) {
+      const error = new Error('An email address is required to claim an account.')
+      error.statusCode = 400
+      error.code = 'EMAIL_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (email.endsWith('@device.sybnb.local')) {
+      const error = new Error('That is not a claimable email address.')
+      error.statusCode = 400
+      error.code = 'CLAIM_EMAIL_INVALID'
+      error.expose = true
+      throw error
+    }
+    assertValidPassword(body.password)
+
+    // Ownership of the email is proven by a recently-verified guest-signup OTP (same gate as guest
+    // self-registration). We never trust a client "verified" flag.
+    const emailVerified = await hasRecentlyVerifiedEmail(email, 'guest-signup')
+    if (!emailVerified) {
+      const error = new Error('Verify your email with the access code before claiming the account.')
+      error.statusCode = 403
+      error.code = 'EMAIL_NOT_VERIFIED'
+      error.expose = true
+      throw error
+    }
+
+    const device = await db().user.findUnique({ where: { id: context.user.id }, include: { roles: true } })
+    // Only an unclaimed device-guest row may be upgraded. A caller whose account is already named
+    // must not silently rewrite their email through this path.
+    if (!device || !device.email || !device.email.endsWith('@device.sybnb.local')) {
+      const error = new Error('This session is not an unclaimed guest account.')
+      error.statusCode = 400
+      error.code = 'NOT_A_DEVICE_GUEST'
+      error.expose = true
+      throw error
+    }
+
+    // If the email already belongs to a DIFFERENT account, reject clearly — never merge/claim another
+    // user's data. (The holder should just sign in to that account instead.)
+    const existing = await db().user.findUnique({ where: { email } })
+    if (existing && existing.id !== device.id) {
+      const error = new Error('An account with this email already exists. Sign in to see your trips.')
+      error.statusCode = 409
+      error.code = 'ACCOUNT_ALREADY_EXISTS'
+      error.expose = true
+      throw error
+    }
+
+    const displayName =
+      (body.displayName && assertBoundedString(body.displayName, { fieldName: 'displayName', maxLength: NAME_FIELD_MAX_LENGTH })) ||
+      (device.displayName && device.displayName !== 'SYBNB Guest' ? device.displayName : email.split('@')[0])
+    const passwordHash = hashPassword(body.password)
+
+    const updated = await db().$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: device.id },
+        data: { email, passwordHash, displayName },
+        include: { roles: true },
+      })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: user.id,
+          action: 'GUEST_ACCOUNT_CLAIMED',
+          entityType: 'users',
+          entityId: user.id,
+          before: { email: device.email },
+          after: { email },
+        },
+      })
+      return user
+    })
+
+    return json(res, 201, { ok: true, user: publicUser(updated), token: createSessionToken(updated) })
+  }
+
   if (url.pathname === '/api/auth/register') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)

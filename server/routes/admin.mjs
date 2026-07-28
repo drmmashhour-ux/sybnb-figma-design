@@ -10,6 +10,7 @@ import { readDriverDocument } from '../lib/driver-document-storage.mjs'
 import { hashPassword, idempotencyKey } from '../lib/security.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail } from '../lib/validate.mjs'
 import { generateUniqueReferralCode } from '../lib/referrals.mjs'
+import { decryptPayoutAccount } from '../lib/payout-account.mjs'
 import { randomUUID } from 'node:crypto'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
@@ -270,20 +271,109 @@ export async function handleAdmin(req, res, url, context) {
     return methodNotAllowed(res, ['GET'])
   }
 
+  // ---- Reveal a host's Sham Cash number for an eligible payout (ADMIN-ONLY) ----
+  // The operator needs the real number to actually push the transfer. It is returned ONLY in this
+  // response body over the authenticated ADMIN channel — never written to any log/audit (only the
+  // last4 is audited). Handles both the encrypted shape and the legacy plaintext-phone shape.
+  const payoutAccountMatch = url.pathname.match(/^\/api\/admin\/payouts\/([^/]+)\/account$/)
+  if (payoutAccountMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN'])
+    const booking = await db().booking.findUnique({
+      where: { id: payoutAccountMatch[1] },
+      include: { listing: { include: { owner: { select: { id: true, displayName: true, payoutMethod: true } } } } },
+    })
+    if (!booking) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const pm = booking.listing?.owner?.payoutMethod
+    if (!pm || typeof pm !== 'object') {
+      const error = new Error('This host has no payout method on file.')
+      error.statusCode = 400
+      error.code = 'PAYOUT_METHOD_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
+    let account = null
+    let last4 = ''
+    if (pm.type === 'sham_cash' && pm.ciphertext) {
+      const number = decryptPayoutAccount(pm)
+      if (!number) {
+        const error = new Error('Could not decrypt the payout account.')
+        error.statusCode = 500
+        error.code = 'PAYOUT_ACCOUNT_DECRYPT_FAILED'
+        error.expose = true
+        throw error
+      }
+      last4 = pm.last4 || number.slice(-4)
+      account = { type: 'sham_cash', accountHolder: pm.accountHolder || '', number }
+    } else if (pm.phone) {
+      // Legacy shape { phone, receiverName } — the phone is already plaintext, return as-is.
+      last4 = String(pm.phone).replace(/\D/g, '').slice(-4)
+      account = { type: 'legacy', accountHolder: pm.receiverName || '', number: String(pm.phone) }
+    } else {
+      const error = new Error('This host payout method has no revealable account number.')
+      error.statusCode = 400
+      error.code = 'PAYOUT_ACCOUNT_UNSUPPORTED'
+      error.expose = true
+      throw error
+    }
+
+    // Audit the reveal WITHOUT the number itself — only who revealed which host's account, and last4.
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_PAYOUT_ACCOUNT_REVEALED',
+        entityType: 'users',
+        entityId: booking.listing.owner.id,
+        before: null,
+        after: { bookingId: booking.id, last4 },
+      },
+    })
+
+    return json(res, 200, { ok: true, account })
+  }
+
   const payoutReleaseMatch = url.pathname.match(/^\/api\/admin\/payouts\/([^/]+)\/release$/)
   if (payoutReleaseMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['ADMIN'])
 
+    // A real disbursement must reconcile against the actual Sham Cash transfer — mirror the SR-driver
+    // release: require the external transaction reference so the ledger is auditable.
+    const body = await readJson(req).catch(() => ({}))
+    const payoutRef = String(body.payoutRef || body.shamCashRef || '').trim()
+    if (!payoutRef) {
+      const error = new Error('A payoutRef (the Sham Cash transaction reference) is required so the payout reconciles against the real transfer.')
+      error.statusCode = 400
+      error.code = 'PAYOUT_REF_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
     const booking = await db().booking.findUnique({
       where: { id: payoutReleaseMatch[1] },
-      include: { listing: true, payments: true },
+      include: { listing: { include: { owner: { select: { id: true, displayName: true, payoutMethod: true } } } }, payments: true },
     })
 
     if (!booking) {
       const error = new Error('Booking not found.')
       error.statusCode = 404
       error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // Refuse to "pay" a host who has no account on file — exactly like the SR-driver path.
+    if (!booking.listing?.owner?.payoutMethod) {
+      const error = new Error('This host has no payout method on file. Ask the host to add a Sham Cash payout account before releasing a payout.')
+      error.statusCode = 400
+      error.code = 'PAYOUT_METHOD_REQUIRED'
       error.expose = true
       throw error
     }
@@ -300,9 +390,17 @@ export async function handleAdmin(req, res, url, context) {
 
       const freshBooking = await tx.booking.findUnique({
         where: { id: booking.id },
-        include: { listing: true, payments: true },
+        include: { listing: { include: { owner: { select: { id: true, payoutMethod: true } } } }, payments: true },
       })
       if (!freshBooking || !isPayoutEligible(freshBooking)) throw payoutNotEligibleError()
+      // Re-check the payout method inside the transaction too, in case it was removed concurrently.
+      if (!freshBooking.listing?.owner?.payoutMethod) {
+        const error = new Error('This host has no payout method on file.')
+        error.statusCode = 400
+        error.code = 'PAYOUT_METHOD_REQUIRED'
+        error.expose = true
+        throw error
+      }
 
       const approvedPayment = freshBooking.payments.find((payment) => payment.status === 'APPROVED')
       const split = bookingFinanceSplit(freshBooking, approvedPayment?.amountMinor || freshBooking.amountMinor)
@@ -313,8 +411,10 @@ export async function handleAdmin(req, res, url, context) {
         currency: freshBooking.currency,
         referenceType: 'booking_payout',
         referenceId: freshBooking.id,
+        // One payout per booking — the key intentionally excludes payoutRef so a second release with a
+        // different ref cannot double-pay the host (recordWalletEntry dedupes on this key).
         keyParts: ['booking-host-release', freshBooking.id, approvedPayment?.id],
-        note: `Host payout released by admin after the ${PAYOUT_HOLD_DAYS}-day hold following stay completion.`,
+        note: `Host payout released by admin after the ${PAYOUT_HOLD_DAYS}-day hold following stay completion; Sham Cash ref ${payoutRef}.`,
       })
 
       await tx.adminAuditLog.create({
@@ -324,7 +424,7 @@ export async function handleAdmin(req, res, url, context) {
           entityType: 'bookings',
           entityId: freshBooking.id,
           before: freshBooking,
-          after: { walletEntry: released },
+          after: { walletEntry: released, payoutRef },
         },
       })
 
