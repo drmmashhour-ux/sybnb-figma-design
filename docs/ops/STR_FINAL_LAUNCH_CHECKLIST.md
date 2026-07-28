@@ -16,22 +16,28 @@ Updated 2026-07-27 · Branch `security/sybnb-v6-predeployment` · Governing matr
 
 ## B. Owner deploy steps (the remaining work — infra only, no code)
 ```bash
-# 1. Provision production Postgres (Neon). Keep the URL in your shell only.
-export PROD_URL='postgresql://…prod…'
+# 1. Provision production Postgres (Neon). Neon gives you TWO URLs — you need BOTH:
+#    - a DIRECT (non "-pooler") URL for migrations, and a POOLED ("-pooler", pgbouncer=true) URL for runtime.
+export DIRECT_URL='postgresql://…-DIRECT-non-pooler…'   # for the one-time migrate below
+export PROD_URL='postgresql://…-pooler…pgbouncer=true'   # Vercel runtime DATABASE_URL
 
-# 2. Apply the schema + reference data to the FRESH prod DB (clean baseline; no P1 diagnostic needed).
-DATABASE_URL="$PROD_URL" npx prisma migrate deploy
-DATABASE_URL="$PROD_URL" node scripts/seed-14-governorates.mjs
-# (optional demo accounts) DATABASE_URL="$PROD_URL" DEMO_ACCOUNT_PASSWORD="…" node scripts/seed-demo-accounts.mjs
+# 2. Apply the schema to the FRESH prod DB using the DIRECT URL (clean baseline; no P1 diagnostic needed).
+#    IMPORTANT: migrate deploy MUST use the direct URL — PgBouncer can't run CREATE EXTENSION / the
+#    migration advisory lock, so the pooled URL fails here.
+DATABASE_URL="$DIRECT_URL" npx prisma migrate deploy
+#    Do NOT run scripts/seed-14-governorates.mjs against production — it injects 14 DEMO listings into the
+#    real marketplace. Governorate reference data is bundled in the frontend; the app needs no seeding.
+#    (Demo accounts are also staging-only.)
 
-# 3. Set Vercel PRODUCTION env (project: sybnb-figma-design):
-#    NODE_ENV=production, AUTH_SECRET (≥16), PHONE_HASH_SECRET (≥16), DATABASE_URL,
-#    CORS_ORIGIN=https://<domain>, RATE_LIMIT_STORE=db, TRUST_PROXY=1, FORCE_HTTPS=1,
+# 3. Set Vercel PRODUCTION env (project: sybnb-figma-design). DATABASE_URL = the POOLED url:
+#    NODE_ENV=production, AUTH_SECRET (≥16), PHONE_HASH_SECRET (≥16), DATABASE_URL="$PROD_URL" (pooled),
+#    CORS_ORIGIN=https://<domain>, RATE_LIMIT_STORE=db, TRUST_PROXY=1, FORCE_HTTPS=1 (else HSTS is silently off),
 #    STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, VITE_STRIPE_PUBLISHABLE_KEY, STRIPE_CURRENCY,
 #    email provider (RESEND_API_KEY/SMTP_*, EMAIL_FROM*), SMS provider if used, SYP_PER_USD.
+#    NOTE: VITE_* are baked in at BUILD time — they must be set before/at deploy or the frontend Stripe init no-ops.
 
 # 4. Register the Stripe webhook (live or test): https://<domain>/api/payments/stripe/webhook → checkout.session.completed
-# 5. Deploy to production (Vercel).
+# 5. Deploy to production (Vercel). (`npm run build` now runs `prisma generate` first, so the client is fresh.)
 # 6. Verify:
 curl -s https://<domain>/api/health      # {"ok":true,...,"database":{"ok":true}}
 ```

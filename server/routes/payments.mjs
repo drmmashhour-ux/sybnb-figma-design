@@ -4,7 +4,10 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
+// timeout/maxNetworkRetries bound how long a Stripe call can block the request: the Stripe SDK default
+// (~80s) exceeds the Vercel function maxDuration (30s), so a slow Stripe response would run the whole
+// budget then 504. 8s + one retry fails fast and cheap instead of burning function time.
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY, { timeout: 8000, maxNetworkRetries: 1 }) : null
 
 function requireStripe() {
   if (!stripe) {

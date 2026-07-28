@@ -29,6 +29,7 @@ export async function sendVerificationCodeSms(phone, code) {
     const auth = Buffer.from(`${sid}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
     const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000), // bound the call so a hung provider can't burn the 30s budget
       headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ To: phone, From: process.env.TWILIO_FROM, Body: message }),
     })
@@ -39,6 +40,7 @@ export async function sendVerificationCodeSms(phone, code) {
   if (provider === 'http') {
     const res = await fetch(process.env.SMS_GATEWAY_URL, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000), // bound the call so a hung provider can't burn the 30s budget
       headers: {
         'Content-Type': 'application/json',
         ...(process.env.SMS_API_KEY ? { Authorization: `Bearer ${process.env.SMS_API_KEY}` } : {}),

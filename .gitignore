@@ -2,6 +2,9 @@ node_modules/
 # Single package manager: this repo uses npm (CI runs `npm ci`, Vercel builds from package-lock.json).
 # A committed pnpm-lock.yaml would make Vercel silently switch to pnpm — keep it out of the tree.
 pnpm-lock.yaml
+# P1 production DB diagnostic outputs — contain prod schema inventory / DB identity. Never commit.
+prod-diagnose.json
+prod-vs-schema.sql*
 dist/
 .vercel/
 .env

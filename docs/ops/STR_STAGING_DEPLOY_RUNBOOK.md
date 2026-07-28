@@ -36,9 +36,12 @@ Stripe TEST mode (P5):
 - `STRIPE_WEBHOOK_SECRET=whsec_...` (from Step 5)
 
 ## Step 3 — Apply migrations to the staging DB (clean baseline)
+Neon gives a POOLED (`-pooler`, `pgbouncer=true`) URL and a DIRECT URL. **Migrations MUST use the DIRECT
+URL** — PgBouncer transaction pooling can't run `CREATE EXTENSION postgis` or the migration advisory lock,
+so the pooled URL fails here. Use the pooled URL only as the runtime `DATABASE_URL` (Step 2).
 ```bash
-DATABASE_URL="<STAGING_URL>" npx prisma migrate deploy
-DATABASE_URL="<STAGING_URL>" npx prisma migrate status   # expect: up to date
+DATABASE_URL="<STAGING_DIRECT_URL>" npx prisma migrate deploy    # direct, non-pooler
+DATABASE_URL="<STAGING_DIRECT_URL>" npx prisma migrate status     # expect: up to date
 ```
 (Fresh DB → the baseline applies with no lineage conflict. If this were an existing DB, run the P1
 diagnostic first per `DB_BASELINE_RUNBOOK.md`.)

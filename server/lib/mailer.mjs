@@ -46,6 +46,8 @@ async function deliver({ to, subject, text }) {
   if (isResendConfigured()) {
     const response = await fetch(RESEND_API_URL, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000), // fail fast; a hung provider must not burn the 30s function budget
+
       headers: {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
