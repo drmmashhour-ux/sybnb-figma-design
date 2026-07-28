@@ -19,7 +19,7 @@ Legend for **Status**:
 | P2 | Production `RATE_LIMIT_STORE=db` | 🔴 | DB limiter built + tested locally; documented in `.env.production.example` | Set env var in Vercel prod | **Owner** |
 | P3 | Staging deployment + validate | 🔴 (prepared) | Exact runbook `docs/ops/STR_STAGING_DEPLOY_RUNBOOK.md` (env vars, fresh-DB migrate deploy, seed, Stripe test webhook, staging deploy, real-target E2E). Fresh staging DB does NOT depend on P1 | Owner grants Vercel access OR runs Steps 1–6 + returns staging URL | **Owner** |
 | P4 | Full guest book→pay→confirm journey | 🟢 (API, local-wallet) / 🔴 (browser+staging) | `test/api/guest-journey-book-pay-confirm.test.mjs`: full book→pay→approve→confirm over HTTP w/ DB-state assertions, host/admin views, failure paths, server-authoritative payment state. Browser-UI + staging leg + Stripe card path remain | Owner unblocks staging (P3) + Stripe (P5) | Claude + Owner |
-| P5 | **Stripe payment architecture** | 🟢 (immediate-capture path) / 🔴 (auth→capture + real card E2E) | `test/api/stripe-booking-payment.test.mjs`: paid session confirms; duplicate/delayed/out-of-order webhook idempotent; unpaid stays pending; no double-pay; endpoints fail closed (503). Capture model = immediate; auth→capture NOT built | Owner decides immediate vs auth→capture; provide test-mode keys (sk_test_/whsec_/pk_test_) | **Owner** decides, Claude builds |
+| P5 | **Stripe payment architecture** | 🟡 **BLOCKED FOR EXTERNAL VALIDATION** | LOCAL evidence only (NOT real Stripe): `test/api/stripe-booking-payment.test.mjs` uses **fabricated session objects** — proves finalize logic, idempotency, fail-closed 503. Capture model = immediate; auth→capture NOT built. **No real Stripe test-mode transaction/webhook has been executed.** | Owner provides test-mode keys → then run the external-validation matrix (see below) with real Stripe event IDs | **Owner** + Claude |
 | P6 | **Tax** | 🔴 (decision request ready) | Facts pinned (`test/api/tax-characterization.test.mjs`): flat 2% folded into platform adminShare (kept, not remitted), no jurisdiction rates, no persisted taxMinor. Decision doc `docs/product/STR_TAX_DECISION_REQUEST.md` | Owner/legal replies A (no tax) / B (reclassify as fee) / C (real remitted tax) | **Owner** |
 | P7 | Wallet / financial integrity | 🟢 | Ledger-invariant suite (bal==Σentries & ≥0); DEBIT floors added (host-cancel fee both-legs, share reversals); payout-clawback intentionally keeps debt semantics; SR-payout lock aligned | done + tested | Claude |
 | P8 | Booking / availability concurrency | 🟢 | 8-case no-double-booking suite; DISPUTED added to occupying set; STAYS dates required | done + tested | Claude |
@@ -35,6 +35,26 @@ Legend for **Status**:
 | P18 | Complete E2E matrix (guest/host/admin/wallet/security/mobile) | 🔵/🟡 | Smoke-level exists; expansion tracked via P4/P7/P8 | Claude expands where local + Stripe permit | Claude + Owner |
 | P19 | Final cleanup (dead code, debug, secrets scan) | 🔵 | Several dead-code items already removed | Claude runs final sweep + secret scan | Claude |
 | P20 | Final launch checklist doc | 🔵 | To be produced: `docs/ops/STR_FINAL_LAUNCH_CHECKLIST.md` | Claude assembles at end | Claude |
+
+## P5 — Stripe EXTERNAL VALIDATION MATRIX (real test-mode; NOT yet executed)
+Local fake-session tests are NOT equivalent to this. Once test-mode keys exist, execute and capture
+**real** Stripe evidence for each case:
+
+| # | Case | Real evidence required |
+|---|------|------------------------|
+| 1 | Successful test card (`4242…`) | Stripe PaymentIntent + Checkout Session id; booking → CONFIRMED; `stripe` proof APPROVED; payout HOLD + admin-share entries |
+| 2 | Declined card (`4000000000000002`) | session NOT paid; booking stays PAYMENT_PENDING; no proof |
+| 3 | Webhook success (`checkout.session.completed`) | Stripe dashboard delivery id + 200 response; booking CONFIRMED |
+| 4 | Duplicate webhook (redeliver same event) | second delivery id; exactly ONE proof + ONE payout (no duplicate financial effect) |
+| 5 | Delayed webhook | late delivery id; idempotent confirm |
+| 6 | Out-of-order webhook | event ids; no double payout |
+| 7 | Unpaid/expired session | session id, unpaid; booking PAYMENT_PENDING → later reaped |
+| 8 | Idempotency/replay (same session to confirm + webhook) | one proof only |
+| 9 | Refund/reversal (if in scope) | Stripe refund id; ledger reversal entry |
+| 10 | Booking + DB state after each event | booking status, proof status, wallet entries, audit-log rows per event |
+
+Deliverable: Stripe test-mode transaction/event IDs + webhook delivery evidence + resulting DB/app state,
+proving duplicate events cause no duplicate financial effect. Until then P5 is YELLOW (external-validation).
 
 ## What is genuinely BLOCKED on you (the owner) — and exactly what I need
 
