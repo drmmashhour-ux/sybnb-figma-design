@@ -25,7 +25,18 @@ const DAYS = {
 const T = {
   ar: {
     title: 'تقويم الحجوزات المتوفرة',
-    help: 'اضغط على أي تاريخ متاح لحجبه، واضغط عليه مجددا لإعادة إتاحته. لمسة واحدة كافية.',
+    help: 'اضغط على أي تاريخ متاح لفتح محرّر اليوم: عدّل سعر تلك الليلة و/أو أتحه أو احجبه.',
+    dayEditorTitle: 'تعديل هذا اليوم',
+    dayStatusLabel: 'الإتاحة',
+    dayAvailable: 'متاح',
+    dayBlocked: 'محجوب',
+    dayPriceLabel: 'سعر هذا اليوم لليلة',
+    dayPriceHint: 'اتركه فارغاً لاستخدام السعر الأساسي.',
+    daySave: 'حفظ اليوم',
+    dayReset: 'إرجاع للسعر الأساسي',
+    dayClose: 'إغلاق',
+    daySaved: 'تم حفظ هذا اليوم.',
+    dayError: 'تعذر حفظ هذا اليوم. تحقق من السعر.',
     legendAvailable: 'متاح',
     legendBlocked: 'محجوب من المضيف',
     legendBooked: 'محجوز من ضيف',
@@ -48,7 +59,18 @@ const T = {
   },
   en: {
     title: 'Availability calendar',
-    help: 'Tap any available date to block it, tap again to make it available. One tap is all it takes.',
+    help: 'Tap any available date to open the day editor: set that night’s price and/or mark it available or blocked.',
+    dayEditorTitle: 'Edit this day',
+    dayStatusLabel: 'Availability',
+    dayAvailable: 'Available',
+    dayBlocked: 'Blocked',
+    dayPriceLabel: 'This day’s nightly price',
+    dayPriceHint: 'Leave empty to use the base price.',
+    daySave: 'Save day',
+    dayReset: 'Reset to base price',
+    dayClose: 'Close',
+    daySaved: 'This day was saved.',
+    dayError: 'Could not save this day. Check the price.',
     legendAvailable: 'Available',
     legendBlocked: 'Blocked by host',
     legendBooked: 'Booked by a guest',
@@ -101,6 +123,12 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
   const [seasonPriceInput, setSeasonPriceInput] = useState('')
   const [pricingBusy, setPricingBusy] = useState(false)
   const [pricingMessage, setPricingMessage] = useState('')
+  // Per-day override editor
+  const [editDate, setEditDate] = useState('')
+  const [editStatus, setEditStatus] = useState<'AVAILABLE' | 'BLOCKED'>('AVAILABLE')
+  const [editPriceInput, setEditPriceInput] = useState('')
+  const [editBusy, setEditBusy] = useState(false)
+  const [editMessage, setEditMessage] = useState('')
 
   useEffect(() => {
     void loadAvailability()
@@ -196,28 +224,56 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
     })
   }, [cursor])
 
-  async function toggleDate(date: Date) {
+  // Clicking a day opens the per-day editor seeded with that day's current status + price override.
+  function openDayEditor(date: Date) {
     const iso = toISO(date)
     if (bookedDates.has(iso) || savingDate) return
+    setEditDate(iso)
+    setEditStatus(blockedDates.has(iso) ? 'BLOCKED' : 'AVAILABLE')
+    setEditPriceInput(priceOverrides.has(iso) ? String(priceOverrides.get(iso)) : '')
+    setEditMessage('')
+  }
 
-    const nextStatus: 'BLOCKED' | 'AVAILABLE' = blockedDates.has(iso) ? 'AVAILABLE' : 'BLOCKED'
-    const previouslyBlocked = new Set(blockedDates)
-    setBlockedDates((current) => {
-      const next = new Set(current)
-      if (nextStatus === 'BLOCKED') next.add(iso)
-      else next.delete(iso)
-      return next
-    })
-    setSavingDate(iso)
-    setMessage('')
+  // Saves THAT day's price override (empty = reset to base → null) and availability status via the
+  // existing availability write API. No booking/business logic is touched — only this one date.
+  async function saveDayEditor() {
+    if (!editDate) return
+    const trimmed = editPriceInput.trim()
+    let priceOverrideMinor: number | null = null
+    if (trimmed !== '') {
+      const parsed = Math.round(Number(trimmed))
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setEditMessage(t.dayError)
+        return
+      }
+      priceOverrideMinor = parsed
+    }
 
+    setEditBusy(true)
+    setEditMessage('')
     try {
-      await updateHostListingAvailability(listingId, [{ date: iso, status: nextStatus }], mode)
+      await updateHostListingAvailability(
+        listingId,
+        [{ date: editDate, status: editStatus, priceOverrideMinor }],
+        mode,
+      )
+      setBlockedDates((current) => {
+        const next = new Set(current)
+        if (editStatus === 'BLOCKED') next.add(editDate)
+        else next.delete(editDate)
+        return next
+      })
+      setPriceOverrides((current) => {
+        const next = new Map(current)
+        if (priceOverrideMinor === null) next.delete(editDate)
+        else next.set(editDate, priceOverrideMinor)
+        return next
+      })
+      setEditMessage(t.daySaved)
     } catch {
-      setBlockedDates(previouslyBlocked)
-      setMessage(t.saveError)
+      setEditMessage(t.dayError)
     } finally {
-      setSavingDate('')
+      setEditBusy(false)
     }
   }
 
@@ -270,18 +326,20 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
           const isBlocked = blockedDates.has(iso)
           const isSaving = savingDate === iso
           const isToday = iso === todayIso
+          const isEditing = editDate === iso
           return (
             <button
               key={iso}
               type="button"
               disabled={isBooked || status === 'loading'}
-              onClick={() => void toggleDate(date)}
+              onClick={() => openDayEditor(date)}
               aria-label={isBooked ? t.legendBooked : isBlocked ? t.legendBlocked : t.legendAvailable}
               style={{
                 ...styles.dayButton,
                 ...(isBlocked ? styles.dayBlocked : {}),
                 ...(isBooked ? styles.dayBooked : {}),
                 ...(isToday ? styles.dayToday : {}),
+                ...(isEditing ? styles.dayEditing : {}),
                 ...(isSaving ? styles.daySaving : {}),
               }}
             >
@@ -293,6 +351,61 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
           )
         })}
       </div>
+
+      {editDate && (
+        <div style={styles.dayEditor}>
+          <div style={styles.dayEditorHead}>
+            <strong>{t.dayEditorTitle} · {editDate}</strong>
+            <button type="button" style={styles.dayEditorClose} onClick={() => setEditDate('')}>
+              {t.dayClose}
+            </button>
+          </div>
+          <div style={styles.dayEditorRow}>
+            <span style={styles.dayEditorLabel}>{t.dayStatusLabel}</span>
+            <div style={styles.daySegment}>
+              <button
+                type="button"
+                style={{ ...styles.daySegmentButton, ...(editStatus === 'AVAILABLE' ? styles.daySegmentActive : {}) }}
+                onClick={() => setEditStatus('AVAILABLE')}
+              >
+                {t.dayAvailable}
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.daySegmentButton, ...(editStatus === 'BLOCKED' ? styles.daySegmentActiveBlocked : {}) }}
+                onClick={() => setEditStatus('BLOCKED')}
+              >
+                {t.dayBlocked}
+              </button>
+            </div>
+          </div>
+          <label style={styles.pricingLabel}>
+            {t.dayPriceLabel}
+            <input
+              inputMode="decimal"
+              placeholder={String(basePriceMinor)}
+              style={styles.pricingInput}
+              type="number"
+              value={editPriceInput}
+              onChange={(event) => setEditPriceInput(event.target.value)}
+            />
+          </label>
+          <span style={styles.basePriceLine}>{t.dayPriceHint}</span>
+          <div style={styles.dayEditorActions}>
+            <button disabled={editBusy} style={styles.applyButton} onClick={() => void saveDayEditor()}>
+              {editBusy ? t.saving : t.daySave}
+            </button>
+            <button
+              disabled={editBusy}
+              style={styles.dayResetButton}
+              onClick={() => setEditPriceInput('')}
+            >
+              {t.dayReset}
+            </button>
+          </div>
+          {editMessage && <p style={styles.error}>{editMessage}</p>}
+        </div>
+      )}
 
       <div style={styles.pricingPanel}>
         <strong>{t.pricingTitle}</strong>
@@ -363,7 +476,19 @@ const styles: Record<string, CSSProperties> = {
   dayBlocked: { background: 'rgba(229,184,11,.14)', borderColor: 'rgba(229,184,11,.5)', color: '#e5b80b' },
   dayBooked: { background: 'rgba(255,78,119,.14)', borderColor: 'rgba(255,78,119,.5)', color: '#ff4e77' },
   dayToday: { boxShadow: '0 0 0 2px rgba(82,108,255,.65) inset' },
+  dayEditing: { boxShadow: '0 0 0 2px #d5a915 inset' },
   daySaving: { opacity: 0.55 },
+  dayEditor: { border: '1px solid rgba(82,108,255,.5)', borderRadius: 8, background: 'rgba(82,108,255,.08)', padding: 14, display: 'grid', gap: 10, marginTop: 6 },
+  dayEditorHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, color: '#fff' },
+  dayEditorClose: { minHeight: 36, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 12px' },
+  dayEditorRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  dayEditorLabel: { color: '#9aa6ba', fontSize: 13, fontWeight: 800 },
+  daySegment: { display: 'flex', gap: 6 },
+  daySegmentButton: { minHeight: 40, border: '1px solid #30384d', borderRadius: 8, background: '#0d1320', color: '#9aa6ba', fontWeight: 900, padding: '0 16px' },
+  daySegmentActive: { background: 'rgba(32,210,155,.16)', borderColor: 'rgba(32,210,155,.5)', color: '#20d29b' },
+  daySegmentActiveBlocked: { background: 'rgba(229,184,11,.16)', borderColor: 'rgba(229,184,11,.5)', color: '#e5b80b' },
+  dayEditorActions: { display: 'flex', gap: 10, flexWrap: 'wrap' },
+  dayResetButton: { minHeight: 44, border: '1px solid #30384d', borderRadius: 10, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
   dayPrice: { fontSize: 9, fontWeight: 800, color: '#8ea0ff', lineHeight: 1 },
   pricingPanel: { border: '1px solid rgba(213,169,21,.4)', borderRadius: 8, background: 'rgba(213,169,21,.06)', padding: 14, display: 'grid', gap: 12, marginTop: 6 },
   basePriceLine: { color: '#9aa6ba', fontSize: 13, fontWeight: 800 },

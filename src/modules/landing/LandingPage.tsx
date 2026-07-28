@@ -441,7 +441,7 @@ export function LandingPage({ lang }: Props) {
             <button className="str-btn-gold" onClick={scrollToSearch}>
               {t.searchStay}
             </button>
-            <button className="str-btn-outline" onClick={() => navigate('/host/stays')}>
+            <button className="str-btn-outline" onClick={() => navigate('/become-host')}>
               {t.becomeHost}
             </button>
           </div>

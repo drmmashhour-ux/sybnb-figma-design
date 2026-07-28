@@ -26,6 +26,9 @@ const MarketplaceSellPage = lazyNamed(() => import('../modules/marketplace/Marke
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
+const HostHomePage = lazyNamed(() => import('../modules/host/HostHomePage'), 'HostHomePage')
+const HostBookingsPage = lazyNamed(() => import('../modules/host/HostBookingsPage'), 'HostBookingsPage')
+const HostPayoutPage = lazyNamed(() => import('../modules/host/HostPayoutPage'), 'HostPayoutPage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostInsightsPanel = lazyNamed(() => import('../modules/host/HostInsightsPanel'), 'HostInsightsPanel')
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
@@ -97,6 +100,8 @@ export function App() {
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
           guestAccountMatch[1] ? <ListingDetailPage listingId={guestAccountMatch[1]} lang={lang} /> : <SearchPreviewPage lang={lang} initialDivision="stays" entry="stays" />
+        ) : path === '/become-host' ? (
+          <HostHomePage lang={lang} />
         ) : path === '/trips' || path === '/my-trips' ? (
           <DashboardPage lang={lang} />
         ) : path === '/dashboard' || path === '/account' ? (
@@ -112,6 +117,10 @@ export function App() {
             mode={path === '/host/stays' || path === '/host' ? 'host' : 'seller'}
             focus={hostFocusFromPath(path)}
           />
+        ) : path === '/host/bookings' ? (
+          <HostBookingsPage lang={lang} />
+        ) : path === '/host/payout' ? (
+          <HostPayoutPage lang={lang} />
         ) : path === '/host/earnings' ? (
           <HostEarningsPage lang={lang} />
         ) : path === '/host/insights' ? (

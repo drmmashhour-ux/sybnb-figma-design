@@ -1502,6 +1502,63 @@ export async function updateHostListingAvailability(
   return response.availability
 }
 
+export type HostPayoutView = {
+  type: 'sham_cash'
+  accountHolder: string
+  last4: string
+  updatedAt: string | null
+} | null
+
+// Reads the host's Sham Cash payout account on file. The server only ever returns type +
+// accountHolder + last4 — never the full number (which is encrypted at rest).
+export async function fetchHostPayoutMethod(mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; payout: HostPayoutView }>('/api/host/payout', {
+    token: session.token,
+  })
+  return response.payout
+}
+
+// Saves/updates the host's Sham Cash payout account. The full number is sent once over the wire,
+// encrypted server-side, and thereafter only its last 4 digits are readable.
+export async function saveHostPayoutMethod(
+  input: { accountHolder: string; shamCashNumber: string },
+  mode: HostDashboardMode = 'host',
+) {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; payout: HostPayoutView }>('/api/host/payout', {
+    method: 'PUT',
+    token: session.token,
+    body: input,
+  })
+  return response.payout
+}
+
+export type ListingClaimCheck = {
+  slotId: string
+  amenityAr: string
+  amenityEn: string
+  verdict: 'yes' | 'no' | 'unclear' | 'missing'
+  reason: string
+}
+
+export type ListingClaimInput = { slotId: string; labelAr: string; labelEn: string }
+
+// Runs the AI truth-controller for a listing's claimed amenities. Advisory only — the host can
+// still publish. Returns [] when AI is unconfigured/unavailable (fail-open).
+export async function verifyListingClaims(
+  listingId: string,
+  claims: ListingClaimInput[],
+  mode: HostDashboardMode = 'host',
+) {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; checks: ListingClaimCheck[] }>(
+    `/api/host/listings/${listingId}/verify-claims`,
+    { method: 'POST', token: session.token, body: { claims } },
+  )
+  return response.checks
+}
+
 export async function fetchPrototypeListing(listingId: string) {
   try {
     const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`)

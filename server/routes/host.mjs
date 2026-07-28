@@ -18,6 +18,8 @@ import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { deleteListingMedia } from '../lib/listing-media-storage.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
 import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
+import { encryptPayoutAccount, payoutAccountLast4 } from '../lib/payout-account.mjs'
+import { checkListingClaims, claimCheckSignature } from '../lib/listing-claim-check.mjs'
 
 // SECURITY (S7/S10): the ONLY guest + payment-proof fields a host is allowed to receive.
 // A host must never see the guest's email, nor a proof's uploaded transfer screenshot (proofAssetUrl),
@@ -32,6 +34,20 @@ const HOST_SAFE_PAYMENT_SELECT = { id: true, status: true, amountMinor: true, cu
 function hostSafePayoutRow(row) {
   const { adminCommissionMinor, ...safeRow } = row
   return safeRow
+}
+
+// The ONLY payout fields ever returned to a client: type, holder, and last4. The encrypted
+// number envelope (ciphertext/iv/tag) never leaves the server.
+function hostSafePayoutView(payoutMethod) {
+  if (!payoutMethod || typeof payoutMethod !== 'object' || payoutMethod.type !== 'sham_cash') {
+    return null
+  }
+  return {
+    type: 'sham_cash',
+    accountHolder: payoutMethod.accountHolder || '',
+    last4: payoutMethod.last4 || '',
+    updatedAt: payoutMethod.updatedAt || null,
+  }
 }
 
 export async function handleHost(req, res, url, context) {
@@ -554,6 +570,128 @@ export async function handleHost(req, res, url, context) {
     }
 
     return methodNotAllowed(res, ['GET', 'PATCH'])
+  }
+
+  // ---- AI CLAIM CHECK — verify claimed amenities against their photos (WARN, never block) ----
+  // Runs Claude vision over the listing's photos for each claimed offer-proof amenity. Advisory
+  // only: persists non-'yes' flags to metadata.claimChecks so admin can see them, and returns the
+  // per-amenity checks to the host. Fail-open — the verifier never throws and returns [] if AI is off.
+  const verifyClaimsMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/verify-claims$/)
+  if (verifyClaimsMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const listingId = verifyClaimsMatch[1]
+    const listing = await db().listing.findFirst({
+      where: { id: listingId, ownerId: context.user.id },
+      include: { media: true },
+    })
+    if (!listing) {
+      const error = new Error('Listing not found for this host account.')
+      error.statusCode = 404
+      error.code = 'HOST_LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const body = await readJson(req).catch(() => ({}))
+    const clientClaims = Array.isArray(body?.claims) ? body.claims : []
+    const force = body?.force === true
+
+    // Cost-aware: skip re-verifying an unchanged listing (same claimed amenities + same photos).
+    const signature = claimCheckSignature(listing)
+    const existing =
+      listing.metadata && typeof listing.metadata === 'object' ? listing.metadata.claimChecks : null
+    if (!force && existing && existing.signature === signature && Array.isArray(existing.checks)) {
+      return json(res, 200, { ok: true, checks: existing.checks, cached: true })
+    }
+
+    // The verifier itself never throws, but guard the whole path so a claim check can never break
+    // the host's flow.
+    let checks = []
+    try {
+      checks = await checkListingClaims(listing, clientClaims)
+    } catch {
+      checks = []
+    }
+
+    const flagCount = checks.filter((check) => check.verdict !== 'yes').length
+    const baseMetadata =
+      listing.metadata && typeof listing.metadata === 'object' ? listing.metadata : {}
+    const nextMetadata = {
+      ...baseMetadata,
+      claimChecks: {
+        checkedAt: new Date().toISOString(),
+        signature,
+        checks,
+        flagCount,
+      },
+    }
+    await db().listing.update({ where: { id: listing.id }, data: { metadata: nextMetadata } })
+
+    return json(res, 200, { ok: true, checks })
+  }
+
+  // ---- HOST PAYOUT ACCOUNT (Sham Cash) — mirrors the driver payout pattern ----
+  // Admin's /api/admin/payouts release surfaces the host's User.payoutMethod so the operator can
+  // push earnings; this endpoint lets the host set/read it. The full number is encrypted at rest
+  // (payout-account.mjs) and only the last 4 digits are ever returned to any client.
+  if (url.pathname === '/api/host/payout') {
+    requireAuth(context, ['HOST', 'SELLER'])
+
+    if (req.method === 'GET') {
+      const user = await db().user.findUnique({
+        where: { id: context.user.id },
+        select: { payoutMethod: true },
+      })
+      return json(res, 200, { ok: true, payout: hostSafePayoutView(user?.payoutMethod) })
+    }
+
+    if (req.method === 'PUT') {
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['accountHolder', 'shamCashNumber'])
+      const accountHolder = assertBoundedString(body.accountHolder, {
+        fieldName: 'accountHolder',
+        maxLength: 120,
+        required: true,
+      })
+      const digits = String(body.shamCashNumber || '').replace(/\D/g, '')
+      if (digits.length < 6 || digits.length > 24) {
+        const error = new Error('Sham Cash number must be between 6 and 24 digits.')
+        error.statusCode = 400
+        error.code = 'SHAM_CASH_NUMBER_INVALID'
+        error.expose = true
+        throw error
+      }
+
+      const payoutMethod = {
+        type: 'sham_cash',
+        accountHolder,
+        last4: payoutAccountLast4(digits),
+        ...encryptPayoutAccount(digits),
+        updatedAt: new Date().toISOString(),
+      }
+
+      await db().user.update({
+        where: { id: context.user.id },
+        data: { payoutMethod },
+      })
+
+      // Audit the change WITHOUT persisting the ciphertext or number — only the type + last4.
+      await db().adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'HOST_PAYOUT_METHOD_UPDATED',
+          entityType: 'users',
+          entityId: context.user.id,
+          before: null,
+          after: { type: 'sham_cash', last4: payoutMethod.last4 },
+        },
+      })
+
+      return json(res, 200, { ok: true, payout: hostSafePayoutView(payoutMethod) })
+    }
+
+    return methodNotAllowed(res, ['GET', 'PUT'])
   }
 
   const listingMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/status$/)

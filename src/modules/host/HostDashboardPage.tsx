@@ -10,11 +10,14 @@ import {
   updatePrototypeHostInstantBook,
   renewPrototypeHostListing,
   updatePrototypeHostListingStatus,
+  verifyListingClaims,
   type HostDashboardMode,
+  type ListingClaimCheck,
+  type ListingClaimInput,
   type PlatformHostOverview,
   type PlatformListing,
 } from '../../shared/api/platformApi'
-import { hostInventoryFilterGroups, type VisualFilterSelection } from '../../engines/filters'
+import { hostInventoryFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { divisionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -156,6 +159,20 @@ const copy = {
     insightPanelBody: (count: number) => `${count} من إعلاناتك فيها ليالٍ فارغة بدون سعر خاص — قد تستفيد من توصية تسعير.`,
     insightPanelEmpty: 'كل إعلاناتك تبدو جيدة الآن.',
     insightPanelCta: 'عرض التوصيات',
+    hubTitle: 'مركز المضيف',
+    hubMyListings: 'إعلاناتي',
+    hubAvailability: 'الإتاحة والتسعير',
+    hubBookings: 'الحجوزات',
+    hubPayments: 'المدفوعات',
+    hubPayout: 'إعدادات الصرف',
+    hubInquiries: 'الاستفسارات',
+    checkListing: 'فحص إعلاني (AI)',
+    checking: 'جار الفحص...',
+    claimAllGood: 'لا ملاحظات — الصور تدعم الخيارات المعلنة.',
+    claimAdvisoryNote: 'ملاحظات إرشادية فقط — يمكنك النشر. أضف صورة واضحة أو أزل الخيار.',
+    verdictMissing: 'لا توجد صورة إثبات',
+    verdictNo: 'الصورة لا تُظهر هذا الخيار بوضوح',
+    verdictUnclear: 'الصورة غير واضحة لهذا الخيار',
   },
   en: {
     back: 'Back to landing',
@@ -283,6 +300,20 @@ const copy = {
     insightPanelBody: (count: number) => `${count} of your listings have open nights with no special price set — a pricing insight could help.`,
     insightPanelEmpty: 'All your listings look good right now.',
     insightPanelCta: 'View recommendations',
+    hubTitle: 'Host hub',
+    hubMyListings: 'My Listings',
+    hubAvailability: 'Availability & Pricing',
+    hubBookings: 'Bookings',
+    hubPayments: 'Payments',
+    hubPayout: 'Payout settings',
+    hubInquiries: 'Inquiries',
+    checkListing: 'Check my listing (AI)',
+    checking: 'Checking...',
+    claimAllGood: 'No flags — your photos support the claimed options.',
+    claimAdvisoryNote: 'Advisory only — you can still publish. Add a clear photo or remove the option.',
+    verdictMissing: 'No proof photo',
+    verdictNo: 'Photo does not clearly show this option',
+    verdictUnclear: 'Photo is unclear for this option',
   },
 }
 
@@ -298,6 +329,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const [activeListingId, setActiveListingId] = useState('')
   const [calendarListingId, setCalendarListingId] = useState('')
   const [pricingToolListingId, setPricingToolListingId] = useState('')
+  const [claimChecks, setClaimChecks] = useState<Record<string, ListingClaimCheck[]>>({})
+  const [claimCheckedIds, setClaimCheckedIds] = useState<Set<string>>(() => new Set())
+  const [claimBusyId, setClaimBusyId] = useState('')
   const [editingListingId, setEditingListingId] = useState('')
   const [editTitleAr, setEditTitleAr] = useState('')
   const [editPriceMinor, setEditPriceMinor] = useState('')
@@ -529,6 +563,22 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     }
   }
 
+  async function runClaimCheck(listing: PlatformListing) {
+    const claims = claimInputsForListing(listing)
+    setClaimBusyId(listing.id)
+    setMessage('')
+    try {
+      const checks = await verifyListingClaims(listing.id, claims, mode)
+      setClaimChecks((current) => ({ ...current, [listing.id]: checks }))
+      setClaimCheckedIds((current) => new Set(current).add(listing.id))
+    } catch (error) {
+      // Advisory feature — a failure must never disrupt the host. Surface a soft note only.
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setClaimBusyId('')
+    }
+  }
+
   async function toggleInstantBook(listingId: string, enabled: boolean) {
     setStatus('saving')
     setActiveListingId(listingId)
@@ -558,6 +608,25 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <span>{providerCopy.verifiedLine(overview?.host.displayName, verificationStatusText)}</span>
         </div>
         <div style={styles.avatar}>{(overview?.host.displayName || 'A').slice(0, 1)}</div>
+      </section>
+
+      <section style={styles.hostHub} aria-label={t.hubTitle}>
+        <span style={styles.hostHubTitle}>{t.hubTitle}</span>
+        <div style={styles.hostHubGrid}>
+          {([
+            [t.hubMyListings, '/host/stays', '▤'],
+            [t.hubAvailability, '/host/stays', '▦'],
+            [t.hubBookings, '/host/bookings', '▧'],
+            [t.hubPayments, '/host/earnings', '▰'],
+            [t.hubPayout, '/host/payout', '⎘'],
+            [t.hubInquiries, '/host/inquiries', '✉'],
+          ] as const).map(([label, route, icon]) => (
+            <button key={label} style={styles.hostHubLink} onClick={() => (window.location.hash = route)}>
+              <span style={styles.hostHubIcon} aria-hidden="true">{icon}</span>
+              <strong>{label}</strong>
+            </button>
+          ))}
+        </div>
       </section>
 
       <section style={styles.providerHealth}>
@@ -808,6 +877,39 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                   </button>
                 )}
               </div>
+              {claimSlotsForListing(listing).length > 0 && (
+                <div style={styles.claimCheckPanel}>
+                  <button
+                    style={styles.secondaryButton}
+                    disabled={claimBusyId === listing.id}
+                    onClick={() => void runClaimCheck(listing)}
+                  >
+                    {claimBusyId === listing.id ? t.checking : `🔎 ${t.checkListing}`}
+                  </button>
+                  {claimCheckedIds.has(listing.id) && (() => {
+                    const flags = (claimChecks[listing.id] || []).filter((check) => check.verdict !== 'yes')
+                    if (flags.length === 0) {
+                      return <p style={styles.claimAllGood}>{t.claimAllGood}</p>
+                    }
+                    return (
+                      <div style={styles.claimFlags}>
+                        <span style={styles.claimAdvisory}>{t.claimAdvisoryNote}</span>
+                        {flags.map((flag) => {
+                          const amenity = isAr ? flag.amenityAr : flag.amenityEn
+                          const verdictLabel =
+                            flag.verdict === 'missing' ? t.verdictMissing : flag.verdict === 'no' ? t.verdictNo : t.verdictUnclear
+                          return (
+                            <div key={flag.slotId} style={styles.claimFlagRow}>
+                              🚩 <b>‘{amenity}’</b> — {verdictLabel}
+                              {flag.reason ? <small style={styles.claimReason}> · {flag.reason}</small> : null}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
               {calendarListingId === listing.id && (
                 <HostAvailabilityCalendar
                   lang={lang}
@@ -951,6 +1053,32 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
 
 function listingTitle(listing: Pick<PlatformListing, 'id' | 'division' | 'titleAr' | 'titleEn'>, lang: Lang) {
   return listingTitleText(listing, lang)
+}
+
+const OFFER_PROOF_PREFIX = 'offerProof:'
+
+// Look up the bilingual label for a claimed offer-proof amenity slot (offerProof:<optionId>) from
+// the same seller filter catalog the wizard uses — no hard-coded/duplicated amenity list.
+function offerProofLabel(slotId: string): { ar: string; en: string } {
+  const optionId = slotId.startsWith(OFFER_PROOF_PREFIX) ? slotId.slice(OFFER_PROOF_PREFIX.length) : slotId
+  for (const group of sellerPropertyFilterGroups) {
+    const option = group.options.find((item) => item.id === optionId)
+    if (option) return option.label
+  }
+  return { ar: optionId, en: optionId }
+}
+
+function claimSlotsForListing(listing: PlatformListing): string[] {
+  const slots = (listing.metadata as Record<string, unknown> | undefined)?.selectedOfferProofSlots
+  if (!Array.isArray(slots)) return []
+  return slots.filter((slot): slot is string => typeof slot === 'string' && slot.startsWith(OFFER_PROOF_PREFIX))
+}
+
+function claimInputsForListing(listing: PlatformListing): ListingClaimInput[] {
+  return claimSlotsForListing(listing).map((slotId) => {
+    const label = offerProofLabel(slotId)
+    return { slotId, labelAr: label.ar, labelEn: label.en }
+  })
 }
 
 function matchesProviderFocus(listing: Pick<PlatformListing, 'division'>, focus?: ProviderFocus) {
@@ -1166,6 +1294,11 @@ const styles: Record<string, CSSProperties> = {
   statusGold: { background: 'rgba(229,184,11,.13)', color: '#e5b80b', border: '1px solid rgba(229,184,11,.42)' },
   statusRed: { background: 'rgba(255,78,119,.13)', color: '#ff4e77', border: '1px solid rgba(255,78,119,.42)' },
   editButton: { width: 38, height: 38, borderRadius: 8, border: '1px solid rgba(82,108,255,.5)', background: 'rgba(82,108,255,.12)', color: '#526cff', fontWeight: 950 },
+  hostHub: { border: '1px solid #242735', borderRadius: 8, background: '#111118', padding: 18, display: 'grid', gap: 14 },
+  hostHubTitle: { color: '#d5a915', fontWeight: 950, fontSize: 13, letterSpacing: 1 },
+  hostHubGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' },
+  hostHubLink: { border: '1px solid #1e1e2a', borderRadius: 10, background: '#0c1220', color: '#fff', minHeight: 92, padding: 14, display: 'grid', gap: 8, alignContent: 'center', justifyItems: 'start', fontWeight: 900, cursor: 'pointer' },
+  hostHubIcon: { width: 40, height: 40, borderRadius: 10, background: 'rgba(82,108,255,.14)', color: '#8ea0ff', display: 'grid', placeItems: 'center', fontSize: 20 },
   hostQuickLinks: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' },
   quickLink: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', color: '#fff', minHeight: 86, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 950 },
   hostFinalStamp: { justifySelf: 'start', border: '1px solid rgba(229,184,11,.65)', borderRadius: 999, background: 'rgba(229,184,11,.12)', color: '#e5b80b', padding: '8px 12px', fontSize: 11, fontWeight: 950 },
@@ -1180,4 +1313,10 @@ const styles: Record<string, CSSProperties> = {
   editForm: { display: 'grid', gap: 10 },
   info: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#9aa6ba' },
   empty: { color: '#9aa6ba', margin: 0 },
+  claimCheckPanel: { display: 'grid', gap: 10, marginTop: 4 },
+  claimAllGood: { margin: 0, color: '#20d29b', fontWeight: 800, fontSize: 13 },
+  claimFlags: { border: '1px solid rgba(229,184,11,.5)', borderRadius: 8, background: 'rgba(229,184,11,.08)', padding: 12, display: 'grid', gap: 8 },
+  claimAdvisory: { color: '#f7d45f', fontSize: 12, fontWeight: 800, lineHeight: 1.5 },
+  claimFlagRow: { color: '#ffe6a3', fontSize: 13, fontWeight: 700, lineHeight: 1.5 },
+  claimReason: { color: '#c9b26a', fontWeight: 600 },
 }
