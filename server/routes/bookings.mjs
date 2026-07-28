@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import {
   CANCELLATION_PROTECTION_RATE,
   bookingFinanceSplit,
+  debitableMinor,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -130,16 +131,19 @@ export async function handleBookings(req, res, url, context) {
         // recorded as its own 'booking_protection_fee' CREDIT at approval time — see
         // approvePaymentProof), so it must be reversed in full here, not reduced by the fee again.
         // The protection fee itself is a non-refundable premium and is never reversed.
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'DEBIT',
-          amountMinor: split.adminShareMinor,
-          currency: existing.currency,
-          referenceType: 'booking_admin_share_reversal',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-admin-share-reversal', existing.id, approvedPayment.id],
-          note: 'Admin/SYBNB share reversed because the guest-cancelled booking was refunded.',
-        })
+        const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
+        if (adminShareRevMinor > 0) {
+          await recordWalletEntry(tx, {
+            userId: adminRecipientId,
+            type: 'DEBIT',
+            amountMinor: adminShareRevMinor,
+            currency: existing.currency,
+            referenceType: 'booking_admin_share_reversal',
+            referenceId: existing.id,
+            keyParts: ['booking-guest-cancel-admin-share-reversal', existing.id, approvedPayment.id],
+            note: 'Admin/SYBNB share reversed because the guest-cancelled booking was refunded.',
+          })
+        }
 
         // The fee is WITHHELD from the guest's refund above (not a separate guest DEBIT), so all that
         // remains is to credit the admin the same amount in the booking currency. No guest DEBIT means no
@@ -396,6 +400,16 @@ export async function handleBookings(req, res, url, context) {
 
   const isShortStay = listing.division === 'STAYS'
 
+  // A STR (STAYS) booking is meaningless without dates, and a dateless booking bypasses the overlap
+  // check entirely (which is guarded by `if (checkIn && checkOut)`), so require them for STAYS.
+  if (isShortStay && (!checkIn || !checkOut)) {
+    const error = new Error('Check-in and check-out dates are required to book a stay.')
+    error.statusCode = 400
+    error.code = 'BOOKING_DATES_REQUIRED'
+    error.expose = true
+    throw error
+  }
+
   // The overlap check and the create used to be two separate, unguarded round-trips: two guests
   // requesting the same listing/dates within a race window could both pass the check before
   // either committed, double-booking the listing. A DB-level exclusion constraint would need raw
@@ -415,7 +429,9 @@ export async function handleBookings(req, res, url, context) {
         tx.booking.findFirst({
           where: {
             listingId: listing.id,
-            status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] },
+            // DISPUTED is included so a not-yet-started CONFIRMED stay that a guest marks disputed
+            // still occupies its dates (it cannot be silently freed for a second booking).
+            status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED'] },
             checkIn: { lt: checkOut },
             checkOut: { gt: checkIn },
           },

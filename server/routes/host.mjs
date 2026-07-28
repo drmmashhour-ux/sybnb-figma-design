@@ -5,6 +5,7 @@ import {
   CANCELLATION_ADMIN_FEE_MINOR,
   bookingFinanceSplit,
   buildPayoutRow,
+  debitableMinor,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -336,38 +337,48 @@ export async function handleHost(req, res, url, context) {
           note: 'Guest refund after host cancelled a protected booking.',
         })
 
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'DEBIT',
-          amountMinor: split.adminShareMinor,
-          currency: existing.currency,
-          referenceType: 'booking_admin_share_reversal',
-          referenceId: existing.id,
-          keyParts: ['booking-admin-share-reversal', existing.id, approvedPayment?.id],
-          note: 'Admin/SYBNB share reversed because the protected booking was refunded.',
-        })
+        // Floor the reversal at the admin wallet's balance so undoing the admin's share can never
+        // push it negative (if the share was already withdrawn, only what remains is reversed).
+        const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
+        if (adminShareRevMinor > 0) {
+          await recordWalletEntry(tx, {
+            userId: adminRecipientId,
+            type: 'DEBIT',
+            amountMinor: adminShareRevMinor,
+            currency: existing.currency,
+            referenceType: 'booking_admin_share_reversal',
+            referenceId: existing.id,
+            keyParts: ['booking-admin-share-reversal', existing.id, approvedPayment?.id],
+            note: 'Admin/SYBNB share reversed because the protected booking was refunded.',
+          })
+        }
 
-        await recordWalletEntry(tx, {
-          userId: existing.listing.ownerId,
-          type: 'DEBIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-host', existing.id, approvedPayment?.id],
-          note: 'Host cancellation admin fee after cancelling a protected paid booking.',
-        })
-
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'CREDIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-admin', existing.id, approvedPayment?.id],
-          note: 'Admin received host cancellation fee for protected paid booking.',
-        })
+        // Host cancellation admin fee is a TRANSFER (host DEBIT → admin CREDIT). Floor it at the host's
+        // available balance so an empty host wallet is never driven negative, and use the same floored
+        // amount for BOTH legs so no money is minted. If the host can't cover it, the fee isn't collected.
+        const hostFeeMinor = await debitableMinor(tx, existing.listing.ownerId, CANCELLATION_ADMIN_FEE_CURRENCY, CANCELLATION_ADMIN_FEE_MINOR)
+        if (hostFeeMinor > 0) {
+          await recordWalletEntry(tx, {
+            userId: existing.listing.ownerId,
+            type: 'DEBIT',
+            amountMinor: hostFeeMinor,
+            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            referenceType: 'booking_host_cancel_fee',
+            referenceId: existing.id,
+            keyParts: ['booking-host-cancel-fee-host', existing.id, approvedPayment?.id],
+            note: 'Host cancellation admin fee after cancelling a protected paid booking.',
+          })
+          await recordWalletEntry(tx, {
+            userId: adminRecipientId,
+            type: 'CREDIT',
+            amountMinor: hostFeeMinor,
+            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            referenceType: 'booking_host_cancel_fee',
+            referenceId: existing.id,
+            keyParts: ['booking-host-cancel-fee-admin', existing.id, approvedPayment?.id],
+            note: 'Admin received host cancellation fee for protected paid booking.',
+          })
+        }
       }
 
       // Payout is intentionally NOT released here. Confirming only means the host accepted the

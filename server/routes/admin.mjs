@@ -1111,16 +1111,20 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
         note: 'Guest refund after admin rejected/ruled against this booking.',
       })
 
-      await recordWalletEntry(tx, {
-        userId: adminRecipientId,
-        type: 'DEBIT',
-        amountMinor: split.adminShareMinor,
-        currency: existing.currency,
-        referenceType: 'booking_admin_share_reversal',
-        referenceId: existing.id,
-        keyParts: ['booking-admin-reject-admin-share-reversal', existing.id, approvedPayment.id],
-        note: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
-      })
+      // Floor the platform-share reversal at the admin wallet's balance so it can't go negative.
+      const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
+      if (adminShareRevMinor > 0) {
+        await recordWalletEntry(tx, {
+          userId: adminRecipientId,
+          type: 'DEBIT',
+          amountMinor: adminShareRevMinor,
+          currency: existing.currency,
+          referenceType: 'booking_admin_share_reversal',
+          referenceId: existing.id,
+          keyParts: ['booking-admin-reject-admin-share-reversal', existing.id, approvedPayment.id],
+          note: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
+        })
+      }
 
       // SECURITY (S5): if the host payout was already RELEASED (money moved to the host, only possible on a
       // COMPLETED booking that was later disputed), an adverse ruling must claw it back. Otherwise the guest

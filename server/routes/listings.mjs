@@ -229,7 +229,7 @@ export async function handleListings(req, res, url, context) {
           db().booking.findMany({
             where: {
               listingId: { in: ids },
-              status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] },
+              status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED'] },
               checkIn: { lt: checkOut },
               checkOut: { gt: checkIn },
             },

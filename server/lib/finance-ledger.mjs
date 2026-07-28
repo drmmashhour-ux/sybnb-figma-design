@@ -88,6 +88,19 @@ export async function lockWalletForSpend(tx, userId, currency) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`wallet:${userId}:${currency}`}))`
 }
 
+// Caps a would-be DEBIT at the wallet's current balance so a fee/reversal can never drive
+// cachedBalanceMinor negative — the same "never go negative" discipline the guest-cancel path already
+// uses by withholding rather than debiting into the red. Returns the amount that can actually be
+// debited (0..requested). IMPORTANT: when the DEBIT is one leg of a transfer (paired with a matching
+// CREDIT), the caller must use the returned amount for BOTH legs so no money is minted.
+export async function debitableMinor(tx, userId, currency, requestedMinor) {
+  const requested = Math.max(0, Math.round(requestedMinor || 0))
+  if (!requested) return 0
+  const wallet = await tx.wallet.findUnique({ where: { userId_currency: { userId, currency } } })
+  const available = Math.max(0, wallet?.cachedBalanceMinor || 0)
+  return Math.min(requested, available)
+}
+
 export async function recordWalletEntry(tx, {
   userId,
   type,
