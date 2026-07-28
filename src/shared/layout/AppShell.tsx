@@ -64,6 +64,9 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
               <button className="menu-action" onClick={() => navigate('/stays')}>
                 {isAr ? 'الإقامات' : 'Stays'}
               </button>
+              <button className="menu-action" onClick={() => navigate('/trips')}>
+                {isAr ? 'رحلاتي' : 'My Trips'}
+              </button>
               {/* Store-compliance reachability fix: /wallet and /settings (delete account, blocked
                   accounts) existed and were fully wired, but nothing in primary navigation linked to
                   them after the account dashboard route was retired — see docs/release notes. */}
@@ -208,6 +211,14 @@ function getRouteContext(path: string, isAr: boolean) {
     return {
       section: isAr ? 'حساب العميل' : 'Guest account',
       page: isAr ? 'المحفظة' : 'Wallet',
+      backPath: '/',
+      nextPath: '/',
+    }
+  }
+  if (path === '/trips' || path === '/my-trips') {
+    return {
+      section: isAr ? 'حساب العميل' : 'Guest account',
+      page: isAr ? 'رحلاتي' : 'My Trips',
       backPath: '/',
       nextPath: '/',
     }

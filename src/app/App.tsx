@@ -13,6 +13,7 @@ const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrai
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
 const BookingReviewPage = lazyNamed(() => import('../modules/bookings/BookingReviewPage'), 'BookingReviewPage')
 const CompetitorsPage = lazyNamed(() => import('../modules/competitors/CompetitorsPage'), 'CompetitorsPage')
+const DashboardPage = lazyNamed(() => import('../modules/dashboard/DashboardPage'), 'DashboardPage')
 const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLivePage'), 'DivisionLivePage')
 const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDashboardPage'), 'DriverDashboardPage')
 const DriverVehiclesPage = lazyNamed(() => import('../modules/driver/DriverVehiclesPage'), 'DriverVehiclesPage')
@@ -96,6 +97,8 @@ export function App() {
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
           guestAccountMatch[1] ? <ListingDetailPage listingId={guestAccountMatch[1]} lang={lang} /> : <SearchPreviewPage lang={lang} initialDivision="stays" entry="stays" />
+        ) : path === '/trips' || path === '/my-trips' ? (
+          <DashboardPage lang={lang} />
         ) : path === '/dashboard' || path === '/account' ? (
           <LandingPage lang={lang} />
         ) : path === '/host' ||

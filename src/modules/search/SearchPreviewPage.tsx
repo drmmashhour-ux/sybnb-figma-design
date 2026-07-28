@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
+import { getGovernorate } from '../../engines/search/syriaData'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { SearchStateCard } from './SearchStates'
@@ -146,6 +147,13 @@ const DIVISION_IMAGES: Record<string, string> = {
 export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'general' }: SearchPreviewPageProps) {
   const t = T[lang]
   const [effectiveInitialDivision, setEffectiveInitialDivision] = useState<SearchDivision>(() => readInitialSearchDivision(initialDivision))
+  // One-time handoff from the landing stays search bar. Reading it also seeds the search-bar
+  // draft (so its inputs reflect the choice) and clears the key so it never re-applies later.
+  const [seededValue] = useState<UnifiedSearchValue | null>(() => {
+    const seed = readStaySearchHandoff()
+    return seed ? { ...buildDefaultStayValue(), ...seed } : null
+  })
+  const seedAppliedRef = useRef(false)
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
   const [listings, setListings] = useState<PlatformListing[]>([])
@@ -159,7 +167,15 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   }, [initialDivision])
 
   useEffect(() => {
+    // Apply the landing handoff once so results are genuinely pre-filtered; otherwise fall
+    // back to the existing default search behavior.
+    if (seededValue && !seedAppliedRef.current) {
+      seedAppliedRef.current = true
+      void runLiveSearch(seededValue)
+      return
+    }
     void runLiveSearch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveInitialDivision])
 
   async function runLiveSearch(value?: UnifiedSearchValue) {
@@ -392,6 +408,96 @@ function readInitialSearchDivision(fallback: SearchDivision) {
     return raw
   }
   return fallback
+}
+
+// Base stays value used only when merging the landing handoff. Governorate/city start EMPTY
+// (unlike the search-bar defaults) so an "All destinations" handoff is not silently narrowed.
+function buildDefaultStayValue(): UnifiedSearchValue {
+  return {
+    division: 'stays',
+    governorate: '',
+    city: '',
+    area: '',
+    customPlaceName: '',
+    checkIn: '',
+    checkOut: '',
+    guests: 2,
+    bedroomsCount: 0,
+    bathrooms: 0,
+    keyword: '',
+    minPrice: '',
+    maxPrice: '',
+    bedrooms: 'any',
+    propertyType: 'any',
+    furnishing: 'any',
+    carBrand: '',
+    carYear: '',
+    carFuel: 'any',
+    carTransmission: 'any',
+    marketCategory: 'any',
+    condition: 'any',
+    sort: 'newest',
+    priceBand: 'any',
+    roomType: 'any',
+    bedType: 'any',
+    carBody: 'any',
+    amenities: [],
+    trust: [],
+    popular: [],
+    views: [],
+    access: [],
+    meals: [],
+    payments: [],
+  }
+}
+
+// Read (once) the landing → search handoff written to localStorage['sybnb_v6_stay_search'],
+// clear it so later visits use the default flow, and seed the search-bar draft so its inputs
+// reflect the guest's choice. Returns the recognized fields as a partial search value.
+function readStaySearchHandoff(): Partial<UnifiedSearchValue> | null {
+  if (typeof window === 'undefined') return null
+  let raw: string | null = null
+  try {
+    raw = window.localStorage.getItem('sybnb_v6_stay_search')
+  } catch {
+    return null
+  }
+  if (!raw) return null
+  try {
+    window.localStorage.removeItem('sybnb_v6_stay_search')
+  } catch {
+    /* ignore */
+  }
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+
+  const seed: Partial<UnifiedSearchValue> = { division: 'stays' }
+  if (typeof parsed.governorate === 'string') seed.governorate = parsed.governorate
+  if (typeof parsed.city === 'string') seed.city = parsed.city
+  if (typeof parsed.area === 'string') seed.area = parsed.area
+  if (typeof parsed.checkIn === 'string') seed.checkIn = parsed.checkIn
+  if (typeof parsed.checkOut === 'string') seed.checkOut = parsed.checkOut
+  if (typeof parsed.guests === 'number') seed.guests = parsed.guests
+  if (typeof parsed.propertyType === 'string') seed.propertyType = parsed.propertyType
+  if (typeof parsed.priceBand === 'string') seed.priceBand = parsed.priceBand
+
+  // Seed the search-bar draft (UnifiedSearchBar reads it on first render). Keep the
+  // governorate/city pair consistent for its dependent selects.
+  try {
+    const draft: Record<string, unknown> = { ...seed }
+    if (seed.governorate && !seed.city) {
+      draft.city = getGovernorate(seed.governorate)?.cities[0]?.key || ''
+    }
+    window.sessionStorage.setItem('sybnb-v6-search-draft', JSON.stringify(draft))
+  } catch {
+    /* ignore */
+  }
+
+  return seed
 }
 
 function routeForDivision(division: string) {
