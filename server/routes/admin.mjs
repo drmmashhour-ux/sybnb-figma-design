@@ -1111,7 +1111,9 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
         note: 'Guest refund after admin rejected/ruled against this booking.',
       })
 
-      // Floor the platform-share reversal at the admin wallet's balance so it can't go negative.
+      // Floor the platform-share reversal at the admin wallet's balance so it can't go negative; lock
+      // the wallet first so the floor's read-then-write is serialized against concurrent debits.
+      await lockWalletForSpend(tx, adminRecipientId, existing.currency)
       const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
       if (adminShareRevMinor > 0) {
         await recordWalletEntry(tx, {

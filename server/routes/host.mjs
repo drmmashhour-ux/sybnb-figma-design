@@ -6,6 +6,7 @@ import {
   bookingFinanceSplit,
   buildPayoutRow,
   debitableMinor,
+  lockWalletForSpend,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -338,7 +339,9 @@ export async function handleHost(req, res, url, context) {
         })
 
         // Floor the reversal at the admin wallet's balance so undoing the admin's share can never
-        // push it negative (if the share was already withdrawn, only what remains is reversed).
+        // push it negative (if the share was already withdrawn, only what remains is reversed). Lock
+        // the wallet first so the floor's read-then-write can't race a concurrent debit on it (M2 class).
+        await lockWalletForSpend(tx, adminRecipientId, existing.currency)
         const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
         if (adminShareRevMinor > 0) {
           await recordWalletEntry(tx, {
@@ -356,6 +359,7 @@ export async function handleHost(req, res, url, context) {
         // Host cancellation admin fee is a TRANSFER (host DEBIT → admin CREDIT). Floor it at the host's
         // available balance so an empty host wallet is never driven negative, and use the same floored
         // amount for BOTH legs so no money is minted. If the host can't cover it, the fee isn't collected.
+        await lockWalletForSpend(tx, existing.listing.ownerId, CANCELLATION_ADMIN_FEE_CURRENCY)
         const hostFeeMinor = await debitableMinor(tx, existing.listing.ownerId, CANCELLATION_ADMIN_FEE_CURRENCY, CANCELLATION_ADMIN_FEE_MINOR)
         if (hostFeeMinor > 0) {
           await recordWalletEntry(tx, {

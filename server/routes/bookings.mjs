@@ -4,6 +4,7 @@ import {
   CANCELLATION_PROTECTION_RATE,
   bookingFinanceSplit,
   debitableMinor,
+  lockWalletForSpend,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -131,6 +132,7 @@ export async function handleBookings(req, res, url, context) {
         // recorded as its own 'booking_protection_fee' CREDIT at approval time — see
         // approvePaymentProof), so it must be reversed in full here, not reduced by the fee again.
         // The protection fee itself is a non-refundable premium and is never reversed.
+        await lockWalletForSpend(tx, adminRecipientId, existing.currency)
         const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
         if (adminShareRevMinor > 0) {
           await recordWalletEntry(tx, {
