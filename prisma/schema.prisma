@@ -196,6 +196,15 @@ model Listing {
   @@index([division, status])
   @@index([ownerId])
   @@index([accommodationId])
+  // Scalability (10K users): the public search (GET /api/listings) filters status='APPROVED' and
+  // sorts by createdAt (default) or priceMinor, with division applied as a residual filter. A
+  // status-leading composite lets Postgres serve filter+sort from the index (division/price-range
+  // filtered on the heap) instead of scanning every APPROVED row and sorting in memory.
+  @@index([status, createdAt])
+  @@index([status, priceMinor])
+  // expireOldListings() runs updateMany(status='APPROVED', expiresAt < now) on EVERY search request
+  // (opportunistic lifecycle sweep, no cron). Without this it re-scans all APPROVED rows each time.
+  @@index([status, expiresAt])
   @@map("listings")
 }
 
@@ -382,6 +391,10 @@ model Booking {
 
   @@index([guestId, status])
   @@index([listingId, status])
+  // Scalability (10K users): completeExpiredBookings() sweeps status='CONFIRMED' with checkOut<cutoff,
+  // and the admin payouts list filters status='COMPLETED' ordered by checkOut. A (status, checkOut)
+  // composite serves both the sweep and the ordered-by-checkOut list from the index.
+  @@index([status, checkOut])
   @@map("bookings")
 }
 
