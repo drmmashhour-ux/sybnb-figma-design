@@ -21,14 +21,14 @@ Legend for **Status**:
 | P4 | Full guest book→pay→confirm journey (E2E) | 🟡 / partial 🔴 | API-level journey partially testable; full UI-payment leg needs Stripe (P5) | Agent mapping testable-now vs Stripe-blocked | Claude + Owner |
 | P5 | **Stripe payment architecture (authorize→capture)** | 🟠 + 🔴 | Currently checkout-session only; 2-step capture NOT built. Stripe MCP not authorized | Owner decides immediate-capture vs authorize→capture; provide Stripe test keys | **Owner** decides, Claude builds |
 | P6 | **Tax** | 🟠 + 🔴 | Disclosed-not-charged. Real rate needs collection+remittance + compliance sign-off | Owner decides launch tax requirement + legal approval | **Owner** |
-| P7 | Wallet / financial integrity | 🟡 | M2 race fixed + proven. Ledger-invariant + concurrency test expansion in progress (agent) | Integrate + run new invariant tests centrally | Claude |
-| P8 | Booking / availability concurrency | 🟡 | Advisory lock + reaper done. Dedicated no-double-booking concurrency tests in progress (agent) | Integrate + run new concurrency tests | Claude |
-| P9 | Security final audit | 🟡 | Prior review clean; re-audit of new code (rate_limit_hits, locks, gift-privacy, reaper) in progress (agent) | Fix any findings + add regression tests | Claude |
+| P7 | Wallet / financial integrity | 🟢 | Ledger-invariant suite (bal==Σentries & ≥0); DEBIT floors added (host-cancel fee both-legs, share reversals); payout-clawback intentionally keeps debt semantics; SR-payout lock aligned | done + tested | Claude |
+| P8 | Booking / availability concurrency | 🟢 | 8-case no-double-booking suite; DISPUTED added to occupying set; STAYS dates required | done + tested | Claude |
+| P9 | Security final audit | 🟢 (code) / 🔴 (prod cfg) | All 5 hardening fixes re-verified clean; added fail-closed RATE_LIMIT_STORE=db guard + TRUST_PROXY warning | Verify deployed Vercel env (→ P17) | Claude + Owner |
 | P10 | Admin operational UI (fleet suspend / SOS console) | 🟠 | Backend endpoints exist; no admin UI | Owner decides if in STR launch scope; if yes, Claude builds | **Owner** decides |
 | P11 | Mobile (iOS/Android production builds) | 🔴 | Capacitor config store-clean; CLI v7→v8 bump staged. Needs devices/signing | Owner builds + tests on device (prod API) | **Owner** |
 | P12 | Accessibility / RTL / Arabic | 🔵 | Mobile overflow fixed (14 e2e). Broader a11y/RTL pass not yet run | Claude runs a11y/RTL audit + fixes | Claude |
-| P13 | Package manager / lockfile | 🟡 | Dual lockfile (npm committed, pnpm untracked; node_modules pnpm). Recommendation in progress (agent) | Adopt one PM per CI/Vercel; remediate | Claude (+ Owner confirm) |
-| P14 | Dependency / supply-chain audit | 🟡 | `npm audit` + compatibility review in progress (agent) | Apply prioritized fixes | Claude |
+| P13 | Package manager / lockfile | 🟢 | Standardized on npm; clean reinstall; lockfile synced to capacitor v8; `npm ci --dry-run` passes; pnpm-lock gitignored | done | Claude |
+| P14 | Dependency / supply-chain audit | 🟢 | `npm audit` = 0 vulnerabilities (postcss/brace-expansion/tar patched); engines pinned node 20.x | done | Claude |
 | P15 | Backups / disaster recovery | 🔴 | Needs prod DB provider access | Owner sets up backups/PITR; rehearse restore; record RPO/RTO | **Owner** |
 | P16 | Observability / monitoring / alerts | 🔴 | Needs prod infra (Vercel/DB provider) | Owner enables error/latency/webhook alerts + incident runbooks | **Owner** (Claude drafts runbooks) |
 | P17 | Production environment audit | 🔴 | Prod env-var guard exists (`server/lib/env.mjs`); needs prod env access to verify actuals | Owner verifies prod env vars vs required list | **Owner** |
