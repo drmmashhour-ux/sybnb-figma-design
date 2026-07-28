@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, lockWalletForSpend, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
@@ -858,7 +858,10 @@ export async function handleAdmin(req, res, url, context) {
       const key = idempotencyKey(['sr-driver-payout', driverId, payoutRef])
       const existingPayout = await tx.walletEntry.findUnique({ where: { idempotencyKey: key } })
       if (existingPayout) return existingPayout
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${driverId}))`
+      // Serialize on the SAME per-(user,currency) wallet lock as lockWalletForSpend, so an admin SR
+      // payout and a concurrent rider-side spend by the same user (one person can be rider + driver)
+      // mutually exclude on their shared wallet and can't both pass a balance check on the same balance.
+      await lockWalletForSpend(tx, driverId, currency)
       const wallet = await tx.wallet.findUnique({ where: { userId_currency: { userId: driverId, currency } } })
       const accruedMinor = wallet?.cachedBalanceMinor || 0
       const requestedMinor = body.amountMinor != null ? Math.max(0, Math.round(Number(body.amountMinor) || 0)) : accruedMinor
