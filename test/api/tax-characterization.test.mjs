@@ -1,43 +1,37 @@
 import { describe, expect, it } from 'vitest'
 import { bookingFinanceSplit, STR_TAX_RATE } from '../../server/lib/finance-ledger.mjs'
 
-// CHARACTERIZATION test for the P6 tax decision — it PINS what the code does today, it does not
-// assert what it SHOULD do (that is the owner/legal decision in docs/product/STR_TAX_DECISION_REQUEST.md).
-// If the tax model changes, this test SHOULD fail — that is the signal to revisit the decision doc.
-//
-// Documented facts, proven below:
-//   1. STR tax is a flat rate (default 2%) folded into the guest's total, OR a per-listing taxesMinor.
-//   2. The collected tax portion is NOT segregated — it is part of adminShareMinor, i.e. the PLATFORM
-//      keeps it. There is no remittance ledger and no jurisdiction-specific rate.
+// P6 decision A (owner, 2026-07-27): STR launches with NO automatically-charged tax. This test pins
+// that behaviour: the default tax rate is 0, a STAYS booking carries no platform-charged tax, and the
+// only tax that ever appears is a per-listing amount a (registered) host explicitly configures. See
+// docs/product/STR_TAX_DECISION_REQUEST.md. If the tax model changes, this test SHOULD fail.
 
-describe('P6 tax characterization — current behaviour (pinned, not endorsed)', () => {
-  const stayBooking = (totalMinor) => ({
+describe('P6 tax = A (no default tax) — pinned behaviour', () => {
+  const stayBooking = (totalMinor, listingMetadata = {}) => ({
     amountMinor: totalMinor,
     currency: 'USD',
     metadata: {},
-    listing: { division: 'STAYS', metadata: {} },
+    listing: { division: 'STAYS', metadata: listingMetadata },
   })
 
-  it('the default STR tax rate is 2%', () => {
-    expect(STR_TAX_RATE).toBe(0.02)
+  it('the default STR tax rate is 0 (no automatically-charged tax)', () => {
+    expect(STR_TAX_RATE).toBe(0)
   })
 
-  it('a STAYS booking has a positive tax component derived server-side', () => {
-    const split = bookingFinanceSplit(stayBooking(100_00), 100_00)
-    expect(split.taxesMinor).toBeGreaterThan(0)
+  it('a STAYS booking carries NO platform-charged tax by default', () => {
+    const split = bookingFinanceSplit(stayBooking(200_00), 200_00)
+    expect(split.taxesMinor).toBe(0)
   })
 
-  it('the collected tax is folded into the platform share (kept by the platform, not remitted)', () => {
-    // adminShareMinor === taxesMinor + adminCommissionMinor: the tax portion the guest pays flows to
-    // the platform wallet as part of booking_admin_share. This is the compliance fact the decision doc
-    // must resolve before charging a real, remittable tax.
+  it('with no tax, the platform keeps only its commission (± a 1-minor rounding residue); money conserved', () => {
     const split = bookingFinanceSplit(stayBooking(250_00), 250_00)
-    expect(split.adminShareMinor).toBe(split.taxesMinor + split.adminCommissionMinor)
+    expect(split.taxesMinor).toBe(0)
+    expect(Math.abs(split.adminShareMinor - split.adminCommissionMinor)).toBeLessThanOrEqual(1)
+    expect(split.hostGrossMinor + split.adminShareMinor).toBe(split.paidTotalMinor)
   })
 
-  it('a per-listing configured taxesMinor overrides the flat rate', () => {
-    const booking = { amountMinor: 200_00, currency: 'USD', metadata: {}, listing: { division: 'STAYS', metadata: { taxesMinor: 500 } } }
-    const split = bookingFinanceSplit(booking, 200_00)
+  it('a registered host CAN still charge a per-listing tax (explicit taxesMinor is honoured)', () => {
+    const split = bookingFinanceSplit(stayBooking(200_00, { taxesMinor: 500 }), 200_00)
     expect(split.taxesMinor).toBe(500)
   })
 

@@ -8,7 +8,11 @@ export const CANCELLATION_ADMIN_FEE_CURRENCY = 'USD'
 export const CANCELLATION_PROTECTION_RATE = 0.03
 export const STR_ADMIN_COMMISSION_RATE = 0.1
 export const STR_CLEANING_RATE = 0.05
-export const STR_TAX_RATE = 0.02
+// P6 decision A (2026-07-27, owner): STR launches with NO automatically-charged tax. The default rate
+// is 0 so no unremitted "tax" is collected into the platform share. A registered host can still set a
+// per-listing tax via listing.metadata.taxesMinor (used verbatim by the split); the platform charges
+// none by default. See docs/product/STR_TAX_DECISION_REQUEST.md.
+export const STR_TAX_RATE = 0
 
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
