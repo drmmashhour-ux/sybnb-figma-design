@@ -95,15 +95,6 @@ const STR_ADMIN_COMMISSION_RATE = 0.1
 const STR_TAX_RATE = 0.02
 const STR_CLEANING_RATE = 0.05
 
-const todayStatBars = [42, 61, 51, 74, 86, 104, 64]
-
-const recentAdminUsers = [
-  { ar: 'سامر محمد', en: 'Samer Mohammad', statusAr: 'نشط', statusEn: 'Active', tone: 'green', ageAr: 'انضم منذ ٥ دقائق', ageEn: 'Joined 5 minutes ago' },
-  { ar: 'محمد علي', en: 'Mohammad Ali', statusAr: 'قيد المراجعة', statusEn: 'Review', tone: 'gold', ageAr: 'انضم منذ ١٢ دقيقة', ageEn: 'Joined 12 minutes ago' },
-  { ar: 'نور حسين', en: 'Nour Hussein', statusAr: 'نشط', statusEn: 'Active', tone: 'green', ageAr: 'انضمت منذ ٢٤ دقيقة', ageEn: 'Joined 24 minutes ago' },
-  { ar: 'عمر خالد', en: 'Omar Khaled', statusAr: 'قيد المراجعة', statusEn: 'Review', tone: 'gold', ageAr: 'انضم منذ ٤٥ دقيقة', ageEn: 'Joined 45 minutes ago' },
-]
-
 export function AdminReviewPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
@@ -155,22 +146,12 @@ export function AdminReviewPage({ lang }: Props) {
     [auditLog, normalizedSearch],
   )
   const activityItems = useMemo(() => {
-    const liveItems = visibleAuditLog.slice(0, 4).map((entry, index) => ({
+    // REAL activity only — the recent audit-log entries. No fabricated fallback rows.
+    return visibleAuditLog.slice(0, 4).map((entry, index) => ({
       label: auditActionText(entry.action, lang),
-      detail: isAr ? 'منذ دقائق' : 'Minutes ago',
+      detail: new Date(entry.createdAt).toLocaleString(isAr ? 'ar-SY' : 'en-US'),
       tone: index % 3 === 0 ? 'green' : index % 3 === 1 ? 'gold' : 'red',
     }))
-
-    if (liveItems.length >= 4) return liveItems
-
-    const fallback = [
-      { label: isAr ? 'مستخدم جديد: سامر محمد' : 'New user: Samer Mohammad', detail: isAr ? 'منذ ٥ دقائق' : '5 minutes ago', tone: 'green' },
-      { label: isAr ? 'دفعة مستلمة: ١٥٠,٠٠٠ ل.س' : 'Payment received: 150,000 SYP', detail: isAr ? 'منذ ١٢ دقيقة' : '12 minutes ago', tone: 'gold' },
-      { label: isAr ? 'إعلان مرفوض: شقة في جرمانا' : 'Rejected listing: Jaramana stay', detail: isAr ? 'منذ ٣٢ دقيقة' : '32 minutes ago', tone: 'red' },
-      { label: 'AI v6.2.1', detail: isAr ? 'نشط الآن' : 'Active now', tone: 'blue' },
-    ]
-
-    return [...liveItems, ...fallback].slice(0, 4)
   }, [isAr, lang, visibleAuditLog])
   const visibleTotal = visibleListings.length + visiblePayments.length + visibleGifts.length + visibleBookings.length
   const nowLabel = new Intl.DateTimeFormat(isAr ? 'ar-SY' : 'en-US', {
@@ -298,7 +279,7 @@ export function AdminReviewPage({ lang }: Props) {
           <button onClick={() => (window.location.hash = '/finance')}>{isAr ? 'المالية' : 'Finance'} <span>▥</span></button>
           <button onClick={() => (window.location.hash = '/admin/disputes')}>{isAr ? 'النزاعات' : 'Disputes'} <span>⚖</span></button>
           <button onClick={() => (window.location.hash = '/admin/reports')}>{isAr ? 'البلاغات' : 'Reports'} <span>⚑</span></button>
-          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'مساعد FAI' : 'FAI helper'} <span>◉</span></button>
+          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'مساعد المراجعة' : 'Review assistant'} <span>◉</span></button>
           <button onClick={() => setActiveFilter('audit')}>{isAr ? 'التقارير' : 'Reports'} <span>▧</span></button>
           <button onClick={() => (window.location.hash = '/')}>{t.back} <span>↩</span></button>
         </aside>
@@ -316,7 +297,6 @@ export function AdminReviewPage({ lang }: Props) {
           <section className="admin-metrics" aria-label={isAr ? 'مؤشرات الإدارة' : 'Admin metrics'}>
             <AdminMetric label={isAr ? 'تنبيهات' : 'Alerts'} value={String(visibleGifts.length + visibleBookings.length)} tone="red" icon="!" />
             <AdminMetric label={isAr ? 'المعاملات اليوم' : 'Transactions'} value={String(visiblePayments.length)} tone="gold" icon="⚡" />
-            <AdminMetric label={isAr ? 'المستخدمون النشطون' : 'Active users'} value="1,483" tone="green" icon="♙" />
             <AdminMetric label={isAr ? 'إجمالي الإعلانات' : 'Total listings'} value={String(queue?.listings.length || 0)} tone="blue" icon="▣" />
           </section>
 
@@ -327,11 +307,6 @@ export function AdminReviewPage({ lang }: Props) {
               <button onClick={() => setActiveFilter('listings')}>{isAr ? 'إدارة الإعلانات' : 'Manage listings'} <span>⊕</span></button>
               <button className="admin-gold-action" onClick={() => setActiveFilter('audit')}>{isAr ? 'تقرير اليوم' : 'Today report'} <span>▥</span></button>
               <button onClick={() => void loadQueue()}>{t.refresh} <span>↻</span></button>
-              <div className="admin-ai-card">
-                <strong>{isAr ? 'ترقية السيرفر' : 'Server upgrade'}</strong>
-                <p>{isAr ? 'استخدم الذاكرة الذكية للوصول إلى ٨٥٪ من المتابعة.' : 'Use smart memory to reach 85% platform tracking.'}</p>
-                <button onClick={() => setActiveFilter('all')}>{isAr ? 'ابدأ الآن' : 'Start now'}</button>
-              </div>
             </div>
 
             <div className="admin-table-card">
@@ -366,37 +341,6 @@ export function AdminReviewPage({ lang }: Props) {
                   <span>{item.label}</span>
                   <small>{item.detail}</small>
                 </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-stats-card" aria-label={isAr ? 'إحصائيات اليوم' : 'Today stats'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Today Stats' : 'Today Stats'}</span>
-              <h2>{isAr ? 'إحصائيات اليوم' : 'Today Stats'}</h2>
-            </div>
-            <div className="admin-bar-chart">
-              {todayStatBars.map((height, index) => (
-                <span key={height} className={index === 5 ? 'gold' : ''} style={{ '--bar-height': `${height}px` } as CSSProperties} />
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-users-card" aria-label={isAr ? 'آخر المستخدمين' : 'Recent users'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Recent Users' : 'Recent Users'}</span>
-              <h2>{isAr ? 'آخر المستخدمين' : 'Recent Users'}</h2>
-            </div>
-            <div className="admin-recent-list">
-              {recentAdminUsers.map((user) => (
-                <article key={user.en}>
-                  <strong>{isAr ? user.ar[0] : user.en[0]}</strong>
-                  <div>
-                    <b>{isAr ? user.ar : user.en}</b>
-                    <small>{isAr ? user.ageAr : user.ageEn}</small>
-                  </div>
-                  <span className={user.tone}>{isAr ? user.statusAr : user.statusEn}</span>
-                </article>
               ))}
             </div>
           </section>
@@ -581,7 +525,7 @@ function FaiAdminHelperPanel({
     <section style={commandStyles.faiPanel}>
       <div style={commandStyles.faiHeader}>
         <div>
-          <small style={commandStyles.faiEyebrow}>FAI · {isAr ? 'مساعد الإدارة' : 'Admin helper'}</small>
+          <small style={commandStyles.faiEyebrow}>SYBNB · {isAr ? 'مساعد الإدارة' : 'Admin helper'}</small>
           <h2 style={{ margin: '4px 0 0' }}>{isAr ? 'فحص ذكي بدون تنفيذ' : 'Smart checks, no automatic action'}</h2>
           <p style={commandStyles.faiCopy}>
             {isAr
@@ -1442,7 +1386,7 @@ function ShortRentAdminCommandDashboard({
           <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
         </article>
         <article style={commandStyles.drawerCard}>
-          <h2>{isAr ? 'مساعد FAI' : 'FAI helper'} <small>{isAr ? 'مساعدة فقط، لا تنفيذ تلقائي' : 'ADVISORY ONLY — no automatic action'}</small></h2>
+          <h2>{isAr ? 'مساعد المراجعة' : 'Review assistant'} <small>{isAr ? 'مساعدة فقط، لا تنفيذ تلقائي' : 'ADVISORY ONLY — no automatic action'}</small></h2>
           {aiReview.reasons.map((reason) => (
             <p key={reason} style={commandStyles.signalLine}>
               <span>✓</span>

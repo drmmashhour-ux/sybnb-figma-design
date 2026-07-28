@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, lockWalletForSpend, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, debitableMinor, lockWalletForSpend, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { assertVehicleEligible, computeDriverStanding } from '../lib/fleet.mjs'
@@ -1134,6 +1134,410 @@ export async function handleAdmin(req, res, url, context) {
       return released
     })
     return json(res, 200, { ok: true, walletEntry: entry })
+  }
+
+  // ========================================================================
+  // ADMIN REMEDIATION — platform-policing controls (all ADMIN, all audited).
+  // ========================================================================
+
+  // ---- A1: suspend / reinstate / close ANY user (generalizes the driver kill switch) ----
+  const userStatusMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/status$/)
+  if (userStatusMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const nextStatus = String(body.status || '').toUpperCase()
+    if (!['ACTIVE', 'SUSPENDED', 'CLOSED'].includes(nextStatus)) {
+      const error = new Error('status must be ACTIVE, SUSPENDED, or CLOSED.')
+      error.statusCode = 400
+      error.code = 'ACCOUNT_STATUS_INVALID'
+      error.expose = true
+      throw error
+    }
+    const reason = body.reason ? assertBoundedString(body.reason, { fieldName: 'reason', maxLength: 500 }) : null
+    const target = await db().user.findUnique({ where: { id: userStatusMatch[1] }, select: { id: true, status: true } })
+    if (!target) {
+      const error = new Error('User not found.')
+      error.statusCode = 404
+      error.code = 'USER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // An admin must not lock themselves out mid-action.
+    if (target.id === context.user.id && nextStatus !== 'ACTIVE') {
+      const error = new Error('You cannot suspend or close your own admin account.')
+      error.statusCode = 400
+      error.code = 'CANNOT_CHANGE_OWN_STATUS'
+      error.expose = true
+      throw error
+    }
+    const updated = await db().$transaction(async (tx) => {
+      // Bumping sessionVersion instantly invalidates the user's existing tokens (getAuthContext also
+      // rejects any non-ACTIVE user), so a suspended/closed user is logged out on their next request.
+      const bumpSession = nextStatus !== 'ACTIVE'
+      const u = await tx.user.update({
+        where: { id: target.id },
+        data: { status: nextStatus, ...(bumpSession ? { sessionVersion: { increment: 1 } } : {}) },
+        select: { id: true, status: true, displayName: true },
+      })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: `USER_STATUS_${nextStatus}`,
+          entityType: 'users',
+          entityId: target.id,
+          before: { status: target.status },
+          after: { status: nextStatus, reason },
+        },
+      })
+      return u
+    })
+    return json(res, 200, { ok: true, user: updated })
+  }
+
+  // ---- A4: user directory / search (all roles) ----
+  if (url.pathname === '/api/admin/users') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const page = Math.max(1, Number(url.searchParams.get('page')) || 1)
+    const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize')) || 25))
+    const search = (url.searchParams.get('search') || '').trim()
+    const roleFilter = String(url.searchParams.get('role') || '').toUpperCase()
+    const statusFilter = String(url.searchParams.get('status') || '').toUpperCase()
+    const where = {
+      ...(['ACTIVE', 'SUSPENDED', 'CLOSED', 'DELETED'].includes(statusFilter) ? { status: statusFilter } : {}),
+      ...(['GUEST', 'HOST', 'SELLER', 'DRIVER', 'ADMIN', 'SUPPORT'].includes(roleFilter) ? { roles: { some: { role: roleFilter } } } : {}),
+      ...(search ? { OR: [{ displayName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] } : {}),
+    }
+    const [total, users] = await Promise.all([
+      db().user.count({ where }),
+      db().user.findMany({
+        where,
+        select: { id: true, displayName: true, email: true, status: true, idDocumentStatus: true, createdAt: true, roles: { select: { role: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ])
+    return json(res, 200, {
+      ok: true,
+      users: users.map((user) => ({ ...user, roles: user.roles.map((entry) => entry.role) })),
+      page,
+      pageSize,
+      total,
+      pages: Math.ceil(total / pageSize),
+    })
+  }
+
+  // ---- A2: take down / pause / restore a listing (already-APPROVED → PAUSED/REJECTED/EXPIRED) ----
+  const listingStatusMatch = url.pathname.match(/^\/api\/admin\/listings\/([^/]+)\/status$/)
+  if (listingStatusMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const nextStatus = String(body.status || '').toUpperCase()
+    // NB: the ListingStatus enum has no REMOVED — PAUSED is the take-down (search filters on APPROVED,
+    // so PAUSED/REJECTED/EXPIRED all remove the listing from search); APPROVED restores it.
+    if (!['APPROVED', 'PAUSED', 'REJECTED', 'EXPIRED'].includes(nextStatus)) {
+      const error = new Error('status must be APPROVED, PAUSED, REJECTED, or EXPIRED.')
+      error.statusCode = 400
+      error.code = 'LISTING_STATUS_INVALID'
+      error.expose = true
+      throw error
+    }
+    const reason = body.reason ? assertBoundedString(body.reason, { fieldName: 'reason', maxLength: 500 }) : null
+    const listing = await db().listing.findUnique({ where: { id: listingStatusMatch[1] }, select: { id: true, status: true } })
+    if (!listing) {
+      const error = new Error('Listing not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const updated = await db().$transaction(async (tx) => {
+      const u = await tx.listing.update({ where: { id: listing.id }, data: { status: nextStatus }, select: { id: true, status: true } })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: `LISTING_STATUS_${nextStatus}`,
+          entityType: 'listings',
+          entityId: listing.id,
+          before: { status: listing.status },
+          after: { status: nextStatus, reason },
+        },
+      })
+      return u
+    })
+    return json(res, 200, { ok: true, listing: updated })
+  }
+
+  // ---- A3: force-cancel + refund ANY booking (CONFIRMED or PAYMENT_PENDING) ----
+  // Reuses the exact refund helpers the guest-cancel path uses (bookingFinanceSplit,
+  // originalAdminShareRecipient, recordWalletEntry, lockWalletForSpend, debitableMinor). TOCTOU-safe
+  // (atomic status-claim), idempotent (ledger keys are per-booking, and a repeat hits 400/409), audited.
+  const bookingCancelMatch = url.pathname.match(/^\/api\/admin\/bookings\/([^/]+)\/cancel$/)
+  if (bookingCancelMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const bookingId = bookingCancelMatch[1]
+    const body = await readJson(req).catch(() => ({}))
+    const reason = body.reason ? assertBoundedString(body.reason, { fieldName: 'reason', maxLength: 500 }) : null
+
+    const existing = await db().booking.findUnique({ where: { id: bookingId }, include: { listing: true, payments: true } })
+    if (!existing) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (!['CONFIRMED', 'PAYMENT_PENDING'].includes(existing.status)) {
+      const error = new Error('Only a CONFIRMED or PAYMENT_PENDING booking can be force-cancelled.')
+      error.statusCode = 400
+      error.code = 'BOOKING_NOT_CANCELLABLE'
+      error.expose = true
+      throw error
+    }
+
+    const result = await db().$transaction(async (tx) => {
+      // Atomically claim the cancel on the expected statuses so concurrent guest-cancel / dispute-refund
+      // / host-confirm all lose the race (they claim on their own statuses and match zero rows).
+      const claim = await tx.booking.updateMany({
+        where: { id: existing.id, status: { in: ['CONFIRMED', 'PAYMENT_PENDING'] } },
+        data: { status: 'CANCELLED' },
+      })
+      if (claim.count !== 1) {
+        const error = new Error('This booking was already updated and can no longer be force-cancelled.')
+        error.statusCode = 409
+        error.code = 'BOOKING_CANCEL_CONFLICT'
+        error.expose = true
+        throw error
+      }
+
+      const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
+      let refundMinor = 0
+      if (approvedPayment) {
+        const split = bookingFinanceSplit(existing, approvedPayment.amountMinor)
+        // Refund exactly what was actually paid (capped) — an admin/consumer-protection cancel, no fee.
+        refundMinor = approvedPayment.amountMinor
+        const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
+
+        await tx.paymentProof.updateMany({
+          where: { bookingId: existing.id, status: { in: ['PENDING_PROOF', 'PENDING_ADMIN_REVIEW', 'APPROVED'] } },
+          data: {
+            status: 'REFUNDED',
+            adminNote: `Admin force-cancelled the booking${reason ? `: ${reason}` : ''}.`,
+            reviewedById: context.user.id,
+            reviewedAt: new Date(),
+          },
+        })
+
+        // Guest refund — keyed on the booking (not the payment) so it can only ever fire ONCE.
+        await recordWalletEntry(tx, {
+          userId: existing.guestId,
+          type: 'REFUND',
+          amountMinor: refundMinor,
+          currency: existing.currency,
+          referenceType: 'booking_refund',
+          referenceId: existing.id,
+          keyParts: ['admin-force-cancel-refund', existing.id],
+          note: 'Admin force-cancelled the booking and refunded the guest.',
+        })
+
+        // Reverse the platform's admin-share, capped at what the recipient can actually give back.
+        if (adminRecipientId) {
+          await lockWalletForSpend(tx, adminRecipientId, existing.currency)
+          const revMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
+          if (revMinor > 0) {
+            await recordWalletEntry(tx, {
+              userId: adminRecipientId,
+              type: 'DEBIT',
+              amountMinor: revMinor,
+              currency: existing.currency,
+              referenceType: 'booking_admin_share_reversal',
+              referenceId: existing.id,
+              keyParts: ['admin-force-cancel-admin-share-reversal', existing.id],
+              note: 'Admin/SYBNB share reversed after admin force-cancelled the booking.',
+            })
+          }
+        }
+
+        // Claw back the host payout if it was ALREADY released (defensive — normally a CONFIRMED
+        // booking's payout is only HELD, never released, but never leave money out if it was).
+        const releasedPayout = await tx.walletEntry.findFirst({
+          where: { referenceType: 'booking_payout', referenceId: existing.id, type: 'RELEASE' },
+        })
+        if (releasedPayout) {
+          const hostId = existing.listing.ownerId
+          await lockWalletForSpend(tx, hostId, existing.currency)
+          const clawMinor = await debitableMinor(tx, hostId, existing.currency, releasedPayout.amountMinor)
+          if (clawMinor > 0) {
+            await recordWalletEntry(tx, {
+              userId: hostId,
+              type: 'DEBIT',
+              amountMinor: clawMinor,
+              currency: existing.currency,
+              referenceType: 'booking_payout_clawback',
+              referenceId: existing.id,
+              keyParts: ['admin-force-cancel-payout-clawback', existing.id],
+              note: 'Host payout clawed back after admin force-cancelled the booking.',
+            })
+          }
+        }
+      }
+
+      // Booking is already CANCELLED (the claim above) — CANCELLED is excluded from the availability
+      // "booked" set, so the held dates are released automatically.
+      const updated = await tx.booking.findUnique({ where: { id: existing.id }, include: { listing: true, payments: true } })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_BOOKING_FORCE_CANCELLED',
+          entityType: 'bookings',
+          entityId: existing.id,
+          before: { status: existing.status },
+          after: { status: 'CANCELLED', refundMinor, currency: existing.currency, reason },
+        },
+      })
+      return updated
+    })
+    return json(res, 200, { ok: true, booking: result })
+  }
+
+  // ---- A4: single booking lookup ----
+  const bookingLookupMatch = url.pathname.match(/^\/api\/admin\/bookings\/([^/]+)$/)
+  if (bookingLookupMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const booking = await db().booking.findUnique({
+      where: { id: bookingLookupMatch[1] },
+      include: {
+        listing: { select: { id: true, titleAr: true, titleEn: true, ownerId: true, currency: true } },
+        guest: { select: { id: true, displayName: true, email: true } },
+        payments: { select: { id: true, status: true, amountMinor: true, currency: true, provider: true, createdAt: true } },
+      },
+    })
+    if (!booking) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    return json(res, 200, { ok: true, booking })
+  }
+
+  // ---- A4: booking directory / search (status / host / guest / date) ----
+  if (url.pathname === '/api/admin/bookings') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const page = Math.max(1, Number(url.searchParams.get('page')) || 1)
+    const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize')) || 25))
+    const statusFilter = String(url.searchParams.get('status') || '').toUpperCase()
+    const hostId = (url.searchParams.get('hostId') || '').trim()
+    const guestId = (url.searchParams.get('guestId') || '').trim()
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+    const createdAt = {}
+    if (from && !Number.isNaN(Date.parse(from))) createdAt.gte = new Date(from)
+    if (to && !Number.isNaN(Date.parse(to))) createdAt.lte = new Date(to)
+    const where = {
+      ...(['DRAFT', 'REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'DISPUTED'].includes(statusFilter) ? { status: statusFilter } : {}),
+      ...(guestId ? { guestId } : {}),
+      ...(hostId ? { listing: { ownerId: hostId } } : {}),
+      ...(Object.keys(createdAt).length ? { createdAt } : {}),
+    }
+    const [total, bookings] = await Promise.all([
+      db().booking.count({ where }),
+      db().booking.findMany({
+        where,
+        select: {
+          id: true, status: true, amountMinor: true, currency: true, checkIn: true, checkOut: true, createdAt: true,
+          listing: { select: { id: true, titleAr: true, titleEn: true, ownerId: true } },
+          guest: { select: { id: true, displayName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ])
+    return json(res, 200, { ok: true, bookings, page, pageSize, total, pages: Math.ceil(total / pageSize) })
+  }
+
+  // ---- B: NEEDS-ATTENTION board (READ-ONLY, ADMIN/SUPPORT) ----
+  if (url.pathname === '/api/admin/needs-attention') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+
+    const STUCK_PAYMENT_HOURS = 2
+    const AGING_HOURS = 48
+    const stuckCutoff = new Date(Date.now() - STUCK_PAYMENT_HOURS * 60 * 60 * 1000)
+    const agingCutoff = new Date(Date.now() - AGING_HOURS * 60 * 60 * 1000)
+
+    const [stuckBookings, positiveWallets, openReview, openDisputes, openSos] = await Promise.all([
+      // (a) bookings stuck in PAYMENT_PENDING past the threshold
+      db().booking.findMany({
+        where: { status: 'PAYMENT_PENDING', createdAt: { lt: stuckCutoff } },
+        select: { id: true, createdAt: true, currency: true, amountMinor: true, listing: { select: { titleAr: true, ownerId: true } } },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+      }),
+      // (b) + (c) source rows: every wallet with a positive balance, plus its owner + entries
+      db().wallet.findMany({
+        where: { cachedBalanceMinor: { gt: 0 } },
+        select: {
+          id: true, currency: true, cachedBalanceMinor: true,
+          user: { select: { id: true, displayName: true, payoutMethod: true, roles: { select: { role: true } } } },
+          entries: { select: { type: true, amountMinor: true } },
+        },
+        take: 500,
+      }),
+      db().listing.count({ where: { status: 'PENDING_REVIEW', updatedAt: { lt: agingCutoff } } }),
+      db().dispute.count({ where: { status: 'OPEN', createdAt: { lt: agingCutoff } } }),
+      db().sosEvent.count({ where: { status: 'OPEN', createdAt: { lt: agingCutoff } } }),
+    ])
+
+    // (b) hosts/sellers holding money but with NO payout method on file.
+    const noPayoutMethodHosts = positiveWallets
+      .filter((wallet) =>
+        wallet.user &&
+        !wallet.user.payoutMethod &&
+        wallet.user.roles.some((entry) => entry.role === 'HOST' || entry.role === 'SELLER'),
+      )
+      .map((wallet) => ({
+        userId: wallet.user.id,
+        displayName: wallet.user.displayName,
+        currency: wallet.currency,
+        cachedBalanceMinor: wallet.cachedBalanceMinor,
+      }))
+
+    // (c) ledger-integrity: cachedBalanceMinor must equal the signed sum of its entries' deltas.
+    const imbalancedWallets = positiveWallets
+      .map((wallet) => {
+        const computed = wallet.entries.reduce((sum, entry) => {
+          if (entry.type === 'CREDIT' || entry.type === 'RELEASE' || entry.type === 'REFUND') return sum + entry.amountMinor
+          if (entry.type === 'DEBIT') return sum - entry.amountMinor
+          return sum
+        }, 0)
+        return { walletId: wallet.id, userId: wallet.user?.id || null, currency: wallet.currency, cachedBalanceMinor: wallet.cachedBalanceMinor, computedBalanceMinor: computed }
+      })
+      .filter((wallet) => wallet.cachedBalanceMinor !== wallet.computedBalanceMinor)
+
+    const counts = {
+      stuckPayments: stuckBookings.length,
+      noPayoutMethodHosts: noPayoutMethodHosts.length,
+      imbalancedWallets: imbalancedWallets.length,
+      agingReviewListings: openReview,
+      agingDisputes: openDisputes,
+      agingSos: openSos,
+    }
+    return json(res, 200, {
+      ok: true,
+      thresholds: { stuckPaymentHours: STUCK_PAYMENT_HOURS, agingHours: AGING_HOURS },
+      counts,
+      total: counts.stuckPayments + counts.noPayoutMethodHosts + counts.imbalancedWallets + counts.agingReviewListings + counts.agingDisputes + counts.agingSos,
+      items: { stuckBookings, noPayoutMethodHosts, imbalancedWallets },
+    })
   }
 
   return false

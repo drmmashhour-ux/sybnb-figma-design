@@ -1826,6 +1826,123 @@ export async function releaseAdminPayout(bookingId: string) {
   return response.walletEntry
 }
 
+// ---- Admin remediation controls (all ADMIN-gated server-side, all audit-logged) ----
+export type AdminDirectoryUser = {
+  id: string
+  displayName: string
+  email: string | null
+  status: string
+  idDocumentStatus: string | null
+  createdAt: string
+  roles: string[]
+}
+
+export type AdminBookingRow = {
+  id: string
+  status: string
+  amountMinor: number
+  currency: string
+  checkIn: string | null
+  checkOut: string | null
+  createdAt: string
+  listing: { id: string; titleAr: string; titleEn: string | null; ownerId: string } | null
+  guest: { id: string; displayName: string; email: string | null } | null
+}
+
+export type AdminNeedsAttention = {
+  thresholds: { stuckPaymentHours: number; agingHours: number }
+  counts: {
+    stuckPayments: number
+    noPayoutMethodHosts: number
+    imbalancedWallets: number
+    agingReviewListings: number
+    agingDisputes: number
+    agingSos: number
+  }
+  total: number
+  items: {
+    stuckBookings: Array<{ id: string; createdAt: string; currency: string; amountMinor: number; listing: { titleAr: string; ownerId: string } | null }>
+    noPayoutMethodHosts: Array<{ userId: string; displayName: string; currency: string; cachedBalanceMinor: number }>
+    imbalancedWallets: Array<{ walletId: string; userId: string | null; currency: string; cachedBalanceMinor: number; computedBalanceMinor: number }>
+  }
+}
+
+// A1: suspend / reinstate / close ANY user (bumps sessionVersion → instant logout).
+export async function setAdminUserStatus(userId: string, status: 'ACTIVE' | 'SUSPENDED' | 'CLOSED', reason?: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; user: { id: string; status: string; displayName: string } }>(`/api/admin/users/${userId}/status`, {
+      method: 'POST',
+      token,
+      body: { status, reason },
+    }),
+  )
+  return response.user
+}
+
+// A4: user directory / search (all roles).
+export async function fetchAdminUsers(params: { search?: string; role?: string; status?: string; page?: number } = {}) {
+  const q = new URLSearchParams()
+  if (params.search) q.set('search', params.search)
+  if (params.role) q.set('role', params.role)
+  if (params.status) q.set('status', params.status)
+  if (params.page) q.set('page', String(params.page))
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; users: AdminDirectoryUser[]; page: number; pages: number; total: number }>(
+      `/api/admin/users?${q.toString()}`,
+      { token },
+    ),
+  )
+  return response
+}
+
+// A2: take down / pause / restore a listing.
+export async function setAdminListingStatus(listingId: string, status: 'APPROVED' | 'PAUSED' | 'REJECTED' | 'EXPIRED', reason?: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; listing: { id: string; status: string } }>(`/api/admin/listings/${listingId}/status`, {
+      method: 'POST',
+      token,
+      body: { status, reason },
+    }),
+  )
+  return response.listing
+}
+
+// A3: force-cancel + refund a booking.
+export async function forceCancelBooking(bookingId: string, reason?: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; booking: Record<string, unknown> }>(`/api/admin/bookings/${bookingId}/cancel`, {
+      method: 'POST',
+      token,
+      body: { reason },
+    }),
+  )
+  return response.booking
+}
+
+// A4: booking directory / search.
+export async function fetchAdminBookings(params: { status?: string; hostId?: string; guestId?: string; page?: number } = {}) {
+  const q = new URLSearchParams()
+  if (params.status) q.set('status', params.status)
+  if (params.hostId) q.set('hostId', params.hostId)
+  if (params.guestId) q.set('guestId', params.guestId)
+  if (params.page) q.set('page', String(params.page))
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; bookings: AdminBookingRow[]; page: number; pages: number; total: number }>(
+      `/api/admin/bookings?${q.toString()}`,
+      { token },
+    ),
+  )
+  return response
+}
+
+// B: needs-attention board (read-only).
+export async function fetchAdminNeedsAttention() {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true } & AdminNeedsAttention>('/api/admin/needs-attention', { token }),
+  )
+  return response
+}
+
 export async function reviewPrototypeQueueEntity(
   entityType: 'listings' | 'payments' | 'gifts' | 'bookings' | 'iddocuments',
   entityId: string,

@@ -3,12 +3,21 @@ import type { CSSProperties, FormEvent, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   createAdminStaff,
+  fetchAdminBookings,
   fetchAdminDisputes,
+  fetchAdminNeedsAttention,
   fetchAdminPayouts,
   fetchAdminRevenueSummary,
   fetchAdminStaff,
+  fetchAdminUsers,
   fetchPrototypeAdminMetrics,
   fetchPrototypeReviewQueue,
+  forceCancelBooking,
+  setAdminListingStatus,
+  setAdminUserStatus,
+  type AdminBookingRow,
+  type AdminDirectoryUser,
+  type AdminNeedsAttention,
   type AdminPayout,
   type PlatformAdminMetrics,
   type PlatformDispute,
@@ -21,7 +30,7 @@ import { listingTitleText, moneyText } from '../../shared/i18n/display'
 
 type Props = { lang: Lang }
 
-type TabId = 'guest' | 'hosting' | 'accounting' | 'hr'
+type TabId = 'guest' | 'hosting' | 'accounting' | 'directory' | 'needs' | 'hr'
 
 const CREATABLE_ROLES = ['ADMIN', 'SUPPORT'] as const
 
@@ -31,7 +40,31 @@ const T = {
     subtitle: 'لوحة موحّدة — بيانات حقيقية من واجهات الإدارة.',
     loading: 'جار التحميل...',
     error: 'تعذر تحميل بعض البيانات.',
-    tabs: { guest: 'العملاء', hosting: 'الاستضافة', accounting: 'المحاسبة', hr: 'الموارد البشرية' },
+    tabs: { guest: 'العملاء', hosting: 'الاستضافة', accounting: 'المحاسبة', directory: 'الدليل', needs: 'يحتاج انتباه', hr: 'الموارد البشرية' },
+    userSearch: 'ابحث بالاسم أو البريد',
+    roleAll: 'كل الأدوار',
+    statusCol: 'الحالة',
+    suspend: 'تعليق',
+    reinstate: 'إعادة تفعيل',
+    close: 'إغلاق',
+    working: 'جارٍ...',
+    usersTitle: 'دليل المستخدمين',
+    bookingsTitle: 'دليل الحجوزات',
+    bookingStatusAll: 'كل الحالات',
+    forceCancel: 'إلغاء + استرداد',
+    confirmForceCancel: 'تأكيد إلغاء الحجز واسترداد الضيف؟',
+    takedown: 'إخفاء (إيقاف)',
+    restore: 'إعادة نشر',
+    takedownDone: 'تم تحديث حالة الإعلان.',
+    needsTitle: 'مهام تحتاج انتباه',
+    needsStuck: 'حجوزات عالقة بانتظار الدفع',
+    needsNoPayout: 'مضيفون لديهم رصيد بلا حساب صرف',
+    needsImbalance: 'محافظ غير متطابقة مع السجل',
+    needsReview: 'مراجعات متأخرة',
+    needsDisputes: 'نزاعات متأخرة',
+    needsSos: 'بلاغات SOS متأخرة',
+    actionDone: 'تم التنفيذ.',
+    actionError: 'تعذر تنفيذ الإجراء.',
     passed: 'مقبول',
     pending: 'قيد المراجعة',
     flagged: 'مُعلَّم',
@@ -89,7 +122,31 @@ const T = {
     subtitle: 'One unified board — real data from the admin APIs.',
     loading: 'Loading...',
     error: 'Some data could not be loaded.',
-    tabs: { guest: 'Guests', hosting: 'Hosting', accounting: 'Accounting', hr: 'HR' },
+    tabs: { guest: 'Guests', hosting: 'Hosting', accounting: 'Accounting', directory: 'Directory', needs: 'Needs attention', hr: 'HR' },
+    userSearch: 'Search by name or email',
+    roleAll: 'All roles',
+    statusCol: 'Status',
+    suspend: 'Suspend',
+    reinstate: 'Reinstate',
+    close: 'Close',
+    working: 'Working...',
+    usersTitle: 'User directory',
+    bookingsTitle: 'Booking directory',
+    bookingStatusAll: 'All statuses',
+    forceCancel: 'Cancel + refund',
+    confirmForceCancel: 'Force-cancel this booking and refund the guest?',
+    takedown: 'Take down (pause)',
+    restore: 'Restore',
+    takedownDone: 'Listing status updated.',
+    needsTitle: 'Needs attention',
+    needsStuck: 'Bookings stuck awaiting payment',
+    needsNoPayout: 'Hosts holding money with no payout method',
+    needsImbalance: 'Wallets out of sync with the ledger',
+    needsReview: 'Aging review items',
+    needsDisputes: 'Aging disputes',
+    needsSos: 'Aging SOS events',
+    actionDone: 'Done.',
+    actionError: 'Could not complete the action.',
     passed: 'Passed',
     pending: 'Pending',
     flagged: 'Flagged',
@@ -172,6 +229,15 @@ export function AdminControlCenterPage({ lang }: Props) {
   const [payouts, setPayouts] = useState<{ payouts: AdminPayout[]; holdDays: number } | null>(null)
   const [disputes, setDisputes] = useState<PlatformDispute[]>([])
   const [staff, setStaff] = useState<PlatformStaffMember[]>([])
+  const [needs, setNeeds] = useState<AdminNeedsAttention | null>(null)
+
+  // Directory
+  const [users, setUsers] = useState<AdminDirectoryUser[]>([])
+  const [userSearch, setUserSearch] = useState('')
+  const [bookings, setBookings] = useState<AdminBookingRow[]>([])
+  const [bookingStatus, setBookingStatus] = useState('')
+  const [actionBusy, setActionBusy] = useState('')
+  const [actionMsg, setActionMsg] = useState('')
 
   // HR form
   const [hrName, setHrName] = useState('')
@@ -192,16 +258,18 @@ export function AdminControlCenterPage({ lang }: Props) {
       fetchAdminPayouts(),
       fetchAdminDisputes(),
       fetchAdminStaff(),
+      fetchAdminNeedsAttention(),
     ])
       .then((results) => {
         if (!active) return
-        const [q, m, r, p, d, s] = results
+        const [q, m, r, p, d, s, n] = results
         if (q.status === 'fulfilled') setQueue(q.value)
         if (m.status === 'fulfilled') setMetrics(m.value)
         if (r.status === 'fulfilled') setRevenue(r.value)
         if (p.status === 'fulfilled') setPayouts(p.value)
         if (d.status === 'fulfilled') setDisputes(d.value)
         if (s.status === 'fulfilled') setStaff(s.value)
+        if (n.status === 'fulfilled') setNeeds(n.value)
         if (results.some((res) => res.status === 'rejected')) setError(t.error)
       })
       .finally(() => {
@@ -212,6 +280,75 @@ export function AdminControlCenterPage({ lang }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Directory data loads on demand when the tab opens (or on search submit).
+  async function loadUsers() {
+    try {
+      const res = await fetchAdminUsers({ search: userSearch.trim() || undefined })
+      setUsers(res.users)
+    } catch {
+      setActionMsg(t.actionError)
+    }
+  }
+  async function loadBookings() {
+    try {
+      const res = await fetchAdminBookings({ status: bookingStatus || undefined })
+      setBookings(res.bookings)
+    } catch {
+      setActionMsg(t.actionError)
+    }
+  }
+  useEffect(() => {
+    if (tab === 'directory') {
+      void loadUsers()
+      void loadBookings()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
+  async function changeUserStatus(userId: string, status: 'ACTIVE' | 'SUSPENDED' | 'CLOSED') {
+    setActionBusy(userId)
+    setActionMsg('')
+    try {
+      const updated = await setAdminUserStatus(userId, status)
+      setUsers((cur) => cur.map((u) => (u.id === userId ? { ...u, status: updated.status } : u)))
+      setActionMsg(t.actionDone)
+    } catch (err) {
+      setActionMsg(err instanceof Error ? err.message : t.actionError)
+    } finally {
+      setActionBusy('')
+    }
+  }
+
+  async function takedownListing(listingId: string, status: 'PAUSED' | 'APPROVED') {
+    setActionBusy(listingId)
+    setActionMsg('')
+    try {
+      await setAdminListingStatus(listingId, status)
+      setActionMsg(t.takedownDone)
+      // Reflect in the review queue view if present.
+      setQueue((cur) => (cur ? { ...cur, listings: cur.listings.map((l) => (l.id === listingId ? { ...l, status } : l)) } : cur))
+    } catch (err) {
+      setActionMsg(err instanceof Error ? err.message : t.actionError)
+    } finally {
+      setActionBusy('')
+    }
+  }
+
+  async function doForceCancel(bookingId: string) {
+    if (!window.confirm(t.confirmForceCancel)) return
+    setActionBusy(bookingId)
+    setActionMsg('')
+    try {
+      await forceCancelBooking(bookingId)
+      setBookings((cur) => cur.map((b) => (b.id === bookingId ? { ...b, status: 'CANCELLED' } : b)))
+      setActionMsg(t.actionDone)
+    } catch (err) {
+      setActionMsg(err instanceof Error ? err.message : t.actionError)
+    } finally {
+      setActionBusy('')
+    }
+  }
 
   const openDisputes = useMemo(() => disputes.filter((d) => d.status === 'OPEN'), [disputes])
 
@@ -243,7 +380,7 @@ export function AdminControlCenterPage({ lang }: Props) {
       </header>
 
       <nav style={styles.tabs} aria-label={t.title}>
-        {(['guest', 'hosting', 'accounting', 'hr'] as TabId[]).map((id) => (
+        {(['guest', 'hosting', 'accounting', 'directory', 'needs', 'hr'] as TabId[]).map((id) => (
           <button
             key={id}
             style={{ ...styles.tab, ...(tab === id ? styles.tabActive : {}) }}
@@ -316,11 +453,23 @@ export function AdminControlCenterPage({ lang }: Props) {
                         ‘{isAr ? f.amenityAr : f.amenityEn}’ — {f.verdict}{f.reason ? ` · ${f.reason}` : ''}
                       </div>
                     ))}
+                    <div style={styles.rowActions}>
+                      {listing.status === 'PAUSED' ? (
+                        <button style={styles.smallBtn} disabled={actionBusy === listing.id} onClick={() => void takedownListing(listing.id, 'APPROVED')}>
+                          {actionBusy === listing.id ? t.working : t.restore}
+                        </button>
+                      ) : (
+                        <button style={styles.smallBtnDanger} disabled={actionBusy === listing.id} onClick={() => void takedownListing(listing.id, 'PAUSED')}>
+                          {actionBusy === listing.id ? t.working : t.takedown}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               })
             })()}
           </Card>
+          {actionMsg && <p style={styles.hint}>{actionMsg}</p>}
 
           <div style={styles.linkRow}>
             <button style={styles.linkButton} onClick={() => go('/admin/review')}>{t.reviewQueue} →</button>
@@ -373,6 +522,131 @@ export function AdminControlCenterPage({ lang }: Props) {
           <div style={styles.linkRow}>
             <button style={styles.linkButton} onClick={() => go('/finance')}>{t.finance} →</button>
           </div>
+        </section>
+      )}
+
+      {!loading && tab === 'directory' && (
+        <section style={styles.group}>
+          {actionMsg && <p style={styles.hint}>{actionMsg}</p>}
+          <Card title={t.usersTitle} count={users.length}>
+            <form
+              style={styles.searchRow}
+              onSubmit={(e) => {
+                e.preventDefault()
+                void loadUsers()
+              }}
+            >
+              <input style={styles.input} placeholder={t.userSearch} value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
+              <button type="submit" style={styles.smallBtn}>{isAr ? 'بحث' : 'Search'}</button>
+            </form>
+            {users.map((u) => (
+              <div key={u.id} style={styles.dirRow}>
+                <div style={styles.dirMain}>
+                  <strong>{u.displayName}</strong>
+                  <small dir="ltr" style={styles.mono}>{u.email || '-'}</small>
+                  <span style={styles.roleBadges}>{u.roles.join(' · ')}</span>
+                </div>
+                <div style={styles.dirActions}>
+                  <span style={{ ...styles.statusTag, ...(u.status === 'ACTIVE' ? styles.tagGreen : styles.tagRed) }}>{u.status}</span>
+                  {u.status === 'ACTIVE' ? (
+                    <>
+                      <button style={styles.smallBtnDanger} disabled={actionBusy === u.id} onClick={() => void changeUserStatus(u.id, 'SUSPENDED')}>{t.suspend}</button>
+                      <button style={styles.smallBtnDanger} disabled={actionBusy === u.id} onClick={() => void changeUserStatus(u.id, 'CLOSED')}>{t.close}</button>
+                    </>
+                  ) : (
+                    <button style={styles.smallBtn} disabled={actionBusy === u.id} onClick={() => void changeUserStatus(u.id, 'ACTIVE')}>{t.reinstate}</button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {users.length === 0 && <p style={styles.muted}>{t.none}</p>}
+          </Card>
+
+          <Card title={t.bookingsTitle} count={bookings.length}>
+            <form
+              style={styles.searchRow}
+              onSubmit={(e) => {
+                e.preventDefault()
+                void loadBookings()
+              }}
+            >
+              <select style={styles.input} value={bookingStatus} onChange={(e) => setBookingStatus(e.target.value)}>
+                <option value="">{t.bookingStatusAll}</option>
+                {['PAYMENT_PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'DISPUTED'].map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <button type="submit" style={styles.smallBtn}>{isAr ? 'بحث' : 'Search'}</button>
+            </form>
+            {bookings.map((b) => (
+              <div key={b.id} style={styles.dirRow}>
+                <div style={styles.dirMain}>
+                  <strong>{b.listing ? (isAr ? b.listing.titleAr : b.listing.titleEn || b.listing.titleAr) : b.id.slice(0, 8)}</strong>
+                  <small>{b.guest?.displayName || b.guest?.id?.slice(0, 8) || '-'}</small>
+                  <span dir="ltr">{moneyText(b.amountMinor, b.currency, lang)}</span>
+                </div>
+                <div style={styles.dirActions}>
+                  <span style={{ ...styles.statusTag, ...(b.status === 'CANCELLED' ? styles.tagRed : styles.tagGold) }}>{b.status}</span>
+                  {['CONFIRMED', 'PAYMENT_PENDING'].includes(b.status) && (
+                    <button style={styles.smallBtnDanger} disabled={actionBusy === b.id} onClick={() => void doForceCancel(b.id)}>
+                      {actionBusy === b.id ? t.working : t.forceCancel}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {bookings.length === 0 && <p style={styles.muted}>{t.none}</p>}
+          </Card>
+        </section>
+      )}
+
+      {!loading && tab === 'needs' && (
+        <section style={styles.group}>
+          <h2 className="" style={styles.cardTitle}>{t.needsTitle}</h2>
+          <div style={styles.chipRow}>
+            <Chip tone="red" label={t.needsStuck} value={needs?.counts.stuckPayments || 0} />
+            <Chip tone="gold" label={t.needsNoPayout} value={needs?.counts.noPayoutMethodHosts || 0} />
+            <Chip tone="red" label={t.needsImbalance} value={needs?.counts.imbalancedWallets || 0} />
+            <Chip tone="gold" label={t.needsReview} value={needs?.counts.agingReviewListings || 0} />
+            <Chip tone="gold" label={t.needsDisputes} value={needs?.counts.agingDisputes || 0} />
+            <Chip tone="red" label={t.needsSos} value={needs?.counts.agingSos || 0} />
+          </div>
+
+          <Card title={t.needsStuck} count={needs?.items.stuckBookings.length || 0}>
+            {needs?.items.stuckBookings.length
+              ? needs.items.stuckBookings.slice(0, 15).map((b) => (
+                  <div key={b.id} style={styles.dirRow}>
+                    <div style={styles.dirMain}>
+                      <strong>{b.listing?.titleAr || b.id.slice(0, 8)}</strong>
+                      <small dir="ltr">{new Date(b.createdAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')}</small>
+                    </div>
+                    <button style={styles.smallBtnDanger} disabled={actionBusy === b.id} onClick={() => void doForceCancel(b.id)}>
+                      {actionBusy === b.id ? t.working : t.forceCancel}
+                    </button>
+                  </div>
+                ))
+              : <p style={styles.muted}>{t.none}</p>}
+          </Card>
+
+          <Card title={t.needsNoPayout} count={needs?.items.noPayoutMethodHosts.length || 0}>
+            {needs?.items.noPayoutMethodHosts.length
+              ? needs.items.noPayoutMethodHosts.slice(0, 15).map((h) => (
+                  <Row key={h.userId} left={h.displayName} right={moneyText(h.cachedBalanceMinor, h.currency, lang)} />
+                ))
+              : <p style={styles.muted}>{t.none}</p>}
+          </Card>
+
+          <Card title={t.needsImbalance} count={needs?.items.imbalancedWallets.length || 0}>
+            {needs?.items.imbalancedWallets.length
+              ? needs.items.imbalancedWallets.slice(0, 15).map((w) => (
+                  <Row
+                    key={w.walletId}
+                    left={`${w.userId?.slice(0, 8) || w.walletId.slice(0, 8)} (${w.currency})`}
+                    right={`${moneyText(w.cachedBalanceMinor, w.currency, lang)} ≠ ${moneyText(w.computedBalanceMinor, w.currency, lang)}`}
+                  />
+                ))
+              : <p style={styles.muted}>{t.none}</p>}
+          </Card>
         </section>
       )}
 
@@ -525,6 +799,15 @@ const styles: Record<string, CSSProperties> = {
   payoutTag: { borderRadius: 8, padding: '4px 10px', fontWeight: 900, fontSize: 12 },
   tagGreen: { background: 'rgba(32,210,155,.14)', color: '#20d29b' },
   tagGold: { background: 'rgba(229,184,11,.14)', color: '#e5b80b' },
+  tagRed: { background: 'rgba(255,78,119,.14)', color: '#ff4e77' },
+  rowActions: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' },
+  smallBtn: { minHeight: 40, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
+  smallBtnDanger: { minHeight: 40, border: '1px solid rgba(255,78,119,.5)', borderRadius: 8, background: 'rgba(255,78,119,.12)', color: '#ffb3c6', fontWeight: 900, padding: '0 14px' },
+  searchRow: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
+  dirRow: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', borderBottom: '1px solid #1a1a24', paddingBottom: 10, flexWrap: 'wrap' },
+  dirMain: { display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', color: '#9aa6ba' },
+  dirActions: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
+  statusTag: { borderRadius: 8, padding: '4px 10px', fontWeight: 900, fontSize: 12 },
   staffTable: { display: 'grid', gap: 0 },
   staffHead: { display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 1fr', gap: 12, color: '#6f7688', fontSize: 12, fontWeight: 800, padding: '0 0 8px', borderBottom: '1px solid #242735' },
   staffRow: { display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 1fr', gap: 12, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #1a1a24' },
