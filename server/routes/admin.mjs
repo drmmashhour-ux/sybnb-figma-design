@@ -24,11 +24,11 @@ function safeHostPayoutMethod(payoutMethod) {
   if (!payoutMethod || typeof payoutMethod !== 'object' || payoutMethod.type !== 'sham_cash') {
     return null
   }
-  return {
-    type: 'sham_cash',
-    accountHolder: payoutMethod.accountHolder || '',
-    last4: payoutMethod.last4 || '',
-  }
+  // Strip only the encrypted number envelope; pass through the safe display fields. This works for
+  // BOTH the legacy shape ({ phone, receiverName }) and the new encrypted shape
+  // ({ accountHolder, last4, ...envelope }) — the ciphertext/iv/tag/alg never reach the client.
+  const { ciphertext, iv, tag, alg, ...safe } = payoutMethod
+  return safe
 }
 
 function payoutNotEligibleError() {
