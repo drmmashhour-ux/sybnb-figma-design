@@ -210,7 +210,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     }
   }
 
-  async function confirmCode() {
+  async function confirmCode(): Promise<boolean> {
     setCodeBusy('confirming')
     try {
       if (usePhone) await verifyPhoneVerificationCode(phone.trim(), code.trim(), otpPurpose)
@@ -218,10 +218,12 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       setCodeConfirmed(true)
       setMessage(usePhone ? t.phoneConfirmed : t.codeConfirmed)
       setIsErrorMessage(false)
+      return true
     } catch {
       setCodeConfirmed(false)
       setMessage(t.codeInvalid)
       setIsErrorMessage(true)
+      return false
     } finally {
       setCodeBusy('idle')
     }
@@ -238,7 +240,14 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       return
     }
     const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim())
-    if (!identifierOk || !password.trim() || !codeConfirmed) {
+    // Users routinely fill the code box and click "Open" without first pressing "Confirm code" — so
+    // auto-confirm the entered code here. If it fails, confirmCode() already showed "code invalid".
+    let confirmed = codeConfirmed
+    if (!confirmed && code.trim() && identifierOk) {
+      confirmed = await confirmCode()
+      if (!confirmed) return
+    }
+    if (!identifierOk || !password.trim() || !confirmed) {
       setIsErrorMessage(true)
       setMessage(mode === 'signUp' ? t.signUpRequired : t.signInRequired)
       return
