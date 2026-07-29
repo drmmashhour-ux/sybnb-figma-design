@@ -5,6 +5,7 @@ import { getGovernorate } from '../../engines/search/syriaData'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { SearchStateCard } from './SearchStates'
+import { ResultsMap } from './ResultsMap'
 import { UnifiedSearchBar } from './UnifiedSearchBar'
 import type { SearchDivision, UnifiedSearchValue } from './UnifiedSearchBar'
 
@@ -239,6 +240,8 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
       {(state !== 'empty' || listings.length === 0) && (
         <SearchStateCard lang={lang} state={state} onReset={() => setLastSearch(null)} />
       )}
+
+      <ResultsMap listings={listings} lang={lang} />
 
       <section className="search-results">
         <div className="search-results-head">
