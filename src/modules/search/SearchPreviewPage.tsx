@@ -237,11 +237,14 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         onSearch={(value) => void runLiveSearch(value)}
       />
 
-      {(state !== 'empty' || listings.length === 0) && (
+      {/* Only surface the loading / error card. The "no results" case is already shown in the
+          results section below ("Matched results: 0" + copy), so a duplicate empty card here just
+          stacked two empty states around the map. */}
+      {state !== 'empty' && (
         <SearchStateCard lang={lang} state={state} onReset={() => setLastSearch(null)} />
       )}
 
-      <ResultsMap listings={listings} lang={lang} />
+      <ResultsMap listings={listings} lang={lang} governorate={lastSearch?.governorate} />
 
       <section className="search-results">
         <div className="search-results-head">

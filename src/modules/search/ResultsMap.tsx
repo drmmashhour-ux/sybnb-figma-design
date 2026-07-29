@@ -6,6 +6,7 @@ import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { PinsMap, DEFAULT_CENTER, type MapPin } from '../../shared/maps/capsule'
+import { governorateCenter } from '../../engines/search/governorateCenters'
 
 // STR adapter for the isolated map capsule: turns STR listings (with prices + i18n) into plain
 // MapPins and renders the capsule's <PinsMap>. All platform-specific formatting lives here so the
@@ -32,9 +33,22 @@ function pinsFromListings(listings: PlatformListing[], lang: Lang): MapPin[] {
   return pins
 }
 
-export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; lang: Lang }) {
+export function ResultsMap({
+  listings,
+  lang,
+  governorate,
+}: {
+  listings: PlatformListing[]
+  lang: Lang
+  governorate?: string
+}) {
   const isAr = lang === 'ar'
   const pins = useMemo(() => pinsFromListings(listings, lang), [listings, lang])
+
+  // When there are listing pins the capsule fits to them. When there are none, centre the map on
+  // the searched governorate so the map follows the search instead of sitting on the default view.
+  const searchCenter = governorateCenter(governorate)
+  const center = searchCenter || DEFAULT_CENTER
 
   return (
     <section style={styles.wrap} aria-label={isAr ? 'خريطة النتائج' : 'Results map'}>
@@ -46,7 +60,7 @@ export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; la
             : isAr ? 'عرض المنطقة' : 'Area view'}
         </small>
       </div>
-      <PinsMap pins={pins} defaultCenter={DEFAULT_CENTER} defaultZoom={11} style={styles.frame} />
+      <PinsMap pins={pins} defaultCenter={center} defaultZoom={searchCenter ? 12 : 11} style={styles.frame} />
     </section>
   )
 }
