@@ -46,11 +46,6 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
       <a className="skip-link" href="#main-content">
         {isAr ? 'تخطي إلى المحتوى الرئيسي' : 'Skip to main content'}
       </a>
-      {(isAdvertisingTunnel || isAdminControlRoom) && (
-        <div className="final-isolated-watermark" aria-hidden="true">
-          FINAL · JULY 6 · CAPSULE EDITION · 3055
-        </div>
-      )}
       {!isAdvertisingTunnel && !isAdminControlRoom && (
         <header className="top-nav">
           <button className="brand-lockup" onClick={() => navigate('/')} aria-label="SYBNB home">
