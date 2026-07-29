@@ -363,9 +363,11 @@ export function DashboardPage({ lang }: Props) {
             <button style={styles.sosButton} onClick={() => (window.location.hash = activeBooking ? `/booking/dispute/${activeBooking.id}` : '/immocontact')}>
               {t.sos} ⚠
             </button>
-            <button style={styles.goldButton} onClick={() => activeBooking?.payments?.[0]?.id ? (window.location.hash = `/payment/receipt/${activeBooking.payments[0].id}`) : window.print()}>
-              {t.invoice} ▤
-            </button>
+            {activeBooking?.payments?.[0]?.id ? (
+              <button style={styles.goldButton} onClick={() => (window.location.hash = `/payment/receipt/${activeBooking?.payments?.[0]?.id}`)}>
+                {t.invoice} ▤
+              </button>
+            ) : null}
             <button style={styles.blueButton} onClick={() => (window.location.hash = '/immocontact')}>
               {t.contact} ◯
             </button>
