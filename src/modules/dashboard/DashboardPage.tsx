@@ -276,7 +276,7 @@ export function DashboardPage({ lang }: Props) {
         <button style={styles.iconButton} onClick={() => (window.location.hash = '/settings')} aria-label={isAr ? 'الإعدادات' : 'Settings'}>⚙</button>
         <div style={styles.profile}>
           <span style={styles.avatar}>{avatarLetter}</span>
-          <div>
+          <div style={{ display: 'grid', gap: 2 }}>
             <strong>{displayName}</strong>
             <span>SYBNB STAYS · {t.member}</span>
           </div>
