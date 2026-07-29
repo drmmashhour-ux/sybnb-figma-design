@@ -232,56 +232,9 @@ const T = {
 
 const DIVISIONS: SearchDivision[] = ['stays', 'rentals', 'buy', 'newConstruction', 'cars', 'marketplace']
 
-type FilterOption = {
-  icon: string
-  key: string
-  labelKey: keyof typeof T.ar
-}
-
-const bedroomOptions: FilterOption[] = [
-  { key: 'any', labelKey: 'any', icon: '*' },
-  { key: 'studio', labelKey: 'studio', icon: '0' },
-  { key: 'oneBedroom', labelKey: 'oneBedroom', icon: '1' },
-  { key: 'twoBedrooms', labelKey: 'twoBedrooms', icon: '2' },
-  { key: 'threeBedrooms', labelKey: 'threeBedrooms', icon: '3' },
-  { key: 'fourPlusBedrooms', labelKey: 'fourPlusBedrooms', icon: '4+' },
-]
-const propertyTypeOptions: FilterOption[] = [
-  { key: 'any', labelKey: 'any', icon: '*' },
-  { key: 'apartment', labelKey: 'apartment', icon: 'A' },
-  { key: 'villa', labelKey: 'villa', icon: 'V' },
-  { key: 'hotel', labelKey: 'hotel', icon: 'H' },
-  { key: 'office', labelKey: 'office', icon: 'O' },
-  { key: 'shop', labelKey: 'shop', icon: 'S' },
-  { key: 'land', labelKey: 'land', icon: 'L' },
-]
-const furnishingOptions: FilterOption[] = [
-  { key: 'any', labelKey: 'any', icon: '*' },
-  { key: 'furnished', labelKey: 'furnished', icon: 'F' },
-  { key: 'semiFurnished', labelKey: 'semiFurnished', icon: '1/2' },
-  { key: 'unfurnished', labelKey: 'unfurnished', icon: 'U' },
-]
-const marketCategoryOptions: FilterOption[] = [
-  { key: 'any', labelKey: 'any', icon: '*' },
-  { key: 'furniture', labelKey: 'furniture', icon: 'F' },
-  { key: 'electronics', labelKey: 'electronics', icon: 'E' },
-  { key: 'appliances', labelKey: 'appliances', icon: 'H' },
-  { key: 'services', labelKey: 'services', icon: 'S' },
-]
-const conditionOptions: FilterOption[] = [
-  { key: 'any', labelKey: 'any', icon: '*' },
-  { key: 'new', labelKey: 'new', icon: 'N' },
-  { key: 'used', labelKey: 'used', icon: 'U' },
-]
-const sortOptions: FilterOption[] = [
-  { key: 'newest', labelKey: 'newest', icon: '↓' },
-  { key: 'priceLow', labelKey: 'priceLow', icon: '$-' },
-  { key: 'priceHigh', labelKey: 'priceHigh', icon: '$+' },
-]
 
 export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
   const t = T[lang]
-  const isAr = lang === 'ar'
   const [openCalendar, setOpenCalendar] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const [value, setValue] = useState<UnifiedSearchValue>(() => ({
@@ -321,7 +274,6 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     ...loadSearchDraft(),
     division: initialDivision,
   }))
-  const [learnedMessage, setLearnedMessage] = useState('')
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -449,8 +401,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
   }
 
   const handleSearch = () => {
-    const didSave = saveLearnedPlace(value)
-    setLearnedMessage(didSave ? t.learnedSaved : '')
+    saveLearnedPlace(value)
     onSearch?.(value)
   }
 
@@ -666,46 +617,6 @@ function BathroomCounterPicture() {
       <span style={styles.bathroomShower} />
       <span style={styles.bathroomShowerLine} />
     </span>
-  )
-}
-
-function OptionGroup({
-  label,
-  lang,
-  onChange,
-  options,
-  value,
-}: {
-  label: string
-  lang: Lang
-  onChange: (value: string) => void
-  options: FilterOption[]
-  value: string
-}) {
-  const t = T[lang]
-
-  return (
-    <fieldset style={styles.optionGroup}>
-      <legend style={styles.optionLegend}>{label}</legend>
-      <div style={styles.optionRow}>
-        {options.map((option) => {
-          const active = option.key === value
-          return (
-            <button
-              key={option.key}
-              type="button"
-              aria-pressed={active}
-              title={t[option.labelKey]}
-              onClick={() => onChange(option.key)}
-              style={active ? styles.optionButtonActive : styles.optionButton}
-            >
-              <span style={styles.optionIcon}>{option.icon}</span>
-              <small>{t[option.labelKey]}</small>
-            </button>
-          )
-        })}
-      </div>
-    </fieldset>
   )
 }
 
