@@ -16,7 +16,7 @@ import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSn
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
-import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
+import { DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { DealRatingBadge } from '../cars/DealRatingBadge'
@@ -536,6 +536,16 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
               {listing.division === 'STAYS' && (
                 <>
+                  <section style={styles.panel}>
+                    <strong>{isAr ? 'اختر تواريخك' : 'Choose your dates'}</strong>
+                    <DateRangePicker
+                      lang={lang}
+                      value={dateRange}
+                      onChange={setDateRange}
+                      disabledDates={disabledDates}
+                      disabledHint={isAr ? 'بعض التواريخ محجوزة بالفعل' : 'Some of those dates are already booked'}
+                    />
+                  </section>
                   {!dateRange.checkIn && offerSummary.count > 0 && (
                     <section style={styles.panel}>
                       <strong>{t.specialOfferBadge(offerSummary.count, 180)}</strong>
@@ -719,6 +729,16 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           )}
 
           <section ref={actionBarRef} style={styles.bottomActionBar}>
+            {listing.division === 'STAYS' && (
+              <div style={styles.reserveBarPrice}>
+                <strong>{moneyText(cancellationProtection ? protectedTotalMinor : displayedTotalMinor, 'USD', lang)}</strong>
+                <small>
+                  {isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut)
+                    ? `${stayQuote?.nights ?? billableNights} ${isAr ? 'ليالٍ' : 'nights'} · ${dateRange.checkIn} → ${dateRange.checkOut}`
+                    : isAr ? 'اختر التواريخ أعلاه' : 'Pick your dates above'}
+                </small>
+              </div>
+            )}
             {!inquirySent && (
               <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
                 {status === 'saving' ? t.saving : actionLabel}
@@ -922,5 +942,6 @@ const styles: Record<string, CSSProperties> = {
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14, display: 'grid', gap: 12 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
-  bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+  bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', alignItems: 'center' },
+  reserveBarPrice: { display: 'grid', gap: 2, alignContent: 'center', color: '#fff' },
 }
