@@ -922,6 +922,19 @@ export async function fetchAccommodation(accommodationId: string) {
   return apiRequest<{ ok: true; accommodation: PlatformAccommodation }>(`/api/accommodations/${accommodationId}`)
 }
 
+// AI listing-description helper (capsule): sends the host's selected attributes to the server, which
+// writes a bilingual description with Claude (or a template fallback when no key is configured).
+export async function generateListingDescription(
+  attributes: Record<string, unknown>,
+): Promise<{ descriptionAr: string; descriptionEn: string; source: string }> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const response = await apiRequest<{ ok: true; descriptionAr: string; descriptionEn: string; source: string }>(
+    '/api/host/listing-description',
+    { method: 'POST', token: session.token, body: attributes },
+  )
+  return { descriptionAr: response.descriptionAr || '', descriptionEn: response.descriptionEn || '', source: response.source }
+}
+
 export async function createSellerAccountSession(input: {
   displayName: string
   email: string

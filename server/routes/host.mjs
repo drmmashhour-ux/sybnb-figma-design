@@ -14,6 +14,7 @@ import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
+import { generateOrTemplate } from '../lib/ai-listing-description.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { deleteListingMedia } from '../lib/listing-media-storage.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
@@ -240,6 +241,16 @@ export async function handleHost(req, res, url, context) {
     // This is the only path that ever spends real AI money — surfaces AI_NOT_CONFIGURED honestly
     // to the host who explicitly clicked the button, unlike the free opportunistic signal above.
     const result = await generateHostInsights(context.user.id)
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI listing-description writer (capsule): turns the host's selected attributes into a bilingual
+  // description. Uses Claude when configured, template fallback otherwise — so it never hard-fails.
+  if (url.pathname === '/api/host/listing-description') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const body = await readJson(req)
+    const result = await generateOrTemplate(body && typeof body === 'object' ? body : {})
     return json(res, 200, { ok: true, ...result })
   }
 

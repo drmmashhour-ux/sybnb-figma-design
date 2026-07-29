@@ -3,8 +3,9 @@ import Anthropic from '@anthropic-ai/sdk'
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null
 
 // Cheapest current Claude model — adequate for restating a handful of already-computed real
-// numbers in short, plain Arabic/English, not for anything requiring deeper reasoning.
-const MODEL = 'claude-haiku-4-5-20251001'
+// numbers in short, plain Arabic/English, not for anything requiring deeper reasoning. Shared with
+// the isolated listing-description capsule (server/lib/ai-listing-description.mjs).
+export const MODEL = 'claude-haiku-4-5-20251001'
 
 export function requireAnthropic() {
   if (!anthropic) {

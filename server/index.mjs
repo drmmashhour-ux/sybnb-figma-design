@@ -83,6 +83,8 @@ const RATE_LIMIT_RULES = [
   { name: 'PUBLIC_SEARCH', method: 'GET', pattern: /^\/api\/listings$/, max: 60, windowMs: 60 * 1000, byUser: false },
   // Map geocoding proxy — cached server-side, but bound per-IP so nobody can pipe abuse through us to Nominatim.
   { name: 'GEOCODE_PLACE', method: 'GET', pattern: /^\/api\/geocode$/, max: 60, windowMs: 60 * 1000, byUser: false },
+  // AI listing-description writer — can spend AI money, so cap per host account.
+  { name: 'AI_DESCRIPTION', method: 'POST', pattern: /^\/api\/host\/listing-description$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true },
   { name: 'PAYMENT_PROOF', method: 'POST', pattern: /^\/api\/payments\/(seller-plan-proof|local-wallet-proof)$/, max: 10, windowMs: 60 * 1000, byUser: true },

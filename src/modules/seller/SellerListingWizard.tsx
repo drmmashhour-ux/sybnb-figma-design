@@ -16,6 +16,7 @@ import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSel
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
+import { writeListingDescription } from '../../shared/ai/listingDescription'
 
 type Props = {
   lang: Lang
@@ -360,6 +361,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
+  const [aiWriting, setAiWriting] = useState(false)
+  const [aiError, setAiError] = useState('')
   const [governorate, setGovernorate] = useState(draft.governorate || 'damascus')
   const [city, setCity] = useState(draft.city || 'damascus-city')
   const [area, setArea] = useState(draft.area || 'old-city')
@@ -524,6 +527,31 @@ export function SellerListingWizard({ lang }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [division, isAdvertisingFlow, governorate, city, area])
+
+  // AI helper: write the description from what the host selected in the filters + listing details.
+  async function writeDescriptionWithAi() {
+    setAiWriting(true)
+    setAiError('')
+    try {
+      const result = await writeListingDescription({
+        groups: sellerPropertyFilterGroups,
+        selection: visualFilters,
+        cityAr: selectedCityData?.ar,
+        cityEn: selectedCityData?.en,
+        areaAr: selectedAreaData?.ar,
+        areaEn: selectedAreaData?.en,
+        guests: toNumber(guestCapacity),
+        bedrooms: toNumber(bedrooms),
+        bathrooms: toNumber(bathrooms),
+        priceUsd: toNumber(variableNightPrice || price),
+      })
+      setDescription(isAr ? result.descriptionAr : result.descriptionEn)
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : isAr ? 'تعذر توليد الوصف. حاول مجدداً.' : 'Could not generate the description. Try again.')
+    } finally {
+      setAiWriting(false)
+    }
+  }
   const normalizedAreaQuery = areaQuery.trim().toLowerCase()
   const filteredAreaOptions = (normalizedAreaQuery
     ? areaOptions.filter((item) =>
@@ -1249,12 +1277,34 @@ export function SellerListingWizard({ lang }: Props) {
                 />
               </label>
               <label className="seller-wide-field">
-                <span>{isAdvertisingFlow ? (isAr ? 'وصف الإعلان' : 'Ad description') : isAr ? 'وصف مختصر' : 'Short description'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <span>{isAdvertisingFlow ? (isAr ? 'وصف الإعلان' : 'Ad description') : isAr ? 'وصف مختصر' : 'Short description'}</span>
+                  {!isAdvertisingFlow && division === 'STAYS' && (
+                    <button
+                      type="button"
+                      onClick={() => void writeDescriptionWithAi()}
+                      disabled={aiWriting}
+                      style={{
+                        minHeight: 40,
+                        border: '1px solid #7c5cff',
+                        borderRadius: 10,
+                        background: aiWriting ? '#241d4a' : 'linear-gradient(135deg,#7c5cff,#4f6cff)',
+                        color: '#fff',
+                        fontWeight: 900,
+                        padding: '0 14px',
+                        cursor: aiWriting ? 'default' : 'pointer',
+                      }}
+                    >
+                      {aiWriting ? (isAr ? '…يكتب الذكاء الاصطناعي' : 'AI is writing…') : isAr ? '✨ اكتب بالذكاء الاصطناعي' : '✨ Write with AI'}
+                    </button>
+                  )}
+                </div>
                 <textarea
                   onChange={(event) => setDescription(event.target.value)}
-                  placeholder={isAdvertisingFlow ? (isAr ? 'اكتب هدف الإعلان والجمهور المطلوب.' : 'Write the ad goal and target audience.') : isAr ? 'اكتب الوصف بوضوح.' : 'Write the description clearly.'}
+                  placeholder={isAdvertisingFlow ? (isAr ? 'اكتب هدف الإعلان والجمهور المطلوب.' : 'Write the ad goal and target audience.') : isAr ? 'اكتب الوصف بوضوح أو استخدم زر الذكاء الاصطناعي.' : 'Write the description clearly, or use the AI button.'}
                   value={description}
                 />
+                {aiError && <span style={{ color: '#ffabab', fontSize: 13, fontWeight: 700 }}>{aiError}</span>}
               </label>
               {isAdvertisingFlow && (
                 <div className="seller-form-grid">
