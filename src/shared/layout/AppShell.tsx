@@ -311,7 +311,9 @@ function getRouteContext(path: string, isAr: boolean) {
     return {
       section: isAr ? 'تواصل' : 'Contact',
       page: isAr ? 'صندوق الرسائل' : 'Inbox',
-      backPath: home,
+      // Back returns to the account page (My Trips), not the public landing — the inbox is opened
+      // from inside a signed-in account.
+      backPath: '/trips',
       nextPath: '',
     }
   }
