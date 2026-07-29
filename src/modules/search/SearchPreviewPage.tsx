@@ -254,7 +254,12 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               <article key={listing.id} className="search-result-card">
                 <img src={listingImage(listing)} alt="" loading="lazy" />
                 <div className="search-result-body">
-                  <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                  <div className="search-result-toprow">
+                    <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                    {(listing.reviewCount ?? 0) > 0 && (
+                      <span className="search-result-rating">★ {listing.reviewAverage} · {listing.reviewCount}</span>
+                    )}
+                  </div>
                   <h2>{listingTitleText(listing, lang)}</h2>
                   <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
                   <div className="search-result-meta">

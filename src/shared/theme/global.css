@@ -6161,11 +6161,25 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   padding: 15px;
 }
 
+.search-result-toprow {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
 .search-result-status {
   color: #20d29b;
   font-size: 12px;
   font-weight: 950;
   text-transform: uppercase;
+}
+
+.search-result-rating {
+  color: #f5c518;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .search-result-offer-badge {

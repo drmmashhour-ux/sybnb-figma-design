@@ -276,6 +276,27 @@ export async function handleListings(req, res, url, context) {
         }
       }
 
+      // Review aggregate per card (Airbnb-style ★ on results). One grouped query; visible reviews only.
+      if (results.length) {
+        const ids = results.map((listing) => listing.id)
+        const reviewRows = await db().listingReview.groupBy({
+          by: ['listingId'],
+          where: { listingId: { in: ids }, hiddenAt: null },
+          _avg: { rating: true },
+          _count: { _all: true },
+        })
+        const reviewByListing = new Map(reviewRows.map((row) => [row.listingId, row]))
+        results = results.map((listing) => {
+          const agg = reviewByListing.get(listing.id)
+          const count = agg?._count?._all || 0
+          return {
+            ...listing,
+            reviewCount: count,
+            reviewAverage: count ? Math.round((agg._avg.rating || 0) * 10) / 10 : null,
+          }
+        })
+      }
+
       return json(res, 200, { ok: true, listings: results })
     }
 

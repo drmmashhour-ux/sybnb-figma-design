@@ -48,6 +48,9 @@ export type PlatformListing = {
   hasActiveOffer?: boolean
   offerNightsCount?: number
   cheapestOfferMinor?: number | null
+  // Guest-review aggregate for cards (Airbnb-style ★). Null average when there are no visible reviews.
+  reviewAverage?: number | null
+  reviewCount?: number
   // CarGurus-style Deal Rating (025/Carcad Phase E) -- CARS listings only, computed server-side
   // against a pool of comparable APPROVED listings. Absent/undefined for every other division.
   dealRating?: {
