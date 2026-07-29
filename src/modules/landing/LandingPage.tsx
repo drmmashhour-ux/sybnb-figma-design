@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { SYRIA_GOVERNORATES, getGovernorate, labelFor } from '../../engines/search/syriaData'
@@ -347,37 +346,8 @@ export function LandingPage({ lang }: Props) {
   const t = COPY[lang]
   const serif = isAr ? '' : ' stay-serif'
 
-  const [destination, setDestination] = useState('')
-  const [area, setArea] = useState('')
-  const [checkIn, setCheckIn] = useState('')
-  const [checkOut, setCheckOut] = useState('')
-  const [guests, setGuests] = useState(2)
-  const [propertyType, setPropertyType] = useState('any')
-  const [priceBand, setPriceBand] = useState('any')
-
   const [category, setCategory] = useState('all')
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set())
-
-  const areaOptions = useMemo(() => governorateAreaOptions(destination), [destination])
-
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const chosenArea = areaOptions.find((entry) => entry.key === area)
-    const query: Record<string, unknown> = { guests }
-    if (destination) query.governorate = destination
-    if (chosenArea) query.city = chosenArea.cityKey
-    if (area) query.area = area
-    if (checkIn) query.checkIn = checkIn
-    if (checkOut) query.checkOut = checkOut
-    if (propertyType && propertyType !== 'any') query.propertyType = propertyType
-    if (priceBand && priceBand !== 'any') query.priceBand = priceBand
-    try {
-      window.localStorage.setItem(PLATFORM.staySearchKey, JSON.stringify(query))
-    } catch {
-      /* storage may be unavailable; still route to the real search */
-    }
-    navigate('/search-preview')
-  }
 
   function toggleFavorite(id: string) {
     setFavorites((current) => {
@@ -422,103 +392,14 @@ export function LandingPage({ lang }: Props) {
           <h1 className={`str-hero-title${serif}`}>{t.heroTitle}</h1>
           <p className="str-hero-sub">{t.heroSub}</p>
 
-          <form className="str-search" onSubmit={submitSearch}>
-            <div className="str-search-main">
-              <div className="str-field">
-                <label htmlFor="str-where">{t.where}</label>
-                <select
-                  id="str-where"
-                  value={destination}
-                  onChange={(e) => {
-                    setDestination(e.target.value)
-                    setArea('')
-                  }}
-                >
-                  <option value="">{t.whereAll}</option>
-                  {SYRIA_GOVERNORATES.map((gov) => (
-                    <option key={gov.key} value={gov.key}>
-                      {labelFor(lang, gov)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="str-field">
-                <label htmlFor="str-area">{t.area}</label>
-                <select
-                  id="str-area"
-                  value={area}
-                  disabled={!destination}
-                  onChange={(e) => setArea(e.target.value)}
-                >
-                  <option value="">{t.areaAll}</option>
-                  {areaOptions.map((entry) => (
-                    <option key={entry.key} value={entry.key}>
-                      {isAr ? entry.ar : entry.en}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="str-field">
-                <label htmlFor="str-checkin">{t.checkIn}</label>
-                <input id="str-checkin" type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
-              </div>
-              <div className="str-field">
-                <label htmlFor="str-checkout">{t.checkOut}</label>
-                <input
-                  id="str-checkout"
-                  type="date"
-                  value={checkOut}
-                  min={checkIn || undefined}
-                  onChange={(e) => setCheckOut(e.target.value)}
-                />
-              </div>
-              <div className="str-field str-field-guests">
-                <label htmlFor="str-guests">{t.guests}</label>
-                <input
-                  id="str-guests"
-                  type="number"
-                  min={1}
-                  max={16}
-                  value={guests}
-                  onChange={(e) => setGuests(Math.max(1, Number(e.target.value) || 1))}
-                />
-              </div>
-            </div>
-
-            <div className="str-search-extra">
-              <div className="str-quick">
-                <div className="str-field">
-                  <label htmlFor="str-ptype">{t.propertyType}</label>
-                  <select id="str-ptype" value={propertyType} onChange={(e) => setPropertyType(e.target.value)}>
-                    {PROPERTY_TYPE_OPTIONS.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {isAr ? option.ar : option.en}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="str-field">
-                  <label>{t.priceBand}</label>
-                  <div className="str-bands" role="group" aria-label={t.priceBand}>
-                    {PRICE_BAND_OPTIONS.map((option) => (
-                      <button
-                        type="button"
-                        key={option.key}
-                        className={`str-chip ${priceBand === option.key ? 'active' : ''}`}
-                        aria-pressed={priceBand === option.key}
-                        onClick={() => setPriceBand(option.key)}
-                      >
-                        {isAr ? option.ar : option.en}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <button type="submit" className="str-search-btn">
-                {t.search}
-              </button>
-            </div>
-          </form>
+          <div className="str-hero-actions">
+            <button className="str-btn-gold" onClick={() => navigate('/search-preview')}>
+              {t.searchStay}
+            </button>
+            <button className="str-btn-outline" onClick={() => navigate('/become-host')}>
+              {t.becomeHost}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -533,41 +414,6 @@ export function LandingPage({ lang }: Props) {
             </div>
           </div>
         ))}
-      </section>
-
-      {/* 4 — STAYS: Airbnb-style grouped rows (real listings or honest empty lines) */}
-      <section className="str-stays" aria-label={t.staysRow}>
-        <h2 className={`str-section-title${serif}`}>{t.staysRow}</h2>
-
-        <div className="str-chips" role="tablist" aria-label={t.staysRow}>
-          {CATEGORIES.map((entry) => (
-            <button
-              key={entry.key}
-              role="tab"
-              aria-selected={category === entry.key}
-              className={`str-chip ${category === entry.key ? 'active' : ''}`}
-              onClick={() => setCategory(entry.key)}
-            >
-              {categoryLabels[entry.key]}
-            </button>
-          ))}
-        </div>
-
-        {STAY_GROUPS.map((group) => {
-          const queries: ListingSearchFilters[] = group.governorates
-            ? group.governorates.map((governorate) => ({ governorate }))
-            : [{ sort: group.sort }]
-          return (
-            <StayGroupRow
-              key={group.key}
-              title={isAr ? group.ar : group.en}
-              queries={queries}
-              category={category}
-              serif={serif}
-              {...cardHandlers}
-            />
-          )
-        })}
       </section>
 
       {/* 5 — HOW IT WORKS */}

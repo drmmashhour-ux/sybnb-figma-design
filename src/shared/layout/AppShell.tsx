@@ -73,20 +73,9 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
                 EN
               </button>
             </div>
-            {!isHostArea && (
-              <div className="public-auth-actions">
-                {/* Nav kept lean per owner: My Trips (the client home) + Book now. Wallet and Settings
-                    are reached from inside My Trips (DashboardPage has the wallet section + a settings ⚙),
-                    so the /wallet and /settings routes stay reachable without cluttering the top nav.
-                    Hidden entirely on host pages (isHostArea) — these are guest/client actions. */}
-                <button className="menu-action" onClick={() => navigate('/trips')}>
-                  {isAr ? 'رحلاتي' : 'My Trips'}
-                </button>
-                <button className="primary-action" onClick={() => navigate('/stays')}>
-                  {isAr ? 'احجز الآن' : 'Book now'}
-                </button>
-              </div>
-            )}
+            {/* Top nav kept to brand + language only, per owner. "My Trips" is NOT a global nav button;
+                the guest reaches their trips from inside the guest account page (the account avatar /
+                the booking flow lands there). Booking/search is reached from the landing "Search stay" CTA. */}
           </nav>
         </header>
       )}
@@ -94,9 +83,6 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
         <div className="flow-step-nav" aria-label={isAr ? 'التنقل داخل المسار' : 'Flow navigation'}>
           <button className="flow-nav-button" onClick={goBack}>
             {isAr ? 'السابق' : 'Back'}
-          </button>
-          <button className="flow-nav-button flow-home-button" onClick={() => navigate('/')}>
-            {isAr ? 'الرئيسية' : 'Home'}
           </button>
           <span>{routeContext.section} · {routeContext.page}</span>
           {routeContext.nextPath ? (

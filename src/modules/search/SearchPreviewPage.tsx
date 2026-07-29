@@ -219,16 +219,14 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         </button>
       </section>
 
-      <section className="search-hero">
-        <div>
-          <p>{divisionCopy?.ready || (isStaysEntry ? t.staysReady : t.ready)}</p>
-          <h1>{divisionCopy?.title || (isStaysEntry ? t.staysTitle : lang === 'ar' ? 'محرك بحث SYBNB' : 'SYBNB Search Engine')}</h1>
-          <span>{divisionCopy?.body || (isStaysEntry ? t.staysBody : t.body)}</span>
-        </div>
-        <div className="search-hero-metrics" aria-label={lang === 'ar' ? 'حالة البحث' : 'Search status'}>
-          <strong>{listings.length}</strong>
-          <small>{isSampleMode ? t.sampleResults : t.liveResults}</small>
-        </div>
+      <section style={flowStyles.heroPhoto} aria-label={lang === 'ar' ? 'سوريا' : 'Syria'}>
+        <img
+          src="/assets/filter-photos/popular/old-city.webp"
+          alt={lang === 'ar' ? 'سوريا' : 'Syria'}
+          style={flowStyles.heroPhotoImg}
+          loading="eager"
+        />
+        <span style={flowStyles.heroPhotoCaption}>{lang === 'ar' ? 'إقامات في سوريا' : 'Stays in Syria'}</span>
       </section>
 
       <UnifiedSearchBar
@@ -291,6 +289,18 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
 const flowStyles = {
   nav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
   arrow: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
+  heroPhoto: { position: 'relative', margin: '16px 0', borderRadius: 20, overflow: 'hidden', border: '1px solid #2d3650' },
+  heroPhotoImg: { display: 'block', width: '100%', height: 240, objectFit: 'cover' },
+  heroPhotoCaption: {
+    position: 'absolute',
+    insetInlineStart: 20,
+    bottom: 18,
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: 900,
+    letterSpacing: '.2px',
+    textShadow: '0 2px 18px rgba(0,0,0,.6)',
+  },
 } as const
 
 function listingImage(listing: PlatformListing) {

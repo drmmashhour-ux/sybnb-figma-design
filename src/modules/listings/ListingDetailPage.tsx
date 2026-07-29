@@ -350,8 +350,23 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     setMessage('')
 
     try {
-      setListing(await fetchPrototypeListing(listingId))
+      const fetched = await fetchPrototypeListing(listingId)
+      setListing(fetched)
       setStatus('ready')
+      // Self-correct the breadcrumb's return-path memory from the listing's own division -- a
+      // direct/shared link (WhatsApp, etc.) never goes through a browse page's click handler, so
+      // sessionStorage would otherwise still hold a stale or default value from a prior visit.
+      if (typeof window !== 'undefined') {
+        const routeForDivision: Record<string, string> = {
+          STAYS: '/stays', RENTALS: '/rentals', BUY: '/buy',
+          NEW_CONSTRUCTION: '/new-construction', CARS: '/cars', MARKETPLACE: '/marketplace',
+        }
+        const route = routeForDivision[fetched.division]
+        if (route) {
+          sessionStorage.setItem('sybnb-v6-listing-return-path', route)
+          window.dispatchEvent(new Event('sybnb:listing-return-path-updated'))
+        }
+      }
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)

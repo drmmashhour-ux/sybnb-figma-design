@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import type { CSSVars } from '../../shared/theme/cssVars'
-import { SYRIA_GOVERNORATES, labelFor } from '../../engines/search/syriaData'
 import { SELLER_PLANS } from '../seller/sellerData'
 
 type Props = {
@@ -37,7 +35,7 @@ const COPY = {
     checkIn: 'الوصول',
     checkOut: 'المغادرة',
     guests: 'الضيوف',
-    searchStays: 'ابحث',
+    searchStays: 'ابحث عن إقامة',
     trustRow: [
       { icon: '✓', t: 'منازل موثّقة', b: 'إعلانات تُراجَع قبل نشرها.' },
       { icon: '⊘', t: 'بلا رسوم خفية', b: 'عمولة واضحة 10% لكل حجز فقط.' },
@@ -89,7 +87,7 @@ const COPY = {
     checkIn: 'Check-in',
     checkOut: 'Check-out',
     guests: 'Guests',
-    searchStays: 'Search',
+    searchStays: 'Search stay',
     trustRow: [
       { icon: '✓', t: 'Verified homes', b: 'Listings are reviewed before they go live.' },
       { icon: '⊘', t: 'No hidden fees', b: 'A clear 10% commission per booking, nothing else.' },
@@ -141,29 +139,9 @@ export function HostHomePage({ lang }: Props) {
   const commission = Math.round(gross * COMMISSION_RATE)
   const net = gross - commission
 
-  // Hero "Search stays" mini-form → same guest handoff.
-  const [where, setWhere] = useState('')
-  const [checkIn, setCheckIn] = useState('')
-  const [checkOut, setCheckOut] = useState('')
-  const [searchGuests, setSearchGuests] = useState(2)
-
   const startHosting = () => navigate('/host/stays')
   const scrollToPlans = () =>
     document.getElementById('hosth-plans')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-
-  function submitStaySearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const query: Record<string, unknown> = { guests: searchGuests }
-    if (where) query.governorate = where
-    if (checkIn) query.checkIn = checkIn
-    if (checkOut) query.checkOut = checkOut
-    try {
-      window.localStorage.setItem(STAY_SEARCH_KEY, JSON.stringify(query))
-    } catch {
-      /* storage may be unavailable; still route to the real search */
-    }
-    navigate('/search-preview')
-  }
 
   return (
     <main className="hosth-page" dir={isAr ? 'rtl' : 'ltr'}>
@@ -180,63 +158,14 @@ export function HostHomePage({ lang }: Props) {
           </h1>
           <p className="hosth-hero-sub">{t.heroTrust}</p>
 
-          {/* Hybrid action card overlapping the hero */}
-          <div className="hosth-hero-card">
-            <div className="hosth-hero-card-primary">
-              <div className="hosth-hero-card-copy">
-                <b>{t.hostCardTitle}</b>
-                <span>{t.hostCardSub}</span>
-              </div>
-              <button className="hosth-btn-primary" onClick={startHosting}>
-                {t.becomeHost}
-              </button>
-            </div>
-
-            <div className="hosth-hero-divider" aria-hidden="true">
-              <span>{t.orSearch}</span>
-            </div>
-
-            <form className="hosth-hero-search" onSubmit={submitStaySearch}>
-              <div className="hosth-hs-field">
-                <label htmlFor="hosth-where">{t.where}</label>
-                <select id="hosth-where" value={where} onChange={(e) => setWhere(e.target.value)}>
-                  <option value="">{t.whereAll}</option>
-                  {SYRIA_GOVERNORATES.map((gov) => (
-                    <option key={gov.key} value={gov.key}>
-                      {labelFor(lang, gov)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="hosth-hs-field">
-                <label htmlFor="hosth-checkin">{t.checkIn}</label>
-                <input id="hosth-checkin" type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
-              </div>
-              <div className="hosth-hs-field">
-                <label htmlFor="hosth-checkout">{t.checkOut}</label>
-                <input
-                  id="hosth-checkout"
-                  type="date"
-                  value={checkOut}
-                  min={checkIn || undefined}
-                  onChange={(e) => setCheckOut(e.target.value)}
-                />
-              </div>
-              <div className="hosth-hs-field hosth-hs-guests">
-                <label htmlFor="hosth-guests">{t.guests}</label>
-                <input
-                  id="hosth-guests"
-                  type="number"
-                  min={1}
-                  max={16}
-                  value={searchGuests}
-                  onChange={(e) => setSearchGuests(Math.max(1, Number(e.target.value) || 1))}
-                />
-              </div>
-              <button type="submit" className="hosth-hs-btn">
-                {t.searchStays}
-              </button>
-            </form>
+          {/* Two clear CTAs: become a host, or jump to the guest stay search. */}
+          <div className="hosth-hero-actions" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 24 }}>
+            <button className="hosth-btn-primary" onClick={startHosting}>
+              {t.becomeHost}
+            </button>
+            <button className="hosth-btn-ghost" onClick={() => navigate('/search-preview')}>
+              {t.searchStays}
+            </button>
           </div>
         </div>
       </section>

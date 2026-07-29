@@ -91,8 +91,8 @@ const T = {
   ar: {
     title: 'محرك البحث الموحد',
     subtitle: 'نفس النظام لكل أقسام SYBNB.',
-    lockedStaysTitle: 'محرك الإيجار اليومي فقط',
-    lockedStaysSubtitle: 'هذه الصفحة مخصصة للحجز قصير المدة: تاريخ، ضيوف، غرفة، سرير، وخدمات.',
+    lockedStaysTitle: 'ابحث عن إقامتك',
+    lockedStaysSubtitle: 'اختر الوجهة والتواريخ والفلاتر.',
     stays: 'إيجار يومي',
     rentals: 'إيجار شهري',
     buy: 'شراء عقار',
@@ -110,11 +110,11 @@ const T = {
     bathrooms: 'حمامات',
     keyword: 'كلمة البحث',
     keywordPlaceholder: 'اكتب اسم، موديل، حي، أو خدمة...',
-    filters: 'خيارات العملاء',
+    filters: 'فلاتر البحث',
     showFilters: 'عرض الفلاتر',
     hideFilters: 'إخفاء الفلاتر',
-    dailyCalendar: 'تقويم الإيجار اليومي',
-    dailyCalendarHint: 'اختر تاريخ الدخول والخروج قبل عرض النتائج اليومية.',
+    dailyCalendar: 'تواريخك',
+    dailyCalendarHint: 'اختر تاريخ الدخول والخروج.',
     minPrice: 'أقل سعر',
     maxPrice: 'أعلى سعر',
     bedrooms: 'الغرف',
@@ -127,6 +127,7 @@ const T = {
     propertyType: 'نوع العقار',
     apartment: 'شقة',
     villa: 'فيلا',
+    hotel: 'فندق',
     office: 'مكتب',
     shop: 'محل',
     land: 'أرض',
@@ -160,8 +161,8 @@ const T = {
   en: {
     title: 'Unified Search Engine',
     subtitle: 'One clean search system across SYBNB.',
-    lockedStaysTitle: 'Daily stay search only',
-    lockedStaysSubtitle: 'This page is dedicated to short-term stays: dates, guests, room, bed, and services.',
+    lockedStaysTitle: 'Find your stay',
+    lockedStaysSubtitle: 'Pick your location, dates, and filters.',
     stays: 'Daily stays',
     rentals: 'Monthly rentals',
     buy: 'Buy property',
@@ -179,11 +180,11 @@ const T = {
     bathrooms: 'Bathrooms',
     keyword: 'Keyword',
     keywordPlaceholder: 'Search name, model, area, or service...',
-    filters: 'Filters',
+    filters: 'Search filters',
     showFilters: 'Show filters',
     hideFilters: 'Hide filters',
-    dailyCalendar: 'Daily rent calendar',
-    dailyCalendarHint: 'Choose check-in and check-out before viewing daily stay results.',
+    dailyCalendar: 'Your dates',
+    dailyCalendarHint: 'Choose check-in and check-out.',
     minPrice: 'Min price',
     maxPrice: 'Max price',
     bedrooms: 'Bedrooms',
@@ -196,6 +197,7 @@ const T = {
     propertyType: 'Property type',
     apartment: 'Apartment',
     villa: 'Villa',
+    hotel: 'Hotel',
     office: 'Office',
     shop: 'Shop',
     land: 'Land',
@@ -248,6 +250,7 @@ const propertyTypeOptions: FilterOption[] = [
   { key: 'any', labelKey: 'any', icon: '*' },
   { key: 'apartment', labelKey: 'apartment', icon: 'A' },
   { key: 'villa', labelKey: 'villa', icon: 'V' },
+  { key: 'hotel', labelKey: 'hotel', icon: 'H' },
   { key: 'office', labelKey: 'office', icon: 'O' },
   { key: 'shop', labelKey: 'shop', icon: 'S' },
   { key: 'land', labelKey: 'land', icon: 'L' },
@@ -455,16 +458,18 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     <section dir={lang === 'ar' ? 'rtl' : 'ltr'} style={styles.shell}>
       <div style={styles.header}>
         <div>
-          <p style={styles.eyebrow}>{isAr ? 'محرك البحث' : 'SEARCH ENGINE'}</p>
           <h2 style={styles.title}>{lockedDivision && initialDivision === 'stays' ? t.lockedStaysTitle : t.title}</h2>
           <p style={styles.subtitle}>{lockedDivision && initialDivision === 'stays' ? t.lockedStaysSubtitle : t.subtitle}</p>
         </div>
       </div>
 
       {lockedDivision ? (
-        <div style={styles.lockedDivision}>
-          <span>{t[initialDivision]}</span>
-        </div>
+        // On the stays-only page the single "Daily stays" pill is redundant with the header — hide it.
+        initialDivision === 'stays' ? null : (
+          <div style={styles.lockedDivision}>
+            <span>{t[initialDivision]}</span>
+          </div>
+        )
       ) : (
         <div style={styles.tabs}>
           {DIVISIONS.map((division) => (
@@ -564,26 +569,6 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
             />
           </section>
         ) : null}
-
-        <label style={styles.label}>
-          {t.customPlace}
-          <input
-            value={value.customPlaceName}
-            onChange={(event) => {
-              update({ customPlaceName: event.target.value })
-              setLearnedMessage('')
-            }}
-            placeholder={t.customPlacePlaceholder}
-            style={styles.input}
-          />
-        </label>
-        <div style={{ ...styles.aiLearnBox, ...(value.customPlaceName.trim() ? styles.aiLearnBoxActive : {}) }}>
-          <span>🧠</span>
-          <div>
-            <b>{value.customPlaceName.trim() ? t.learnedPending : (isAr ? 'مكان مخصص' : 'Custom place')}</b>
-            <p style={styles.aiLearnText}>{learnedMessage || t.aiLearnHint}</p>
-          </div>
-        </div>
 
         {!isStay ? (
           <label style={styles.label}>

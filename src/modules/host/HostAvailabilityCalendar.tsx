@@ -277,7 +277,12 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
     }
   }
 
-  const todayIso = toISO(new Date())
+  const now = new Date()
+  const todayIso = toISO(now)
+  // Can't set availability/pricing on days that have already passed → block paging into past months.
+  const cursorBeforeThisMonth =
+    cursor.getFullYear() < now.getFullYear() ||
+    (cursor.getFullYear() === now.getFullYear() && cursor.getMonth() <= now.getMonth())
 
   return (
     <section dir={isAr ? 'rtl' : 'ltr'} style={styles.wrap}>
@@ -298,6 +303,7 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
         <button
           type="button"
           style={styles.navButton}
+          disabled={cursorBeforeThisMonth}
           onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}
         >
           ‹
@@ -326,12 +332,13 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
           const isBlocked = blockedDates.has(iso)
           const isSaving = savingDate === iso
           const isToday = iso === todayIso
+          const isPast = iso < todayIso
           const isEditing = editDate === iso
           return (
             <button
               key={iso}
               type="button"
-              disabled={isBooked || status === 'loading'}
+              disabled={isBooked || isPast || status === 'loading'}
               onClick={() => openDayEditor(date)}
               aria-label={isBooked ? t.legendBooked : isBlocked ? t.legendBlocked : t.legendAvailable}
               style={{
@@ -341,6 +348,7 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
                 ...(isToday ? styles.dayToday : {}),
                 ...(isEditing ? styles.dayEditing : {}),
                 ...(isSaving ? styles.daySaving : {}),
+                ...(isPast ? { opacity: 0.32, textDecoration: 'line-through', cursor: 'not-allowed' } : {}),
               }}
             >
               <span>{date.getDate()}</span>
@@ -431,11 +439,11 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
         <div style={styles.pricingRow}>
           <label style={styles.pricingLabel}>
             {t.seasonFrom}
-            <input style={styles.pricingInput} type="date" value={seasonFrom} onChange={(event) => setSeasonFrom(event.target.value)} />
+            <input style={styles.pricingInput} type="date" min={todayIso} value={seasonFrom} onChange={(event) => setSeasonFrom(event.target.value)} />
           </label>
           <label style={styles.pricingLabel}>
             {t.seasonTo}
-            <input style={styles.pricingInput} type="date" value={seasonTo} onChange={(event) => setSeasonTo(event.target.value)} />
+            <input style={styles.pricingInput} type="date" min={seasonFrom || todayIso} value={seasonTo} onChange={(event) => setSeasonTo(event.target.value)} />
           </label>
           <label style={styles.pricingLabel}>
             {t.seasonPrice}

@@ -501,6 +501,11 @@ export function SellerListingWizard({ lang }: Props) {
     longitude,
     pinConfirmed: mapPinConfirmed,
   }
+  // A host can only open availability on today or future days — never the past.
+  const wizardTodayIso = addDaysIso(0)
+  const availMonthAtOrBeforeThisMonth =
+    availabilityMonth.getFullYear() < new Date().getFullYear() ||
+    (availabilityMonth.getFullYear() === new Date().getFullYear() && availabilityMonth.getMonth() <= new Date().getMonth())
   const availabilityMonthDays = useMemo(() => monthDays(availabilityMonth), [availabilityMonth])
   const reservationMonthDays = useMemo(() => monthDays(reservationMonth), [reservationMonth])
   const selectedAvailabilityDays = useMemo(() => new Set(availabilityDates), [availabilityDates])
@@ -516,6 +521,7 @@ export function SellerListingWizard({ lang }: Props) {
   }
 
   function toggleAvailabilityDay(day: string) {
+    if (day < wizardTodayIso) return // can't open a day that has already passed
     updateAvailabilityDates(selectedAvailabilityDays.has(day) ? availabilityDates.filter((item) => item !== day) : [...availabilityDates, day])
   }
 
@@ -1463,7 +1469,7 @@ export function SellerListingWizard({ lang }: Props) {
                       <div className="seller-host-calendar-panel-head">
                         <strong>{isAr ? 'أماكن متوفرة' : 'Available places'}</strong>
                         <div className="seller-host-month-switcher">
-                          <button onClick={() => setAvailabilityMonth((current) => addMonths(current, -1))} type="button">
+                          <button disabled={availMonthAtOrBeforeThisMonth} onClick={() => setAvailabilityMonth((current) => addMonths(current, -1))} type="button">
                             {isAr ? 'السابق' : 'Previous'}
                           </button>
                           <b>{monthTitle(availabilityMonth, lang)}</b>
@@ -1485,12 +1491,22 @@ export function SellerListingWizard({ lang }: Props) {
                         </label>
                       </div>
                       <div className="seller-host-day-grid">
-                        {availabilityMonthDays.map((day) => (
-                          <button className={selectedAvailabilityDays.has(day) ? 'active' : ''} key={day} onClick={() => toggleAvailabilityDay(day)} type="button">
-                            <strong>{new Date(`${day}T00:00:00`).getDate()}</strong>
-                            <span>{selectedAvailabilityDays.has(day) ? `USD ${variableNightPrice || price}` : isAr ? 'مغلق' : 'Closed'}</span>
-                          </button>
-                        ))}
+                        {availabilityMonthDays.map((day) => {
+                          const isPast = day < wizardTodayIso
+                          return (
+                            <button
+                              className={selectedAvailabilityDays.has(day) ? 'active' : ''}
+                              key={day}
+                              disabled={isPast}
+                              onClick={() => toggleAvailabilityDay(day)}
+                              type="button"
+                              style={isPast ? { opacity: 0.3, textDecoration: 'line-through', cursor: 'not-allowed' } : undefined}
+                            >
+                              <strong>{new Date(`${day}T00:00:00`).getDate()}</strong>
+                              <span>{selectedAvailabilityDays.has(day) ? `USD ${variableNightPrice || price}` : isAr ? 'مغلق' : 'Closed'}</span>
+                            </button>
+                          )
+                        })}
                       </div>
                     </section>
                     <section className="seller-host-calendar-panel booked">
