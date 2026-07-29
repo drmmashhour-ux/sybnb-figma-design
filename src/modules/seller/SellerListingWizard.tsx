@@ -286,6 +286,43 @@ const HOST_LISTING_PLANS: Array<{
       { id: 'inspectionFiles', ar: 'ملفات الفحص', en: 'Inspection files' },
     ],
   },
+  {
+    // Hotel plan (STR): for multi-room properties. The room-type engine already lets a hotel add
+    // many room types / bed types under one accommodation (addAccommodationRoomType); this plan is
+    // the tier meant for it, with the richest photo slots. Self-attested payment like the other host
+    // plans — no server price table involved (see the accommodation flow, not seller-plan-proof).
+    id: 'hotel',
+    ar: 'Hotel',
+    en: 'Hotel',
+    priceUsd: 100,
+    services: {
+      ar: [
+        'كل مزايا Premium',
+        'عدة أنواع غرف وأسِرّة في إعلان واحد',
+        'حتى 30 صورة عبر خانات متعددة',
+        'أولوية قصوى في المراجعة',
+        'دعم تجهيز الفندق قبل النشر',
+      ],
+      en: [
+        'Everything in Premium',
+        'Multiple room types & bed types in one ad',
+        'Up to 30 photos across multiple slots',
+        'Top-priority admin review',
+        'Hotel setup support before publishing',
+      ],
+    },
+    mediaSlots: [
+      { id: 'propertyPhotos', ar: 'صور المبنى والواجهة', en: 'Building & exterior photos' },
+      { id: 'lobbyPhotos', ar: 'صور اللوبي والمرافق', en: 'Lobby & common areas' },
+      { id: 'roomPhotos', ar: 'صور أنواع الغرف', en: 'Room-type photos' },
+      { id: 'amenitiesPhotos', ar: 'صور الخدمات', en: 'Amenities photos' },
+      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
+      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
+      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
+      { id: 'extraGallery', ar: 'معرض صور إضافي', en: 'Extra gallery' },
+      { id: 'inspectionFiles', ar: 'رخص وملفات الفندق', en: 'Hotel licenses & files' },
+    ],
+  },
 ]
 
 export function SellerListingWizard({ lang }: Props) {
