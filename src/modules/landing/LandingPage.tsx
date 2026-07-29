@@ -388,9 +388,6 @@ export function LandingPage({ lang }: Props) {
     })
   }
 
-  const scrollToSearch = () =>
-    document.getElementById('stay-search')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-
   const trust = [
     { icon: '✓', title: t.trustVerified, body: t.trustVerifiedBody },
     { icon: '⛨', title: t.trustSecure, body: t.trustSecureBody },
@@ -414,41 +411,7 @@ export function LandingPage({ lang }: Props) {
 
   return (
     <main className="landing-page str-landing">
-      {/* 1 — SPLASH */}
-      <section className="str-splash" aria-label={`${PLATFORM.brand} ${PLATFORM.suffix}`}>
-        <div className="str-splash-inner">
-          <span className="str-wordmark">
-            {PLATFORM.brand}
-            <i>·</i>
-            {PLATFORM.suffix}
-          </span>
-
-          <div className="str-movie">
-            <video
-              key={lang}
-              className="str-movie-video"
-              src={isAr ? PLATFORM.video.ar : PLATFORM.video.en}
-              controls
-              playsInline
-              preload="metadata"
-              aria-label={t.movieLabel}
-            />
-          </div>
-
-          <p className={`str-letter${serif}`}>{t.letter}</p>
-
-          <div className="str-splash-actions">
-            <button className="str-btn-gold" onClick={scrollToSearch}>
-              {t.searchStay}
-            </button>
-            <button className="str-btn-outline" onClick={() => navigate('/become-host')}>
-              {t.becomeHost}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* 2 — STAYS HERO + SEARCH */}
+      {/* 1 — STAYS HERO + SEARCH */}
       <section
         id="stay-search"
         className="str-hero"
