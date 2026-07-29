@@ -40,7 +40,7 @@ type Thread = {
 
 const copy = {
   ar: {
-    back: 'العودة للرئيسية',
+    back: 'العودة إلى حسابي',
     previous: 'السابق',
     next: 'التالي',
     title: 'IMMOContact',
@@ -87,7 +87,7 @@ const copy = {
     sendError: 'تعذر إرسال الرسالة.',
   },
   en: {
-    back: 'Back to landing',
+    back: 'Back to my account',
     previous: 'Previous',
     next: 'Next',
     title: 'IMMOContact',
@@ -271,7 +271,7 @@ export function ImmocontactPage({ lang }: Props) {
         </button>
       </section>
 
-      <button className="immo-back" onClick={() => (window.location.hash = '/')}>
+      <button className="immo-back" onClick={() => (window.location.hash = '/trips')}>
         {t.back}
       </button>
 
