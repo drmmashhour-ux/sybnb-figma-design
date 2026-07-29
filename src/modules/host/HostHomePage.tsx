@@ -170,6 +170,23 @@ export function HostHomePage({ lang }: Props) {
         </div>
       </section>
 
+      {/* HOST STORY VIDEO — autoplays (muted) so guests see it the moment they open the page */}
+      <section
+        style={{ padding: '18px clamp(22px, 4vw, 54px) 0', maxWidth: 1180, margin: '0 auto', width: '100%' }}
+        aria-label={isAr ? 'قصة المضيف مع SYBNB' : 'Host story with SYBNB'}
+      >
+        <video
+          src="/assets/videos/host-ar.mp4"
+          autoPlay
+          muted
+          loop
+          controls
+          playsInline
+          preload="auto"
+          style={{ width: '100%', borderRadius: 20, display: 'block', border: '1px solid var(--hairline)', background: '#000' }}
+        />
+      </section>
+
       {/* Trust row */}
       <section className="hosth-trustrow" aria-label={t.heroTrust}>
         {t.trustRow.map((item) => (
@@ -260,20 +277,6 @@ export function HostHomePage({ lang }: Props) {
             </article>
           ))}
         </div>
-      </section>
-
-      {/* HOST STORY VIDEO */}
-      <section
-        style={{ padding: '6px clamp(22px, 4vw, 54px) 0', maxWidth: 1180, margin: '0 auto', width: '100%' }}
-        aria-label={isAr ? 'قصة المضيف مع SYBNB' : 'Host story with SYBNB'}
-      >
-        <video
-          src="/assets/videos/host-ar.mp4"
-          controls
-          playsInline
-          preload="metadata"
-          style={{ width: '100%', borderRadius: 20, display: 'block', border: '1px solid var(--hairline)', background: '#000' }}
-        />
       </section>
 
       {/* FINAL CTA */}
