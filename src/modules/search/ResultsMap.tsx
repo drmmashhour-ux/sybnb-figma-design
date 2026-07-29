@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import type { PlatformListing } from '../../shared/api/platformApi'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
-import { listingTitleText, moneyText } from '../../shared/i18n/display'
-import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
+import { listingTitleText } from '../../shared/i18n/display'
 
-// Airbnb-style results map.
-//  - No API key  → keyless Google embed centred on the searched area (works today).
-//  - Key present → Google Maps JS with one pin per stay (fit to bounds, price info window).
-// The owner adds VITE_GOOGLE_MAPS_API_KEY to the Vercel env to switch on pins; the component
-// upgrades automatically with no code change.
+// Airbnb-style results map — 100% free OpenStreetMap, no API key, no billing, no charges.
+// The map is a keyless OSM embed centred on the searched area (or the average of the stays that
+// carry coordinates). No Google Maps: no card, no key, nothing to bill.
 
-type Pin = { id: string; lat: number; lng: number; title: string; priceMinor: number; currency: string }
+type Pin = { id: string; lat: number; lng: number }
 
 const DAMASCUS = { lat: 33.5138, lng: 36.2765 }
 
@@ -23,85 +20,19 @@ function pinsFromListings(listings: PlatformListing[], lang: Lang): Pin[] {
     if (!target.hasCoordinates) continue
     const [lat, lng] = target.query.split(',').map(Number)
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
-    pins.push({
-      id: listing.id,
-      lat,
-      lng,
-      title: listingTitleText(listing, lang),
-      priceMinor: listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor,
-      currency: listing.currency === 'SYP' ? 'USD' : listing.currency,
-    })
+    pins.push({ id: listing.id, lat, lng })
   }
   return pins
 }
 
-// Load the Google Maps JS SDK exactly once per page.
-let mapsLoader: Promise<unknown> | null = null
-function loadGoogleMaps(apiKey: string): Promise<unknown> {
-  const w = window as unknown as { google?: { maps?: unknown } }
-  if (w.google?.maps) return Promise.resolve(w.google)
-  if (mapsLoader) return mapsLoader
-  mapsLoader = new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`
-    script.async = true
-    script.defer = true
-    script.onload = () => resolve((window as unknown as { google?: unknown }).google)
-    script.onerror = () => reject(new Error('google maps failed to load'))
-    document.head.appendChild(script)
-  })
-  return mapsLoader
-}
-
 export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; lang: Lang }) {
   const isAr = lang === 'ar'
-  const apiKey = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY || ''
   const pins = useMemo(() => pinsFromListings(listings, lang), [listings, lang])
-  const mapRef = useRef<HTMLDivElement | null>(null)
-  const [jsFailed, setJsFailed] = useState(false)
 
   const center = pins.length
     ? { lat: pins.reduce((sum, pin) => sum + pin.lat, 0) / pins.length, lng: pins.reduce((sum, pin) => sum + pin.lng, 0) / pins.length }
     : DAMASCUS
 
-  useEffect(() => {
-    if (!apiKey || !mapRef.current) return
-    let cancelled = false
-    loadGoogleMaps(apiKey)
-      .then((googleUnknown) => {
-        if (cancelled || !mapRef.current) return
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const google = googleUnknown as any
-        const map = new google.maps.Map(mapRef.current, {
-          center,
-          zoom: pins.length ? 12 : 11,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: false,
-        })
-        const bounds = new google.maps.LatLngBounds()
-        pins.forEach((pin) => {
-          const marker = new google.maps.Marker({ position: { lat: pin.lat, lng: pin.lng }, map, title: pin.title })
-          const info = new google.maps.InfoWindow({
-            content: `<div style="color:#111;font-weight:700;max-width:200px">${pin.title}<br/>${moneyText(pin.priceMinor, pin.currency, lang)} / ${isAr ? 'ليلة' : 'night'}</div>`,
-          })
-          marker.addListener('click', () => info.open(map, marker))
-          bounds.extend({ lat: pin.lat, lng: pin.lng })
-        })
-        if (pins.length > 1) map.fitBounds(bounds)
-      })
-      .catch(() => {
-        if (!cancelled) setJsFailed(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [apiKey, pins, center.lat, center.lng, lang, isAr])
-
-  // Google Maps JS (with pins) is used when a valid, billing-enabled key is present. Otherwise —
-  // no key, or Google rejected the key (billing not active) so `jsFailed` — fall back to a KEYLESS
-  // OpenStreetMap embed so the map always renders instead of a broken/blank Google frame.
-  const showGoogle = Boolean(apiKey) && !jsFailed
   const span = pins.length ? 0.06 : 0.09
   const bbox = `${center.lng - span},${center.lat - span},${center.lng + span},${center.lat + span}`
   const osmSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${center.lat}%2C${center.lng}`
@@ -116,17 +47,13 @@ export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; la
             : isAr ? 'عرض المنطقة' : 'Area view'}
         </small>
       </div>
-      {showGoogle ? (
-        <div ref={mapRef} style={styles.frame} />
-      ) : (
-        <iframe
-          title={isAr ? 'خريطة' : 'Map'}
-          src={osmSrc}
-          style={styles.frame}
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-      )}
+      <iframe
+        title={isAr ? 'خريطة' : 'Map'}
+        src={osmSrc}
+        style={styles.frame}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+      />
     </section>
   )
 }

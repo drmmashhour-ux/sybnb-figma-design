@@ -21,12 +21,9 @@ export function googleMapsSearchUrl(listing: PlatformListing, title: string, lan
 }
 
 export function googleMapsEmbedUrl(listing: PlatformListing, title: string, lang: Lang) {
-  const key = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY
   const target = listingMapTarget(listing, title, lang)
-  // With a billing-enabled key, use the Google Maps Embed API. Otherwise fall back to a KEYLESS
-  // OpenStreetMap embed (needs coordinates) so the map still renders — Google 404s / SAMEORIGIN-blocks
-  // its old keyless URL, so a Google embed without a key can never render.
-  if (key) return `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${encodeURIComponent(target.query)}`
+  // Free OpenStreetMap embed only — no Google Maps key, no billing, no charges. Needs coordinates;
+  // without them there is nothing precise to render, so return '' and let the caller show a link.
   if (target.hasCoordinates) {
     const [lat, lng] = target.query.split(',').map(Number)
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
