@@ -98,8 +98,13 @@ export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; la
     }
   }, [apiKey, pins, center.lat, center.lng, lang, isAr])
 
-  const useEmbed = !apiKey || jsFailed
-  const embedSrc = `https://www.google.com/maps?q=${center.lat},${center.lng}&z=${pins.length ? 12 : 11}&output=embed`
+  // A real Google map needs the API key: Google 404s / SAMEORIGIN-blocks the keyless embed URL,
+  // so without a key we hide the map entirely (no broken frame). It appears the moment
+  // VITE_GOOGLE_MAPS_API_KEY is set in the Vercel env — JS pins, with a keyed Embed-API fallback.
+  if (!apiKey) return null
+
+  const zoom = pins.length ? 12 : 11
+  const embedSrc = `https://www.google.com/maps/embed/v1/view?key=${encodeURIComponent(apiKey)}&center=${center.lat},${center.lng}&zoom=${zoom}`
 
   return (
     <section style={styles.wrap} aria-label={isAr ? 'خريطة النتائج' : 'Results map'}>
@@ -111,7 +116,7 @@ export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; la
             : isAr ? 'عرض المنطقة' : 'Area view'}
         </small>
       </div>
-      {useEmbed ? (
+      {jsFailed ? (
         <iframe
           title={isAr ? 'خريطة' : 'Map'}
           src={embedSrc}

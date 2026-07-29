@@ -21,7 +21,11 @@ export function googleMapsSearchUrl(listing: PlatformListing, title: string, lan
 }
 
 export function googleMapsEmbedUrl(listing: PlatformListing, title: string, lang: Lang) {
-  return `https://www.google.com/maps?q=${encodeURIComponent(listingMapTarget(listing, title, lang).query)}&output=embed`
+  const key = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY
+  const query = listingMapTarget(listing, title, lang).query
+  // Google 404s / SAMEORIGIN-blocks the old keyless `?output=embed` URL, so a working embed needs
+  // the key (Maps Embed API). Without a key return '' → callers show a blank frame, never a broken one.
+  return key ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}` : ''
 }
 
 export function offlineMapSnapshot(listing: PlatformListing, title: string, lang: Lang): OfflineMapSnapshot {

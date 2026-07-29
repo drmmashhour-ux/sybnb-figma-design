@@ -155,18 +155,7 @@ export function LandingPage({ lang }: Props) {
         </div>
       </section>
 
-      {/* 4 — MY TRIPS band */}
-      <section className="str-trips-band" aria-label={t.tripsTitle}>
-        <div className="str-trips-copy">
-          <b className={serif.trim()}>{t.tripsTitle}</b>
-          <p>{t.tripsBody}</p>
-        </div>
-        <button className="str-btn-outline" onClick={() => navigate('/trips')}>
-          {t.tripsCta}
-        </button>
-      </section>
-
-      {/* 5 — ABOUT */}
+      {/* 4 — ABOUT */}
       <section id="platform-about" className="str-about" aria-label={t.aboutEyebrow}>
         <span className="str-about-eyebrow">{t.aboutEyebrow}</span>
         <h2 className={serif.trim()}>{t.aboutTitle}</h2>
