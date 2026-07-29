@@ -248,7 +248,9 @@ export async function handleHost(req, res, url, context) {
   // description. Uses Claude when configured, template fallback otherwise — so it never hard-fails.
   if (url.pathname === '/api/host/listing-description') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    requireAuth(context, ['HOST', 'SELLER'])
+    // Any signed-in user (a host drafting a listing may still be a guest mid-onboarding). Low-risk
+    // text generation from client-provided attributes; cost is bounded by the AI_DESCRIPTION limit.
+    requireAuth(context)
     const body = await readJson(req)
     const result = await generateOrTemplate(body && typeof body === 'object' ? body : {})
     return json(res, 200, { ok: true, ...result })

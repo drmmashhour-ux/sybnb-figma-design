@@ -927,7 +927,13 @@ export async function fetchAccommodation(accommodationId: string) {
 export async function generateListingDescription(
   attributes: Record<string, unknown>,
 ): Promise<{ descriptionAr: string; descriptionEn: string; source: string }> {
-  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  // Prefer a host/seller session; fall back to the device guest session (auto-created) so the
+  // "Write with AI" button works even before the host has finished the partner sign-in.
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
   const response = await apiRequest<{ ok: true; descriptionAr: string; descriptionEn: string; source: string }>(
     '/api/host/listing-description',
     { method: 'POST', token: session.token, body: attributes },
