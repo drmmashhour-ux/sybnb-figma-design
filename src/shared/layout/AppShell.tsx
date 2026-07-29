@@ -4,6 +4,7 @@ import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
 import { Footer } from './Footer'
 import { AuthPanel } from '../../modules/auth/AuthPanel'
+import { clearGuestSession, clearStoredStaffSession, getStoredGuestSession, getStoredStaffSession } from '../../shared/api/platformApi'
 
 type Props = {
   lang: Lang
@@ -28,8 +29,19 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   useEffect(() => {
     const onUpdate = () => forceReturnPathRecompute((tick) => tick + 1)
     window.addEventListener('sybnb:listing-return-path-updated', onUpdate)
-    return () => window.removeEventListener('sybnb:listing-return-path-updated', onUpdate)
+    // Re-render the nav (account name vs "Sign in") whenever the session changes.
+    window.addEventListener('sybnb-session-changed', onUpdate)
+    return () => {
+      window.removeEventListener('sybnb:listing-return-path-updated', onUpdate)
+      window.removeEventListener('sybnb-session-changed', onUpdate)
+    }
   }, [])
+  const session = getStoredGuestSession() || getStoredStaffSession()
+  const logout = () => {
+    clearGuestSession()
+    clearStoredStaffSession()
+    navigate('/')
+  }
   const [authOpen, setAuthOpen] = useState(false)
   // After sign in / sign up, land the user where they belong: guests on My Trips, hosts on the host
   // dashboard, admins in admin, drivers on their dashboard.
@@ -79,9 +91,20 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
                 EN
               </button>
             </div>
-            <button className="primary-action nav-signin" onClick={() => setAuthOpen(true)}>
-              {isAr ? 'دخول / حساب' : 'Sign in'}
-            </button>
+            {session ? (
+              <>
+                <button className="menu-action" onClick={() => routeAfterAuth(session.user.roles || [])}>
+                  {session.user.displayName || (isAr ? 'حسابي' : 'My account')}
+                </button>
+                <button className="menu-action" onClick={logout}>
+                  {isAr ? 'تسجيل الخروج' : 'Log out'}
+                </button>
+              </>
+            ) : (
+              <button className="primary-action nav-signin" onClick={() => setAuthOpen(true)}>
+                {isAr ? 'دخول / حساب' : 'Sign in'}
+              </button>
+            )}
           </nav>
         </header>
       )}
