@@ -262,33 +262,7 @@ export function HostHomePage({ lang }: Props) {
         </div>
       </section>
 
-      {/* 5 — PLANS (real SELLER_PLANS data) */}
-      <section id="hosth-plans" className="hosth-plans" aria-label={t.plansTitle}>
-        <h2 className={`hosth-section-title${serif}`}>{t.plansTitle}</h2>
-        <p className="hosth-plans-note">{t.plansNote}</p>
-        <p className="hosth-pay-methods">{t.payMethods}</p>
-        <div className="hosth-plans-grid">
-          {SELLER_PLANS.map((plan) => (
-            <article className="hosth-plan" key={plan.id} style={{ '--accent': plan.accent } as CSSVars}>
-              <div className="hosth-plan-head">
-                <b>{isAr ? plan.label.ar : plan.label.en}</b>
-                {plan.price ? <span className="hosth-plan-price">{plan.price}</span> : null}
-              </div>
-              <p className="hosth-plan-payonce">{t.planPayOnce}</p>
-              <ul className="hosth-plan-features">
-                {plan.features.map((feature, index) => (
-                  <li key={index}>{isAr ? feature.ar : feature.en}</li>
-                ))}
-              </ul>
-              <button className="hosth-btn-primary hosth-plan-cta" onClick={startHosting}>
-                {t.planCta}
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      {/* 6 — FINAL CTA */}
+      {/* FINAL CTA */}
       <section className="hosth-final" aria-label={t.finalTitle}>
         <div className="hosth-final-inner">
           <h2 className={serif.trim()}>{t.finalTitle}</h2>
