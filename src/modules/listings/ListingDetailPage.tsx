@@ -13,7 +13,7 @@ import {
 } from '../../shared/api/platformApi'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
-import { LocationMap } from '../../shared/maps/LocationMap'
+import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
@@ -85,6 +85,7 @@ const copy = {
     mapPin: 'موقع الاستضافة',
     mapApproximate: 'موقع تقريبي حسب بيانات الإعلان',
     openGoogleMaps: 'فتح في خرائط Google',
+    getDirections: 'الاتجاهات · GPS',
     saveOfflineMap: 'حفظ الموقع دون إنترنت',
     offlineMapReady: 'تم حفظ الموقع للاستخدام دون إنترنت',
     offlineMapCopy: 'في حال انقطاع الإنترنت سيبقى العنوان والإحداثيات محفوظة داخل جهاز العميل.',
@@ -163,6 +164,7 @@ const copy = {
     mapPin: 'Stay location',
     mapApproximate: 'Approximate location from listing data',
     openGoogleMaps: 'Open in Google Maps',
+    getDirections: 'Get directions · GPS',
     saveOfflineMap: 'Save offline location',
     offlineMapReady: 'Location saved for offline use',
     offlineMapCopy: 'If internet is unavailable, the address and coordinates stay saved on the guest device.',
@@ -626,7 +628,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 </div>
                 <div style={styles.mapCanvas} aria-label={detailCopy.mapTitle}>
                   {mapCoords ? (
-                    <LocationMap lat={mapCoords.lat} lng={mapCoords.lng} label={mapTarget?.label} style={styles.mapFrame} />
+                    <LocationMap
+                      lat={mapCoords.lat}
+                      lng={mapCoords.lng}
+                      popupHtml={mapTarget?.label ? `<div style="color:#111;font-weight:700;max-width:220px">${mapTarget.label}</div>` : undefined}
+                      style={styles.mapFrame}
+                    />
                   ) : (
                     <div style={{ ...styles.mapFrame, display: 'grid', placeItems: 'center', color: '#9aa6ba', background: '#10141f' }}>
                       {t.mapApproximate}
@@ -638,6 +645,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                     <small>{mapTarget?.hasCoordinates ? mapTarget.query : t.mapApproximate}</small>
                   </div>
                 </div>
+                {mapCoords ? (
+                  <a href={directionsUrl(mapCoords.lat, mapCoords.lng)} rel="noreferrer" target="_blank" style={styles.directionsButton}>
+                    {t.getDirections}
+                  </a>
+                ) : null}
                 <a href={googleMapsSearchUrl(listing, title, lang)} rel="noreferrer" target="_blank" style={styles.secondaryLinkButton}>
                   {t.openGoogleMaps}
                 </a>
@@ -922,6 +934,7 @@ const styles: Record<string, CSSProperties> = {
   primaryButton: { minHeight: 54, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 16px', fontSize: 18 },
   secondaryButton: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
   secondaryLinkButton: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px', display: 'grid', placeItems: 'center', textDecoration: 'none' },
+  directionsButton: { minHeight: 44, border: 0, borderRadius: 8, background: '#14b8a6', color: '#06110e', fontWeight: 950, padding: '0 16px', display: 'grid', placeItems: 'center', textDecoration: 'none' },
   grid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' },
   trustGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   trustCard: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.08)', padding: 14, display: 'grid', gap: 8 },

@@ -20,21 +20,6 @@ export function googleMapsSearchUrl(listing: PlatformListing, title: string, lan
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listingMapTarget(listing, title, lang).query)}`
 }
 
-export function googleMapsEmbedUrl(listing: PlatformListing, title: string, lang: Lang) {
-  const target = listingMapTarget(listing, title, lang)
-  // Free OpenStreetMap embed only — no Google Maps key, no billing, no charges. Needs coordinates;
-  // without them there is nothing precise to render, so return '' and let the caller show a link.
-  if (target.hasCoordinates) {
-    const [lat, lng] = target.query.split(',').map(Number)
-    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      const s = 0.01
-      const bbox = `${lng - s},${lat - s},${lng + s},${lat + s}`
-      return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${lat}%2C${lng}`
-    }
-  }
-  return ''
-}
-
 export function offlineMapSnapshot(listing: PlatformListing, title: string, lang: Lang): OfflineMapSnapshot {
   const target = listingMapTarget(listing, title, lang)
   return {
