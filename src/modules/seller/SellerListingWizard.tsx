@@ -417,7 +417,7 @@ export function SellerListingWizard({ lang }: Props) {
     draft.visualFilters || {
       propertyType: 'apartment',
       roomType: 'doubleRoom',
-      bedType: 'queenBed',
+      bedType: ['queenBed'],
       amenities: ['wifi', 'kitchen'],
     },
   )
@@ -873,7 +873,7 @@ export function SellerListingWizard({ lang }: Props) {
     setBedrooms('1')
     setBathrooms('1')
     setSelectedType(PROPERTY_TYPES[0].en)
-    setVisualFilters({ propertyType: 'apartment', roomType: 'doubleRoom', bedType: 'queenBed', amenities: ['wifi', 'kitchen'] })
+    setVisualFilters({ propertyType: 'apartment', roomType: 'doubleRoom', bedType: ['queenBed'], amenities: ['wifi', 'kitchen'] })
     setRoomTypeStage('idle')
     setStepIndex(0)
   }

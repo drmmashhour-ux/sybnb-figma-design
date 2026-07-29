@@ -580,7 +580,12 @@ function marketplaceVisualFilterGroups() {
 }
 
 export function sellerPropertyFilterGroupsFromConfig() {
-  return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'payments'])
+  // Host LISTING flow: bed type is multi-select — one room/ad can offer several bed options
+  // (e.g. a family room with a queen + a sofa bed, or a hotel room sold as queen-or-king). Guest
+  // SEARCH keeps bed type single (visualFilterGroupsForDivision), so this override is host-only.
+  return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'payments']).map((group) =>
+    group.id === 'bedType' ? { ...group, mode: 'multi' as const } : group,
+  )
 }
 
 export function sellerCarFilterGroupsFromConfig() {
