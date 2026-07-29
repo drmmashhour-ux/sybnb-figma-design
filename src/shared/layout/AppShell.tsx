@@ -3,6 +3,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
 import { Footer } from './Footer'
+import { AuthPanel } from '../../modules/auth/AuthPanel'
 
 type Props = {
   lang: Lang
@@ -29,6 +30,16 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
     window.addEventListener('sybnb:listing-return-path-updated', onUpdate)
     return () => window.removeEventListener('sybnb:listing-return-path-updated', onUpdate)
   }, [])
+  const [authOpen, setAuthOpen] = useState(false)
+  // After sign in / sign up, land the user where they belong: guests on My Trips, hosts on the host
+  // dashboard, admins in admin, drivers on their dashboard.
+  const routeAfterAuth = (roles: string[]) => {
+    setAuthOpen(false)
+    if (roles.includes('ADMIN')) navigate('/admin')
+    else if (roles.includes('HOST') || roles.includes('SELLER')) navigate('/host')
+    else if (roles.includes('DRIVER')) navigate('/driver')
+    else navigate('/trips')
+  }
   const routeContext = getRouteContext(path, isAr)
   const showFlowNav = !isLanding && !isAdminControlRoom
   function goBack() {
@@ -68,9 +79,9 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
                 EN
               </button>
             </div>
-            {/* Top nav kept to brand + language only, per owner. "My Trips" is NOT a global nav button;
-                the guest reaches their trips from inside the guest account page (the account avatar /
-                the booking flow lands there). Booking/search is reached from the landing "Search stay" CTA. */}
+            <button className="primary-action nav-signin" onClick={() => setAuthOpen(true)}>
+              {isAr ? 'دخول / حساب' : 'Sign in'}
+            </button>
           </nav>
         </header>
       )}
@@ -93,6 +104,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
         {children}
       </div>
       {!isAdvertisingTunnel && !isAdminControlRoom && <Footer lang={lang} />}
+      {authOpen && <AuthPanel lang={lang} onClose={() => setAuthOpen(false)} onAuthed={routeAfterAuth} />}
     </div>
   )
 }

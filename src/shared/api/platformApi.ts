@@ -949,6 +949,8 @@ export async function createGuestAccountSession(input: {
     displayName,
     role: 'GUEST',
     phone,
+    ...(input.firstName?.trim() ? { firstName: input.firstName.trim() } : {}),
+    ...(input.lastName?.trim() ? { lastName: input.lastName.trim() } : {}),
     ...(trimmedReferralCode ? { referralCode: trimmedReferralCode } : {}),
   }
 
@@ -2846,12 +2848,35 @@ async function register(body: {
   displayName: string
   role: string
   phone?: string
+  firstName?: string
+  lastName?: string
   referralCode?: string
 }) {
   return apiRequest<AuthResponse>('/api/auth/register', {
     method: 'POST',
     body,
   })
+}
+
+// Unified sign-in for the landing auth panel: log in with email + password, then persist the
+// session to the store the app actually reads for that role (guest / staff / seller) and fire the
+// session-changed event. Returns the session so the caller can route by role. Mirrors the per-role
+// setters above so no store handling is duplicated inconsistently.
+export async function signIn(email: string, password: string) {
+  const session = await login(email.trim(), password)
+  const roles = session.user.roles || []
+  // A user can hold several roles; persist to every store that applies so each context works.
+  if (roles.includes('GUEST')) {
+    authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+    authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  }
+  if (roles.some((role) => role === 'ADMIN' || role === 'HOST' || role === 'DRIVER' || role === 'SELLER')) {
+    authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
+    authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
+  }
+  if (roles.includes('SELLER')) authStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session))
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return session
 }
 
 async function apiRequest<T>(
