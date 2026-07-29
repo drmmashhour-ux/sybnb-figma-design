@@ -8,6 +8,32 @@
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://127.0.0.1:3051')
 
+// Forward-geocode a place description ("مدحت باشا, دمشق, سوريا") to coordinates via our same-origin
+// server proxy (which calls free OpenStreetMap Nominatim — the browser can't call it directly, it
+// 403s browser User-Agents). Results are cached client-side so a place is fetched at most once.
+const geocodeCache = new Map<string, { lat: number; lng: number } | null>()
+export async function geocodePlace(query: string): Promise<{ lat: number; lng: number } | null> {
+  const q = query.trim()
+  if (!q) return null
+  if (geocodeCache.has(q)) return geocodeCache.get(q) ?? null
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/geocode?q=${encodeURIComponent(q)}`)
+    if (!response.ok) {
+      geocodeCache.set(q, null)
+      return null
+    }
+    const payload = (await response.json()) as { result?: { lat: number; lng: number } | null }
+    const result = payload.result && Number.isFinite(payload.result.lat) && Number.isFinite(payload.result.lng)
+      ? { lat: payload.result.lat, lng: payload.result.lng }
+      : null
+    geocodeCache.set(q, result)
+    return result
+  } catch {
+    geocodeCache.set(q, null)
+    return null
+  }
+}
+
 type ApiUser = {
   id: string
   email: string | null

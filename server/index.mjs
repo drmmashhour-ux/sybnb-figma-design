@@ -17,6 +17,7 @@ import { handleHost } from './routes/host.mjs'
 import { handleListings } from './routes/listings.mjs'
 import { handleMe } from './routes/me.mjs'
 import { handleMessages } from './routes/messages.mjs'
+import { handleGeocode } from './routes/geocode.mjs'
 import { handlePayments } from './routes/payments.mjs'
 import { handleDisputes } from './routes/disputes.mjs'
 import { handleReports } from './routes/reports.mjs'
@@ -80,6 +81,8 @@ const RATE_LIMIT_RULES = [
   { name: 'AUTH_PHONE_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/phone-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
   { name: 'AUTH_PHONE_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/phone-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false },
   { name: 'PUBLIC_SEARCH', method: 'GET', pattern: /^\/api\/listings$/, max: 60, windowMs: 60 * 1000, byUser: false },
+  // Map geocoding proxy — cached server-side, but bound per-IP so nobody can pipe abuse through us to Nominatim.
+  { name: 'GEOCODE_PLACE', method: 'GET', pattern: /^\/api\/geocode$/, max: 60, windowMs: 60 * 1000, byUser: false },
   { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true },
   { name: 'PAYMENT_PROOF', method: 'POST', pattern: /^\/api\/payments\/(seller-plan-proof|local-wallet-proof)$/, max: 10, windowMs: 60 * 1000, byUser: true },
@@ -180,6 +183,7 @@ async function dispatch(req, res, url, context) {
     handleDisputes,
     handleReports,
     handleMessages,
+    handleGeocode,
   ]) {
     const handled = await handler(req, res, url, context)
     if (handled !== false) return handled

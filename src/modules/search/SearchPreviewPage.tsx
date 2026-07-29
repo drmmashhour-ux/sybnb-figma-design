@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
-import { getGovernorate } from '../../engines/search/syriaData'
+import { getGovernorate, getCity } from '../../engines/search/syriaData'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { SearchStateCard } from './SearchStates'
@@ -244,7 +244,12 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         <SearchStateCard lang={lang} state={state} onReset={() => setLastSearch(null)} />
       )}
 
-      <ResultsMap listings={listings} lang={lang} governorate={lastSearch?.governorate} />
+      <ResultsMap
+        listings={listings}
+        lang={lang}
+        governorate={lastSearch?.governorate}
+        placeQuery={staySearchPlaceQuery(lastSearch)}
+      />
 
       <section className="search-results">
         <div className="search-results-head">
@@ -470,6 +475,23 @@ function buildDefaultStayValue(): UnifiedSearchValue {
     meals: [],
     payments: [],
   }
+}
+
+// Build the place text for map geocoding from the search value — most specific first
+// (area/street → city → governorate → Syria), e.g. "مدحت باشا, دمشق, سوريا". ARABIC names are used
+// deliberately: OpenStreetMap/Nominatim resolves Syrian streets and neighbourhoods far better in
+// Arabic than English (English variants of these places usually return no result). The result is
+// just coordinates, so the query language does not affect the UI. A leading "شارع " (Street) is
+// stripped because it often blocks a match (e.g. مدحت باشا is tagged as a souk in OSM). Consecutive
+// duplicates are dropped (Damascus city == Damascus governorate).
+function staySearchPlaceQuery(value: UnifiedSearchValue | null): string {
+  if (!value) return ''
+  const gov = getGovernorate(value.governorate)
+  const city = value.city ? getCity(value.governorate, value.city) : undefined
+  const area = value.area ? city?.areas.find((a) => a.key === value.area) : undefined
+  const areaName = area?.ar.replace(/^شارع\s+/, '')
+  const parts = [areaName, city?.ar, gov?.ar, 'سوريا'].filter((p): p is string => Boolean(p))
+  return parts.filter((p, i) => p !== parts[i - 1]).join(', ')
 }
 
 // Read (once) the landing → search handoff written to localStorage['sybnb_v6_stay_search'],

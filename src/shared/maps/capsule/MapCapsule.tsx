@@ -108,13 +108,17 @@ export function PinsMap({
   }, [])
 
   // Draw/refresh markers whenever the points change.
+  // NB: all view changes here use { animate: false }. These are programmatic syncs that can fire in
+  // quick succession (e.g. governorate centre → geocoded place), and competing Leaflet pan/zoom
+  // animations for nearby targets can cancel each other and silently leave the map put. A hard,
+  // instant setView is deterministic.
   useEffect(() => {
     const map = mapRef.current
     const layer = layerRef.current
     if (!map || !layer) return
     layer.clearLayers()
     if (!pins.length) {
-      map.setView([defaultCenter.lat, defaultCenter.lng], defaultZoom)
+      map.setView([defaultCenter.lat, defaultCenter.lng], defaultZoom, { animate: false })
       return
     }
     const latLngs: L.LatLngExpression[] = []
@@ -124,8 +128,8 @@ export function PinsMap({
       if (pin.popupHtml) marker.bindPopup(pin.popupHtml)
       marker.addTo(layer)
     }
-    if (pins.length === 1) map.setView(latLngs[0], 13)
-    else map.fitBounds(L.latLngBounds(latLngs).pad(0.2))
+    if (pins.length === 1) map.setView(latLngs[0], 13, { animate: false })
+    else map.fitBounds(L.latLngBounds(latLngs).pad(0.2), { animate: false })
   }, [pins, defaultCenter.lat, defaultCenter.lng, defaultZoom])
 
   return <div ref={boxRef} style={style} />
