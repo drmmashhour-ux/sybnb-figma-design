@@ -7,6 +7,7 @@ import {
   createAccommodation,
   createAndSubmitCarListing,
   createAndSubmitPrototypeListing,
+  geocodePlace,
   submitAccommodation,
   type CarVehicleAttributes,
 } from '../../shared/api/platformApi'
@@ -499,6 +500,30 @@ export function SellerListingWizard({ lang }: Props) {
   const selectedCityLabel = labelFor(lang, selectedCityData)
   const selectedAreaLabel = labelFor(lang, selectedAreaData)
   const areaOptions = selectedCityData?.areas || []
+
+  // Stays/hotels: auto-geocode the picked area (free OSM proxy — same one the search map uses) so
+  // the listing carries REAL coordinates. Without this a stay would keep the Damascus default and
+  // never get a precise search-map pin or a working "Get directions" button. Arabic names geocode
+  // Syrian streets far better than English; a leading "شارع " is stripped as it blocks matches.
+  // Any new area selection un-confirms the pin so the host reconfirms the moved location.
+  useEffect(() => {
+    if (isAdvertisingFlow || division !== 'STAYS') return
+    const areaName = selectedAreaData?.ar.replace(/^شارع\s+/, '')
+    const parts = [areaName, selectedCityData?.ar, selectedGovernorateData?.ar, 'سوريا'].filter((p): p is string => Boolean(p))
+    const query = parts.filter((p, i) => p !== parts[i - 1]).join(', ')
+    if (!query) return
+    let cancelled = false
+    void geocodePlace(query).then((result) => {
+      if (cancelled || !result) return
+      setLatitude(String(result.lat))
+      setLongitude(String(result.lng))
+      setMapPinConfirmed(false)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [division, isAdvertisingFlow, governorate, city, area])
   const normalizedAreaQuery = areaQuery.trim().toLowerCase()
   const filteredAreaOptions = (normalizedAreaQuery
     ? areaOptions.filter((item) =>
@@ -636,10 +661,20 @@ export function SellerListingWizard({ lang }: Props) {
     // Real location capture (025/Carcad Phase D): previously nothing blocked advancing past this
     // step for CARS, so the map pin was decorative and every car ended up with the same fake
     // default coordinate. Mirrors the mapLocation rule added to carRules() server-side.
-    if (!isAdvertisingFlow && division === 'CARS' && activeStep.id === 'location') {
+    // Real location capture is now required for stays/hotels too — a listing without a confirmed
+    // pin has no coordinates, so it never gets a search-map pin or the Get-directions button.
+    if (!isAdvertisingFlow && (division === 'CARS' || division === 'STAYS') && activeStep.id === 'location') {
       if (!mapPinConfirmed || !isValidSyriaCoord(latitude, longitude)) {
         setSubmitState('error')
-        setSubmitError(isAr ? 'أكّد موقع السيارة على الخريطة قبل المتابعة.' : "Confirm the car's location on the map before continuing.")
+        setSubmitError(
+          isAr
+            ? division === 'CARS'
+              ? 'أكّد موقع السيارة على الخريطة قبل المتابعة.'
+              : 'أكّد موقع العقار على الخريطة قبل المتابعة.'
+            : division === 'CARS'
+              ? "Confirm the car's location on the map before continuing."
+              : 'Confirm the property location on the map before continuing.',
+        )
         return
       }
     }
@@ -1321,7 +1356,7 @@ export function SellerListingWizard({ lang }: Props) {
                   <button
                     aria-label={isAr ? 'تأكيد دبوس الموقع' : 'Confirm map pin'}
                     className={`seller-map-pin ${mapPinConfirmed ? 'confirmed' : ''}`}
-                    onClick={division === 'CARS' ? confirmMapPin : () => setMapPinConfirmed(true)}
+                    onClick={confirmMapPin}
                     type="button"
                   >
                     <span />
@@ -1344,14 +1379,14 @@ export function SellerListingWizard({ lang }: Props) {
                     <span>{isAr ? 'خط الطول' : 'Longitude'}</span>
                     <input dir="ltr" inputMode="decimal" onChange={(event) => setLongitude(event.target.value)} value={longitude} />
                   </label>
-                  {division === 'CARS' && (
+                  {(division === 'CARS' || division === 'STAYS') && (
                     <button disabled={geoStatus === 'locating'} onClick={useMyLocation} type="button">
                       {geoStatus === 'locating'
                         ? isAr ? 'جارِ تحديد الموقع...' : 'Locating...'
                         : isAr ? 'استخدام موقعي الحالي' : 'Use my current location'}
                     </button>
                   )}
-                  {division === 'CARS' && (geoStatus === 'denied' || geoStatus === 'error') && (
+                  {(division === 'CARS' || division === 'STAYS') && (geoStatus === 'denied' || geoStatus === 'error') && (
                     <span className="seller-map-geo-hint">
                       {isAr
                         ? 'تعذر الوصول للموقع. أدخل الإحداثيات يدوياً ثم اضغط تأكيد.'
@@ -1360,14 +1395,14 @@ export function SellerListingWizard({ lang }: Props) {
                   )}
                   <button
                     className={mapPinConfirmed ? 'confirmed' : ''}
-                    onClick={division === 'CARS' ? confirmMapPin : () => setMapPinConfirmed(true)}
+                    onClick={confirmMapPin}
                     type="button"
                   >
                     {mapPinConfirmed ? (isAr ? 'تم حفظ الموقع' : 'Location saved') : isAr ? 'تأكيد الموقع على الخريطة' : 'Confirm location on map'}
                   </button>
                 </div>
               </div>
-              {!isAdvertisingFlow && division === 'CARS' && submitState === 'error' && (
+              {!isAdvertisingFlow && (division === 'CARS' || division === 'STAYS') && submitState === 'error' && (
                 <div className="seller-inline-alert">
                   <strong>{isAr ? 'الموقع مطلوب' : 'Location required'}</strong>
                   <span>{submitError}</span>
