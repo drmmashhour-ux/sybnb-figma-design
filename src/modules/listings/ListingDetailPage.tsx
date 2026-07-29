@@ -495,6 +495,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           <section style={styles.detailBody}>
             <div style={styles.titleBlock}>
               <h1 style={styles.title}>{title}</h1>
+              {reviewSummary.count > 0 && (
+                <span style={styles.ratingLine}>★ {reviewSummary.average} · {t.reviewsCount(reviewSummary.count)}</span>
+              )}
               <span style={styles.locationLine}>⌖ {mapTarget?.label || divisionText(listing.division, lang)}</span>
             </div>
 
@@ -894,6 +897,7 @@ const styles: Record<string, CSSProperties> = {
   detailBody: { border: '1px solid #263146', borderRadius: 8, background: '#10141f', padding: 18, display: 'grid', gap: 16, boxShadow: '0 18px 60px rgba(0,0,0,.24)' },
   titleBlock: { display: 'grid', gap: 8, justifyItems: 'center', textAlign: 'center' },
   locationLine: { color: '#9aa6ba', fontWeight: 800 },
+  ratingLine: { color: '#f5c518', fontWeight: 900, fontSize: 15 },
   tabRow: { display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
   tab: { minHeight: 42, border: 0, borderRadius: 999, background: '#20212b', color: '#c8cede', padding: '0 18px', fontWeight: 900 },
   tabActive: { minHeight: 42, border: '1px solid #4760ff', borderRadius: 999, background: '#4760ff', color: '#fff', padding: '0 18px', fontWeight: 950 },
