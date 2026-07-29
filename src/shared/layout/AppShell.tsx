@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
@@ -16,6 +16,19 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   const isLanding = path === '/'
   const isAdvertisingTunnel = path.startsWith('/sell') || path.startsWith('/advertising')
   const isAdminControlRoom = path.startsWith('/admin')
+  // Host area (become-a-host marketing + host dashboards): the top-nav's GUEST actions
+  // (My Trips / Wallet / Settings / Book now) are for clients and don't belong here, so they're
+  // hidden on host pages. The brand logo + language toggle stay.
+  const isHostArea = path.startsWith('/host') || path === '/become-host'
+  // A direct/shared link into /listing/:id has no return-path in sessionStorage yet -- the listing
+  // page writes the correct one once its fetch resolves and fires this event so the breadcrumb
+  // (otherwise computed once at mount, before that write lands) picks it up without a full reload.
+  const [, forceReturnPathRecompute] = useState(0)
+  useEffect(() => {
+    const onUpdate = () => forceReturnPathRecompute((tick) => tick + 1)
+    window.addEventListener('sybnb:listing-return-path-updated', onUpdate)
+    return () => window.removeEventListener('sybnb:listing-return-path-updated', onUpdate)
+  }, [])
   const routeContext = getRouteContext(path, isAr)
   const showFlowNav = !isLanding && !isAdminControlRoom
   function goBack() {
@@ -60,30 +73,20 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
                 EN
               </button>
             </div>
-            <div className="public-auth-actions">
-              <button className="menu-action" onClick={() => navigate('/stays')}>
-                {isAr ? 'الإقامات' : 'Stays'}
-              </button>
-              <button className="menu-action" onClick={() => navigate('/trips')}>
-                {isAr ? 'رحلاتي' : 'My Trips'}
-              </button>
-              {/* Store-compliance reachability fix: /wallet and /settings (delete account, blocked
-                  accounts) existed and were fully wired, but nothing in primary navigation linked to
-                  them after the account dashboard route was retired — see docs/release notes. */}
-              <button className="menu-action" onClick={() => navigate('/wallet')}>
-                {isAr ? 'المحفظة' : 'Wallet'}
-              </button>
-              <button
-                className="menu-action"
-                onClick={() => navigate('/settings')}
-                aria-label={isAr ? 'الإعدادات' : 'Settings'}
-              >
-                {isAr ? 'الإعدادات ⚙' : 'Settings ⚙'}
-              </button>
-              <button className="primary-action" onClick={() => navigate('/stays')}>
-                {isAr ? 'احجز الآن' : 'Book now'}
-              </button>
-            </div>
+            {!isHostArea && (
+              <div className="public-auth-actions">
+                {/* Nav kept lean per owner: My Trips (the client home) + Book now. Wallet and Settings
+                    are reached from inside My Trips (DashboardPage has the wallet section + a settings ⚙),
+                    so the /wallet and /settings routes stay reachable without cluttering the top nav.
+                    Hidden entirely on host pages (isHostArea) — these are guest/client actions. */}
+                <button className="menu-action" onClick={() => navigate('/trips')}>
+                  {isAr ? 'رحلاتي' : 'My Trips'}
+                </button>
+                <button className="primary-action" onClick={() => navigate('/stays')}>
+                  {isAr ? 'احجز الآن' : 'Book now'}
+                </button>
+              </div>
+            )}
           </nav>
         </header>
       )}
