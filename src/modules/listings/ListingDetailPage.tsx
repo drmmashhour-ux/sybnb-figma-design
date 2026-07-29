@@ -12,7 +12,8 @@ import {
   type PlatformListingReview,
 } from '../../shared/api/platformApi'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
-import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
+import { googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
+import { LocationMap } from '../../shared/maps/LocationMap'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
@@ -241,6 +242,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const protectionFeeMinor = Math.round(displayedTotalMinor * 0.03)
   const protectedTotalMinor = displayedTotalMinor + protectionFeeMinor
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null
+  const mapCoords = (() => {
+    if (!mapTarget?.hasCoordinates) return null
+    const [lat, lng] = mapTarget.query.split(',').map(Number)
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+  })()
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -619,13 +625,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   <span>{detailCopy.mapCopy}</span>
                 </div>
                 <div style={styles.mapCanvas} aria-label={detailCopy.mapTitle}>
-                  <iframe
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                    src={googleMapsEmbedUrl(listing, title, lang)}
-                    style={styles.mapFrame}
-                    title={detailCopy.mapTitle}
-                  />
+                  {mapCoords ? (
+                    <LocationMap lat={mapCoords.lat} lng={mapCoords.lng} label={mapTarget?.label} style={styles.mapFrame} />
+                  ) : (
+                    <div style={{ ...styles.mapFrame, display: 'grid', placeItems: 'center', color: '#9aa6ba', background: '#10141f' }}>
+                      {t.mapApproximate}
+                    </div>
+                  )}
                   <div style={styles.mapLocationCard}>
                     <span style={styles.mapPin}>{detailCopy.mapPin}</span>
                     <strong>{mapTarget?.label}</strong>
