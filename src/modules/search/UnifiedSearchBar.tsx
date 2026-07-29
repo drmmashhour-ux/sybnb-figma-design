@@ -230,7 +230,9 @@ const T = {
   },
 }
 
-const DIVISIONS: SearchDivision[] = ['stays', 'rentals', 'buy', 'newConstruction', 'cars', 'marketplace']
+// STR-only platform: stays is the sole division. Other divisions (rentals/buy/newConstruction/
+// cars/marketplace) are intentionally hidden from the search — their code stays but is not offered.
+const DIVISIONS: SearchDivision[] = ['stays']
 
 
 export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
