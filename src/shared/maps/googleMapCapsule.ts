@@ -22,10 +22,20 @@ export function googleMapsSearchUrl(listing: PlatformListing, title: string, lan
 
 export function googleMapsEmbedUrl(listing: PlatformListing, title: string, lang: Lang) {
   const key = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY
-  const query = listingMapTarget(listing, title, lang).query
-  // Google 404s / SAMEORIGIN-blocks the old keyless `?output=embed` URL, so a working embed needs
-  // the key (Maps Embed API). Without a key return '' → callers show a blank frame, never a broken one.
-  return key ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}` : ''
+  const target = listingMapTarget(listing, title, lang)
+  // With a billing-enabled key, use the Google Maps Embed API. Otherwise fall back to a KEYLESS
+  // OpenStreetMap embed (needs coordinates) so the map still renders — Google 404s / SAMEORIGIN-blocks
+  // its old keyless URL, so a Google embed without a key can never render.
+  if (key) return `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${encodeURIComponent(target.query)}`
+  if (target.hasCoordinates) {
+    const [lat, lng] = target.query.split(',').map(Number)
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const s = 0.01
+      const bbox = `${lng - s},${lat - s},${lng + s},${lat + s}`
+      return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${lat}%2C${lng}`
+    }
+  }
+  return ''
 }
 
 export function offlineMapSnapshot(listing: PlatformListing, title: string, lang: Lang): OfflineMapSnapshot {

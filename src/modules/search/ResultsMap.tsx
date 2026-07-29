@@ -98,13 +98,13 @@ export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; la
     }
   }, [apiKey, pins, center.lat, center.lng, lang, isAr])
 
-  // A real Google map needs the API key: Google 404s / SAMEORIGIN-blocks the keyless embed URL,
-  // so without a key we hide the map entirely (no broken frame). It appears the moment
-  // VITE_GOOGLE_MAPS_API_KEY is set in the Vercel env — JS pins, with a keyed Embed-API fallback.
-  if (!apiKey) return null
-
-  const zoom = pins.length ? 12 : 11
-  const embedSrc = `https://www.google.com/maps/embed/v1/view?key=${encodeURIComponent(apiKey)}&center=${center.lat},${center.lng}&zoom=${zoom}`
+  // Google Maps JS (with pins) is used when a valid, billing-enabled key is present. Otherwise —
+  // no key, or Google rejected the key (billing not active) so `jsFailed` — fall back to a KEYLESS
+  // OpenStreetMap embed so the map always renders instead of a broken/blank Google frame.
+  const showGoogle = Boolean(apiKey) && !jsFailed
+  const span = pins.length ? 0.06 : 0.09
+  const bbox = `${center.lng - span},${center.lat - span},${center.lng + span},${center.lat + span}`
+  const osmSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${center.lat}%2C${center.lng}`
 
   return (
     <section style={styles.wrap} aria-label={isAr ? 'خريطة النتائج' : 'Results map'}>
@@ -116,16 +116,16 @@ export function ResultsMap({ listings, lang }: { listings: PlatformListing[]; la
             : isAr ? 'عرض المنطقة' : 'Area view'}
         </small>
       </div>
-      {jsFailed ? (
+      {showGoogle ? (
+        <div ref={mapRef} style={styles.frame} />
+      ) : (
         <iframe
           title={isAr ? 'خريطة' : 'Map'}
-          src={embedSrc}
+          src={osmSrc}
           style={styles.frame}
           loading="lazy"
           referrerPolicy="no-referrer-when-downgrade"
         />
-      ) : (
-        <div ref={mapRef} style={styles.frame} />
       )}
     </section>
   )
