@@ -54,6 +54,8 @@ const labels = {
     sendCode: 'إرسال الرمز',
     resendCode: 'إعادة الإرسال',
     confirmCode: 'تأكيد الرمز',
+    confirmedShort: 'تم التأكيد ✓',
+    tryAgain: 'حاول مجدداً',
     confirmingCode: 'جار التأكيد...',
     sendingCode: 'جار الإرسال...',
     codeSentReal: 'تم إرسال الرمز إلى بريدك الإلكتروني.',
@@ -106,6 +108,8 @@ const labels = {
     sendCode: 'Send code',
     resendCode: 'Resend code',
     confirmCode: 'Confirm code',
+    confirmedShort: 'Confirmed ✓',
+    tryAgain: 'Try again',
     confirmingCode: 'Confirming...',
     sendingCode: 'Sending...',
     codeSentReal: 'A verification code was sent to your email.',
@@ -152,6 +156,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [code, setCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
   const [codeConfirmed, setCodeConfirmed] = useState(false)
+  const [codeTryAgain, setCodeTryAgain] = useState(false)
   const [codeBusy, setCodeBusy] = useState<'idle' | 'sending' | 'confirming'>('idle')
   const [devCode, setDevCode] = useState('')
   const [message, setMessage] = useState('')
@@ -189,6 +194,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     setCodeBusy('sending')
     setCode('')
     setCodeConfirmed(false)
+    setCodeTryAgain(false)
     setDevCode('')
     try {
       const result = usePhone
@@ -216,11 +222,13 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       if (usePhone) await verifyPhoneVerificationCode(phone.trim(), code.trim(), otpPurpose)
       else await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
       setCodeConfirmed(true)
+      setCodeTryAgain(false)
       setMessage(usePhone ? t.phoneConfirmed : t.codeConfirmed)
       setIsErrorMessage(false)
       return true
     } catch {
       setCodeConfirmed(false)
+      setCodeTryAgain(true)
       setMessage(t.codeInvalid)
       setIsErrorMessage(true)
       return false
@@ -430,6 +438,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 onChange={(event) => {
                   setCode(event.target.value)
                   setCodeConfirmed(false)
+                  setCodeTryAgain(false)
                 }}
                 dir="ltr"
               />
@@ -437,11 +446,21 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : usePhone ? t.sendCodePhone : t.sendCode}
               </button>
               <button
-                style={styles.codeButton}
+                style={{
+                  ...styles.codeButton,
+                  ...(codeConfirmed ? styles.codeButtonConfirmed : {}),
+                  ...(codeTryAgain ? styles.codeButtonError : {}),
+                }}
                 onClick={() => void confirmCode()}
-                disabled={!codeSent || code.trim().length < 4 || codeBusy !== 'idle'}
+                disabled={!codeSent || code.trim().length < 4 || codeBusy !== 'idle' || codeConfirmed}
               >
-                {codeBusy === 'confirming' ? t.confirmingCode : t.confirmCode}
+                {codeBusy === 'confirming'
+                  ? t.confirmingCode
+                  : codeConfirmed
+                    ? t.confirmedShort
+                    : codeTryAgain
+                      ? t.tryAgain
+                      : t.confirmCode}
               </button>
             </div>
           </section>
@@ -534,6 +553,8 @@ const styles: Record<string, CSSProperties> = {
   confirmedPill: { background: '#08251c', border: '1px solid #22d28f', borderRadius: 999, color: '#22d28f', padding: '6px 10px', fontSize: 12, fontWeight: 900 },
   codeRow: { display: 'grid', gridTemplateColumns: 'minmax(130px, 1fr) auto auto', gap: 8 },
   codeButton: { minHeight: 52, border: '1px solid #22d28f', borderRadius: 12, background: '#08251c', color: '#22d28f', fontWeight: 900, padding: '0 16px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  codeButtonConfirmed: { background: '#22d28f', color: '#06110e', border: '1px solid #22d28f' },
+  codeButtonError: { background: '#3a0f14', color: '#ff9aa2', border: '1px solid #ff5f76' },
   methodActive: { flex: 1, minHeight: 44, border: '1px solid rgba(82,104,255,.2)', borderRadius: 10, background: '#20212b', color: '#fff', fontWeight: 800, cursor: 'pointer' },
   methodInactive: { flex: 1, minHeight: 44, border: '1px solid transparent', borderRadius: 10, background: 'transparent', color: '#8a90a2', fontWeight: 800, cursor: 'pointer' },
   note: { marginTop: 18, color: '#22d28f', fontWeight: 800 },
