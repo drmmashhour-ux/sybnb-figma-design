@@ -4,6 +4,7 @@ import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
 import { Footer } from './Footer'
 import { AuthPanel } from '../../modules/auth/AuthPanel'
+import { AssistantWidget } from '../ai/AssistantWidget'
 import { clearGuestSession, clearStoredStaffSession, getStoredGuestSession, getStoredStaffSession } from '../../shared/api/platformApi'
 
 type Props = {
@@ -128,6 +129,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
       </div>
       {!isAdvertisingTunnel && !isAdminControlRoom && <Footer lang={lang} />}
       {authOpen && <AuthPanel lang={lang} onClose={() => setAuthOpen(false)} onAuthed={routeAfterAuth} />}
+      {!isAdminControlRoom && <AssistantWidget lang={isAr ? 'ar' : 'en'} />}
     </div>
   )
 }
@@ -211,10 +213,13 @@ function getRouteContext(path: string, isAr: boolean) {
     }
   }
   if (path.startsWith('/booking/')) {
+    // Booking is reached from a stay's details (/booking/review/:id), so Back should return to that
+    // listing — not dump the guest on the public landing and lose what they were booking.
+    const id = path.split('/')[3] || ''
     return {
       section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
       page: isAr ? 'الحجز' : 'Booking',
-      backPath: '/',
+      backPath: id ? `/listing/${id}` : '/',
       nextPath: '',
     }
   }
@@ -271,14 +276,19 @@ function getRouteContext(path: string, isAr: boolean) {
       return {
         section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
         page: isAr ? 'لوحة الاستضافة' : 'Hosting dashboard',
-        backPath: '/stays',
+        // Back from the host dashboard goes to the site home, not the GUEST stay-search (a host on
+        // their dashboard shouldn't be dropped into guest search).
+        backPath: '/',
         nextPath: '',
       }
     }
+    // Host sub-pages (insights, earnings, inquiries, bookings, availability, payments, payout…) are
+    // opened from inside the hosting dashboard, so "Back" must return there — not dump a signed-in
+    // host on the public landing (which has no Back of its own).
     return {
       section: isAr ? 'المضيف' : 'Host',
       page: isAr ? 'لوحة الاستضافة' : 'Hosting dashboard',
-      backPath: home,
+      backPath: '/host/stays',
       nextPath: '',
     }
   }

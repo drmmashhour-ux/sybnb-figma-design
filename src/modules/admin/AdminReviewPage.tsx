@@ -2167,6 +2167,16 @@ function ListingReviewCard({
           </strong>
         </div>
       ) : null}
+      {Array.isArray(listing.metadata?.truthCheckWarnings) && (listing.metadata.truthCheckWarnings as unknown[]).length > 0 ? (
+        <div style={{ ...styles.meta, borderTop: '1px dashed #30384d', paddingTop: 8, display: 'grid', gap: 4 }}>
+          <span style={{ color: '#ffcf7a', fontWeight: 900 }}>
+            {lang === 'ar' ? '⚠️ تنبيه المصداقية من الذكاء الاصطناعي' : '⚠️ AI honesty flag'}
+          </span>
+          {(listing.metadata.truthCheckWarnings as unknown[]).map((warning, index) => (
+            <span key={index} style={{ color: '#ffe1b0', fontSize: 13 }}>• {String(warning)}</span>
+          ))}
+        </div>
+      ) : null}
       <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
         {labels.details}
       </button>

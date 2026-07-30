@@ -7,6 +7,8 @@ import {
   createAccommodation,
   createAndSubmitCarListing,
   createAndSubmitPrototypeListing,
+  checkListingHonesty,
+  correctListingText,
   geocodePlace,
   submitAccommodation,
   uploadListingPhoto,
@@ -14,6 +16,8 @@ import {
 } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
+import { LocationMap } from '../../shared/maps/capsule'
+import { PaymentQr, createPlatformPaymentQrPayload, platformPaymentGateMethods } from '../../shared/payments/capsule'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -68,7 +72,19 @@ type WizardDraft = {
   bookedDate: string
   paymentDay: string
   visualFilters: VisualFilterSelection
+  addOns: ListingAddOn[]
 }
+
+// Optional add-on services a host can offer (breakfast, shuttle, airport taxi, cleaning…). Increment 1
+// defines + displays them; charging them at checkout is a separate, finance-tested increment.
+type ListingAddOn = { id: string; name: string; priceUsd: string; description: string; mandatory: boolean }
+
+const ADD_ON_PRESETS: { key: string; ar: string; en: string }[] = [
+  { key: 'breakfast', ar: 'إفطار', en: 'Breakfast' },
+  { key: 'shuttle', ar: 'باص نقل', en: 'Shuttle bus' },
+  { key: 'airportTaxi', ar: 'تكسي المطار', en: 'Airport taxi' },
+  { key: 'cleaning', ar: 'تنظيف', en: 'Cleaning' },
+]
 
 function loadDraft(): Partial<WizardDraft> {
   if (typeof window === 'undefined') return {}
@@ -363,6 +379,9 @@ export function SellerListingWizard({ lang }: Props) {
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
   const [aiWriting, setAiWriting] = useState(false)
+  const [aiCorrecting, setAiCorrecting] = useState(false)
+  const [truthChecking, setTruthChecking] = useState(false)
+  const [truthResult, setTruthResult] = useState<{ status: string; warnings: string[] } | null>(null)
   const [aiError, setAiError] = useState('')
   // Guest-facing property/room photos (real image bytes) for STAYS — uploaded to the listing on
   // submit so stays publish WITH photos. Proof/deed documents stay in the separate document uploader.
@@ -381,6 +400,15 @@ export function SellerListingWizard({ lang }: Props) {
   const [price, setPrice] = useState(draft.price || '15')
   const [cleaningFee, setCleaningFee] = useState(draft.cleaningFee || '0')
   const [taxFee, setTaxFee] = useState(draft.taxFee || '0')
+  const [addOns, setAddOns] = useState<ListingAddOn[]>(draft.addOns || [])
+  const addAddOn = (preset?: { key: string; ar: string; en: string }) =>
+    setAddOns((current) => [
+      ...current,
+      { id: `${Date.now()}-${current.length}`, name: preset ? (isAr ? preset.ar : preset.en) : '', priceUsd: '', description: '', mandatory: false },
+    ])
+  const updateAddOn = (index: number, patch: Partial<ListingAddOn>) =>
+    setAddOns((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  const removeAddOn = (index: number) => setAddOns((current) => current.filter((_, i) => i !== index))
   const [size, setSize] = useState(draft.size || '110')
   const [guestCapacity, setGuestCapacity] = useState(draft.guestCapacity || '2')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
@@ -480,6 +508,7 @@ export function SellerListingWizard({ lang }: Props) {
       price,
       cleaningFee,
       taxFee,
+      addOns,
       size,
       guestCapacity,
       bedrooms,
@@ -495,7 +524,7 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, listingPlan, listingPlanPaymentMethod, listingPlanPaymentConfirmed, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
+  }, [division, listingPlan, listingPlanPaymentMethod, listingPlanPaymentConfirmed, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, addOns, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -549,11 +578,84 @@ export function SellerListingWizard({ lang }: Props) {
         bathrooms: toNumber(bathrooms),
         priceUsd: toNumber(variableNightPrice || price),
       })
+      // AI writes the title too — but only fill it when the host hasn't typed one, so we never
+      // overwrite a title they crafted themselves.
+      const aiTitle = isAr ? result.titleAr : result.titleEn
+      if (aiTitle && !title.trim()) setTitle(aiTitle)
       setDescription(isAr ? result.descriptionAr : result.descriptionEn)
     } catch (error) {
       setAiError(error instanceof Error ? error.message : isAr ? 'تعذر توليد الوصف. حاول مجدداً.' : 'Could not generate the description. Try again.')
     } finally {
       setAiWriting(false)
+    }
+  }
+
+  // AI correction helper: polishes the host's OWN title + description (spelling, grammar, clarity)
+  // without inventing anything. Only touches fields the host actually wrote.
+  async function correctTextWithAi() {
+    if (aiCorrecting || (!title.trim() && !description.trim())) return
+    setAiCorrecting(true)
+    setAiError('')
+    try {
+      const locale = isAr ? 'ar' : 'en'
+      if (title.trim()) {
+        const r = await correctListingText(title, locale)
+        if (r.corrected) setTitle(r.corrected)
+      }
+      if (description.trim()) {
+        const r = await correctListingText(description, locale)
+        if (r.corrected) setDescription(r.corrected)
+      }
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : isAr ? 'تعذّر التصحيح. حاول مجدداً.' : 'Could not correct the text. Try again.')
+    } finally {
+      setAiCorrecting(false)
+    }
+  }
+
+  // AI truth-check: verifies the VISUAL features the host claimed are actually shown in the photos.
+  // Warn, don't block — the host still submits; a mismatch just surfaces an honest warning.
+  function claimedVisualFeatureLabels(): string[] {
+    const visualGroupIds = new Set(['popular', 'amenities', 'views', 'access'])
+    const labels: string[] = []
+    for (const group of sellerPropertyFilterGroups) {
+      if (!visualGroupIds.has(group.id)) continue
+      const raw = visualFilters[group.id]
+      const ids = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter((id) => id && id !== 'any')
+      for (const id of ids) {
+        const opt = group.options.find((o) => o.id === id)
+        if (opt) labels.push(isAr ? opt.label.ar : opt.label.en)
+      }
+    }
+    return Array.from(new Set(labels))
+  }
+
+  function fileToImagePayload(file: File): Promise<{ data: string; mediaType: string }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = String(reader.result || '')
+        const comma = result.indexOf(',')
+        resolve({ data: comma >= 0 ? result.slice(comma + 1) : result, mediaType: file.type || 'image/jpeg' })
+      }
+      reader.onerror = () => reject(new Error('read failed'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function runTruthCheck() {
+    if (truthChecking || !listingPhotoFiles.length) return
+    setTruthChecking(true)
+    setTruthResult(null)
+    try {
+      const claims = claimedVisualFeatureLabels()
+      const photos = await Promise.all(listingPhotoFiles.slice(0, 6).map(fileToImagePayload))
+      const result = await checkListingHonesty(claims, photos, isAr ? 'ar' : 'en')
+      setTruthResult({ status: result.status, warnings: result.warnings })
+    } catch {
+      setTruthResult({ status: 'unavailable', warnings: [] })
+    } finally {
+      setTruthChecking(false)
     }
   }
   const normalizedAreaQuery = areaQuery.trim().toLowerCase()
@@ -569,6 +671,19 @@ export function SellerListingWizard({ lang }: Props) {
   ).slice(0, 16)
   const listingCurrency = division === 'STAYS' ? 'USD' : 'SYP'
   const selectedListingPlan = HOST_LISTING_PLANS.find((plan) => plan.id === listingPlan) || HOST_LISTING_PLANS[1]
+  // Sham Cash scan-to-pay payload for the selected plan — the reusable <PaymentQr> capsule renders it.
+  const planQrPayload = useMemo(
+    () =>
+      createPlatformPaymentQrPayload({
+        amountMinor: Math.round(selectedListingPlan.priceUsd * 100),
+        currency: 'USD',
+        destinationCode: platformPaymentGateMethods.shamCash.destinationCode,
+        followCode: `PLAN-${selectedListingPlan.id.toUpperCase()}`,
+        provider: 'sham_cash',
+        purpose: 'listing_plan',
+      }),
+    [selectedListingPlan.priceUsd, selectedListingPlan.id],
+  )
   const selectedOfferProofSlots = useMemo(() => selectedOfferProofMediaSlots(visualFilters), [visualFilters])
   const planAllowsOfferProofs = selectedListingPlan.id !== 'basic'
   const activeOfferProofSlots = !isAdvertisingFlow && division === 'STAYS' && planAllowsOfferProofs ? selectedOfferProofSlots : []
@@ -774,6 +889,19 @@ export function SellerListingWizard({ lang }: Props) {
         visualFilters,
         availabilityCalendar,
         mapLocation,
+        // Optional add-on services (breakfast, shuttle, airport taxi…). Stored + displayed now;
+        // charging them at checkout is the separate finance-tested increment.
+        addOns: addOns
+          .filter((row) => row.name.trim())
+          .map((row) => ({
+            name: row.name.trim(),
+            priceUsd: Math.max(0, Number(row.priceUsd) || 0),
+            description: row.description.trim(),
+            mandatory: Boolean(row.mandatory),
+          })),
+        // AI honesty guard: if the host ran the truth-check and it raised warnings, carry them into
+        // the listing so the admin review card shows the AI note before approving (warn, not block).
+        truthCheckWarnings: truthResult?.warnings?.length ? truthResult.warnings : undefined,
       }
 
       try {
@@ -947,6 +1075,7 @@ export function SellerListingWizard({ lang }: Props) {
     setPrice('15')
     setCleaningFee('0')
     setTaxFee('0')
+    setAddOns([])
     setSize('40')
     setBedrooms('1')
     setBathrooms('1')
@@ -1295,23 +1424,44 @@ export function SellerListingWizard({ lang }: Props) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                   <span>{isAdvertisingFlow ? (isAr ? 'وصف الإعلان' : 'Ad description') : isAr ? 'وصف مختصر' : 'Short description'}</span>
                   {!isAdvertisingFlow && division === 'STAYS' && (
-                    <button
-                      type="button"
-                      onClick={() => void writeDescriptionWithAi()}
-                      disabled={aiWriting}
-                      style={{
-                        minHeight: 40,
-                        border: '1px solid #7c5cff',
-                        borderRadius: 10,
-                        background: aiWriting ? '#241d4a' : 'linear-gradient(135deg,#7c5cff,#4f6cff)',
-                        color: '#fff',
-                        fontWeight: 900,
-                        padding: '0 14px',
-                        cursor: aiWriting ? 'default' : 'pointer',
-                      }}
-                    >
-                      {aiWriting ? (isAr ? '…يكتب الذكاء الاصطناعي' : 'AI is writing…') : isAr ? '✨ اكتب بالذكاء الاصطناعي' : '✨ Write with AI'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => void writeDescriptionWithAi()}
+                        disabled={aiWriting || aiCorrecting}
+                        style={{
+                          minHeight: 40,
+                          border: '1px solid #7c5cff',
+                          borderRadius: 10,
+                          background: aiWriting ? '#241d4a' : 'linear-gradient(135deg,#7c5cff,#4f6cff)',
+                          color: '#fff',
+                          fontWeight: 900,
+                          padding: '0 14px',
+                          cursor: aiWriting ? 'default' : 'pointer',
+                        }}
+                      >
+                        {aiWriting ? (isAr ? '…يكتب الذكاء الاصطناعي' : 'AI is writing…') : isAr ? '✨ اكتب العنوان والوصف' : '✨ Write title + description'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void correctTextWithAi()}
+                        disabled={aiCorrecting || aiWriting || (!title.trim() && !description.trim())}
+                        title={isAr ? 'صحّح وحسّن النص الذي كتبته' : 'Fix spelling & clarity of your own text'}
+                        style={{
+                          minHeight: 40,
+                          border: '1px solid #2f8f6b',
+                          borderRadius: 10,
+                          background: aiCorrecting ? '#173a2c' : 'linear-gradient(135deg,#1f9e6b,#2fb389)',
+                          color: '#fff',
+                          fontWeight: 900,
+                          padding: '0 14px',
+                          cursor: aiCorrecting || (!title.trim() && !description.trim()) ? 'default' : 'pointer',
+                          opacity: !title.trim() && !description.trim() ? 0.55 : 1,
+                        }}
+                      >
+                        {aiCorrecting ? (isAr ? '…يصحّح' : 'Correcting…') : isAr ? '🩹 صحّح وحسّن' : '🩹 Correct & improve'}
+                      </button>
+                    </div>
                   )}
                 </div>
                 <textarea
@@ -1414,21 +1564,20 @@ export function SellerListingWizard({ lang }: Props) {
                 />
               </label>
               <div className="seller-map-panel">
-                <div className="seller-map-card" aria-label={isAr ? 'خريطة موقع الإعلان' : 'Listing location map'}>
-                  <div className="seller-map-grid-lines" />
-                  <div className="seller-map-route seller-map-route-a" />
-                  <div className="seller-map-route seller-map-route-b" />
-                  <button
-                    aria-label={isAr ? 'تأكيد دبوس الموقع' : 'Confirm map pin'}
-                    className={`seller-map-pin ${mapPinConfirmed ? 'confirmed' : ''}`}
-                    onClick={confirmMapPin}
-                    type="button"
-                  >
-                    <span />
-                  </button>
-                  <div className="seller-map-chip">
+                <div className="seller-map-card" aria-label={isAr ? 'خريطة موقع الإعلان' : 'Listing location map'} style={{ position: 'relative', overflow: 'hidden' }}>
+                  {isValidSyriaCoord(latitude, longitude) ? (
+                    <LocationMap
+                      lat={Number(latitude)}
+                      lng={Number(longitude)}
+                      zoom={15}
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+                    />
+                  ) : (
+                    <div className="seller-map-grid-lines" />
+                  )}
+                  <div className="seller-map-chip" style={{ position: 'absolute', zIndex: 500, pointerEvents: 'none' }}>
                     <strong>{selectedAreaLabel || selectedCityLabel}</strong>
-                    <span>{mapPinConfirmed ? (isAr ? 'تم تأكيد الموقع' : 'Pin confirmed') : isAr ? 'اضغط الدبوس لتأكيد الموقع' : 'Press the pin to confirm'}</span>
+                    <span>{mapPinConfirmed ? (isAr ? 'تم تأكيد الموقع' : 'Pin confirmed') : isAr ? 'اضغط "تأكيد الموقع على الخريطة"' : 'Press "Confirm location on map"'}</span>
                   </div>
                 </div>
                 <div className="seller-map-controls">
@@ -1535,6 +1684,44 @@ export function SellerListingWizard({ lang }: Props) {
                     />
                   </div>
                 </label>
+              )}
+              {division === 'STAYS' && (
+                <div style={{ gridColumn: '1 / -1', display: 'grid', gap: 8, marginTop: 4 }}>
+                  <span style={{ fontWeight: 800 }}>{isAr ? 'خدمات ورسوم إضافية (اختياري)' : 'Add-on services & fees (optional)'}</span>
+                  <span style={{ color: '#9aa6ba', fontSize: 13 }}>
+                    {isAr ? 'تظهر في صفحة الإعلان مع السعر ووصف ما تشمله.' : 'These appear on the listing with a price and a short “what’s included” note.'}
+                  </span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {ADD_ON_PRESETS.map((preset) => (
+                      <button key={preset.key} type="button" onClick={() => addAddOn(preset)}
+                        style={{ minHeight: 36, border: '1px solid #30384d', borderRadius: 999, background: '#151827', color: '#cfe0ff', fontWeight: 700, padding: '0 12px', cursor: 'pointer' }}>
+                        + {isAr ? preset.ar : preset.en}
+                      </button>
+                    ))}
+                    <button type="button" onClick={() => addAddOn()}
+                      style={{ minHeight: 36, border: '1px dashed #30384d', borderRadius: 999, background: 'transparent', color: '#9aa6ba', fontWeight: 700, padding: '0 12px', cursor: 'pointer' }}>
+                      + {isAr ? 'خدمة مخصصة' : 'Custom'}
+                    </button>
+                  </div>
+                  {addOns.map((addOn, index) => (
+                    <div key={addOn.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', border: '1px solid #242735', borderRadius: 10, padding: 8, background: '#101016' }}>
+                      <input placeholder={isAr ? 'اسم الخدمة' : 'Service name'} value={addOn.name} onChange={(event) => updateAddOn(index, { name: event.target.value })}
+                        style={{ flex: '2 1 140px', minHeight: 38, border: '1px solid #30384d', borderRadius: 8, background: '#0d0d14', color: '#fff', padding: '0 10px', fontSize: 14 }} />
+                      <div className="seller-price-input-shell" style={{ flex: '1 1 100px' }}>
+                        <b>USD</b>
+                        <input dir="ltr" inputMode="numeric" placeholder="0" value={addOn.priceUsd} onChange={(event) => updateAddOn(index, { priceUsd: event.target.value })} />
+                      </div>
+                      <input placeholder={isAr ? 'ما الذي يشمله' : 'What’s included'} value={addOn.description} onChange={(event) => updateAddOn(index, { description: event.target.value })}
+                        style={{ flex: '3 1 180px', minHeight: 38, border: '1px solid #30384d', borderRadius: 8, background: '#0d0d14', color: '#fff', padding: '0 10px', fontSize: 14 }} />
+                      <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: '#cfe0ff', fontSize: 13, whiteSpace: 'nowrap' }}>
+                        <input type="checkbox" checked={addOn.mandatory} onChange={(event) => updateAddOn(index, { mandatory: event.target.checked })} />
+                        {isAr ? 'إلزامي' : 'Mandatory'}
+                      </label>
+                      <button type="button" onClick={() => removeAddOn(index)} aria-label={isAr ? 'حذف الخدمة' : 'Remove service'}
+                        style={{ border: 0, background: 'transparent', color: '#ff9c9c', fontSize: 20, cursor: 'pointer' }}>×</button>
+                    </div>
+                  ))}
+                </div>
               )}
               <label>
                 <span>
@@ -1788,16 +1975,22 @@ export function SellerListingWizard({ lang }: Props) {
                 </div>
                 <div className="seller-host-plan-methods">
                   {[
-                    { id: 'shamCash', ar: 'Sham Cash', en: 'Sham Cash' },
-                    { id: 'card', ar: 'بطاقة / Mastercard', en: 'Card / Mastercard' },
+                    { id: 'shamCash', ar: 'Sham Cash', en: 'Sham Cash', disabled: false },
+                    // Card/Stripe isn't wired yet (no real checkout flow / key), so it's shown as
+                    // "coming soon" and disabled — better than a method that selects but goes nowhere.
+                    { id: 'card', ar: 'بطاقة / Mastercard (قريباً)', en: 'Card / Mastercard (soon)', disabled: true },
                   ].map((method) => (
                     <button
                       className={listingPlanPaymentMethod === method.id ? 'active' : ''}
+                      disabled={method.disabled}
                       key={method.id}
                       onClick={() => {
+                        if (method.disabled) return
                         setListingPlanPaymentMethod(method.id)
                         setListingPlanPaymentConfirmed(false)
                       }}
+                      style={method.disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                      title={method.disabled ? (isAr ? 'الدفع بالبطاقة قريباً — استخدم Sham Cash الآن' : 'Card payment coming soon — use Sham Cash for now') : undefined}
                       type="button"
                     >
                       {method[lang]}
@@ -1816,6 +2009,19 @@ export function SellerListingWizard({ lang }: Props) {
                       <div>
                         <b>{isAr ? 'المبلغ' : 'Amount'}</b>
                         <p>{`USD ${selectedListingPlan.priceUsd}`}</p>
+                      </div>
+                      <div className="seller-sham-qr-panel">
+                        <PaymentQr
+                          payload={planQrPayload}
+                          scale={6}
+                          alt={isAr ? 'رمز QR شام كاش للدفع' : 'Sham Cash payment QR code'}
+                          generatingLabel={isAr ? 'جار إنشاء رمز QR' : 'Generating QR'}
+                        />
+                        <div>
+                          <strong>{isAr ? 'امسح QR للدفع' : 'Scan QR to pay'}</strong>
+                          <span dir="ltr">{platformPaymentGateMethods.shamCash.destinationCode}</span>
+                          <small>{isAr ? 'اكتب كود المتابعة في ملاحظة العملية.' : 'Write the follow-up code in the transaction note.'}</small>
+                        </div>
                       </div>
                     </>
                   ) : (
@@ -1920,6 +2126,33 @@ export function SellerListingWizard({ lang }: Props) {
                               </button>
                             </span>
                           ))}
+                        </div>
+                      )}
+                      {listingPhotoFiles.length > 0 && (
+                        <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                          <button
+                            type="button"
+                            onClick={() => void runTruthCheck()}
+                            disabled={truthChecking}
+                            title={isAr ? 'يتحقق الذكاء الاصطناعي أن صورك تطابق ما اخترته' : 'AI checks your photos match the features you selected'}
+                            style={{ justifySelf: 'start', minHeight: 42, border: '1px solid #d5a915', borderRadius: 10, background: truthChecking ? '#332b12' : '#1a1608', color: '#f4d772', fontWeight: 900, padding: '0 16px', cursor: truthChecking ? 'default' : 'pointer' }}
+                          >
+                            {truthChecking ? (isAr ? '…يتحقق الذكاء الاصطناعي' : 'AI is checking…') : isAr ? '🛡️ فحص المصداقية بالذكاء الاصطناعي' : '🛡️ AI honesty check'}
+                          </button>
+                          {truthResult && truthResult.warnings.length > 0 && (
+                            <div style={{ border: '1px solid rgba(255,180,60,.45)', borderRadius: 10, background: 'rgba(255,180,60,.08)', padding: 12, display: 'grid', gap: 6 }}>
+                              <strong style={{ color: '#ffcf7a' }}>{isAr ? '⚠️ تنبيهات المصداقية (يمكنك المتابعة)' : '⚠️ Honesty warnings (you can still continue)'}</strong>
+                              {truthResult.warnings.map((w, i) => (
+                                <span key={i} style={{ color: '#ffe1b0', fontSize: 13 }}>• {w}</span>
+                              ))}
+                            </div>
+                          )}
+                          {truthResult && truthResult.status === 'ok' && truthResult.warnings.length === 0 && (
+                            <span style={{ color: '#7fdca6', fontSize: 13, fontWeight: 700 }}>{isAr ? '✓ صورك تطابق ما اخترته.' : '✓ Your photos match the features you selected.'}</span>
+                          )}
+                          {truthResult && truthResult.status === 'unavailable' && (
+                            <span style={{ color: '#9aa6ba', fontSize: 13 }}>{isAr ? 'فحص المصداقية غير متاح حالياً.' : 'Honesty check is not available right now.'}</span>
+                          )}
                         </div>
                       )}
                     </div>

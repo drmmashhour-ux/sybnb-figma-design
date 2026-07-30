@@ -113,6 +113,7 @@ const copy = {
     excellentMonth: 'أداء ممتاز هذا الشهر',
     steadyMonth: 'أداء مستقر هذا الشهر',
     needsAttentionMonth: 'الأداء يحتاج إلى تحسين',
+    gettingStarted: 'أضف إعلانك الأول لتبدأ',
     viewEarningsReport: 'عرض تقرير الأرباح',
     views: 'ظهور إعلانك',
     bookingsImpact: 'زيادة الحجوزات',
@@ -254,6 +255,7 @@ const copy = {
     excellentMonth: 'Excellent performance this month',
     steadyMonth: 'Steady performance this month',
     needsAttentionMonth: 'Performance needs attention',
+    gettingStarted: 'Add your first listing to get started',
     viewEarningsReport: 'View earnings report',
     views: 'Listing visibility',
     bookingsImpact: 'More bookings',
@@ -374,6 +376,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     100,
   )
   const healthScore = clamp(Math.round((trustScore + averageQualityScore + responseScore) / 3), 0, 100)
+  // A brand-new host (no listings, no requests) has no real performance yet — "needs attention" reads
+  // as a problem before they've done anything, so show a neutral getting-started state instead.
+  const hasHostActivity = visibleListings.length > 0 || visibleRequests.length > 0
   const isDocumentVerified = overview?.host.idDocumentStatus === 'APPROVED'
   const verificationStatusText = isDocumentVerified
     ? providerCopy.verifiedLabel
@@ -648,9 +653,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         </div>
         <div style={styles.healthScore}>
           <span>{t.healthDegree}</span>
-          <strong>{healthScore}</strong>
-          <small>/100</small>
-          <em>{healthScore >= 80 ? t.excellentMonth : healthScore >= 50 ? t.steadyMonth : t.needsAttentionMonth}</em>
+          <strong>{hasHostActivity ? healthScore : '—'}</strong>
+          <small>{hasHostActivity ? '/100' : ''}</small>
+          <em>{!hasHostActivity ? t.gettingStarted : healthScore >= 80 ? t.excellentMonth : healthScore >= 50 ? t.steadyMonth : t.needsAttentionMonth}</em>
         </div>
       </section>
 

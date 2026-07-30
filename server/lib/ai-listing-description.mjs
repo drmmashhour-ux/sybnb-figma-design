@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { isAnthropicConfigured, requireAnthropic, MODEL } from './ai-insights.mjs'
 
-const SYSTEM_PROMPT = `You write a short, warm, honest listing description for a short-term rental on the SYBNB platform (Syria). You are given ONLY real facts a host selected: property type, room type(s), bed type(s), amenities, meals, hotel star rating, city/area, guest capacity, bedrooms, bathrooms, and nightly price in USD. Write in BOTH Arabic and English. Rules: use ONLY the given facts — never invent an amenity, view, distance, or number that is not given; 2 to 4 sentences each; inviting but not exaggerated; no markdown, no emojis. Reply with strict JSON: {"descriptionAr":"...","descriptionEn":"..."}.`
+const SYSTEM_PROMPT = `You write a short, warm, honest listing title and description for a short-term rental on the SYBNB platform (Syria). You are given ONLY real facts a host selected: property type, room type(s), bed type(s), amenities, meals, hotel star rating, city/area, guest capacity, bedrooms, bathrooms, and nightly price in USD. Write in BOTH Arabic and English. Rules: use ONLY the given facts — never invent an amenity, view, distance, or number that is not given; the TITLE is a short catchy name of 3 to 7 words (typically property type + area, optionally one standout amenity), no price; the DESCRIPTION is 2 to 4 sentences; inviting but not exaggerated; no markdown, no emojis. Reply with strict JSON: {"titleAr":"...","titleEn":"...","descriptionAr":"...","descriptionEn":"..."}.`
 
 // Public entry: AI when configured, template otherwise. Never throws for a normal request.
 export async function generateOrTemplate(attributes) {
@@ -42,7 +42,16 @@ async function generateWithAi(attributes) {
     return templateListingDescription(attributes)
   }
   if (!parsed.descriptionAr && !parsed.descriptionEn) return templateListingDescription(attributes)
-  return { descriptionAr: parsed.descriptionAr || '', descriptionEn: parsed.descriptionEn || '', source: 'ai', model: MODEL }
+  // Fall back to the template's title if the model omitted one, so callers always get a title.
+  const fallbackTitle = templateListingDescription(attributes)
+  return {
+    titleAr: parsed.titleAr || fallbackTitle.titleAr,
+    titleEn: parsed.titleEn || fallbackTitle.titleEn,
+    descriptionAr: parsed.descriptionAr || '',
+    descriptionEn: parsed.descriptionEn || '',
+    source: 'ai',
+    model: MODEL,
+  }
 }
 
 // Deterministic fallback — no API key needed. Same attributes, clean bilingual output.
@@ -84,5 +93,9 @@ export function templateListingDescription(attributes = {}) {
     price ? `Priced at $${price} per night. Book now for a comfortable stay.` : 'Book now for a comfortable stay.',
   ].filter(Boolean).join(' ')
 
-  return { descriptionAr: ar, descriptionEn: en, source: 'template', model: null }
+  // Short catchy title from the same facts: property type + area/city (no price, no invented detail).
+  const titleAr = `${propAr}${placeAr ? ` في ${placeAr}` : ''}`.trim()
+  const titleEn = `${propEn.charAt(0).toUpperCase()}${propEn.slice(1)}${placeEn ? ` in ${placeEn}` : ''}`.trim()
+
+  return { titleAr, titleEn, descriptionAr: ar, descriptionEn: en, source: 'template', model: null }
 }

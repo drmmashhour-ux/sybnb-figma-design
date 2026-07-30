@@ -15,6 +15,8 @@ import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate, listingE
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
 import { generateOrTemplate } from '../lib/ai-listing-description.mjs'
+import { correctText } from '../lib/ai-text-correct.mjs'
+import { checkListingHonesty } from '../lib/ai-truth-check.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { deleteListingMedia } from '../lib/listing-media-storage.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
@@ -253,6 +255,31 @@ export async function handleHost(req, res, url, context) {
     requireAuth(context)
     const body = await readJson(req)
     const result = await generateOrTemplate(body && typeof body === 'object' ? body : {})
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI text-correction (capsule): polishes the host's OWN title/description text (spelling, grammar,
+  // clarity) without inventing facts. Same auth + cost profile as the description writer.
+  if (url.pathname === '/api/host/listing-correct') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const text = typeof body?.text === 'string' ? body.text.slice(0, 4000) : ''
+    const locale = body?.locale === 'ar' ? 'ar' : 'en'
+    const result = await correctText({ text, locale })
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI truth-check (capsule): cross-checks the host's CLAIMED features against their PHOTOS with
+  // vision, and warns on mismatches. Warn-not-block honesty guard; same auth + cost profile.
+  if (url.pathname === '/api/host/listing-truth-check') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const claims = Array.isArray(body?.claims) ? body.claims.slice(0, 40).map((c) => String(c)) : []
+    const photos = Array.isArray(body?.photos) ? body.photos.slice(0, 6) : []
+    const locale = body?.locale === 'ar' ? 'ar' : 'en'
+    const result = await checkListingHonesty({ claims, photos, locale })
     return json(res, 200, { ok: true, ...result })
   }
 

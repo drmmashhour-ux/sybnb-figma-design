@@ -938,7 +938,7 @@ export async function fetchAccommodation(accommodationId: string) {
 // writes a bilingual description with Claude (or a template fallback when no key is configured).
 export async function generateListingDescription(
   attributes: Record<string, unknown>,
-): Promise<{ descriptionAr: string; descriptionEn: string; source: string }> {
+): Promise<{ titleAr: string; titleEn: string; descriptionAr: string; descriptionEn: string; source: string }> {
   // Prefer a host/seller session; fall back to the device guest session (auto-created) so the
   // "Write with AI" button works even before the host has finished the partner sign-in.
   const session =
@@ -946,11 +946,76 @@ export async function generateListingDescription(
     getStoredStaffSession('HOST') ||
     getStoredStaffSession('SELLER') ||
     (await ensurePrototypeGuestSession())
-  const response = await apiRequest<{ ok: true; descriptionAr: string; descriptionEn: string; source: string }>(
+  const response = await apiRequest<{ ok: true; titleAr?: string; titleEn?: string; descriptionAr: string; descriptionEn: string; source: string }>(
     '/api/host/listing-description',
     { method: 'POST', token: session.token, body: attributes },
   )
-  return { descriptionAr: response.descriptionAr || '', descriptionEn: response.descriptionEn || '', source: response.source }
+  return {
+    titleAr: response.titleAr || '',
+    titleEn: response.titleEn || '',
+    descriptionAr: response.descriptionAr || '',
+    descriptionEn: response.descriptionEn || '',
+    source: response.source,
+  }
+}
+
+// "Ask SYBNB AI" — role-aware assistant for any signed-in user. The server derives the role
+// (guest/host/admin) from the session token, so we send whichever session the user has (most
+// privileged first), falling back to the auto-created guest session so the helper always works.
+export async function askAssistant(
+  question: string,
+  locale: 'ar' | 'en',
+): Promise<{ answer: string; source: string }> {
+  const session =
+    getStoredStaffSession('ADMIN') ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    getStoredSellerSession() ||
+    (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; answer: string; source: string }>(
+    '/api/assistant/ask',
+    { method: 'POST', token: session.token, body: { question, locale } },
+  )
+  return { answer: response.answer || '', source: response.source }
+}
+
+// AI "Correct & improve" — polishes the host's OWN text (spelling/grammar/clarity), never invents
+// facts. Same session fallback as the description writer so it works throughout the listing flow.
+export async function correctListingText(
+  text: string,
+  locale: 'ar' | 'en',
+): Promise<{ corrected: string; source: string }> {
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; corrected: string; source: string }>(
+    '/api/host/listing-correct',
+    { method: 'POST', token: session.token, body: { text, locale } },
+  )
+  return { corrected: response.corrected || '', source: response.source }
+}
+
+export type TruthCheckItem = { claim: string; verdict: 'evidenced' | 'not_evidenced' | 'contradicted'; note: string }
+
+// AI honesty guard: cross-checks the host's CLAIMED features against their PHOTOS (vision) and returns
+// warnings on mismatches. Warn-not-block. `photos` are base64 (no data: prefix) + mediaType.
+export async function checkListingHonesty(
+  claims: string[],
+  photos: { data: string; mediaType: string }[],
+  locale: 'ar' | 'en',
+): Promise<{ status: string; items: TruthCheckItem[]; warnings: string[] }> {
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; status: string; items?: TruthCheckItem[]; warnings?: string[] }>(
+    '/api/host/listing-truth-check',
+    { method: 'POST', token: session.token, body: { claims, photos, locale } },
+  )
+  return { status: response.status, items: response.items || [], warnings: response.warnings || [] }
 }
 
 export async function createSellerAccountSession(input: {

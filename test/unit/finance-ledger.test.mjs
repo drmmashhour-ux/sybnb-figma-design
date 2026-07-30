@@ -55,6 +55,41 @@ describe('bookingFinanceSplit: STAYS division invariant (rent + cleaning + tax r
     expect(split.stayAmountMinor + split.cleaningFeeMinor + split.taxesMinor).toBe(paid - protectionFeeMinor)
   })
 
+  it('routes add-on service fees to the host with NO commission, kept separate from cleaning', () => {
+    const rent = 100000
+    const cleaning = 5000
+    const addOns = 8000
+    const booking = strBooking({
+      amountMinor: rent,
+      metadata: { addOnFeesMinor: addOns },
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: cleaning } },
+    })
+    const paid = rent + cleaning + addOns
+    const split = bookingFinanceSplit(booking, paid)
+
+    expect(split.addOnFeesMinor).toBe(addOns)
+    expect(split.cleaningFeeMinor).toBe(cleaning) // add-ons are NOT lumped into cleaning
+    // commission is 10% of RENT only — never on cleaning or add-ons
+    expect(split.adminCommissionMinor).toBe(Math.round(rent * STR_ADMIN_COMMISSION_RATE))
+    expect(split.hostGrossMinor).toBe(rent + cleaning + addOns - split.adminCommissionMinor)
+    // nothing vanishes; everything reconciles to what the guest paid
+    expect(split.hostGrossMinor + split.adminShareMinor).toBe(paid)
+    expect(split.stayAmountMinor + split.cleaningFeeMinor + split.taxesMinor + split.addOnFeesMinor).toBe(paid)
+  })
+
+  it('carves add-on fees out of the cleaning residual when cleaning is not set explicitly', () => {
+    const rent = 100000
+    const addOns = 12000
+    const booking = strBooking({ amountMinor: rent, metadata: { addOnFeesMinor: addOns } })
+    const paid = rent + addOns
+    const split = bookingFinanceSplit(booking, paid)
+
+    expect(split.addOnFeesMinor).toBe(addOns)
+    expect(split.cleaningFeeMinor).toBe(0) // the whole residual was add-ons, so cleaning is 0
+    expect(split.adminCommissionMinor).toBe(Math.round(rent * STR_ADMIN_COMMISSION_RATE))
+    expect(split.hostGrossMinor + split.adminShareMinor).toBe(paid)
+  })
+
   it('never produces a negative host gross or admin share regardless of a tiny paid amount', () => {
     const booking = strBooking({ amountMinor: 1 })
     const split = bookingFinanceSplit(booking, 1)

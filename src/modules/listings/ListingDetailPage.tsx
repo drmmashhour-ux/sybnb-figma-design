@@ -583,6 +583,28 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                     </article>
                   </section>
 
+                  {(() => {
+                    const addOns = (listing?.metadata as { addOns?: Array<{ name?: string; priceUsd?: number; description?: string; mandatory?: boolean }> } | undefined)?.addOns
+                    const rows = Array.isArray(addOns) ? addOns.filter((row) => row && row.name) : []
+                    if (!rows.length) return null
+                    return (
+                      <section style={styles.priceSummary}>
+                        <article style={{ ...styles.priceSummaryCard, gridColumn: '1 / -1', display: 'grid', gap: 8, textAlign: isAr ? 'right' : 'left' }}>
+                          <strong>{isAr ? 'خدمات وإضافات' : 'Services & extras'}</strong>
+                          {rows.map((row, index) => (
+                            <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, borderTop: index ? '1px solid rgba(255,255,255,.08)' : 'none', paddingTop: index ? 8 : 0 }}>
+                              <span style={{ display: 'grid', gap: 2 }}>
+                                <span>{row.name}{row.mandatory ? (isAr ? ' · مشمول' : ' · included') : (isAr ? ' · عند الطلب' : ' · on request')}</span>
+                                {row.description ? <small style={{ opacity: 0.7 }}>{row.description}</small> : null}
+                              </span>
+                              <strong dir="ltr">{moneyText(Math.round((Number(row.priceUsd) || 0) * 100), 'USD', lang)}</strong>
+                            </div>
+                          ))}
+                        </article>
+                      </section>
+                    )
+                  })()}
+
                   <section style={styles.protectionChoice}>
                     <strong>{t.protectionChoice}</strong>
                     <div style={styles.protectionOptions}>

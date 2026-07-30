@@ -48,6 +48,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
       cleaningFeeMinor: 0,
       taxesMinor: 0,
       adminCommissionMinor: 0,
+      addOnFeesMinor: 0,
       extraFeesMinor,
       cancellationProtectionFeeMinor,
       cancellationProtectionPurchased,
@@ -71,9 +72,13 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   // Cleaning = whatever the guest actually paid on top of rent (+ tax), derived from the real
   // amounts so rent+cleaning+tax always reconciles to what was paid — instead of assuming a fixed
   // 5% of rent, which invented a phantom fee when the guest paid rent only.
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.max(0, staySplitBaseMinor - rentMinor - taxesMinor)
+  // Add-on service fees the guest was charged for THIS booking (mandatory + any optional they picked).
+  // Like cleaning, they pass through to the host with NO commission — and are carved out of the
+  // cleaning residual below so they aren't mislabelled as cleaning in the admin/host breakdown.
+  const addOnFeesMinor = metadataNumber(bookingMetadata, 'addOnFeesMinor')
+  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.max(0, staySplitBaseMinor - rentMinor - taxesMinor - addOnFeesMinor)
   const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
-  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
+  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor + addOnFeesMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 
   return {
@@ -81,6 +86,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     cleaningFeeMinor,
     taxesMinor,
     adminCommissionMinor,
+    addOnFeesMinor,
     extraFeesMinor: 0,
     cancellationProtectionFeeMinor,
     cancellationProtectionPurchased,
@@ -367,6 +373,7 @@ export function buildPayoutRow(booking, releasedBookingIds) {
     hostGrossMinor: split.hostGrossMinor,
     adminCommissionMinor: split.adminCommissionMinor,
     cleaningFeeMinor: split.cleaningFeeMinor,
+    addOnFeesMinor: split.addOnFeesMinor,
     taxesMinor: split.taxesMinor,
     currency: booking.currency,
     payoutStatus: released ? 'RELEASED' : isPayoutEligible(booking) ? 'ELIGIBLE' : 'PENDING_HOLD',
