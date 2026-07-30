@@ -324,6 +324,26 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // outcome as one who converts as a paying guest -- see the booking branch above for the full
     // farming-prevention rationale, identical here.
     await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.id })
+  } else if (proof.provider === 'str_host_plan') {
+    // STR daily-stay host LISTING plan fee (basic/plus/premium/hotel), paid by card. DISTINCT from the
+    // `seller_plan` branch above: it is NOT a marketplace/dealer/developer plan, so it must NOT flip
+    // sellerProfile.documentStatus (that would wrongly unlock cars/marketplace selling for an STR host).
+    // It is 100% platform revenue and is recorded the same way booking commission / seller-plan fees are
+    // — a CREDIT to the platform actor — so STR host-plan income is visible in the finance rollups.
+    const platformActorId = await resolvePlatformActorId(tx, actorUserId)
+    if (platformActorId) {
+      await recordWalletEntry(tx, {
+        userId: platformActorId,
+        type: 'CREDIT',
+        amountMinor: proof.amountMinor,
+        currency: proof.currency,
+        referenceType: 'str_host_plan_fee',
+        referenceId: proof.id,
+        keyParts: ['str-host-plan-fee', proof.id, platformActorId],
+        note: 'SYBNB collected an STR host listing-plan fee (card).',
+      })
+    }
+    await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.id })
   } else if (proof.provider === 'wallet_topup_sham_cash') {
     // SR cashless (016): an admin-approved Sham Cash top-up credits the rider's OWN wallet 1:1, no fee.
     // The updateMany status-claim above guarantees exactly-once; recordWalletEntry's idempotencyKey makes

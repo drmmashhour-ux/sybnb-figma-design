@@ -121,6 +121,8 @@ export async function creditWalletTopupSession(session) {
 export async function finalizeStripeSession(session) {
   // A wallet top-up is credited exclusively by creditWalletTopupSession() from the webhook — never here.
   if (session.metadata?.kind === 'wallet_topup') return null
+  // STR host listing-plan card payments finalize through their own path (isolated from bookings).
+  if (session.metadata?.purpose === 'str_host_plan') return finalizeStripeStrPlanSession(session)
   const bookingId = session.metadata?.bookingId
   if (!bookingId || session.payment_status !== 'paid') return null
 
@@ -172,6 +174,64 @@ export async function finalizeStripeSession(session) {
           bookingId: approved.bookingId,
           stripeSessionId: session.id,
         },
+      },
+    })
+
+    return approved
+  })
+}
+
+// STR daily-stay host listing-plan prices (USD whole units). SERVER-SIDE source of truth — the Stripe
+// plan charge is keyed by planCode and NEVER taken from the client (S6). Mirrors the wizard's displayed
+// prices (HOST_LISTING_PLANS in src/modules/seller/SellerListingWizard.tsx). Isolated from the
+// marketplace SELLER_PLAN_PRICE_MINOR table used by /api/payments/seller-plan-proof.
+export const STR_HOST_PLAN_PRICE_MINOR = { basic: 9, plus: 19, premium: 49, hotel: 100 }
+
+// Finalize an STR host listing-plan CARD payment. Acts only on a captured ('paid') session whose
+// metadata.purpose is 'str_host_plan'. Idempotent on the Stripe session id, so a retried / out-of-order
+// webhook (or a confirm racing the webhook) records the plan fee exactly once. Revenue is booked by
+// approvePaymentProof's `str_host_plan` branch — 100% platform, and deliberately WITHOUT any
+// sellerProfile write, so it never unlocks marketplace/dealer selling the way `seller_plan` does.
+export async function finalizeStripeStrPlanSession(session) {
+  if (session.metadata?.purpose !== 'str_host_plan' || session.payment_status !== 'paid') return null
+  const userId = session.metadata?.userId
+  const planCode = session.metadata?.planCode
+  const amountMinor = Number(session.metadata?.planPriceUsdMinor)
+  if (!userId || !planCode || !Number.isFinite(amountMinor) || amountMinor <= 0) return null
+
+  return db().$transaction(async (tx) => {
+    const existingProof = await tx.paymentProof.findFirst({
+      where: { provider: 'str_host_plan', providerRef: session.id },
+    })
+    if (existingProof) return existingProof
+
+    const created = await tx.paymentProof.create({
+      data: {
+        userId,
+        provider: 'str_host_plan',
+        status: 'PENDING_ADMIN_REVIEW',
+        amountMinor,
+        currency: 'USD',
+        providerRef: session.id,
+        proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
+      },
+    })
+
+    const actorUserId = await firstAdminId(tx)
+    const approved = await approvePaymentProof(tx, {
+      proofId: created.id,
+      actorUserId,
+      note: 'Auto-approved: Stripe confirmed the STR host plan fee was captured.',
+    })
+
+    await tx.adminAuditLog.create({
+      data: {
+        actorUserId: actorUserId || null,
+        action: 'STRIPE_STR_PLAN_AUTO_APPROVED',
+        entityType: 'payment_proofs',
+        entityId: approved.id,
+        before: { status: created.status, provider: created.provider, providerRef: created.providerRef },
+        after: { status: approved.status, provider: approved.provider, providerRef: approved.providerRef, planCode, stripeSessionId: session.id },
       },
     })
 
@@ -288,6 +348,107 @@ export async function handlePayments(req, res, url, context) {
     }
 
     return json(res, 200, { ok: true, proof })
+  }
+
+  // STR host listing-plan CARD checkout (host pays the plan fee mid-wizard). Isolated from the
+  // marketplace /seller-plan-proof flow; charges the server-side price for the plan code in USD.
+  if (url.pathname === '/api/payments/stripe/create-str-plan-checkout-session') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    requireStripe()
+
+    const body = await readJson(req)
+    const planCode = body.planCode ? String(body.planCode).trim() : ''
+    const origin = String(body.origin || '').replace(/\/$/, '')
+    if (!origin) {
+      const error = new Error('origin is required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_SESSION_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    if (!Object.prototype.hasOwnProperty.call(STR_HOST_PLAN_PRICE_MINOR, planCode)) {
+      const error = new Error('A valid plan must be selected.')
+      error.statusCode = 400
+      error.code = 'PLAN_CODE_INVALID'
+      error.expose = true
+      throw error
+    }
+    // SECURITY (S6): amount is looked up by planCode server-side, never taken from the request.
+    const amountMinor = STR_HOST_PLAN_PRICE_MINOR[planCode]
+    if (amountMinor <= 0) {
+      const error = new Error('This plan has no card fee.')
+      error.statusCode = 400
+      error.code = 'PLAN_NOT_PAYABLE'
+      error.expose = true
+      throw error
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'usd', // STR host plans are priced in USD whole units — charge USD directly (not SYP).
+          unit_amount: amountMinor * 100,
+          product_data: { name: `SYBNB host plan (${planCode})` },
+        },
+        quantity: 1,
+      }],
+      metadata: {
+        purpose: 'str_host_plan',
+        userId: context.user.id,
+        planCode,
+        planPriceUsdMinor: String(amountMinor),
+      },
+      success_url: `${origin}/?str_plan_session_id={CHECKOUT_SESSION_ID}#/sell/listing-wizard`,
+      cancel_url: `${origin}/#/sell/listing-wizard`,
+    })
+
+    return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
+  }
+
+  if (url.pathname === '/api/payments/stripe/confirm-str-plan') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    requireStripe()
+
+    const body = await readJson(req)
+    const sessionId = String(body.sessionId || '')
+    if (!sessionId) {
+      const error = new Error('sessionId is required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_CONFIRM_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId)
+    if (session.metadata?.purpose !== 'str_host_plan' || session.metadata?.userId !== context.user.id) {
+      const error = new Error('This payment session does not belong to this account.')
+      error.statusCode = 403
+      error.code = 'STRIPE_SESSION_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+    if (session.payment_status !== 'paid') {
+      const error = new Error('This card payment has not been captured yet.')
+      error.statusCode = 409
+      error.code = 'STRIPE_PAYMENT_NOT_CAPTURED'
+      error.expose = true
+      throw error
+    }
+
+    const proof = await finalizeStripeStrPlanSession(session)
+    if (!proof) {
+      const error = new Error('Could not confirm this plan payment.')
+      error.statusCode = 409
+      error.code = 'STRIPE_CONFIRM_FAILED'
+      error.expose = true
+      throw error
+    }
+
+    return json(res, 200, { ok: true, proof, planCode: session.metadata?.planCode })
   }
 
   if (url.pathname === '/api/payments/stripe/webhook') {

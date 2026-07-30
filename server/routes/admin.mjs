@@ -666,7 +666,7 @@ export async function handleAdmin(req, res, url, context) {
     // silently folded into "revenue".
     const [commissionEntries, completedSrRides] = await Promise.all([
       db().walletEntry.findMany({
-        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee'] } },
+        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee'] } },
         select: { amountMinor: true, currency: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
       }),

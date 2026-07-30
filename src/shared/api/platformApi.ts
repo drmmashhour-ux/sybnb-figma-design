@@ -1755,6 +1755,34 @@ export async function confirmStripePayment(sessionId: string) {
   return response.proof
 }
 
+// STR host listing-plan CARD checkout (host pays the plan fee mid-wizard). Uses the host/seller
+// session so the charge ties to the host's own account; the server prices the plan by code (S6).
+export async function createStrPlanCheckoutSession(planCode: string) {
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; url: string; sessionId: string }>(
+    '/api/payments/stripe/create-str-plan-checkout-session',
+    { method: 'POST', token: session.token, body: { planCode, origin: window.location.origin } },
+  )
+  return response
+}
+
+export async function confirmStrPlanPayment(sessionId: string) {
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof; planCode: string }>(
+    '/api/payments/stripe/confirm-str-plan',
+    { method: 'POST', token: session.token, body: { sessionId } },
+  )
+  return { proof: response.proof, planCode: response.planCode }
+}
+
 export async function fetchPrototypePaymentProof(proofId: string) {
   const localProof = getLocalFallbackPaymentProof(proofId)
   if (localProof) return localProof

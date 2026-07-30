@@ -8,7 +8,10 @@ import {
   createAndSubmitCarListing,
   createAndSubmitPrototypeListing,
   checkListingHonesty,
+  confirmStrPlanPayment,
   correctListingText,
+  createStrPlanCheckoutSession,
+  fetchStripePaymentStatus,
   geocodePlace,
   submitAccommodation,
   uploadListingPhoto,
@@ -291,7 +294,7 @@ const HOST_LISTING_PLANS: Array<{
     id: 'premium',
     ar: 'Premium',
     en: 'Premium',
-    priceUsd: 39,
+    priceUsd: 49,
     services: {
       ar: ['كل مزايا Plus', 'صور وملفات وإثباتات إضافية', 'تمييز أعلى داخل البحث', 'دعم تجهيز الإعلان قبل النشر'],
       en: ['Everything in Plus', 'Extra photos, files, and proofs', 'Higher search highlight', 'Listing preparation support before publishing'],
@@ -375,6 +378,10 @@ export function SellerListingWizard({ lang }: Props) {
   const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'plus')
   const [listingPlanPaymentMethod, setListingPlanPaymentMethod] = useState(draft.listingPlanPaymentMethod || 'shamCash')
   const [listingPlanPaymentConfirmed, setListingPlanPaymentConfirmed] = useState(draft.listingPlanPaymentConfirmed ?? false)
+  // Card (Stripe) plan payment: only offered when Stripe is configured on the server; the card path
+  // charges the server-priced plan fee and confirms on return, replacing the Sham Cash self-attest.
+  const [stripeConfigured, setStripeConfigured] = useState(false)
+  const [cardRedirecting, setCardRedirecting] = useState(false)
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
@@ -473,6 +480,38 @@ export function SellerListingWizard({ lang }: Props) {
   // the condition chip's new/used-only options are coarser than the real make/condition fields,
   // so a chip pick only fills the structured field while it's still empty/default, and the user
   // can always override it with the real input/select.
+  // On mount: (1) ask the server whether Stripe is configured, so the plan step only offers Card when a
+  // real checkout is possible; (2) if we returned from a Stripe plan checkout (?str_plan_session_id=…),
+  // confirm it and mark the plan paid. The wizard draft persists to localStorage, so it survives the
+  // round-trip through Stripe.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    void fetchStripePaymentStatus()
+      .then((r) => setStripeConfigured(Boolean(r.configured)))
+      .catch(() => setStripeConfigured(false))
+
+    const params = new URLSearchParams(window.location.search)
+    const planSessionId = params.get('str_plan_session_id')
+    if (!planSessionId) return
+    setCardRedirecting(true)
+    void confirmStrPlanPayment(planSessionId)
+      .then(() => {
+        setListingPlanPaymentMethod('card')
+        setListingPlanPaymentConfirmed(true)
+      })
+      .catch((error) => {
+        setSubmitError(error instanceof Error ? error.message : isAr ? 'تعذّر تأكيد دفع الخطة بالبطاقة.' : 'Could not confirm the card plan payment.')
+      })
+      .finally(() => {
+        setCardRedirecting(false)
+        // Strip the one-time session param but keep the hash route (and any other query params).
+        params.delete('str_plan_session_id')
+        const qs = params.toString()
+        window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const brand = visualFilters.carBrand
     if (division === 'CARS' && typeof brand === 'string' && brand && !carMake) {
@@ -562,6 +601,21 @@ export function SellerListingWizard({ lang }: Props) {
   }, [division, isAdvertisingFlow, governorate, city, area])
 
   // AI helper: write the description from what the host selected in the filters + listing details.
+  // Start the Stripe card checkout for the selected host plan. The server prices the plan by code and
+  // returns a Checkout URL; we redirect there. On return, the mount effect confirms and marks it paid.
+  async function startCardPlanPayment() {
+    if (cardRedirecting) return
+    setCardRedirecting(true)
+    setSubmitError('')
+    try {
+      const { url } = await createStrPlanCheckoutSession(selectedListingPlan.id)
+      window.location.href = url
+    } catch (error) {
+      setCardRedirecting(false)
+      setSubmitError(error instanceof Error ? error.message : isAr ? 'تعذّر بدء الدفع بالبطاقة.' : 'Could not start the card payment.')
+    }
+  }
+
   async function writeDescriptionWithAi() {
     setAiWriting(true)
     setAiError('')
@@ -1976,9 +2030,11 @@ export function SellerListingWizard({ lang }: Props) {
                 <div className="seller-host-plan-methods">
                   {[
                     { id: 'shamCash', ar: 'Sham Cash', en: 'Sham Cash', disabled: false },
-                    // Card/Stripe isn't wired yet (no real checkout flow / key), so it's shown as
-                    // "coming soon" and disabled — better than a method that selects but goes nowhere.
-                    { id: 'card', ar: 'بطاقة / Mastercard (قريباً)', en: 'Card / Mastercard (soon)', disabled: true },
+                    // Card/Stripe is offered only when the server reports Stripe configured; otherwise it
+                    // stays disabled ("coming soon") rather than selecting but going nowhere.
+                    stripeConfigured
+                      ? { id: 'card', ar: 'بطاقة / Mastercard', en: 'Card / Mastercard', disabled: false }
+                      : { id: 'card', ar: 'بطاقة / Mastercard (قريباً)', en: 'Card / Mastercard (soon)', disabled: true },
                   ].map((method) => (
                     <button
                       className={listingPlanPaymentMethod === method.id ? 'active' : ''}
@@ -2049,16 +2105,36 @@ export function SellerListingWizard({ lang }: Props) {
                         ? 'بعد تأكيد دفع الخطة ستظهر لك خانات الرفع المسموحة.'
                         : 'After plan payment is confirmed, the allowed upload slots will open.'}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setListingPlanPaymentConfirmed(true)
-                      setSubmitState('idle')
-                      setSubmitError('')
-                    }}
-                  >
-                    {isAr ? 'تأكيد دفع الخطة' : 'Confirm plan payment'}
-                  </button>
+                  {listingPlanPaymentMethod === 'card' && stripeConfigured ? (
+                    <button
+                      type="button"
+                      disabled={cardRedirecting || listingPlanPaymentConfirmed}
+                      onClick={() => void startCardPlanPayment()}
+                    >
+                      {listingPlanPaymentConfirmed
+                        ? isAr
+                          ? 'تم الدفع بالبطاقة'
+                          : 'Card payment complete'
+                        : cardRedirecting
+                          ? isAr
+                            ? '...جارٍ التحويل إلى صفحة الدفع'
+                            : 'Redirecting to secure checkout…'
+                          : isAr
+                            ? `ادفع بالبطاقة · USD ${selectedListingPlan.priceUsd}`
+                            : `Pay by card · USD ${selectedListingPlan.priceUsd}`}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setListingPlanPaymentConfirmed(true)
+                        setSubmitState('idle')
+                        setSubmitError('')
+                      }}
+                    >
+                      {isAr ? 'تأكيد دفع الخطة' : 'Confirm plan payment'}
+                    </button>
+                  )}
                 </div>
               </div>
               {submitState === 'error' && (
