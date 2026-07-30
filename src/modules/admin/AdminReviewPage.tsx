@@ -632,7 +632,7 @@ function ShortRentAdminCommandDashboard({
   const hostName = paymentHostName(previewPayment, lang)
   const hostIdVerified = previewPayment?.booking?.listing?.owner?.idDocumentStatus === 'APPROVED'
   const amountMinor = previewPayment?.amountMinor || 0
-  const currency = previewPayment?.currency || 'SYP'
+  const currency = previewPayment?.currency || 'USD'
   const selectedPaymentNeedsCashMatch = primaryPayment ? isShamCashProvider(primaryPayment.provider) : false
   const selectedPaymentHeld = primaryPayment ? Boolean(heldPaymentIds[primaryPayment.id]) : false
   const staffSession = getStoredStaffSession('ADMIN')
@@ -780,9 +780,9 @@ function ShortRentAdminCommandDashboard({
     { label: isAr ? 'بانتظار مراجعة الدفع' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
     { label: isAr ? 'حجوزات مؤكدة' : 'Confirmed bookings', value: String(confirmedBookings), tone: 'green' },
     { label: isAr ? 'حالات نزاع' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
-    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
-    { label: isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
-    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
+    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'USD', lang), tone: 'gold' },
+    { label: isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout', value: moneyText(readyPayout, 'USD', lang), tone: 'green' },
+    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'USD', lang), tone: 'blue' },
     { label: isAr ? 'عقارات نشطة' : 'Active stays', value: String(activeListings), tone: 'white' },
   ]
   const adminGroups = [
@@ -815,7 +815,7 @@ function ShortRentAdminCommandDashboard({
     { id: 'hosts', label: isAr ? 'المضيفين' : 'Hosts', count: listings.length || activeListings, tone: 'green' },
     { id: 'customers', label: isAr ? 'العملاء' : 'Customers', count: bookings.length, tone: 'blue' },
     { id: 'bookings', label: isAr ? 'الحجوزات' : 'Bookings', count: bookings.length, tone: 'blue' },
-    { id: 'finance', label: isAr ? 'المالية' : 'Finance', count: pendingPayments, tone: shamCashReconciliation.isMatched ? 'green' : 'red' },
+    { id: 'finance', label: isAr ? 'المالية' : 'Finance', count: pendingPayments, tone: shamCashReconciliation.isDiscrepancy ? 'red' : shamCashReconciliation.awaitingLink ? 'gold' : 'green' },
   ]
   const commandCategories: Array<{ id: string; label: string; subtitle: string; viewIds: AdminCommandView[] }> = [
     {
@@ -935,21 +935,25 @@ function ShortRentAdminCommandDashboard({
             <strong style={commandTone(stat.tone)}>{stat.value}</strong>
           </article>
         ))}
-        <article style={{ ...commandStyles.statCard, borderColor: shamCashReconciliation.isMatched ? 'rgba(32,210,155,.3)' : 'rgba(255,77,115,.5)' }}>
+        <article style={{ ...commandStyles.statCard, borderColor: shamCashReconciliation.isDiscrepancy ? 'rgba(255,77,115,.5)' : shamCashReconciliation.awaitingLink ? 'rgba(229,184,11,.35)' : shamCashReconciliation.nothingToReconcile ? 'rgba(255,255,255,.15)' : 'rgba(32,210,155,.3)' }}>
           <small>{isAr ? 'مطابقة شام كاش' : 'Sham Cash match'}</small>
-          <strong style={commandTone(shamCashReconciliation.isMatched ? 'green' : 'red')}>
-            {shamCashReconciliation.isMatched ? (isAr ? 'مطابق' : 'MATCHED') : (isAr ? 'غير مطابق' : 'MISMATCH')}
+          <strong style={commandTone(shamCashReconciliation.isDiscrepancy ? 'red' : shamCashReconciliation.awaitingLink ? 'gold' : shamCashReconciliation.nothingToReconcile ? 'muted' : 'green')}>
+            {shamCashReconciliation.nothingToReconcile
+              ? (isAr ? 'لا شيء للمطابقة' : 'NOTHING TO RECONCILE')
+              : shamCashReconciliation.awaitingLink
+              ? (isAr ? 'بانتظار الربط' : 'AWAITING LINK')
+              : shamCashReconciliation.isDiscrepancy ? (isAr ? 'غير مطابق' : 'MISMATCH') : (isAr ? 'مطابق' : 'MATCHED')}
           </strong>
         </article>
       </section>
 
-      {!shamCashReconciliation.isMatched && (
+      {shamCashReconciliation.isDiscrepancy && (
         <section style={commandStyles.warningBanner}>
           <strong>⚠</strong>
           <span>
             {isAr
-              ? `تنبيه: يوجد عدم مطابقة في Sham Cash بقيمة ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} للحجز ${bookingRef}.`
-              : `Warning: Sham Cash mismatch of ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} for booking ${bookingRef}.`}
+              ? `تنبيه: يوجد عدم مطابقة في Sham Cash بقيمة ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'USD', lang)} للحجز ${bookingRef}.`
+              : `Warning: Sham Cash mismatch of ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'USD', lang)} for booking ${bookingRef}.`}
           </span>
           <button style={commandStyles.outlineGold} onClick={() => setActiveCommandView('finance')}>{isAr ? 'مراجعة الفروقات' : 'Review mismatch'}</button>
         </section>
@@ -1155,21 +1159,21 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.moneyCommandGrid}>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout'}</small>
-              <strong style={commandTone('green')}>{moneyText(readyPayout, 'SYP', lang)}</strong>
+              <strong style={commandTone('green')}>{moneyText(readyPayout, 'USD', lang)}</strong>
               <span style={commandStyles.payoutState}>{selectedPayoutState === 'RELEASE_STAGED' ? (isAr ? 'جاهز للصرف' : 'Release staged') : selectedPayoutState === 'HELD' ? (isAr ? 'معلق' : 'Held') : (isAr ? 'اختر حجزا' : 'Select booking')}</span>
               <button style={commandStyles.acceptButton} onClick={() => stagePayoutDecision('RELEASE_STAGED')}>{isAr ? 'إطلاق الدفعة للمضيف' : 'Release payout'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'عمولة المنصة' : 'Platform commission'}</small>
-              <strong style={commandTone('blue')}>{moneyText(totalAdminCommission, 'SYP', lang)}</strong>
+              <strong style={commandTone('blue')}>{moneyText(totalAdminCommission, 'USD', lang)}</strong>
               <button style={commandStyles.secondaryCommand} onClick={() => {
                 setActiveCommandView('finance')
-                setCommandNotice(isAr ? `سجل عمولة المنصة للحجز ${selectedBookingRef}: ${moneyText(adminCommission, 'SYP', lang)}.` : `Platform commission ledger for ${selectedBookingRef}: ${moneyText(adminCommission, 'SYP', lang)}.`)
+                setCommandNotice(isAr ? `سجل عمولة المنصة للحجز ${selectedBookingRef}: ${moneyText(adminCommission, 'USD', lang)}.` : `Platform commission ledger for ${selectedBookingRef}: ${moneyText(adminCommission, 'USD', lang)}.`)
               }}>{isAr ? 'عرض السجل المالي' : 'View ledger'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'مبالغ محجوزة' : 'Held funds'}</small>
-              <strong style={commandTone('gold')}>{moneyText(heldTotal, 'SYP', lang)}</strong>
+              <strong style={commandTone('gold')}>{moneyText(heldTotal, 'USD', lang)}</strong>
               <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
             </div>
           </div>
@@ -1388,14 +1392,14 @@ function ShortRentAdminCommandDashboard({
           </article>
           <article style={commandStyles.sideCard}>
             <div style={commandStyles.cardTitleRow}>
-              <span style={shamCashReconciliation.isMatched ? commandStyles.confirmedPill : commandStyles.warningPill}>
-                {shamCashReconciliation.isMatched ? (isAr ? 'مطابق' : 'Matched') : (isAr ? 'فرق' : 'Mismatch')}
+              <span style={shamCashReconciliation.isDiscrepancy || shamCashReconciliation.awaitingLink ? commandStyles.warningPill : commandStyles.confirmedPill}>
+                {shamCashReconciliation.statusLabel}
               </span>
               <h2>{isAr ? 'مطابقة شام كاش' : 'Sham Cash match'}</h2>
             </div>
-            <FeeLine label={isAr ? 'المتوقع في SYBNB' : 'SYBNB expected'} value={moneyText(shamCashReconciliation.expectedMinor, 'SYP', lang)} />
-            <FeeLine label={isAr ? 'حساب شام كاش' : 'Sham Cash account'} value={moneyText(shamCashReconciliation.accountMinor, 'SYP', lang)} />
-            <FeeLine label={isAr ? 'الفرق' : 'Difference'} value={moneyText(shamCashReconciliation.differenceMinor, 'SYP', lang)} strong danger={!shamCashReconciliation.isMatched} />
+            <FeeLine label={isAr ? 'المتوقع في SYBNB' : 'SYBNB expected'} value={moneyText(shamCashReconciliation.expectedMinor, 'USD', lang)} />
+            <FeeLine label={isAr ? 'حساب شام كاش' : 'Sham Cash account'} value={moneyText(shamCashReconciliation.accountMinor, 'USD', lang)} />
+            <FeeLine label={isAr ? 'الفرق' : 'Difference'} value={moneyText(shamCashReconciliation.differenceMinor, 'USD', lang)} strong danger={shamCashReconciliation.isDiscrepancy} />
           </article>
         </aside>
       </section>
@@ -1684,22 +1688,22 @@ function ShamCashReconciliationPanel({
           <small>{isAr ? 'ربط مالي داخلي' : 'Internal finance link'}</small>
           <h3>{isAr ? 'مطابقة حساب شام كاش' : 'Sham Cash account reconciliation'}</h3>
         </div>
-        <span style={data.isMatched ? commandStyles.confirmedPill : commandStyles.warningPill}>
+        <span style={data.isDiscrepancy || data.awaitingLink ? commandStyles.warningPill : commandStyles.confirmedPill}>
           {data.statusLabel}
         </span>
       </div>
       <div style={commandStyles.shamCashGrid}>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'المتوقع حسب SYBNB' : 'Expected by SYBNB'}</small>
-          <strong style={commandTone('gold')}>{moneyText(data.expectedMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone('gold')}>{moneyText(data.expectedMinor, 'USD', lang)}</strong>
         </div>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'الموجود في شام كاش' : 'In Sham Cash account'}</small>
-          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{data.accountMinor == null ? (isAr ? 'غير مربوط' : 'Not linked') : moneyText(data.accountMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone(data.isDiscrepancy ? 'red' : data.awaitingLink ? 'gold' : 'green')}>{data.accountMinor == null ? (isAr ? 'غير مربوط' : 'Not linked') : moneyText(data.accountMinor, 'USD', lang)}</strong>
         </div>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'فرق المطابقة' : 'Reconciliation difference'}</small>
-          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{moneyText(data.differenceMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone(data.isDiscrepancy ? 'red' : data.awaitingLink ? 'gold' : 'green')}>{moneyText(data.differenceMinor, 'USD', lang)}</strong>
         </div>
       </div>
       <div style={commandStyles.shamCashReconcileRow}>
@@ -1742,7 +1746,7 @@ function ShamCashReconciliationPanel({
                 <small>{isAr ? 'رمز شام كاش' : 'Sham Cash code'}</small>
               </div>
               <span>{item.status}</span>
-              <b>{moneyText(item.amountMinor, 'SYP', lang)}</b>
+              <b>{moneyText(item.amountMinor, 'USD', lang)}</b>
               <small>{item.note}</small>
             </div>
           ))}
@@ -1859,12 +1863,25 @@ function createShamCashReconciliation(realPayments: PlatformPaymentProof[], disp
   const accountMinor = hasAnyEntry ? reconciledPayments.reduce((sum, payment) => sum + payment.amountMinor, 0) : null
   const hasExternalAccount = accountMinor != null
   const differenceMinor = hasExternalAccount ? accountMinor - expectedMinor : expectedMinor
-  const isMatched = sourcePayments.length > 0 && reconciledPayments.length === sourcePayments.length
+  // Empty platform (no Sham Cash payments to check) is NOT a mismatch — flagging it red trains
+  // admins to ignore the alert. Treat "nothing to reconcile" as a neutral, matched state.
+  const nothingToReconcile = sourcePayments.length === 0
+  // "Awaiting link" = there ARE Sham Cash payments but the real account balance hasn't been entered
+  // yet. That is a pending task, not a discrepancy — flagging it red trains admins to ignore the
+  // alert. A real MISMATCH only exists once a balance is entered and the numbers genuinely differ.
+  const awaitingLink = !nothingToReconcile && !hasExternalAccount
+  const isMatched = nothingToReconcile || reconciledPayments.length === sourcePayments.length
+  const isDiscrepancy = hasExternalAccount && !isMatched
   const isAr = lang === 'ar'
   return {
     accountMinor,
-    canApprove: isMatched,
-    controlNote: hasExternalAccount
+    canApprove: !nothingToReconcile && isMatched,
+    nothingToReconcile,
+    awaitingLink,
+    isDiscrepancy,
+    controlNote: nothingToReconcile
+      ? (isAr ? 'لا توجد دفعات شام كاش بانتظار المطابقة حالياً.' : 'No Sham Cash payments are waiting to be reconciled right now.')
+      : hasExternalAccount
       ? (isMatched
         ? (isAr ? 'تمت المطابقة مع رصيد شام كاش المدخل. يمكن قبول الدفع بعد مراجعة الإدارة.' : 'Matched against the entered Sham Cash balance. Admin can approve after review.')
         : (isAr ? 'يوجد فرق بين سجل SYBNB وحساب شام كاش. لا تقبل الدفع قبل حل الفرق.' : 'There is a difference between the SYBNB ledger and Sham Cash. Do not approve before resolving it.'))
@@ -1872,7 +1889,9 @@ function createShamCashReconciliation(realPayments: PlatformPaymentProof[], disp
     differenceMinor,
     expectedMinor,
     isMatched,
-    statusLabel: hasExternalAccount
+    statusLabel: nothingToReconcile
+      ? (isAr ? 'لا شيء للمطابقة' : 'Nothing to reconcile')
+      : hasExternalAccount
       ? (isMatched ? (isAr ? 'الأرقام متطابقة' : 'Numbers match') : (isAr ? 'يوجد فرق' : 'Mismatch'))
       : (isAr ? 'ينتظر الربط' : 'Awaiting link'),
     items: sourcePayments.slice(0, 6).map((payment) => {
@@ -1902,6 +1921,7 @@ function commandTone(tone: string): CSSProperties {
     green: '#20d29b',
     red: '#ff4d73',
     white: '#f7f7fb',
+    muted: '#9aa0ad',
   }
   return { color: colors[tone] || colors.white }
 }

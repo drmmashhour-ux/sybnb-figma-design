@@ -30,9 +30,24 @@ import { listingTitleText, moneyText } from '../../shared/i18n/display'
 import { AccountControlPanel } from './AccountControlPanel'
 import { LoyaltyPanel } from './LoyaltyPanel'
 
-type Props = { lang: Lang }
+// Each staff group is its own page (deep-linkable) instead of a tab on one screen.
+type GroupId = 'guest' | 'host' | 'accounting' | 'management' | 'hr'
+type Props = { lang: Lang; group?: GroupId }
 
-type TabId = 'guest' | 'hosting' | 'accounting' | 'directory' | 'needs' | 'hr'
+const GROUP_NAV: Array<{ id: GroupId; hash: string; ar: string; en: string }> = [
+  { id: 'guest', hash: '/admin/guests', ar: 'العملاء', en: 'Guests' },
+  { id: 'host', hash: '/admin/hosts', ar: 'المضيفون', en: 'Hosts' },
+  { id: 'accounting', hash: '/admin/accounting', ar: 'المحاسبة', en: 'Accounting' },
+  { id: 'management', hash: '/admin/management', ar: 'الإدارة', en: 'Management' },
+  { id: 'hr', hash: '/admin/hr', ar: 'الموارد البشرية', en: 'HR' },
+]
+
+// Other admin surfaces, reachable page-to-page from the same nav header.
+const EXTERNAL_NAV: Array<{ hash: string; ar: string; en: string }> = [
+  { hash: '/admin/review', ar: 'العمليات', en: 'Operations' },
+  { hash: '/admin/reports', ar: 'التقارير', en: 'Reports' },
+  { hash: '/admin/disputes', ar: 'النزاعات', en: 'Disputes' },
+]
 
 const CREATABLE_ROLES = ['ADMIN', 'SUPPORT'] as const
 
@@ -226,10 +241,9 @@ function claimChecksOf(listing: PlatformListing): ClaimCheckMeta | null {
   return cc && typeof cc === 'object' ? (cc as ClaimCheckMeta) : null
 }
 
-export function AdminControlCenterPage({ lang }: Props) {
+export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
   const isAr = lang === 'ar'
   const t = T[lang]
-  const [tab, setTab] = useState<TabId>('guest')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -309,12 +323,12 @@ export function AdminControlCenterPage({ lang }: Props) {
     }
   }
   useEffect(() => {
-    if (tab === 'directory') {
+    if (group === 'management') {
       void loadUsers()
       void loadBookings()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab])
+  }, [group])
 
   async function changeUserStatus(userId: string, status: 'ACTIVE' | 'SUSPENDED' | 'CLOSED') {
     setActionBusy(userId)
@@ -390,14 +404,20 @@ export function AdminControlCenterPage({ lang }: Props) {
       </header>
 
       <nav style={styles.tabs} aria-label={t.title}>
-        {(['guest', 'hosting', 'accounting', 'directory', 'needs', 'hr'] as TabId[]).map((id) => (
+        {GROUP_NAV.map((item) => (
           <button
-            key={id}
-            style={{ ...styles.tab, ...(tab === id ? styles.tabActive : {}) }}
-            aria-selected={tab === id}
-            onClick={() => setTab(id)}
+            key={item.id}
+            style={{ ...styles.tab, ...(group === item.id ? styles.tabActive : {}) }}
+            aria-current={group === item.id ? 'page' : undefined}
+            onClick={() => go(item.hash)}
           >
-            {t.tabs[id]}
+            {isAr ? item.ar : item.en}
+          </button>
+        ))}
+        <span style={styles.navDivider} aria-hidden="true" />
+        {EXTERNAL_NAV.map((item) => (
+          <button key={item.hash} style={styles.tabLink} onClick={() => go(item.hash)}>
+            {isAr ? item.ar : item.en} →
           </button>
         ))}
       </nav>
@@ -405,7 +425,7 @@ export function AdminControlCenterPage({ lang }: Props) {
       {error && <p style={styles.error}>{error}</p>}
       {loading && <p style={styles.muted}>{t.loading}</p>}
 
-      {!loading && tab === 'guest' && (
+      {!loading && group === 'guest' && (
         <section style={styles.group}>
           <div style={styles.chipRow}>
             <Chip tone="green" label={t.passed} value={num(metrics?.paymentsByStatus, 'APPROVED')} sub={t.guestApprovedPayments} />
@@ -436,7 +456,7 @@ export function AdminControlCenterPage({ lang }: Props) {
         </section>
       )}
 
-      {!loading && tab === 'hosting' && (
+      {!loading && group === 'host' && (
         <section style={styles.group}>
           <div style={styles.chipRow}>
             <Chip tone="green" label={t.passed} value={num(metrics?.listingsByStatus, 'APPROVED')} sub={t.hostingApproved} />
@@ -487,7 +507,7 @@ export function AdminControlCenterPage({ lang }: Props) {
         </section>
       )}
 
-      {!loading && tab === 'accounting' && (
+      {!loading && group === 'accounting' && (
         <section style={styles.group}>
           <div style={styles.chipRow}>
             {(revenue?.byCurrency || []).map((c) => (
@@ -497,8 +517,8 @@ export function AdminControlCenterPage({ lang }: Props) {
           </div>
 
           <div style={styles.chipRow}>
-            <Chip tone="blue" label={t.walletBalance} valueText={moneyText(metrics?.walletBalanceMinor || 0, 'SYP', lang)} sub={`${metrics?.walletCount || 0}`} />
-            <Chip tone="green" label={t.approvedVolume} valueText={moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'SYP', lang)} sub={`${t.approvedCount}: ${metrics?.approvedPaymentCount || 0}`} />
+            <Chip tone="blue" label={t.walletBalance} valueText={moneyText(metrics?.walletBalanceMinor || 0, 'USD', lang)} sub={`${metrics?.walletCount || 0}`} />
+            <Chip tone="green" label={t.approvedVolume} valueText={moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'USD', lang)} sub={`${t.approvedCount}: ${metrics?.approvedPaymentCount || 0}`} />
             <Chip tone="red" label={t.refunds} value={num(metrics?.paymentsByStatus, 'REFUNDED')} sub={t.refunds} />
           </div>
 
@@ -535,7 +555,7 @@ export function AdminControlCenterPage({ lang }: Props) {
         </section>
       )}
 
-      {!loading && tab === 'directory' && (
+      {!loading && group === 'management' && (
         <section style={styles.group}>
           {actionMsg && <p style={styles.hint}>{actionMsg}</p>}
           <Card title={t.accountControl}>
@@ -618,7 +638,7 @@ export function AdminControlCenterPage({ lang }: Props) {
         </section>
       )}
 
-      {!loading && tab === 'needs' && (
+      {!loading && group === 'management' && (
         <section style={styles.group}>
           <h2 className="" style={styles.cardTitle}>{t.needsTitle}</h2>
           <div style={styles.chipRow}>
@@ -668,7 +688,7 @@ export function AdminControlCenterPage({ lang }: Props) {
         </section>
       )}
 
-      {!loading && tab === 'hr' && (
+      {!loading && group === 'hr' && (
         <section style={styles.group}>
           <Card title={t.hrDirectory} count={staff.length}>
             {staff.length ? (
@@ -785,6 +805,8 @@ const styles: Record<string, CSSProperties> = {
   tabs: { display: 'flex', flexWrap: 'wrap', gap: 8, borderBottom: '1px solid #242735', paddingBottom: 10 },
   tab: { minHeight: 46, borderWidth: 1, borderStyle: 'solid', borderColor: '#242735', borderRadius: 999, background: '#101119', color: '#9aa6ba', fontWeight: 900, padding: '0 20px' },
   tabActive: { background: 'rgba(213,169,21,.14)', borderColor: 'rgba(213,169,21,.55)', color: '#e5b80b' },
+  tabLink: { minHeight: 46, borderWidth: 1, borderStyle: 'solid', borderColor: 'transparent', borderRadius: 999, background: 'transparent', color: '#7f8aa0', fontWeight: 800, padding: '0 14px' },
+  navDivider: { width: 1, alignSelf: 'stretch', background: '#242735', margin: '2px 4px' },
   group: { display: 'grid', gap: 16 },
   chipRow: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   chip: { borderWidth: 1, borderStyle: 'solid', borderColor: '#242735', borderRadius: 12, background: '#101119', padding: 16, display: 'grid', gap: 6 },

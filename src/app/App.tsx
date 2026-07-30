@@ -142,8 +142,16 @@ export function App() {
           <DisputesPage lang={lang} />
         ) : path === '/settings' ? (
           <SettingsPage lang={lang} />
-        ) : path === '/admin' ? (
-          <AdminControlCenterPage lang={lang} />
+        ) : path === '/admin' || path === '/admin/guests' ? (
+          <AdminControlCenterPage lang={lang} group="guest" />
+        ) : path === '/admin/hosts' ? (
+          <AdminControlCenterPage lang={lang} group="host" />
+        ) : path === '/admin/accounting' ? (
+          <AdminControlCenterPage lang={lang} group="accounting" />
+        ) : path === '/admin/management' ? (
+          <AdminControlCenterPage lang={lang} group="management" />
+        ) : path === '/admin/hr' ? (
+          <AdminControlCenterPage lang={lang} group="hr" />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
         ) : path === '/ai-brain' ? (
