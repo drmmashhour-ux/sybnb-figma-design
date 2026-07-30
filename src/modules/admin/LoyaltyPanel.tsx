@@ -127,7 +127,7 @@ export function LoyaltyPanel({ lang }: Props) {
 const S: Record<string, CSSProperties> = {
   wrap: { display: 'grid', gap: 12 },
   controls: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  btn: { background: '#1b2130', color: '#e8ecf3', border: '1px solid rgba(255,255,255,.16)', borderRadius: 8, padding: '9px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
+  btn: { background: '#1b2130', color: '#e8ecf3', borderWidth: 1, borderStyle: 'solid', borderColor: 'rgba(255,255,255,.16)', borderRadius: 8, padding: '9px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
   ok: { background: 'rgba(32,210,155,.16)', borderColor: '#20d29b', color: '#6ff0c8' },
   no: { background: 'rgba(255,92,120,.16)', borderColor: '#ff5c78', color: '#ff9fb1' },
   notice: { color: '#6ff0c8', background: 'rgba(32,210,155,.1)', border: '1px solid rgba(32,210,155,.3)', borderRadius: 8, padding: '8px 11px', fontSize: 12.5 },
