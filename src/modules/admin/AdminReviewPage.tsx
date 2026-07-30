@@ -2158,6 +2158,15 @@ function ListingReviewCard({
         <span>{labels.price}</span>
         <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
       </div>
+      {listing.metadata?.listingPlan ? (
+        <div style={{ ...styles.meta, borderTop: '1px dashed #30384d', paddingTop: 8 }}>
+          <span>{lang === 'ar' ? 'الخطة — تحقّق من الدفع قبل القبول' : 'Plan — verify payment before approving'}</span>
+          <strong>
+            {String(listing.metadata.listingPlan).toUpperCase()}
+            {listing.metadata.listingPlanPriceUsd ? ` · $${listing.metadata.listingPlanPriceUsd}` : ''}
+          </strong>
+        </div>
+      ) : null}
       <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
         {labels.details}
       </button>

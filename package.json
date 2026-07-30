@@ -30,6 +30,7 @@
     "db:generate": "prisma generate",
     "db:test:push": "node scripts/db-test-push.mjs",
     "db:audit-test-role": "node scripts/audit-test-role-privileges.mjs",
+    "bootstrap:admin": "node --env-file=.env scripts/bootstrap-admin.mjs",
     "cap:build": "VITE_API_BASE_URL=https://sybnb.app npm run build && npx cap sync",
     "cap:open:ios": "npx cap open ios",
     "cap:open:android": "npx cap open android"
