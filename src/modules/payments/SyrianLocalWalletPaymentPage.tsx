@@ -13,6 +13,7 @@ import {
   createLocalFallbackPaymentProof,
   createStripeCheckoutSession,
   fetchStripePaymentStatus,
+  submitPrototypeLocalWalletProof,
   type PlatformPaymentProof,
 } from '../../shared/api/platformApi'
 import { moneyText } from '../../shared/i18n/display'
@@ -164,7 +165,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         currency: paymentProof.currency,
         transactionReference: paymentProof.providerRef,
         paymentProofId: paymentProof.id,
-        status: 'APPROVED',
+        status: paymentProof.status,
       }),
     )
   }, [bookingId, paymentProof])
@@ -183,16 +184,30 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     })
   }
 
-  function confirmWalletPayment() {
+  async function confirmWalletPayment() {
     setPaymentState('wallet')
     setPaymentError('')
-
     try {
-      const proof = createLocalProof('syrian_local_wallet')
-      setPaymentProof({ ...proof, status: 'APPROVED', reviewedAt: new Date().toISOString(), reviewedById: 'local-wallet-test' })
-    } catch (error) {
-      setPaymentState('error')
-      setPaymentError(error instanceof Error ? error.message : t.apiError)
+      // Submit a REAL Sham Cash proof — it is persisted server-side as pending admin review, so an
+      // admin verifies the transfer before the booking is confirmed. (Previously this self-stamped
+      // the payment APPROVED on the client: no money moved and nothing was recorded server-side.)
+      const proof = await submitPrototypeLocalWalletProof({
+        bookingId,
+        amountMinor: walletAmountDue,
+        currency: walletCurrency,
+        providerRef: transactionReference,
+      })
+      setPaymentProof(proof)
+    } catch {
+      // Offline/demo bookings have no server record — keep a local proof so the demo still completes,
+      // but leave it PENDING review (never auto-approved).
+      try {
+        setPaymentProof({ ...createLocalProof('syrian_local_wallet'), status: 'PENDING_REVIEW' })
+      } catch (error) {
+        setPaymentState('error')
+        setPaymentError(error instanceof Error ? error.message : t.apiError)
+        return
+      }
     } finally {
       setPaymentState('idle')
     }
