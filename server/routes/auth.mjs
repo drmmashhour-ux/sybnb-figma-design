@@ -6,6 +6,7 @@ import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerifi
 import { consumePhoneVerificationCode, hasRecentlyVerifiedPhone, sendPhoneVerificationCode } from '../lib/phone-verification.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { attachReferralOnRegister, generateUniqueReferralCode } from '../lib/referrals.mjs'
+import { isMailerConfigured, sendPasswordChangedEmail } from '../lib/mailer.mjs'
 
 const NAME_FIELD_MAX_LENGTH = 120
 
@@ -147,10 +148,18 @@ export async function handleAuth(req, res, url, context) {
     // Bumping sessionVersion here invalidates any session issued before the reset (F-02) -- e.g.
     // an attacker who stole a session token loses it the moment the legitimate owner resets their
     // password, instead of the token staying valid until its own 7-day expiry regardless.
-    await db().user.updateMany({
+    const result = await db().user.updateMany({
       where: { email: validEmail },
       data: { passwordHash: hashPassword(validPassword), sessionVersion: { increment: 1 } },
     })
+
+    // Security confirmation: tell the account owner their password changed so they can react if it
+    // wasn't them. Fire-and-forget + mailer-gated + try/catch, so a mail hiccup never fails the reset.
+    if (result.count > 0 && isMailerConfigured()) {
+      sendPasswordChangedEmail(validEmail).catch((err) =>
+        console.error('[auth] password-changed email failed:', err?.message || err),
+      )
+    }
     return json(res, 200, { ok: true })
   }
 
