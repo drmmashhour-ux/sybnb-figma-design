@@ -9,6 +9,7 @@ import {
   createAndSubmitPrototypeListing,
   geocodePlace,
   submitAccommodation,
+  uploadListingPhoto,
   type CarVehicleAttributes,
 } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
@@ -363,6 +364,9 @@ export function SellerListingWizard({ lang }: Props) {
   const [description, setDescription] = useState(draft.description ?? '')
   const [aiWriting, setAiWriting] = useState(false)
   const [aiError, setAiError] = useState('')
+  // Guest-facing property/room photos (real image bytes) for STAYS — uploaded to the listing on
+  // submit so stays publish WITH photos. Proof/deed documents stay in the separate document uploader.
+  const [listingPhotoFiles, setListingPhotoFiles] = useState<File[]>([])
   const [governorate, setGovernorate] = useState(draft.governorate || 'damascus')
   const [city, setCity] = useState(draft.city || 'damascus-city')
   const [area, setArea] = useState(draft.area || 'old-city')
@@ -711,6 +715,13 @@ export function SellerListingWizard({ lang }: Props) {
       setSubmitError(isAr ? 'ارفع صورة واحدة حقيقية على الأقل للسيارة.' : 'Upload at least one real photo of the car.')
       return
     }
+    // Stays must publish with at least one guest-facing photo (the media step only shows on the first
+    // room type, so this is checked once per accommodation).
+    if (!isAdvertisingFlow && division === 'STAYS' && activeStep.id === 'media' && !listingPhotoFiles.length) {
+      setSubmitState('error')
+      setSubmitError(isAr ? 'ارفع صورة واحدة على الأقل للعقار.' : 'Upload at least one property photo.')
+      return
+    }
     setSubmitState('idle')
     setSubmitError('')
 
@@ -793,7 +804,7 @@ export function SellerListingWizard({ lang }: Props) {
                 missingOfferProofSlots: missingRequiredOfferProofSlots.map((slot) => slot.id),
               },
             })
-            await addAccommodationRoomType(accommodation.id, {
+            const roomTypeListing = await addAccommodationRoomType(accommodation.id, {
               titleAr: title || (isAr ? 'نوع غرفة جديد' : 'New room type'),
               titleEn: title,
               description,
@@ -802,6 +813,10 @@ export function SellerListingWizard({ lang }: Props) {
               instantBookEnabled,
               metadata: roomTypeMetadata,
             })
+            // Upload the guest-facing property/room photos so the listing publishes WITH images.
+            for (const file of listingPhotoFiles) {
+              await uploadListingPhoto(roomTypeListing.id, file)
+            }
             setAccommodationId(accommodation.id)
           } else {
             await addAccommodationRoomType(accommodationId, {
@@ -1872,6 +1887,43 @@ export function SellerListingWizard({ lang }: Props) {
                 </div>
               ) : (
                 <>
+                  {!isAdvertisingFlow && division === 'STAYS' && (
+                    <div className="seller-form-grid">
+                      <label className="seller-wide-field">
+                        <span>{isAr ? 'صور العقار للضيوف (مطلوب صورة واحدة على الأقل — حتى 30)' : 'Guest-facing property photos (at least one required — up to 30)'}</span>
+                        <input
+                          accept="image/jpeg,image/png,image/webp"
+                          multiple
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files || []).filter((file) => {
+                              const allowed = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+                              const withinSize = file.size <= 8 * 1024 * 1024
+                              return allowed && withinSize
+                            })
+                            if (files.length) setListingPhotoFiles((current) => [...current, ...files].slice(0, 30))
+                            event.target.value = ''
+                          }}
+                          type="file"
+                        />
+                      </label>
+                      {listingPhotoFiles.length > 0 && (
+                        <div className="seller-upload-grid">
+                          {listingPhotoFiles.map((file, index) => (
+                            <span key={`${file.name}-${index}`}>
+                              {file.name}
+                              <button
+                                type="button"
+                                aria-label={isAr ? 'إزالة الصورة' : 'Remove photo'}
+                                onClick={() => setListingPhotoFiles((current) => current.filter((_, i) => i !== index))}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {!isAdvertisingFlow && division === 'CARS' && (
                     <div className="seller-form-grid">
                       <label className="seller-wide-field">

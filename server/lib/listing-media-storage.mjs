@@ -20,7 +20,7 @@ export const ALLOWED_LISTING_MEDIA_TYPES = {
 export const MAX_LISTING_MEDIA_BYTES = 8 * 1024 * 1024 // 8MB
 // A hard ceiling so a single listing can't be used to fill the disk. The submit guard only needs
 // one real photo; this is the upper bound, not the requirement.
-export const MAX_LISTING_PHOTOS = 20
+export const MAX_LISTING_PHOTOS = 30
 
 // storageKey shape: <uuid>.<ext> — used both at read time (path-traversal guard) and by the route
 // layer to recognise its own serve URLs.

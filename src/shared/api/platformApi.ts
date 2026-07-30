@@ -906,6 +906,18 @@ export async function addAccommodationRoomType(accommodationId: string, input: A
   return response.listing
 }
 
+// Upload one guest-facing photo (the image bytes) to a listing/room-type as ListingMedia. Used by
+// the stays wizard so listings actually publish WITH photos (previously only filenames were kept).
+export async function uploadListingPhoto(listingId: string, file: File) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const fileBase64 = await readFileAsBase64(file)
+  await apiRequest<{ ok: true }>(`/api/listings/${listingId}/media`, {
+    method: 'POST',
+    token: session.token,
+    body: { fileBase64, mimeType: file.type },
+  })
+}
+
 export async function submitAccommodation(accommodationId: string) {
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
   const response = await apiRequest<{ ok: true; accommodation: PlatformAccommodation }>(
