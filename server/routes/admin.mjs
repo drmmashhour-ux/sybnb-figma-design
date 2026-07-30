@@ -529,6 +529,247 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, user: foundUser })
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // ACCOUNT CONTROL — universal admin control over ANY account, across every
+  // section of the control center. Generalizes the driver kill-switch (below)
+  // to all roles: open an account, fix it, or suspend / reinstate / soft-delete
+  // it. Suspend & delete bump sessionVersion so the target is logged out on
+  // their next request (auth-context.mjs already rejects non-ACTIVE + stale sv).
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Which roles each control-center section manages. 'management'/'all' => everyone.
+  const ACCOUNT_SECTION_ROLES = {
+    guest: ['GUEST'],
+    host: ['HOST'],
+    accounting: ['SELLER'],
+    hr: ['ADMIN', 'SUPPORT'],
+    staff: ['ADMIN', 'SUPPORT'],
+    driver: ['DRIVER'],
+  }
+
+  // Search / list accounts by section (role) + status + free text.
+  if (url.pathname === '/api/admin/accounts') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const section = String(url.searchParams.get('section') || 'all').toLowerCase()
+    const statusFilter = String(url.searchParams.get('status') || '').toUpperCase()
+    const q = String(url.searchParams.get('q') || '').trim()
+    const roleFilter = ACCOUNT_SECTION_ROLES[section] // undefined => all sections (management)
+
+    const accounts = await db().user.findMany({
+      where: {
+        ...(roleFilter ? { roles: { some: { role: { in: roleFilter } } } } : {}),
+        ...(['ACTIVE', 'SUSPENDED', 'DELETED'].includes(statusFilter) ? { status: statusFilter } : {}),
+        ...(q
+          ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { displayName: { contains: q, mode: 'insensitive' } }] }
+          : {}),
+      },
+      select: {
+        id: true, displayName: true, email: true, status: true, createdAt: true,
+        idDocumentStatus: true, isDemo: true, roles: { select: { role: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+    return json(res, 200, { ok: true, accounts: accounts.map((a) => ({ ...a, roles: a.roles.map((r) => r.role) })) })
+  }
+
+  // Suspend (revoke) / reinstate (release) / soft-delete an account — the universal kill switch.
+  const accountStatusMatch = url.pathname.match(/^\/api\/admin\/accounts\/([^/]+)\/status$/)
+  if (accountStatusMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN']) // status changes are ADMIN-only, not SUPPORT
+    const targetId = accountStatusMatch[1]
+    const body = await readJson(req)
+    const nextStatus = String(body.status || '').toUpperCase()
+    if (!['ACTIVE', 'SUSPENDED', 'DELETED'].includes(nextStatus)) {
+      const error = new Error('status must be ACTIVE, SUSPENDED, or DELETED.')
+      error.statusCode = 400
+      error.code = 'ACCOUNT_STATUS_INVALID'
+      error.expose = true
+      throw error
+    }
+    // A revoke/delete must carry a reason — it goes into the audit trail.
+    if (nextStatus !== 'ACTIVE' && !body.reason) {
+      const error = new Error('A reason is required to suspend or delete an account.')
+      error.statusCode = 400
+      error.code = 'ACCOUNT_REASON_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const reason = body.reason ? assertBoundedString(body.reason, { fieldName: 'reason', maxLength: 500 }) : null
+
+    // Guard: an admin can never lock/delete their own account.
+    if (targetId === context.user.id) {
+      const error = new Error('You cannot change the status of your own account.')
+      error.statusCode = 400
+      error.code = 'ACCOUNT_SELF_ACTION_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+
+    const target = await db().user.findUnique({ where: { id: targetId }, include: { roles: true } })
+    if (!target) {
+      const error = new Error('Account not found.')
+      error.statusCode = 404
+      error.code = 'USER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // Guard: never suspend/delete the LAST active admin — that would lock everyone out of the console.
+    if (nextStatus !== 'ACTIVE' && target.roles.some((r) => r.role === 'ADMIN')) {
+      const otherActiveAdmins = await db().user.count({
+        where: { id: { not: targetId }, status: 'ACTIVE', roles: { some: { role: 'ADMIN' } } },
+      })
+      if (otherActiveAdmins === 0) {
+        const error = new Error('This is the last active admin — reinstate another admin before changing this one.')
+        error.statusCode = 409
+        error.code = 'LAST_ADMIN_PROTECTED'
+        error.expose = true
+        throw error
+      }
+    }
+
+    const updated = await db().$transaction(async (tx) => {
+      const bumpSession = nextStatus !== 'ACTIVE'
+      const u = await tx.user.update({
+        where: { id: targetId },
+        data: {
+          status: nextStatus,
+          // Suspend/delete invalidate live tokens immediately; reinstate clears the soft-delete tombstone.
+          ...(bumpSession ? { sessionVersion: { increment: 1 } } : {}),
+          ...(nextStatus === 'DELETED' ? { deletedAt: new Date() } : {}),
+          ...(nextStatus === 'ACTIVE' ? { deletedAt: null } : {}),
+        },
+        select: { id: true, status: true, deletedAt: true },
+      })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: `ACCOUNT_STATUS_${nextStatus}`,
+          entityType: 'users',
+          entityId: targetId,
+          before: { status: target.status },
+          after: { status: nextStatus, reason },
+        },
+      })
+      return u
+    })
+    return json(res, 200, { ok: true, account: updated })
+  }
+
+  // Open one account (full record) OR fix its safe fields / roles.
+  const accountRecordMatch = url.pathname.match(/^\/api\/admin\/accounts\/([^/]+)$/)
+  if (accountRecordMatch) {
+    const targetId = accountRecordMatch[1]
+
+    if (req.method === 'GET') {
+      requireAuth(context, ['ADMIN', 'SUPPORT'])
+      const account = await db().user.findUnique({
+        where: { id: targetId },
+        select: {
+          id: true, displayName: true, email: true, locale: true, status: true,
+          idDocumentStatus: true, idDocumentRef: true, isDemo: true,
+          createdAt: true, deletedAt: true, roles: { select: { role: true } },
+        },
+      })
+      if (!account) {
+        const error = new Error('Account not found.')
+        error.statusCode = 404
+        error.code = 'USER_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      const [listingsCount, bookingsCount, paymentProofsCount, recentActivity] = await Promise.all([
+        db().listing.count({ where: { ownerId: targetId } }),
+        db().booking.count({ where: { guestId: targetId } }),
+        db().paymentProof.count({ where: { userId: targetId } }),
+        db().adminAuditLog.findMany({
+          where: { entityType: 'users', entityId: targetId },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { action: true, createdAt: true, after: true },
+        }),
+      ])
+      return json(res, 200, {
+        ok: true,
+        account: {
+          ...account,
+          roles: account.roles.map((r) => r.role),
+          hasIdDocument: Boolean(account.idDocumentRef),
+          idDocumentRef: undefined,
+          counts: { listings: listingsCount, bookings: bookingsCount, paymentProofs: paymentProofsCount },
+          recentActivity,
+        },
+      })
+    }
+
+    if (req.method === 'PATCH') {
+      requireAuth(context, ['ADMIN']) // editing an account (incl. roles) is ADMIN-only
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['displayName', 'locale', 'email', 'addRoles', 'removeRoles'], 'account edit body')
+
+      const target = await db().user.findUnique({ where: { id: targetId }, include: { roles: true } })
+      if (!target) {
+        const error = new Error('Account not found.')
+        error.statusCode = 404
+        error.code = 'USER_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+
+      const data = {}
+      if (body.displayName !== undefined) data.displayName = assertBoundedString(body.displayName, { fieldName: 'displayName', maxLength: 120 })
+      if (body.locale !== undefined) data.locale = assertBoundedString(body.locale, { fieldName: 'locale', maxLength: 12 })
+      if (body.email !== undefined) data.email = assertValidEmail(body.email).toLowerCase()
+
+      const VALID_ROLES = ['GUEST', 'HOST', 'SELLER', 'DRIVER', 'ADMIN', 'SUPPORT']
+      const addRoles = Array.isArray(body.addRoles) ? body.addRoles.map((r) => String(r).toUpperCase()).filter((r) => VALID_ROLES.includes(r)) : []
+      const removeRoles = Array.isArray(body.removeRoles) ? body.removeRoles.map((r) => String(r).toUpperCase()).filter((r) => VALID_ROLES.includes(r)) : []
+
+      // Guard: don't strip ADMIN from the last active admin.
+      if (removeRoles.includes('ADMIN') && target.roles.some((r) => r.role === 'ADMIN')) {
+        const otherActiveAdmins = await db().user.count({
+          where: { id: { not: targetId }, status: 'ACTIVE', roles: { some: { role: 'ADMIN' } } },
+        })
+        if (otherActiveAdmins === 0) {
+          const error = new Error('Cannot remove ADMIN from the last active admin.')
+          error.statusCode = 409
+          error.code = 'LAST_ADMIN_PROTECTED'
+          error.expose = true
+          throw error
+        }
+      }
+
+      const updated = await db().$transaction(async (tx) => {
+        if (Object.keys(data).length) await tx.user.update({ where: { id: targetId }, data })
+        for (const role of removeRoles) await tx.userRole.deleteMany({ where: { userId: targetId, role } })
+        for (const role of addRoles) {
+          const exists = await tx.userRole.findFirst({ where: { userId: targetId, role } })
+          if (!exists) await tx.userRole.create({ data: { userId: targetId, role } })
+        }
+        await tx.adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'ACCOUNT_EDIT',
+            entityType: 'users',
+            entityId: targetId,
+            before: { displayName: target.displayName, email: target.email, locale: target.locale, roles: target.roles.map((r) => r.role) },
+            after: { ...data, addRoles, removeRoles },
+          },
+        })
+        return tx.user.findUnique({
+          where: { id: targetId },
+          select: { id: true, displayName: true, email: true, locale: true, status: true, roles: { select: { role: true } } },
+        })
+      })
+      return json(res, 200, { ok: true, account: { ...updated, roles: updated.roles.map((r) => r.role) } })
+    }
+
+    return methodNotAllowed(res, ['GET', 'PATCH'])
+  }
+
   const idDocumentAdminUploadMatch = url.pathname.match(/^\/api\/admin\/id-document\/([^/]+)\/upload$/)
   if (idDocumentAdminUploadMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

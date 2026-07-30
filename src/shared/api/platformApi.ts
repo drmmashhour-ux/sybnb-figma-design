@@ -1453,6 +1453,68 @@ export async function hideAdminReview(reviewId: string) {
   return response.review
 }
 
+// ── Admin account control: open any account, fix it, or suspend/reinstate/soft-delete it ──
+export type AdminAccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
+export type PlatformAdminAccount = {
+  id: string
+  displayName: string
+  email: string | null
+  status: AdminAccountStatus
+  createdAt: string
+  idDocumentStatus: string | null
+  isDemo: boolean
+  roles: string[]
+}
+export type PlatformAdminAccountDetail = PlatformAdminAccount & {
+  locale: string
+  deletedAt: string | null
+  hasIdDocument: boolean
+  counts: { listings: number; bookings: number; paymentProofs: number }
+  recentActivity: Array<{ action: string; createdAt: string; after: unknown }>
+}
+
+export async function adminSearchAccounts(section: string, status?: AdminAccountStatus | '', q?: string) {
+  const session = await ensurePrototypeAdminSession()
+  const params = new URLSearchParams({ section })
+  if (status) params.set('status', status)
+  if (q) params.set('q', q)
+  const response = await apiRequest<{ ok: true; accounts: PlatformAdminAccount[] }>(
+    `/api/admin/accounts?${params.toString()}`,
+    { token: session.token },
+  )
+  return response.accounts
+}
+
+export async function adminGetAccount(id: string) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; account: PlatformAdminAccountDetail }>(`/api/admin/accounts/${id}`, {
+    token: session.token,
+  })
+  return response.account
+}
+
+export async function adminSetAccountStatus(id: string, status: AdminAccountStatus, reason?: string) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; account: { id: string; status: AdminAccountStatus; deletedAt: string | null } }>(
+    `/api/admin/accounts/${id}/status`,
+    { method: 'PATCH', token: session.token, body: { status, reason } },
+  )
+  return response.account
+}
+
+export async function adminUpdateAccount(
+  id: string,
+  patch: { displayName?: string; locale?: string; email?: string; addRoles?: string[]; removeRoles?: string[] },
+) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; account: PlatformAdminAccount }>(`/api/admin/accounts/${id}`, {
+    method: 'PATCH',
+    token: session.token,
+    body: patch,
+  })
+  return response.account
+}
+
 export type PlatformAdminHostInsight = PlatformHostInsight & {
   host?: { id: string; displayName: string; email: string | null }
   listing?: { id: string; titleAr: string; titleEn: string | null }

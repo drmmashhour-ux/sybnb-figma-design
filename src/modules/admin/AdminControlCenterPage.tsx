@@ -27,6 +27,7 @@ import {
   type PlatformStaffMember,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { AccountControlPanel } from './AccountControlPanel'
 
 type Props = { lang: Lang }
 
@@ -40,7 +41,9 @@ const T = {
     subtitle: 'لوحة موحّدة — بيانات حقيقية من واجهات الإدارة.',
     loading: 'جار التحميل...',
     error: 'تعذر تحميل بعض البيانات.',
-    tabs: { guest: 'العملاء', hosting: 'الاستضافة', accounting: 'المحاسبة', directory: 'الدليل', needs: 'يحتاج انتباه', hr: 'الموارد البشرية' },
+    tabs: { guest: 'العملاء', hosting: 'المضيفون', accounting: 'المحاسبة', directory: 'الإدارة', needs: 'يحتاج انتباه', hr: 'الموارد البشرية' },
+    accountControl: 'التحكم بالحسابات',
+    accountControlHint: 'افتح أي حساب وأصلح مشاكله، أو علّقه أو أعد تفعيله أو احذفه. كل إجراء يُسجَّل.',
     userSearch: 'ابحث بالاسم أو البريد',
     roleAll: 'كل الأدوار',
     statusCol: 'الحالة',
@@ -122,7 +125,9 @@ const T = {
     subtitle: 'One unified board — real data from the admin APIs.',
     loading: 'Loading...',
     error: 'Some data could not be loaded.',
-    tabs: { guest: 'Guests', hosting: 'Hosting', accounting: 'Accounting', directory: 'Directory', needs: 'Needs attention', hr: 'HR' },
+    tabs: { guest: 'Guests', hosting: 'Hosts', accounting: 'Accounting', directory: 'Management', needs: 'Needs attention', hr: 'HR' },
+    accountControl: 'Account control',
+    accountControlHint: 'Open any account and fix its problems, or suspend / reinstate / delete it. Every action is logged.',
     userSearch: 'Search by name or email',
     roleAll: 'All roles',
     statusCol: 'Status',
@@ -528,6 +533,10 @@ export function AdminControlCenterPage({ lang }: Props) {
       {!loading && tab === 'directory' && (
         <section style={styles.group}>
           {actionMsg && <p style={styles.hint}>{actionMsg}</p>}
+          <Card title={t.accountControl}>
+            <p style={styles.hint}>{t.accountControlHint}</p>
+            <AccountControlPanel lang={lang} />
+          </Card>
           <Card title={t.usersTitle} count={users.length}>
             <form
               style={styles.searchRow}
