@@ -96,7 +96,7 @@ export function AdminShell({ lang, active, title, subtitle, children, counts, on
   )
 
   return (
-    <div className="admin-console" dir={isAr ? 'rtl' : 'ltr'}>
+    <div className="sybnb-admin" dir={isAr ? 'rtl' : 'ltr'}>
       <div className="ambient ambient-one" aria-hidden="true" />
       <div className="ambient ambient-two" aria-hidden="true" />
 

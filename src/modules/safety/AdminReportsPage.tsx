@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { actionReport, fetchAdminReports, type PlatformReport } from '../../shared/api/platformApi'
+import { AdminShell } from '../admin/AdminShell'
 
 // Admin report queue (GET /api/admin/reports, OPEN only) + action (PATCH /api/admin/reports/:id).
 const copy = {
@@ -42,7 +43,7 @@ const copy = {
   },
 }
 
-export function AdminReportsPage({ lang }: { lang: Lang }) {
+export function AdminReportsPage({ lang, onLanguageChange }: { lang: Lang; onLanguageChange?: (lang: Lang) => void }) {
   const isAr = lang === 'ar'
   const t = isAr ? copy.ar : copy.en
   const [reports, setReports] = useState<PlatformReport[]>([])
@@ -65,16 +66,14 @@ export function AdminReportsPage({ lang }: { lang: Lang }) {
   }
 
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <button style={styles.back} onClick={() => (window.location.hash = '/admin/review')}>{t.back}</button>
-      <h1 style={styles.title}>{t.title}</h1>
-      <p style={styles.subtitle}>{t.subtitle}</p>
-
-      {state === 'loading' && <p style={styles.muted}>{t.loading}</p>}
-      {state === 'error' && <p style={styles.error}>{t.error}</p>}
-      {state === 'ready' && reports.length === 0 && <p style={styles.muted}>{t.empty}</p>}
-      {state === 'ready' && reports.map((r) => <ReportRow key={r.id} report={r} t={t} isAr={isAr} onDone={onDone} />)}
-    </main>
+    <AdminShell lang={lang} active="reports" title={t.title} subtitle={t.subtitle} onLanguageChange={onLanguageChange} onRefresh={() => void load()}>
+      <div dir={isAr ? 'rtl' : 'ltr'} style={{ display: 'grid', gap: 14 }}>
+        {state === 'loading' && <p style={styles.muted}>{t.loading}</p>}
+        {state === 'error' && <p style={styles.error}>{t.error}</p>}
+        {state === 'ready' && reports.length === 0 && <div className="empty"><div><span>✓</span>{t.empty}</div></div>}
+        {state === 'ready' && reports.map((r) => <ReportRow key={r.id} report={r} t={t} isAr={isAr} onDone={onDone} />)}
+      </div>
+    </AdminShell>
   )
 }
 

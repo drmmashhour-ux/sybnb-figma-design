@@ -7,7 +7,6 @@ import {
   fetchStrPlanProofBlobUrl,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
-  getStoredStaffSession,
   lookupAdminUserByEmail,
   releaseAdminPayout,
   reviewPrototypePaymentProof,
@@ -23,10 +22,12 @@ import {
   type PlatformWalletGift,
 } from '../../shared/api/platformApi'
 import { BrandLogo } from '../../shared/brand'
+import { AdminShell } from './AdminShell'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, providerText, statusText } from '../../shared/i18n/display'
 
 type Props = {
   lang: Lang
+  onLanguageChange?: (lang: Lang) => void
 }
 
 const copy = {
@@ -96,7 +97,7 @@ const STR_ADMIN_COMMISSION_RATE = 0.1
 const STR_TAX_RATE = 0.02
 const STR_CLEANING_RATE = 0.05
 
-export function AdminReviewPage({ lang }: Props) {
+export function AdminReviewPage({ lang, onLanguageChange }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
@@ -252,6 +253,7 @@ export function AdminReviewPage({ lang }: Props) {
       disabled={status === 'saving'}
       isAr={isAr}
       lang={lang}
+      onLanguageChange={onLanguageChange}
       listings={visibleListings}
       loadQueue={loadQueue}
       message={message}
@@ -563,6 +565,7 @@ function ShortRentAdminCommandDashboard({
   disabled,
   isAr,
   lang,
+  onLanguageChange,
   listings,
   loadQueue,
   message,
@@ -582,6 +585,7 @@ function ShortRentAdminCommandDashboard({
   disabled: boolean
   isAr: boolean
   lang: Lang
+  onLanguageChange?: (lang: Lang) => void
   listings: PlatformListing[]
   loadQueue: () => Promise<void>
   message: string
@@ -635,10 +639,6 @@ function ShortRentAdminCommandDashboard({
   const currency = previewPayment?.currency || 'USD'
   const selectedPaymentNeedsCashMatch = primaryPayment ? isShamCashProvider(primaryPayment.provider) : false
   const selectedPaymentHeld = primaryPayment ? Boolean(heldPaymentIds[primaryPayment.id]) : false
-  const staffSession = getStoredStaffSession('ADMIN')
-  const adminName = staffSession?.user.displayName || (isAr ? 'مدير الإدارة' : 'Platform Admin')
-  const adminRole = isAr ? 'مدير العمليات' : 'Operations manager'
-  const adminInitial = (adminName.trim()[0] || 'A').toUpperCase()
   const selectPayment = (payment: PlatformPaymentProof) => {
     setSelectedPaymentId(payment.id)
     if (payment.bookingId) setSelectedBookingId(payment.bookingId)
@@ -861,28 +861,15 @@ function ShortRentAdminCommandDashboard({
   ]
 
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={commandStyles.page}>
-      <header className="admin-command-header" style={commandStyles.header}>
-        <div className="admin-brand-lockup" style={commandStyles.strBrandLockup}>
-          <BrandLogo logo="stays" size="nav" />
-          <div className="admin-header-watermark" style={commandStyles.watermark}>STR · STAY TRUST RELAX · FINAL REVIEW · 3055</div>
-        </div>
-        <div className="admin-breadcrumb" style={commandStyles.breadcrumb}>
-          <strong>{isAr ? 'لوحة الإدارة' : 'Admin dashboard'}</strong>
-          <b>/</b>
-          <span>{isAr ? 'الإيجار اليومي' : 'Daily rent'}</span>
-        </div>
-        <div className="admin-identity" style={commandStyles.adminIdentity}>
-          <strong>{adminName}</strong>
-          <small className="admin-identity-role">{adminRole}</small>
-          <span style={commandStyles.avatar}>{adminInitial}</span>
-          <span className="admin-identity-notify" style={commandStyles.notify}>●</span>
-          <b className="admin-identity-lang">EN / AR</b>
-          <button style={commandStyles.circleButton} onClick={() => window.history.back()} aria-label={isAr ? 'السابق' : 'Back'}>←</button>
-          <button style={commandStyles.circleButton} onClick={() => window.history.forward()} aria-label={isAr ? 'التالي' : 'Next'}>→</button>
-        </div>
-      </header>
-
+    <AdminShell
+      lang={lang}
+      active="operations"
+      title={isAr ? 'مركز العمليات' : 'Operations command center'}
+      subtitle={isAr ? 'مراقبة الحجوزات والمدفوعات والتسويات واتخاذ القرار.' : 'Monitor bookings, payments and reconciliations — with human decisions.'}
+      onLanguageChange={onLanguageChange}
+      heroActions={<button className="button ghost" type="button" onClick={() => void loadQueue()}>↻ {isAr ? 'تحديث' : 'Refresh'}</button>}
+    >
+      <div dir={isAr ? 'rtl' : 'ltr'} style={{ display: 'grid', gap: 18 }}>
       <section style={commandStyles.departmentGroups} aria-label={isAr ? 'أقسام الإدارة' : 'Admin departments'}>
         {commandCategories.map((category) => {
           const items = commandViews.filter((view) => category.viewIds.includes(view.id))
@@ -1449,7 +1436,8 @@ function ShortRentAdminCommandDashboard({
         <button style={commandStyles.secondaryCommand} onClick={() => window.print()}>{isAr ? 'طباعة التقرير' : 'Print report'}</button>
         <button style={commandStyles.secondaryCommand} onClick={() => void loadQueue()}>{isAr ? 'تحديث' : 'Refresh'}</button>
       </nav>
-    </main>
+      </div>
+    </AdminShell>
   )
 }
 
@@ -2152,7 +2140,7 @@ const commandStyles: Record<string, CSSProperties> = {
   walletTimeline: { borderInlineStart: '2px solid rgba(255,255,255,.18)', display: 'grid', gap: 14, paddingInlineStart: 18 },
   signalLine: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', margin: 0, padding: 12 },
   riskPair: { display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' },
-  actionBar: { alignItems: 'center', background: 'rgba(7,8,13,.94)', borderTop: '1px solid rgba(255,255,255,.12)', bottom: 0, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', insetInline: 0, padding: '12px 24px', position: 'fixed', zIndex: 10 },
+  actionBar: { alignItems: 'center', background: 'rgba(18,21,26,.92)', border: '1px solid #242a33', borderRadius: 14, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', padding: '14px 18px' },
   acceptButton: { background: '#20c987', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   rejectButton: { background: '#ff4d73', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   goldButton: { background: '#e6b80d', border: 0, borderRadius: 8, color: '#111', fontWeight: 950, minHeight: 44, padding: '0 14px' },

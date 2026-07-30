@@ -135,9 +135,9 @@ export function App() {
         ) : path === '/immocontact' ? (
           <ImmocontactPage lang={lang} />
         ) : path === '/admin/disputes' ? (
-          <AdminDisputesPage lang={lang} />
+          <AdminDisputesPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/admin/reports' ? (
-          <AdminReportsPage lang={lang} />
+          <AdminReportsPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/disputes' ? (
           <DisputesPage lang={lang} />
         ) : path === '/settings' ? (
@@ -153,7 +153,7 @@ export function App() {
         ) : path === '/admin/hr' ? (
           <AdminControlCenterPage lang={lang} group="hr" onLanguageChange={setLang} />
         ) : path === '/admin/review' ? (
-          <AdminReviewPage lang={lang} />
+          <AdminReviewPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/ai-brain' ? (
           <AiBrainPage lang={lang} />
         ) : path === '/competitors' ? (
