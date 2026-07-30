@@ -45,7 +45,8 @@ export async function answerAssistant({ role = 'guest', locale = 'en', question 
   if (!isAnthropicConfigured()) return { answer: fallbackAnswer(role, locale), source: 'template' }
   try {
     return await answerWithAi({ role, locale, question: trimmed, context })
-  } catch {
+  } catch (err) {
+    console.error('[ai-assistant] Claude call failed, using canned answer:', err?.status ?? err?.statusCode, err?.message)
     return { answer: fallbackAnswer(role, locale), source: 'template' }
   }
 }

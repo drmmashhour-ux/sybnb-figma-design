@@ -22,6 +22,33 @@ export function isAnthropicConfigured() {
   return Boolean(anthropic)
 }
 
+// Tolerant JSON parse for model output. Haiku honours "reply with strict JSON" most of the time, but
+// occasionally wraps the object in a ```json fence or adds a short preamble/among; a bare JSON.parse
+// then throws and silently drops us to the template. This strips fences and, failing that, extracts
+// the outermost {...} block before parsing. Returns null only when there is genuinely no JSON.
+export function parseJsonLoose(text) {
+  if (typeof text !== 'string') return null
+  let s = text.trim()
+  // Strip a leading/trailing markdown code fence (```json ... ``` or ``` ... ```).
+  const fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  if (fence) s = fence[1].trim()
+  try {
+    return JSON.parse(s)
+  } catch {
+    // Fall back to the first balanced-looking {...} span.
+    const start = s.indexOf('{')
+    const end = s.lastIndexOf('}')
+    if (start !== -1 && end > start) {
+      try {
+        return JSON.parse(s.slice(start, end + 1))
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+}
+
 const SYSTEM_PROMPT = `You write a single short pricing recommendation for a short-term rental host on the SYBNB platform. You are given real, already-computed facts about one listing (title, base nightly price, currency, and a count of upcoming open nights with no discount set). Restate only those facts naturally — never invent a number, date, or statistic that is not in the given facts. Suggest exactly one concrete action: adding a lower price override for some of those open nights to attract bookings during a slow period. Reply with strict JSON: {"messageAr": "...", "messageEn": "..."}. Keep each message under 240 characters, one or two sentences, no markdown.`
 
 export async function generatePricingInsightMessage(facts) {
@@ -53,10 +80,8 @@ export async function generatePricingInsightMessage(facts) {
     throw error
   }
 
-  let parsed
-  try {
-    parsed = JSON.parse(textBlock.text)
-  } catch {
+  const parsed = parseJsonLoose(textBlock.text)
+  if (!parsed) {
     const error = new Error('AI response was not valid JSON.')
     error.statusCode = 502
     error.code = 'AI_RESPONSE_INVALID'

@@ -13,7 +13,7 @@
 // treated as lies — only clearly visual claims (pool, sea view, parking, balcony, garden…) or direct
 // contradictions raise a warning.
 // ─────────────────────────────────────────────────────────────────────────────
-import { isAnthropicConfigured, requireAnthropic, MODEL } from './ai-insights.mjs'
+import { isAnthropicConfigured, requireAnthropic, parseJsonLoose, MODEL } from './ai-insights.mjs'
 
 const ALLOWED_MEDIA = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MAX_PHOTOS = 6
@@ -43,10 +43,9 @@ export async function checkListingHonesty({ claims = [], photos = [], locale = '
     const response = await client.messages.create({ model: MODEL, max_tokens: 900, system: SYSTEM_PROMPT, messages: [{ role: 'user', content }] })
     const block = response.content.find((b) => b.type === 'text')
     if (!block?.text) return { status: 'unavailable', items: [], warnings: [] }
-    let parsed
-    try {
-      parsed = JSON.parse(block.text)
-    } catch {
+    const parsed = parseJsonLoose(block.text)
+    if (!parsed) {
+      console.error('[ai-truth-check] Claude returned non-JSON. First 120 chars:', String(block.text).slice(0, 120))
       return { status: 'unavailable', items: [], warnings: [] }
     }
     return {
@@ -55,7 +54,8 @@ export async function checkListingHonesty({ claims = [], photos = [], locale = '
       warnings: Array.isArray(parsed.warnings) ? parsed.warnings.filter((w) => typeof w === 'string').slice(0, 20) : [],
       model: MODEL,
     }
-  } catch {
+  } catch (err) {
+    console.error('[ai-truth-check] Claude call failed:', err?.status ?? err?.statusCode, err?.message)
     return { status: 'unavailable', items: [], warnings: [] }
   }
 }

@@ -11,7 +11,7 @@
 // Reuse in another platform: copy this file + wire one endpoint that calls generateOrTemplate().
 // Depends only on the shared Anthropic client accessor — no platform/DB code.
 // ─────────────────────────────────────────────────────────────────────────────
-import { isAnthropicConfigured, requireAnthropic, MODEL } from './ai-insights.mjs'
+import { isAnthropicConfigured, requireAnthropic, parseJsonLoose, MODEL } from './ai-insights.mjs'
 
 const SYSTEM_PROMPT = `You write a short, warm, honest listing title and description for a short-term rental on the SYBNB platform (Syria). You are given ONLY real facts a host selected: property type, room type(s), bed type(s), amenities, meals, hotel star rating, city/area, guest capacity, bedrooms, bathrooms, and nightly price in USD. Write in BOTH Arabic and English. Rules: use ONLY the given facts — never invent an amenity, view, distance, or number that is not given; the TITLE is a short catchy name of 3 to 7 words (typically property type + area, optionally one standout amenity), no price; the DESCRIPTION is 2 to 4 sentences; inviting but not exaggerated; no markdown, no emojis. Reply with strict JSON: {"titleAr":"...","titleEn":"...","descriptionAr":"...","descriptionEn":"..."}.`
 
@@ -20,7 +20,10 @@ export async function generateOrTemplate(attributes) {
   if (!isAnthropicConfigured()) return templateListingDescription(attributes)
   try {
     return await generateWithAi(attributes)
-  } catch {
+  } catch (err) {
+    // Never hard-fail the host — but don't swallow silently either, or a broken key / model / parse
+    // looks identical to "no key" and we ship the template forever without knowing why.
+    console.error('[ai-listing-description] Claude call failed, using template fallback:', err?.status ?? err?.statusCode, err?.message)
     return templateListingDescription(attributes)
   }
 }
@@ -35,10 +38,9 @@ async function generateWithAi(attributes) {
   })
   const textBlock = response.content.find((block) => block.type === 'text')
   if (!textBlock) return templateListingDescription(attributes)
-  let parsed
-  try {
-    parsed = JSON.parse(textBlock.text)
-  } catch {
+  const parsed = parseJsonLoose(textBlock.text)
+  if (!parsed) {
+    console.error('[ai-listing-description] Claude returned non-JSON, using template. First 120 chars:', String(textBlock.text).slice(0, 120))
     return templateListingDescription(attributes)
   }
   if (!parsed.descriptionAr && !parsed.descriptionEn) return templateListingDescription(attributes)
