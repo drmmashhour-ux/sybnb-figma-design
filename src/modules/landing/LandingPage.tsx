@@ -22,6 +22,7 @@ const PLATFORM = {
 
 const COPY = {
   ar: {
+    heroBadge: 'اكتشف سوريا من جديد',
     searchStay: 'ابحث عن إقامة',
     becomeHost: 'أصبح مضيفاً',
     heroTitle: 'تشعر أنك في المكان الصحيح',
@@ -54,6 +55,7 @@ const COPY = {
     sloganBody: 'ابحث بثقة. احجز بأمان. تابع كل شيء من مكان واحد.',
   },
   en: {
+    heroBadge: 'Discover Syria, reimagined',
     searchStay: 'Search stay',
     becomeHost: 'Become a host',
     heroTitle: 'Stay somewhere that feels right',
@@ -114,11 +116,12 @@ export function LandingPage({ lang }: Props) {
         aria-label={t.heroTitle}
       >
         <div className="str-hero-inner">
+          <span className="str-hero-badge">{t.heroBadge}</span>
           <h1 className={`str-hero-title${serif}`}>{t.heroTitle}</h1>
           <p className="str-hero-sub">{t.heroSub}</p>
 
           <div className="str-hero-actions">
-            <button className="str-btn-gold" onClick={() => navigate('/search-preview')}>
+            <button className="str-btn-teal" onClick={() => navigate('/search-preview')}>
               {t.searchStay}
             </button>
             <button className="str-btn-outline" onClick={() => navigate('/become-host')}>

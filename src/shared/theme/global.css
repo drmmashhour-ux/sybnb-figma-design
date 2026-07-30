@@ -8812,6 +8812,10 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   --gold: #c9a35a;
   --gold-bright: #d6b46a;
   --gold-soft: rgba(201, 163, 90, 0.14);
+  /* Teal = primary action / trust (matches the SYBNB landing identity: teal leads, gold accents). */
+  --teal: #2dd4bf;
+  --teal-bright: #35e0cb;
+  --teal-soft: rgba(45, 212, 191, 0.14);
   --cream: #f2ede2;
   --muted: #a9b4c6;
   background: var(--ink);
@@ -8915,6 +8919,24 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   filter: brightness(1.06);
 }
 
+/* Primary action — teal, the SYBNB landing's lead color. */
+.str-btn-teal {
+  background: linear-gradient(135deg, var(--teal-bright), var(--teal));
+  border: 0;
+  border-radius: 12px;
+  color: #05201c;
+  font-size: 16px;
+  font-weight: 900;
+  min-height: 60px;
+  min-width: 200px;
+  padding: 0 32px;
+  box-shadow: 0 14px 34px rgba(45, 212, 191, 0.22);
+}
+
+.str-btn-teal:hover {
+  filter: brightness(1.05);
+}
+
 .str-btn-outline {
   background: transparent;
   border: 1px solid var(--gold);
@@ -8959,6 +8981,29 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   justify-items: start;
   margin-inline: auto;
   max-width: 1120px;
+}
+
+.str-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--teal-soft);
+  border: 1px solid rgba(45, 212, 191, 0.4);
+  border-radius: 999px;
+  color: var(--teal-bright);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  padding: 8px 16px;
+}
+
+.str-hero-badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.22);
 }
 
 .str-hero-title {
@@ -9067,9 +9112,9 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
 
 .str-trust-icon {
   align-items: center;
-  background: var(--gold-soft);
+  background: var(--teal-soft);
   border-radius: 12px;
-  color: var(--gold-bright);
+  color: var(--teal-bright);
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 20px;

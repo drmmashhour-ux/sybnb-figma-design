@@ -90,9 +90,9 @@ export function AssistantWidget({ lang }: { lang: Lang }) {
 
 const styles: Record<string, CSSProperties> = {
   fab: {
-    position: 'fixed', bottom: 18, zIndex: 60, minHeight: 46, border: '1px solid #7c5cff', borderRadius: 999,
-    background: 'linear-gradient(135deg,#7c5cff,#4f6cff)', color: '#fff', fontWeight: 900, padding: '0 18px',
-    cursor: 'pointer', boxShadow: '0 8px 24px rgba(79,108,255,.35)',
+    position: 'fixed', bottom: 18, zIndex: 60, minHeight: 46, border: '1px solid rgba(45,212,191,.5)', borderRadius: 999,
+    background: 'linear-gradient(135deg,#35e0cb,#2dd4bf)', color: '#05201c', fontWeight: 900, padding: '0 18px',
+    cursor: 'pointer', boxShadow: '0 8px 24px rgba(45,212,191,.35)',
   },
   panel: {
     position: 'fixed', bottom: 18, zIndex: 60, width: 'min(360px, calc(100vw - 32px))', height: 'min(520px, calc(100vh - 120px))',
@@ -103,7 +103,7 @@ const styles: Record<string, CSSProperties> = {
   closeBtn: { border: 0, background: 'transparent', color: '#9aa6ba', fontSize: 22, lineHeight: 1, cursor: 'pointer' },
   thread: { flex: 1, overflowY: 'auto', padding: 12, display: 'grid', gap: 8, alignContent: 'start' },
   aiBubble: { justifySelf: 'start', maxWidth: '85%', background: '#171826', border: '1px solid #242739', borderRadius: 12, padding: '10px 12px', lineHeight: 1.55, fontSize: 14 },
-  userBubble: { justifySelf: 'end', maxWidth: '85%', background: 'linear-gradient(135deg,#7c5cff,#4f6cff)', borderRadius: 12, padding: '10px 12px', lineHeight: 1.55, fontSize: 14 },
+  userBubble: { justifySelf: 'end', maxWidth: '85%', background: 'linear-gradient(135deg,#1f9e90,#2dd4bf)', color: '#05201c', borderRadius: 12, padding: '10px 12px', lineHeight: 1.55, fontSize: 14 },
   inputRow: { display: 'flex', gap: 8, padding: 10, borderTop: '1px solid #1e1f2b', background: '#111119' },
   inputBox: { flex: 1, minHeight: 42, border: '1px solid #2a2c3a', borderRadius: 10, background: '#0d0d14', color: '#fff', padding: '0 12px', fontSize: 14 },
   sendBtn: { minHeight: 42, border: 0, borderRadius: 10, background: '#d5a915', color: '#1a1300', fontWeight: 900, padding: '0 16px', cursor: 'pointer' },
