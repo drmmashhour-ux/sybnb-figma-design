@@ -1783,6 +1783,31 @@ export async function confirmStrPlanPayment(sessionId: string) {
   return { proof: response.proof, planCode: response.planCode }
 }
 
+// Sham Cash host-plan payment: submit the transfer receipt (real file, stored server-side) + the
+// transaction reference. Creates a PENDING proof the admin verifies before approving. Card doesn't use
+// this — Stripe auto-verifies the charge.
+export async function submitStrPlanShamProof(input: {
+  planCode: string
+  providerRef: string
+  file: File
+}) {
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
+  const fileBase64 = await readFileAsBase64(input.file)
+  const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof }>(
+    '/api/payments/str-plan-sham-proof',
+    {
+      method: 'POST',
+      token: session.token,
+      body: { planCode: input.planCode, providerRef: input.providerRef, fileBase64, mimeType: input.file.type },
+    },
+  )
+  return response.proof
+}
+
 export async function fetchPrototypePaymentProof(proofId: string) {
   const localProof = getLocalFallbackPaymentProof(proofId)
   if (localProof) return localProof
@@ -2117,6 +2142,18 @@ export async function reviewPrototypeQueueEntity(
 
 // <img src> can't send an Authorization header, and this file is admin/support-only, so the
 // review UI fetches it as an authenticated blob instead of linking to the endpoint directly.
+// Admin-only: load a Sham Cash plan-payment receipt as a blob URL for inline review (the file endpoint
+// is token-authed, so a plain <a href> can't reach it — fetch with the admin token, then objectURL it).
+export async function fetchStrPlanProofBlobUrl(proofId: string) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await fetch(`${API_BASE_URL}/api/payments/str-plan-sham-proof/${proofId}/file`, {
+    headers: { authorization: `Bearer ${session.token}` },
+  })
+  if (!response.ok) throw new Error(`Could not load payment receipt: ${response.status}`)
+  const blob = await response.blob()
+  return URL.createObjectURL(blob)
+}
+
 export async function fetchIdDocumentBlobUrl(userId: string) {
   const session = await ensurePrototypeAdminSession()
   const response = await fetch(`${API_BASE_URL}/api/admin/id-document/${userId}/file`, {

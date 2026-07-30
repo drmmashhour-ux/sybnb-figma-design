@@ -4,6 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
   fetchIdDocumentBlobUrl,
+  fetchStrPlanProofBlobUrl,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
   getStoredStaffSession,
@@ -1080,6 +1081,19 @@ function ShortRentAdminCommandDashboard({
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
+                  {payment.provider === 'str_host_plan' && payment.proofAssetUrl ? (
+                    <button
+                      style={commandStyles.secondaryCommand}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void fetchStrPlanProofBlobUrl(payment.id)
+                          .then((blobUrl) => window.open(blobUrl, '_blank', 'noopener'))
+                          .catch(() => undefined)
+                      }}
+                    >
+                      {isAr ? 'عرض الإيصال' : 'View receipt'}
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -1311,6 +1325,19 @@ function ShortRentAdminCommandDashboard({
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
+                  {payment.provider === 'str_host_plan' && payment.proofAssetUrl ? (
+                    <button
+                      style={commandStyles.secondaryCommand}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void fetchStrPlanProofBlobUrl(payment.id)
+                          .then((blobUrl) => window.open(blobUrl, '_blank', 'noopener'))
+                          .catch(() => undefined)
+                      }}
+                    >
+                      {isAr ? 'عرض الإيصال' : 'View receipt'}
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}

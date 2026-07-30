@@ -415,10 +415,26 @@ model PaymentProof {
   updatedAt     DateTime      @updatedAt @map("updated_at")
   booking       Booking?      @relation(fields: [bookingId], references: [id])
   payer         User          @relation("PaymentPayer", fields: [userId], references: [id])
+  proofFile     PaymentProofFile?
 
   @@index([status, createdAt])
   @@index([userId])
   @@map("payment_proofs")
+}
+
+// Persistent bytes for an uploaded payment receipt (e.g. a Sham Cash plan-fee transfer). Stored in the
+// database — NOT on local disk — because the runtime filesystem is ephemeral on serverless, so a
+// disk-written proof would not survive to admin-review time. Kept in its own table (not a column on
+// payment_proofs) so listing/proof queries never drag the file bytes around. Admin-only to read.
+model PaymentProofFile {
+  id        String       @id @default(uuid())
+  proofId   String       @unique @map("proof_id")
+  mimeType  String       @map("mime_type")
+  data      Bytes
+  createdAt DateTime     @default(now()) @map("created_at")
+  proof     PaymentProof @relation(fields: [proofId], references: [id], onDelete: Cascade)
+
+  @@map("payment_proof_files")
 }
 
 model ListingReview {

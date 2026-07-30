@@ -11,6 +11,7 @@ import {
   confirmStrPlanPayment,
   correctListingText,
   createStrPlanCheckoutSession,
+  submitStrPlanShamProof,
   fetchStripePaymentStatus,
   geocodePlace,
   submitAccommodation,
@@ -382,6 +383,11 @@ export function SellerListingWizard({ lang }: Props) {
   // charges the server-priced plan fee and confirms on return, replacing the Sham Cash self-attest.
   const [stripeConfigured, setStripeConfigured] = useState(false)
   const [cardRedirecting, setCardRedirecting] = useState(false)
+  // Sham Cash plan payment now takes a real receipt (transaction ref + file) instead of a bare
+  // self-attest; it creates a pending proof the admin verifies. Not persisted in the draft.
+  const [shamPlanRef, setShamPlanRef] = useState('')
+  const [shamPlanProofFile, setShamPlanProofFile] = useState<File | null>(null)
+  const [shamSubmitting, setShamSubmitting] = useState(false)
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
@@ -613,6 +619,28 @@ export function SellerListingWizard({ lang }: Props) {
     } catch (error) {
       setCardRedirecting(false)
       setSubmitError(error instanceof Error ? error.message : isAr ? 'تعذّر بدء الدفع بالبطاقة.' : 'Could not start the card payment.')
+    }
+  }
+
+  // Submit the Sham Cash plan payment: a real receipt (transaction ref + file) that the admin verifies.
+  // Creates a PENDING proof server-side; the plan counts as "paid, pending review" once submitted.
+  async function submitShamPlanProof() {
+    if (shamSubmitting) return
+    if (!shamPlanRef.trim() || !shamPlanProofFile) {
+      setSubmitError(isAr ? 'أدخل رقم العملية وارفع إيصال الدفع.' : 'Enter the transaction number and upload the payment receipt.')
+      return
+    }
+    setShamSubmitting(true)
+    setSubmitError('')
+    try {
+      await submitStrPlanShamProof({ planCode: selectedListingPlan.id, providerRef: shamPlanRef.trim(), file: shamPlanProofFile })
+      setListingPlanPaymentMethod('shamCash')
+      setListingPlanPaymentConfirmed(true)
+      setSubmitState('idle')
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : isAr ? 'تعذّر إرسال إثبات الدفع.' : 'Could not submit the payment proof.')
+    } finally {
+      setShamSubmitting(false)
     }
   }
 
@@ -2079,6 +2107,37 @@ export function SellerListingWizard({ lang }: Props) {
                           <small>{isAr ? 'اكتب كود المتابعة في ملاحظة العملية.' : 'Write the follow-up code in the transaction note.'}</small>
                         </div>
                       </div>
+                      <div className="seller-sham-proof-fields">
+                        <label>
+                          <span>{isAr ? 'رقم عملية Sham Cash' : 'Sham Cash transaction number'}</span>
+                          <input
+                            type="text"
+                            value={shamPlanRef}
+                            onChange={(event) => {
+                              setShamPlanRef(event.target.value)
+                              setListingPlanPaymentConfirmed(false)
+                            }}
+                            placeholder={isAr ? 'مثال: 123456789' : 'e.g. 123456789'}
+                          />
+                        </label>
+                        <label>
+                          <span>{isAr ? 'إيصال الدفع (صورة أو PDF)' : 'Payment receipt (image or PDF)'}</span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,application/pdf"
+                            onChange={(event) => {
+                              setShamPlanProofFile(event.target.files?.[0] || null)
+                              setListingPlanPaymentConfirmed(false)
+                            }}
+                          />
+                          {shamPlanProofFile ? <small>{shamPlanProofFile.name}</small> : null}
+                        </label>
+                        <small>
+                          {isAr
+                            ? 'ترفع الإيصال ليتحقق منه فريق الإدارة قبل الاعتماد.'
+                            : 'Your receipt is uploaded for the admin team to verify before approval.'}
+                        </small>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -2126,13 +2185,20 @@ export function SellerListingWizard({ lang }: Props) {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        setListingPlanPaymentConfirmed(true)
-                        setSubmitState('idle')
-                        setSubmitError('')
-                      }}
+                      disabled={shamSubmitting || listingPlanPaymentConfirmed}
+                      onClick={() => void submitShamPlanProof()}
                     >
-                      {isAr ? 'تأكيد دفع الخطة' : 'Confirm plan payment'}
+                      {listingPlanPaymentConfirmed
+                        ? isAr
+                          ? 'تم إرسال الإثبات · بانتظار مراجعة الإدارة'
+                          : 'Proof submitted · pending admin review'
+                        : shamSubmitting
+                          ? isAr
+                            ? '...جارٍ إرسال الإثبات'
+                            : 'Submitting proof…'
+                          : isAr
+                            ? 'إرسال إثبات الدفع'
+                            : 'Submit payment proof'}
                     </button>
                   )}
                 </div>

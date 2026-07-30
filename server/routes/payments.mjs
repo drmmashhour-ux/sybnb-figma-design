@@ -3,6 +3,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { savePaymentProofFile, readPaymentProofFile } from '../lib/payment-proof-storage.mjs'
 
 // timeout/maxNetworkRetries bound how long a Stripe call can block the request: the Stripe SDK default
 // (~80s) exceeds the Vercel function maxDuration (30s), so a slow Stripe response would run the whole
@@ -449,6 +450,94 @@ export async function handlePayments(req, res, url, context) {
     }
 
     return json(res, 200, { ok: true, proof, planCode: session.metadata?.planCode })
+  }
+
+  // Sham Cash STR host-plan payment proof: the host uploads a receipt of the manual transfer. UNLIKE
+  // the card path (auto-approved because Stripe already captured the charge), this creates a PENDING
+  // proof the admin verifies against the uploaded file, then approves — which records the plan revenue
+  // via the str_host_plan branch in approvePaymentProof (finance-ledger.mjs).
+  if (url.pathname === '/api/payments/str-plan-sham-proof') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+
+    const body = await readJson(req)
+    const planCode = body.planCode ? String(body.planCode).trim() : ''
+    const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+
+    if (!Object.prototype.hasOwnProperty.call(STR_HOST_PLAN_PRICE_MINOR, planCode)) {
+      const error = new Error('A valid plan must be selected.')
+      error.statusCode = 400
+      error.code = 'PLAN_CODE_INVALID'
+      error.expose = true
+      throw error
+    }
+    if (!providerRef) {
+      const error = new Error('Transaction reference is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_REFERENCE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (!fileBase64 || !mimeType) {
+      const error = new Error('A payment proof file is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_PROOF_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    // SECURITY (S6): amount is the server-table price for the plan code, never taken from the request.
+    const amountMinor = STR_HOST_PLAN_PRICE_MINOR[planCode]
+
+    const duplicate = await db().paymentProof.findFirst({ where: { provider: 'str_host_plan', providerRef } })
+    if (duplicate) {
+      const error = new Error('This transaction reference was already submitted.')
+      error.statusCode = 409
+      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+      error.expose = true
+      throw error
+    }
+
+    const proof = await db().$transaction(async (tx) => {
+      const created = await tx.paymentProof.create({
+        data: {
+          userId: context.user.id,
+          provider: 'str_host_plan',
+          status: 'PENDING_ADMIN_REVIEW',
+          amountMinor,
+          currency: 'USD',
+          providerRef,
+        },
+      })
+      // Persist the receipt bytes in the DB (validated for type/size), then point proofAssetUrl at the
+      // admin-only file endpoint now that we have the proof id.
+      await savePaymentProofFile(tx, created.id, fileBase64, mimeType)
+      return tx.paymentProof.update({
+        where: { id: created.id },
+        data: { proofAssetUrl: `/api/payments/str-plan-sham-proof/${created.id}/file` },
+      })
+    })
+
+    return json(res, 201, { ok: true, proof })
+  }
+
+  // Admin-only: stream the stored receipt bytes for a plan-payment proof so an admin can verify it.
+  const strPlanProofFileMatch = url.pathname.match(/^\/api\/payments\/str-plan-sham-proof\/([^/]+)\/file$/)
+  if (strPlanProofFileMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN'])
+    const file = await readPaymentProofFile(strPlanProofFileMatch[1])
+    if (!file) {
+      const error = new Error('No payment proof file found.')
+      error.statusCode = 404
+      error.code = 'PAYMENT_PROOF_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    res.writeHead(200, { 'content-type': file.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    res.end(file.data)
+    return true
   }
 
   if (url.pathname === '/api/payments/stripe/webhook') {
