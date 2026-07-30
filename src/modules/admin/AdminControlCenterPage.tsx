@@ -28,6 +28,7 @@ import {
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
 import { AccountControlPanel } from './AccountControlPanel'
+import { LoyaltyPanel } from './LoyaltyPanel'
 
 type Props = { lang: Lang }
 
@@ -44,6 +45,8 @@ const T = {
     tabs: { guest: 'العملاء', hosting: 'المضيفون', accounting: 'المحاسبة', directory: 'الإدارة', needs: 'يحتاج انتباه', hr: 'الموارد البشرية' },
     accountControl: 'التحكم بالحسابات',
     accountControlHint: 'افتح أي حساب وأصلح مشاكله، أو علّقه أو أعد تفعيله أو احذفه. كل إجراء يُسجَّل.',
+    loyalty: 'الولاء والتقييم',
+    loyaltyHint: 'يقترح الذكاء الاصطناعي مستويات الثقة للمضيفين والعملاء — والإدارة تعتمد أو ترفض. لا يتغير أي مستوى دون اعتماد.',
     userSearch: 'ابحث بالاسم أو البريد',
     roleAll: 'كل الأدوار',
     statusCol: 'الحالة',
@@ -128,6 +131,8 @@ const T = {
     tabs: { guest: 'Guests', hosting: 'Hosts', accounting: 'Accounting', directory: 'Management', needs: 'Needs attention', hr: 'HR' },
     accountControl: 'Account control',
     accountControlHint: 'Open any account and fix its problems, or suspend / reinstate / delete it. Every action is logged.',
+    loyalty: 'Loyalty & standing',
+    loyaltyHint: 'AI proposes trust tiers for hosts and guests — admins approve or reject. No tier changes without approval.',
     userSearch: 'Search by name or email',
     roleAll: 'All roles',
     statusCol: 'Status',
@@ -536,6 +541,10 @@ export function AdminControlCenterPage({ lang }: Props) {
           <Card title={t.accountControl}>
             <p style={styles.hint}>{t.accountControlHint}</p>
             <AccountControlPanel lang={lang} />
+          </Card>
+          <Card title={t.loyalty}>
+            <p style={styles.hint}>{t.loyaltyHint}</p>
+            <LoyaltyPanel lang={lang} />
           </Card>
           <Card title={t.usersTitle} count={users.length}>
             <form

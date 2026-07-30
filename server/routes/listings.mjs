@@ -386,6 +386,11 @@ export async function handleListings(req, res, url, context) {
     // Verification badge: the listing owner's identity document has been admin-approved. Surfaced on
     // the public detail so a buyer can see "verified seller" before contacting them.
     const sellerVerified = listing.owner?.idDocumentStatus === 'APPROVED'
+    // Loyalty (Phase 2): the host's admin-approved trust tier, surfaced so guests see a confidence badge.
+    const hostStanding = listing.ownerId
+      ? await db().accountStanding.findFirst({ where: { userId: listing.ownerId, kind: 'HOST' }, select: { tier: true } })
+      : null
+    const hostTier = hostStanding?.tier && hostStanding.tier !== 'NEW' ? hostStanding.tier : null
     let listingWithDealRating = listing
     if (listing.division === 'CARS') {
       const pool = await loadCarsComparablePool()
@@ -396,7 +401,7 @@ export async function handleListings(req, res, url, context) {
       const summaries = await loadAuctionSummaries([listing.id])
       if (summaries.size) listingWithDealRating.auction = summaries.get(listing.id)
     }
-    return json(res, 200, { ok: true, listing: listingWithDealRating, sellerVerified })
+    return json(res, 200, { ok: true, listing: listingWithDealRating, sellerVerified, hostTier })
   }
 
   const availabilityMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/availability$/)

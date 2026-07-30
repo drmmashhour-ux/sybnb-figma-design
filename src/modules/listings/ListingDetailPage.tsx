@@ -503,6 +503,21 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           <section style={styles.detailBody}>
             <div style={styles.titleBlock}>
               <h1 style={styles.title}>{title}</h1>
+              {(listing.hostTier === 'TRUSTED' || listing.hostTier === 'ELITE') && (
+                <span
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                    fontSize: 12.5, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
+                    color: listing.hostTier === 'ELITE' ? '#8a6d1e' : '#0f6b52',
+                    background: listing.hostTier === 'ELITE' ? 'rgba(200,162,74,.16)' : 'rgba(32,210,155,.16)',
+                    border: `1px solid ${listing.hostTier === 'ELITE' ? 'rgba(200,162,74,.5)' : 'rgba(32,210,155,.5)'}`,
+                  }}
+                >
+                  {listing.hostTier === 'ELITE'
+                    ? (isAr ? '👑 مضيف نخبة' : '👑 Elite host')
+                    : (isAr ? '⭐ مضيف موثوق' : '⭐ Trusted host')}
+                </span>
+              )}
               {reviewSummary.count > 0 && (
                 <span style={styles.ratingLine}>★ {reviewSummary.average} · {t.reviewsCount(reviewSummary.count)}</span>
               )}

@@ -13,11 +13,29 @@ import { generateUniqueReferralCode } from '../lib/referrals.mjs'
 import { decryptPayoutAccount } from '../lib/payout-account.mjs'
 import { randomUUID } from 'node:crypto'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { computeStandingStats, ruleTier, validTiersFor } from '../lib/account-standing.mjs'
+import { suggestTier } from '../lib/ai-loyalty.mjs'
 
 // The internal staff roles the HR department manages/creates. Deliberately NOT HOST/DRIVER/SELLER
 // (those self-register through the normal flow) — only privileged back-office roles.
 const STAFF_ROLES = ['ADMIN', 'SUPPORT']
 const STAFF_EMAIL_DOMAIN = '@sybnb.app'
+
+// Compute one user's standing suggestion and queue it (PENDING) — but only when the AI/rule tier would
+// actually CHANGE their current tier. Replaces any prior pending suggestion for that user+kind. Shared
+// by the batch scan and the single-user suggest endpoints. Returns the created suggestion or null.
+async function upsertStandingSuggestion(userId, kind) {
+  const stats = await computeStandingStats(userId, kind)
+  if (!stats) return null
+  const standing = await db().accountStanding.findUnique({ where: { userId_kind: { userId, kind } } })
+  const currentTier = standing?.tier || 'NEW'
+  const { suggestedTier, reason, model } = await suggestTier(kind, stats)
+  if (suggestedTier === currentTier) return null
+  await db().standingSuggestion.deleteMany({ where: { userId, kind, status: 'PENDING' } })
+  return db().standingSuggestion.create({
+    data: { userId, kind, currentTier, suggestedTier, reason, stats, aiModel: model },
+  })
+}
 
 // Surface only what admin needs to push a payout — type, holder, last4. The encrypted number
 // envelope (ciphertext/iv/tag stored in User.payoutMethod) must never reach the admin client.
@@ -768,6 +786,129 @@ export async function handleAdmin(req, res, url, context) {
     }
 
     return methodNotAllowed(res, ['GET', 'PATCH'])
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LOYALTY / STANDING (Phase 2) — AI SUGGESTS a tier, an ADMIN APPROVES it.
+  // A user's live tier NEVER changes without an approved suggestion.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // On-demand scan: propose tiers for a batch of active users of a kind (HOST|GUEST).
+  if (url.pathname === '/api/admin/standing/scan') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const kind = String(body.kind || '').toUpperCase()
+    if (kind !== 'HOST' && kind !== 'GUEST') {
+      const error = new Error('kind must be HOST or GUEST.')
+      error.statusCode = 400
+      error.code = 'STANDING_KIND_INVALID'
+      error.expose = true
+      throw error
+    }
+    const limit = Math.min(50, Math.max(1, Number(body.limit) || 25))
+    const users = await db().user.findMany({
+      where: { status: 'ACTIVE', roles: { some: { role: kind } } },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+    let created = 0
+    for (const u of users) {
+      if (await upsertStandingSuggestion(u.id, kind)) created += 1
+    }
+    return json(res, 200, { ok: true, scanned: users.length, suggestionsCreated: created })
+  }
+
+  // Single-user suggestion (e.g. triggered from the account panel).
+  if (url.pathname === '/api/admin/standing/suggest') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const kind = String(body.kind || '').toUpperCase()
+    const userId = String(body.userId || '')
+    if ((kind !== 'HOST' && kind !== 'GUEST') || !userId) {
+      const error = new Error('userId and a valid kind (HOST|GUEST) are required.')
+      error.statusCode = 400
+      error.code = 'STANDING_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    const suggestion = await upsertStandingSuggestion(userId, kind)
+    return json(res, 200, { ok: true, suggestion })
+  }
+
+  // The pending approval queue.
+  if (url.pathname === '/api/admin/standing/suggestions') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const status = String(url.searchParams.get('status') || 'PENDING').toUpperCase()
+    const suggestions = await db().standingSuggestion.findMany({
+      where: { status: ['PENDING', 'APPROVED', 'REJECTED'].includes(status) ? status : 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: { user: { select: { id: true, displayName: true, email: true } } },
+    })
+    return json(res, 200, { ok: true, suggestions })
+  }
+
+  // Approve (applies the tier) or reject a suggestion.
+  const standingDecideMatch = url.pathname.match(/^\/api\/admin\/standing\/suggestions\/([^/]+)$/)
+  if (standingDecideMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const id = standingDecideMatch[1]
+    const body = await readJson(req)
+    const decision = String(body.decision || '').toUpperCase()
+    if (decision !== 'APPROVE' && decision !== 'REJECT') {
+      const error = new Error('decision must be APPROVE or REJECT.')
+      error.statusCode = 400
+      error.code = 'STANDING_DECISION_INVALID'
+      error.expose = true
+      throw error
+    }
+    const suggestion = await db().standingSuggestion.findUnique({ where: { id } })
+    if (!suggestion) {
+      const error = new Error('Suggestion not found.')
+      error.statusCode = 404
+      error.code = 'STANDING_SUGGESTION_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (suggestion.status !== 'PENDING') {
+      const error = new Error('This suggestion has already been decided.')
+      error.statusCode = 409
+      error.code = 'STANDING_ALREADY_DECIDED'
+      error.expose = true
+      throw error
+    }
+
+    const result = await db().$transaction(async (tx) => {
+      const decided = await tx.standingSuggestion.update({
+        where: { id },
+        data: { status: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED', decidedById: context.user.id, decidedAt: new Date() },
+      })
+      if (decision === 'APPROVE') {
+        // Only an approved suggestion ever writes a user's live tier.
+        await tx.accountStanding.upsert({
+          where: { userId_kind: { userId: suggestion.userId, kind: suggestion.kind } },
+          create: { userId: suggestion.userId, kind: suggestion.kind, tier: suggestion.suggestedTier, grantedById: context.user.id },
+          update: { tier: suggestion.suggestedTier, grantedById: context.user.id, grantedAt: new Date() },
+        })
+      }
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: `STANDING_${decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'}`,
+          entityType: 'standing_suggestions',
+          entityId: id,
+          before: { status: 'PENDING', tier: suggestion.currentTier },
+          after: { status: decided.status, kind: suggestion.kind, tier: suggestion.suggestedTier },
+        },
+      })
+      return decided
+    })
+    return json(res, 200, { ok: true, suggestion: result })
   }
 
   const idDocumentAdminUploadMatch = url.pathname.match(/^\/api\/admin\/id-document\/([^/]+)\/upload$/)

@@ -58,6 +58,7 @@ export type PlatformListing = {
   titleEn: string | null
   description: string | null
   status: string
+  hostTier?: string | null
   priceMinor: number
   currency: string
   instantBookEnabled?: boolean
@@ -1515,6 +1516,49 @@ export async function adminUpdateAccount(
   return response.account
 }
 
+// ── Loyalty / standing (Phase 2): AI suggests a tier, an admin approves ──
+export type StandingKind = 'HOST' | 'GUEST'
+export type PlatformStandingSuggestion = {
+  id: string
+  userId: string
+  kind: StandingKind
+  currentTier: string
+  suggestedTier: string
+  reason: string
+  stats: Record<string, unknown>
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  aiModel: string | null
+  createdAt: string
+  user?: { id: string; displayName: string; email: string | null }
+}
+
+export async function adminScanStanding(kind: StandingKind, limit = 25) {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{ ok: true; scanned: number; suggestionsCreated: number }>('/api/admin/standing/scan', {
+    method: 'POST',
+    token: session.token,
+    body: { kind, limit },
+  })
+}
+
+export async function adminListStandingSuggestions(status: 'PENDING' | 'APPROVED' | 'REJECTED' = 'PENDING') {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; suggestions: PlatformStandingSuggestion[] }>(
+    `/api/admin/standing/suggestions?status=${status}`,
+    { token: session.token },
+  )
+  return response.suggestions
+}
+
+export async function adminDecideStandingSuggestion(id: string, decision: 'APPROVE' | 'REJECT') {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; suggestion: PlatformStandingSuggestion }>(
+    `/api/admin/standing/suggestions/${id}`,
+    { method: 'PATCH', token: session.token, body: { decision } },
+  )
+  return response.suggestion
+}
+
 export type PlatformAdminHostInsight = PlatformHostInsight & {
   host?: { id: string; displayName: string; email: string | null }
   listing?: { id: string; titleAr: string; titleEn: string | null }
@@ -1767,8 +1811,12 @@ export async function verifyListingClaims(
 
 export async function fetchPrototypeListing(listingId: string) {
   try {
-    const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`)
-    return response.listing
+    const response = await apiRequest<{ ok: true; listing: PlatformListing; hostTier?: string | null; sellerVerified?: boolean }>(
+      `/api/listings/${listingId}`,
+    )
+    // Surface the host's admin-approved loyalty tier (Phase 2) on the listing so the detail page can
+    // show a guest-facing trust badge.
+    return { ...response.listing, hostTier: response.hostTier ?? null }
   } catch (error) {
     const fallbackListing = FALLBACK_APPROVED_LISTINGS.find((listing) => listing.id === listingId)
     if (fallbackListing) return fallbackListing
