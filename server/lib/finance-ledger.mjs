@@ -58,9 +58,20 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   }
 
   const divisor = 1 + STR_CLEANING_RATE + STR_TAX_RATE
-  const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
+  // Rent (the stay total, excluding cleaning/tax/protection) is authoritatively booking.amountMinor —
+  // set at booking create as the clean stay total (see bookings.mjs). Prefer it so commission is a
+  // true 10% of rent. The old `staySplitBaseMinor / divisor` back-solve assumed cleaning == 5% of
+  // rent, which under-collected commission whenever the host set a different cleaning fee. Metadata
+  // rentMinor (never written today) still wins if present; the divisor stays as a last-resort fallback.
+  const rentMinor =
+    metadataNumber(listingMetadata, 'rentMinor') ||
+    Math.max(0, Math.round(booking?.amountMinor || 0)) ||
+    Math.round(staySplitBaseMinor / divisor)
+  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (STR_TAX_RATE > 0 ? Math.round(rentMinor * STR_TAX_RATE) : 0)
+  // Cleaning = whatever the guest actually paid on top of rent (+ tax), derived from the real
+  // amounts so rent+cleaning+tax always reconciles to what was paid — instead of assuming a fixed
+  // 5% of rent, which invented a phantom fee when the guest paid rent only.
+  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.max(0, staySplitBaseMinor - rentMinor - taxesMinor)
   const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
   const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
