@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { isAnthropicConfigured, requireAnthropic, parseJsonLoose, MODEL } from './ai-insights.mjs'
 
-const SYSTEM_PROMPT = `You write a short, warm, honest listing title and description for a short-term rental on the SYBNB platform (Syria). You are given ONLY real facts a host selected: property type, room type(s), bed type(s), amenities, meals, hotel star rating, city/area, guest capacity, bedrooms, bathrooms, and nightly price in USD. Write in BOTH Arabic and English. Rules: use ONLY the given facts — never invent an amenity, view, distance, or number that is not given; the TITLE is a short catchy name of 3 to 7 words (typically property type + area, optionally one standout amenity), no price; the DESCRIPTION is 2 to 4 sentences; inviting but not exaggerated; no markdown, no emojis. Reply with strict JSON: {"titleAr":"...","titleEn":"...","descriptionAr":"...","descriptionEn":"..."}.`
+const SYSTEM_PROMPT = `You write a short, warm, honest listing title and description for a short-term rental on the SYBNB platform (Syria). You are given ONLY real facts a host selected: property type, room type(s), bed type(s), amenities, views/outdoors, accessibility features, meals, hotel star rating, city/area, guest capacity, bedrooms, bathrooms, nightly price in USD, and the payment methods the host accepts (e.g. Sham Cash, credit card, local wallet). Write in BOTH Arabic and English. Rules: use ONLY the given facts — never invent an amenity, view, distance, or number that is not given; mention the accepted payment method(s) in the description with a short natural phrase (e.g. "Pay easily by Sham Cash."); the TITLE is a short catchy name of 3 to 7 words (typically property type + area, optionally one standout amenity), no price and no payment method; the DESCRIPTION is 2 to 4 sentences; inviting but not exaggerated; no markdown, no emojis. Reply with strict JSON: {"titleAr":"...","titleEn":"...","descriptionAr":"...","descriptionEn":"..."}.`
 
 // Public entry: AI when configured, template otherwise. Never throws for a normal request.
 export async function generateOrTemplate(attributes) {
@@ -74,8 +74,14 @@ export function templateListingDescription(attributes = {}) {
   const bedsEn = list(attributes.bedTypesEn).join(' & ')
   const amenAr = list(attributes.amenitiesAr).slice(0, 6).join('، ')
   const amenEn = list(attributes.amenitiesEn).slice(0, 6).join(', ')
+  const viewsAr = list(attributes.viewsAr).slice(0, 4).join('، ')
+  const viewsEn = list(attributes.viewsEn).slice(0, 4).join(', ')
+  const accessAr = list(attributes.accessAr).slice(0, 4).join('، ')
+  const accessEn = list(attributes.accessEn).slice(0, 4).join(', ')
   const mealsAr = list(attributes.mealsAr).join('، ')
   const mealsEn = list(attributes.mealsEn).join(', ')
+  const payAr = list(attributes.paymentMethodsAr).join('، ')
+  const payEn = list(attributes.paymentMethodsEn).join(', ')
   const stars = attributes.hotelStars ? String(attributes.hotelStars).replace(/\D/g, '') : ''
   const price = Number(attributes.priceUsd) || 0
 
@@ -83,7 +89,10 @@ export function templateListingDescription(attributes = {}) {
     `${propAr}${placeAr ? ` في ${placeAr}` : ''}${stars ? ` بتصنيف ${stars} نجوم` : ''}.`,
     guests || bedrooms ? `يتّسع لـ ${guests || 1} ضيوف${bedrooms ? ` مع ${bedrooms} غرفة نوم` : ''}${bathrooms ? ` و${bathrooms} حمام` : ''}${bedsAr ? ` (${bedsAr})` : ''}.` : '',
     amenAr ? `يوفّر: ${amenAr}.` : '',
+    viewsAr ? `إطلالات وأماكن خارجية: ${viewsAr}.` : '',
+    accessAr ? `تسهيلات الوصول: ${accessAr}.` : '',
     mealsAr ? `الوجبات: ${mealsAr}.` : '',
+    payAr ? `طرق الدفع: ${payAr}.` : '',
     price ? `السعر ${price} دولار في الليلة. احجز الآن لتجربة إقامة مريحة.` : 'احجز الآن لتجربة إقامة مريحة.',
   ].filter(Boolean).join(' ')
 
@@ -91,7 +100,10 @@ export function templateListingDescription(attributes = {}) {
     `${propEn.charAt(0).toUpperCase()}${propEn.slice(1)}${placeEn ? ` in ${placeEn}` : ''}${stars ? `, ${stars}-star` : ''}.`,
     guests || bedrooms ? `Sleeps ${guests || 1}${bedrooms ? ` with ${bedrooms} bedroom(s)` : ''}${bathrooms ? ` and ${bathrooms} bathroom(s)` : ''}${bedsEn ? ` (${bedsEn})` : ''}.` : '',
     amenEn ? `Amenities: ${amenEn}.` : '',
+    viewsEn ? `Views & outdoors: ${viewsEn}.` : '',
+    accessEn ? `Accessibility: ${accessEn}.` : '',
     mealsEn ? `Meals: ${mealsEn}.` : '',
+    payEn ? `Payment: ${payEn}.` : '',
     price ? `Priced at $${price} per night. Book now for a comfortable stay.` : 'Book now for a comfortable stay.',
   ].filter(Boolean).join(' ')
 

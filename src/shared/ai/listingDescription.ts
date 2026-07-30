@@ -60,8 +60,18 @@ export async function writeListingDescription(input: ListingDescriptionInput) {
     bedTypesEn: g.bedType?.en,
     amenitiesAr: g.amenities?.ar,
     amenitiesEn: g.amenities?.en,
+    // Views/outdoors + accessibility are real selected features too — include them so the description
+    // reflects everything the host ticked (and stays consistent with the photos / truth-check).
+    viewsAr: g.views?.ar,
+    viewsEn: g.views?.en,
+    accessAr: g.access?.ar,
+    accessEn: g.access?.en,
     mealsAr: g.meals?.ar,
     mealsEn: g.meals?.en,
+    // Payment methods the host accepts (Sham Cash, card, local wallet). Host asked these appear in the
+    // description so guests know how they can pay.
+    paymentMethodsAr: g.payments?.ar,
+    paymentMethodsEn: g.payments?.en,
     hotelStars: g.hotelStars?.en[0],
     cityAr: input.cityAr,
     cityEn: input.cityEn,
