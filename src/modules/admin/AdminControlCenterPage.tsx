@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, FormEvent, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -27,44 +27,40 @@ import {
   type PlatformStaffMember,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { navigate } from '../../app/routes'
+import { AdminShell, type AdminNavKey } from './AdminShell'
 import { AccountControlPanel } from './AccountControlPanel'
 import { LoyaltyPanel } from './LoyaltyPanel'
 
-// Each staff group is its own page (deep-linkable) instead of a tab on one screen.
+// Each staff group is its own page (deep-linkable) inside the shared admin shell.
 type GroupId = 'guest' | 'host' | 'accounting' | 'management' | 'hr'
-type Props = { lang: Lang; group?: GroupId }
+type Props = { lang: Lang; group?: GroupId; onLanguageChange?: (lang: Lang) => void }
 
-const GROUP_NAV: Array<{ id: GroupId; hash: string; ar: string; en: string }> = [
-  { id: 'guest', hash: '/admin/guests', ar: 'العملاء', en: 'Guests' },
-  { id: 'host', hash: '/admin/hosts', ar: 'المضيفون', en: 'Hosts' },
-  { id: 'accounting', hash: '/admin/accounting', ar: 'المحاسبة', en: 'Accounting' },
-  { id: 'management', hash: '/admin/management', ar: 'الإدارة', en: 'Management' },
-  { id: 'hr', hash: '/admin/hr', ar: 'الموارد البشرية', en: 'HR' },
-]
+const TONE = { green: '#29d39b', gold: '#d4af6a', red: '#ff5c7a', blue: '#5b8cff', teal: '#2dd4bf' }
 
-// Other admin surfaces, reachable page-to-page from the same nav header.
-const EXTERNAL_NAV: Array<{ hash: string; ar: string; en: string }> = [
-  { hash: '/admin/review', ar: 'العمليات', en: 'Operations' },
-  { hash: '/admin/reports', ar: 'التقارير', en: 'Reports' },
-  { hash: '/admin/disputes', ar: 'النزاعات', en: 'Disputes' },
-]
+const GROUP_TO_NAV: Record<GroupId, AdminNavKey> = {
+  guest: 'guests', host: 'hosts', accounting: 'accounting', management: 'management', hr: 'hr',
+}
+
+const META: Record<GroupId, { ar: [string, string]; en: [string, string] }> = {
+  guest: { ar: ['العملاء', 'كل ما يحتاج إلى مراجعة في تجربة الضيف.'], en: ['Guests', 'Everything requiring attention across the guest journey.'] },
+  host: { ar: ['المضيفون', 'صحة مسار القوائم وإشارات التحقق من الادعاءات.'], en: ['Hosts', 'Listing pipeline health and claim-check signals.'] },
+  accounting: { ar: ['المحاسبة', 'الإيرادات والمحافظ والمدفوعات وحركة السداد.'], en: ['Accounting', 'Revenue, wallets, payment volume and payouts.'] },
+  management: { ar: ['الإدارة', 'التحكم بالحسابات وبرنامج الولاء وقوائم الانتباه.'], en: ['Management', 'Account control, loyalty standing and attention queues.'] },
+  hr: { ar: ['الموارد البشرية', 'دليل الفريق وإنشاء حسابات الإدارة والدعم.'], en: ['Human Resources', 'Staff directory and controlled account creation.'] },
+}
 
 const CREATABLE_ROLES = ['ADMIN', 'SUPPORT'] as const
 
 const T = {
   ar: {
-    title: 'مركز تحكم SYBNB',
-    subtitle: 'لوحة موحّدة — بيانات حقيقية من واجهات الإدارة.',
-    loading: 'جار التحميل...',
     error: 'تعذر تحميل بعض البيانات.',
-    tabs: { guest: 'العملاء', hosting: 'المضيفون', accounting: 'المحاسبة', directory: 'الإدارة', needs: 'يحتاج انتباه', hr: 'الموارد البشرية' },
     accountControl: 'التحكم بالحسابات',
     accountControlHint: 'افتح أي حساب وأصلح مشاكله، أو علّقه أو أعد تفعيله أو احذفه. كل إجراء يُسجَّل.',
     loyalty: 'الولاء والتقييم',
     loyaltyHint: 'يقترح الذكاء الاصطناعي مستويات الثقة للمضيفين والعملاء — والإدارة تعتمد أو ترفض. لا يتغير أي مستوى دون اعتماد.',
     userSearch: 'ابحث بالاسم أو البريد',
-    roleAll: 'كل الأدوار',
-    statusCol: 'الحالة',
+    search: 'بحث',
     suspend: 'تعليق',
     reinstate: 'إعادة تفعيل',
     close: 'إغلاق',
@@ -74,9 +70,60 @@ const T = {
     bookingStatusAll: 'كل الحالات',
     forceCancel: 'إلغاء + استرداد',
     confirmForceCancel: 'تأكيد إلغاء الحجز واسترداد الضيف؟',
-    takedown: 'إخفاء (إيقاف)',
+    takedown: 'إيقاف مؤقت',
     restore: 'إعادة نشر',
     takedownDone: 'تم تحديث حالة الإعلان.',
+    open: 'فتح',
+    review: 'مراجعة',
+    reviewQueue: 'الذهاب إلى قائمة المراجعة ←',
+    disputesLink: 'عرض النزاعات ←',
+    financeLink: 'المالية ←',
+    guestVerif: 'التحقق من الهوية',
+    guestVerifSub: 'طلبات معلقة للمراجعة',
+    guestPayments: 'إثباتات دفع معلّقة',
+    guestBookings: 'حجوزات بانتظار القرار',
+    guestBookingsSub: 'لا يتم اعتماد أي حجز تلقائياً',
+    approvedPayments: 'المدفوعات المعتمدة',
+    last30: 'آخر 30 يوماً',
+    pendingDecision: 'بانتظار القرار',
+    idAndProof: 'هوية وإثبات دفع',
+    openDisputes: 'نزاعات مفتوحة',
+    needsHuman: 'تحتاج متابعة بشرية',
+    none: 'لا عناصر.',
+    hostingApproved: 'قوائم معتمدة',
+    publishedNow: 'منشورة الآن',
+    hostingPending: 'بانتظار المراجعة',
+    humanDecision: 'قرار بشري مطلوب',
+    hostingRejected: 'مرفوضة',
+    sinceMonth: 'منذ بداية الشهر',
+    hostsCount: 'إجمالي المضيفين',
+    hostAccounts: 'حساب مضيف',
+    aiFlagsTitle: 'إشارات التحقق بالذكاء الاصطناعي',
+    aiFlagsSub: 'الإشارات استشارية ولا تنفذ تلقائياً',
+    aiNoFlags: 'لا إشارات على القوائم المعروضة حالياً.',
+    flags: 'إشارات',
+    decisionNeeded: 'قرار مطلوب',
+    totalRevenue: 'إجمالي الإيراد',
+    proj30: (v: string) => `توقع 30 يوماً: ${v}`,
+    walletBalance: 'أرصدة المحافظ',
+    walletsCount: (n: number) => `${n} محفظة`,
+    approvedVolume: 'حجم الدفع المعتمد',
+    approvedOps: (n: number) => `${n} عملية`,
+    refunds: 'المبالغ المستردة',
+    movements: 'حركات السداد المعلقة',
+    movementsSub: 'فترة حماية 14 يوماً بعد المغادرة قبل السماح بالسداد',
+    payoutEligible: 'مؤهل الآن',
+    payoutHold: 'فترة حماية',
+    noAccount: 'لا يوجد حساب',
+    pay: 'دفع',
+    srRides: (n: number) => `رحلات SR المكتملة دون عمولة منصة: ${n}`,
+    accountsTitle: 'الحسابات',
+    accountsSub: 'ابحث ثم اختر حساباً للتحكم به',
+    bookingDir: 'دليل الحجوزات',
+    active: 'نشط',
+    suspended: 'موقوف',
+    approve: 'موافقة',
+    scanLink: 'تشغيل فحص عند الطلب ←',
     needsTitle: 'مهام تحتاج انتباه',
     needsStuck: 'حجوزات عالقة بانتظار الدفع',
     needsNoPayout: 'مضيفون لديهم رصيد بلا حساب صرف',
@@ -84,73 +131,27 @@ const T = {
     needsReview: 'مراجعات متأخرة',
     needsDisputes: 'نزاعات متأخرة',
     needsSos: 'بلاغات SOS متأخرة',
-    actionDone: 'تم التنفيذ.',
-    actionError: 'تعذر تنفيذ الإجراء.',
-    passed: 'مقبول',
-    pending: 'قيد المراجعة',
-    flagged: 'مُعلَّم',
-    open: 'فتح الصفحة',
-    reviewQueue: 'قائمة المراجعة',
-    disputes: 'النزاعات',
-    finance: 'المالية',
-    guestVerif: 'توثيق الهوية (قيد المراجعة)',
-    guestPayments: 'إثباتات الدفع المعلّقة',
-    guestBookings: 'حجوزات بانتظار القرار',
-    guestApprovedPayments: 'مدفوعات مقبولة',
-    guestOpenDisputes: 'نزاعات مفتوحة',
-    none: 'لا عناصر.',
-    hostingApproved: 'إعلانات منشورة',
-    hostingPending: 'إعلانات قيد المراجعة',
-    hostingRejected: 'إعلانات مرفوضة',
-    hostsCount: 'عدد المضيفين',
-    aiFlagsTitle: 'أعلام فحص الذكاء الاصطناعي',
-    aiFlags: 'أعلام AI',
-    aiNoFlags: 'لا أعلام على الإعلانات المعروضة في قائمة المراجعة.',
-    revenue: 'الإيراد (عمولة STR الحقيقية)',
-    totalRevenue: 'إجمالي الإيراد',
-    proj30: 'توقّع 30 يوم',
-    proj90: 'توقّع 90 يوم',
-    walletBalance: 'رصيد المحافظ',
-    approvedVolume: 'حجم المدفوعات المقبولة',
-    approvedCount: 'عدد المدفوعات المقبولة',
-    refunds: 'المبالغ المُعادة',
-    movements: 'حركات الصرف المعلّقة',
-    payoutHost: 'المضيف',
-    payoutAmount: 'المبلغ',
-    payoutAccount: 'حساب شام كاش',
-    payoutEligible: 'جاهز للصرف',
-    payoutHold: 'ضمن فترة الحماية',
-    holdDaysNote: (d: number) => `فترة الحماية: ${d} يوم بعد المغادرة قبل السماح بالصرف.`,
-    noAccount: 'لا حساب مسجّل',
-    srRides: 'رحلات SR مكتملة (بلا عمولة منصة)',
-    hrDirectory: 'دليل الطاقم',
-    hrRole: 'الدور',
-    hrEmail: 'البريد',
-    hrCreated: 'أُنشئ',
-    hrAddTitle: 'إضافة عضو طاقم/إدارة',
-    hrName: 'الاسم الظاهر',
-    hrEmailField: 'البريد (@sybnb.app)',
+    hrDirectory: 'دليل الموظفين',
+    hrDirectorySub: 'حسابات الإدارة والدعم',
+    hrAddTitle: 'إضافة عضو فريق',
+    hrAddSub: 'يجب أن ينتهي البريد بـ @sybnb.app',
+    hrName: 'الاسم المعروض',
+    hrEmailField: 'البريد',
     hrRoleField: 'الدور',
     hrAdd: 'إنشاء الحساب',
     hrAdding: 'جار الإنشاء...',
-    hrDomainNote: 'يجب أن يكون البريد على نطاق @sybnb.app.',
-    hrMailboxNote: 'يُنشأ صندوق البريد نفسه في Google Workspace؛ هذا فقط يهيّئ الحساب والدور.',
-    hrCreated2: 'تم إنشاء الحساب.',
+    hrMailboxNote: 'يُنشأ صندوق البريد في Google Workspace بصورة منفصلة؛ هذا النموذج يحدد الحساب والدور فقط.',
     hrEmpty: 'لا يوجد طاقم بعد.',
+    actionError: 'تعذر تنفيذ الإجراء.',
   },
   en: {
-    title: 'SYBNB Control Center',
-    subtitle: 'One unified board — real data from the admin APIs.',
-    loading: 'Loading...',
     error: 'Some data could not be loaded.',
-    tabs: { guest: 'Guests', hosting: 'Hosts', accounting: 'Accounting', directory: 'Management', needs: 'Needs attention', hr: 'HR' },
     accountControl: 'Account control',
     accountControlHint: 'Open any account and fix its problems, or suspend / reinstate / delete it. Every action is logged.',
     loyalty: 'Loyalty & standing',
     loyaltyHint: 'AI proposes trust tiers for hosts and guests — admins approve or reject. No tier changes without approval.',
     userSearch: 'Search by name or email',
-    roleAll: 'All roles',
-    statusCol: 'Status',
+    search: 'Search',
     suspend: 'Suspend',
     reinstate: 'Reinstate',
     close: 'Close',
@@ -160,9 +161,60 @@ const T = {
     bookingStatusAll: 'All statuses',
     forceCancel: 'Cancel + refund',
     confirmForceCancel: 'Force-cancel this booking and refund the guest?',
-    takedown: 'Take down (pause)',
+    takedown: 'Take down',
     restore: 'Restore',
     takedownDone: 'Listing status updated.',
+    open: 'Open',
+    review: 'Review',
+    reviewQueue: 'Go to review queue →',
+    disputesLink: 'View disputes →',
+    financeLink: 'Finance →',
+    guestVerif: 'ID verification',
+    guestVerifSub: 'Pending requests for review',
+    guestPayments: 'Pending payment proofs',
+    guestBookings: 'Bookings awaiting decision',
+    guestBookingsSub: 'No booking is approved automatically',
+    approvedPayments: 'Approved payments',
+    last30: 'Last 30 days',
+    pendingDecision: 'Awaiting decision',
+    idAndProof: 'ID & payment proof',
+    openDisputes: 'Open disputes',
+    needsHuman: 'Needs human follow-up',
+    none: 'No items.',
+    hostingApproved: 'Approved listings',
+    publishedNow: 'Published now',
+    hostingPending: 'Pending review',
+    humanDecision: 'Human decision required',
+    hostingRejected: 'Rejected',
+    sinceMonth: 'Since start of month',
+    hostsCount: 'Total hosts',
+    hostAccounts: 'Host accounts',
+    aiFlagsTitle: 'AI claim-check flags',
+    aiFlagsSub: 'Flags are advisory and never auto-applied',
+    aiNoFlags: 'No flags on the listings currently in the queue.',
+    flags: 'flags',
+    decisionNeeded: 'Decision needed',
+    totalRevenue: 'Total revenue',
+    proj30: (v: string) => `30-day projection: ${v}`,
+    walletBalance: 'Wallet balances',
+    walletsCount: (n: number) => `${n} wallets`,
+    approvedVolume: 'Approved payment volume',
+    approvedOps: (n: number) => `${n} payments`,
+    refunds: 'Refunds',
+    movements: 'Pending payout movements',
+    movementsSub: '14-day protection hold after checkout before payout is allowed',
+    payoutEligible: 'Eligible now',
+    payoutHold: 'In protection hold',
+    noAccount: 'No account',
+    pay: 'Pay',
+    srRides: (n: number) => `Completed SR rides (no platform commission): ${n}`,
+    accountsTitle: 'Accounts',
+    accountsSub: 'Search, then open an account to control it',
+    bookingDir: 'Booking directory',
+    active: 'Active',
+    suspended: 'Suspended',
+    approve: 'Approve',
+    scanLink: 'Run an on-demand scan →',
     needsTitle: 'Needs attention',
     needsStuck: 'Bookings stuck awaiting payment',
     needsNoPayout: 'Hosts holding money with no payout method',
@@ -170,64 +222,19 @@ const T = {
     needsReview: 'Aging review items',
     needsDisputes: 'Aging disputes',
     needsSos: 'Aging SOS events',
-    actionDone: 'Done.',
-    actionError: 'Could not complete the action.',
-    passed: 'Passed',
-    pending: 'Pending',
-    flagged: 'Flagged',
-    open: 'Open page',
-    reviewQueue: 'Review queue',
-    disputes: 'Disputes',
-    finance: 'Finance',
-    guestVerif: 'ID verification (pending)',
-    guestPayments: 'Pending payment proofs',
-    guestBookings: 'Bookings awaiting decision',
-    guestApprovedPayments: 'Approved payments',
-    guestOpenDisputes: 'Open disputes',
-    none: 'No items.',
-    hostingApproved: 'Approved listings',
-    hostingPending: 'Listings pending review',
-    hostingRejected: 'Rejected listings',
-    hostsCount: 'Hosts',
-    aiFlagsTitle: 'AI claim-check flags',
-    aiFlags: 'AI flags',
-    aiNoFlags: 'No flags on the listings currently in the review queue.',
-    revenue: 'Revenue (real STR commission)',
-    totalRevenue: 'Total revenue',
-    proj30: '30-day projection',
-    proj90: '90-day projection',
-    walletBalance: 'Wallet balances',
-    approvedVolume: 'Approved payment volume',
-    approvedCount: 'Approved payments',
-    refunds: 'Refunds',
-    movements: 'Pending payout movements',
-    payoutHost: 'Host',
-    payoutAmount: 'Amount',
-    payoutAccount: 'Sham Cash account',
-    payoutEligible: 'Eligible now',
-    payoutHold: 'In protection hold',
-    holdDaysNote: (d: number) => `Protection hold: ${d} days after checkout before payout is allowed.`,
-    noAccount: 'No account on file',
-    srRides: 'Completed SR rides (no platform commission)',
     hrDirectory: 'Staff directory',
-    hrRole: 'Role',
-    hrEmail: 'Email',
-    hrCreated: 'Created',
-    hrAddTitle: 'Add a staff/admin member',
+    hrDirectorySub: 'Admin and support accounts',
+    hrAddTitle: 'Add a team member',
+    hrAddSub: 'Email must end with @sybnb.app',
     hrName: 'Display name',
-    hrEmailField: 'Email (@sybnb.app)',
+    hrEmailField: 'Email',
     hrRoleField: 'Role',
     hrAdd: 'Create account',
     hrAdding: 'Creating...',
-    hrDomainNote: 'Email must be on the @sybnb.app domain.',
-    hrMailboxNote: 'The mailbox itself is created in Google Workspace; this only sets the account + role.',
-    hrCreated2: 'Account created.',
+    hrMailboxNote: 'The mailbox is created separately in Google Workspace; this form only sets the account and role.',
     hrEmpty: 'No staff yet.',
+    actionError: 'Could not complete the action.',
   },
-}
-
-function go(hash: string) {
-  window.location.hash = hash
 }
 
 type ClaimCheckMeta = {
@@ -241,7 +248,9 @@ function claimChecksOf(listing: PlatformListing): ClaimCheckMeta | null {
   return cc && typeof cc === 'object' ? (cc as ClaimCheckMeta) : null
 }
 
-export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
+const initialsOf = (s: string) => (s || '?').replace(/[._-]+/g, ' ').trim().slice(0, 2).toUpperCase()
+
+export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange }: Props) {
   const isAr = lang === 'ar'
   const t = T[lang]
   const [loading, setLoading] = useState(true)
@@ -271,7 +280,7 @@ export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
   const [hrError, setHrError] = useState('')
   const [hrMessage, setHrMessage] = useState('')
 
-  useEffect(() => {
+  const loadAll = useCallback(() => {
     let active = true
     setLoading(true)
     setError('')
@@ -305,23 +314,28 @@ export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Directory data loads on demand when the tab opens (or on search submit).
-  async function loadUsers() {
+  useEffect(() => loadAll(), [loadAll])
+
+  const loadUsers = useCallback(async () => {
     try {
       const res = await fetchAdminUsers({ search: userSearch.trim() || undefined })
       setUsers(res.users)
     } catch {
       setActionMsg(t.actionError)
     }
-  }
-  async function loadBookings() {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userSearch])
+
+  const loadBookings = useCallback(async () => {
     try {
       const res = await fetchAdminBookings({ status: bookingStatus || undefined })
       setBookings(res.bookings)
     } catch {
       setActionMsg(t.actionError)
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingStatus])
+
   useEffect(() => {
     if (group === 'management') {
       void loadUsers()
@@ -336,7 +350,6 @@ export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
     try {
       const updated = await setAdminUserStatus(userId, status)
       setUsers((cur) => cur.map((u) => (u.id === userId ? { ...u, status: updated.status } : u)))
-      setActionMsg(t.actionDone)
     } catch (err) {
       setActionMsg(err instanceof Error ? err.message : t.actionError)
     } finally {
@@ -350,7 +363,6 @@ export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
     try {
       await setAdminListingStatus(listingId, status)
       setActionMsg(t.takedownDone)
-      // Reflect in the review queue view if present.
       setQueue((cur) => (cur ? { ...cur, listings: cur.listings.map((l) => (l.id === listingId ? { ...l, status } : l)) } : cur))
     } catch (err) {
       setActionMsg(err instanceof Error ? err.message : t.actionError)
@@ -366,7 +378,6 @@ export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
     try {
       await forceCancelBooking(bookingId)
       setBookings((cur) => cur.map((b) => (b.id === bookingId ? { ...b, status: 'CANCELLED' } : b)))
-      setActionMsg(t.actionDone)
     } catch (err) {
       setActionMsg(err instanceof Error ? err.message : t.actionError)
     } finally {
@@ -386,7 +397,7 @@ export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
       setStaff((current) => [...current, created])
       setHrName('')
       setHrEmail('')
-      setHrMessage(t.hrCreated2)
+      setHrMessage(t.hrAdd)
     } catch (err) {
       setHrError(err instanceof Error ? err.message : t.error)
     } finally {
@@ -395,468 +406,307 @@ export function AdminControlCenterPage({ lang, group = 'guest' }: Props) {
   }
 
   const num = (map: Record<string, number> | undefined, key: string) => (map ? map[key] || 0 : 0)
+  const meta = META[group][lang]
+
+  const counts: Partial<Record<AdminNavKey, number>> = {
+    guests: (queue?.idDocuments.length || 0) + (queue?.payments.length || 0),
+    hosts: num(metrics?.listingsByStatus, 'PENDING_REVIEW'),
+    management: needs ? Object.values(needs.counts).reduce((a, b) => a + (b || 0), 0) : undefined,
+    reports: openDisputes.length || undefined,
+  }
 
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>{t.title}</h1>
-        <p style={styles.subtitle}>{t.subtitle}</p>
-      </header>
-
-      <nav style={styles.tabs} aria-label={t.title}>
-        {GROUP_NAV.map((item) => (
-          <button
-            key={item.id}
-            style={{ ...styles.tab, ...(group === item.id ? styles.tabActive : {}) }}
-            aria-current={group === item.id ? 'page' : undefined}
-            onClick={() => go(item.hash)}
-          >
-            {isAr ? item.ar : item.en}
-          </button>
-        ))}
-        <span style={styles.navDivider} aria-hidden="true" />
-        {EXTERNAL_NAV.map((item) => (
-          <button key={item.hash} style={styles.tabLink} onClick={() => go(item.hash)}>
-            {isAr ? item.ar : item.en} →
-          </button>
-        ))}
-      </nav>
-
-      {error && <p style={styles.error}>{error}</p>}
-      {loading && <p style={styles.muted}>{t.loading}</p>}
+    <AdminShell
+      lang={lang}
+      active={GROUP_TO_NAV[group]}
+      title={meta[0]}
+      subtitle={meta[1]}
+      counts={counts}
+      onLanguageChange={onLanguageChange}
+      onRefresh={loadAll}
+    >
+      {error && <div className="alert">{error}</div>}
+      {loading && <div className="empty"><div><span>◴</span>{isAr ? 'جار التحميل...' : 'Loading...'}</div></div>}
 
       {!loading && group === 'guest' && (
-        <section style={styles.group}>
-          <div style={styles.chipRow}>
-            <Chip tone="green" label={t.passed} value={num(metrics?.paymentsByStatus, 'APPROVED')} sub={t.guestApprovedPayments} />
-            <Chip tone="gold" label={t.pending} value={(queue?.idDocuments.length || 0) + (queue?.payments.length || 0)} sub={`${t.guestVerif} · ${t.guestPayments}`} />
-            <Chip tone="red" label={t.flagged} value={openDisputes.length} sub={t.guestOpenDisputes} />
+        <>
+          <div className="metrics">
+            <Metric label={t.approvedPayments} value={num(metrics?.paymentsByStatus, 'APPROVED')} sub={t.last30} tone={TONE.green} />
+            <Metric label={t.pendingDecision} value={(queue?.idDocuments.length || 0) + (queue?.payments.length || 0)} sub={t.idAndProof} tone={TONE.gold} />
+            <Metric label={t.openDisputes} value={openDisputes.length} sub={t.needsHuman} tone={TONE.red} />
           </div>
-
-          <Card title={t.guestVerif} count={queue?.idDocuments.length || 0}>
-            {queue?.idDocuments.length
-              ? queue.idDocuments.slice(0, 8).map((doc) => (
-                  <Row key={doc.id} left={doc.displayName} right={doc.email || doc.id.slice(0, 8)} />
-                ))
-              : <p style={styles.muted}>{t.none}</p>}
-          </Card>
-
-          <Card title={t.guestBookings} count={queue?.bookings.length || 0}>
-            {queue?.bookings.length
-              ? queue.bookings.slice(0, 8).map((b) => (
-                  <Row key={b.id} left={b.listing ? listingTitleText(b.listing, lang) : b.id.slice(0, 8)} right={b.status} />
-                ))
-              : <p style={styles.muted}>{t.none}</p>}
-          </Card>
-
-          <div style={styles.linkRow}>
-            <button style={styles.linkButton} onClick={() => go('/admin/review')}>{t.reviewQueue} →</button>
-            <button style={styles.linkButton} onClick={() => go('/admin/disputes')}>{t.disputes} →</button>
+          <div className="grid">
+            <KCard title={t.guestVerif} sub={t.guestVerifSub} count={queue?.idDocuments.length || 0} footer={t.reviewQueue} onFooter={() => navigate('/admin/review')}>
+              {queue?.idDocuments.length
+                ? queue.idDocuments.slice(0, 8).map((doc) => (
+                    <KRow key={doc.id} initials={initialsOf(doc.displayName)} name={doc.displayName} meta={doc.email || doc.id.slice(0, 8)} pill={t.pendingDecision} tone="gold" />
+                  ))
+                : <Empty text={t.none} />}
+            </KCard>
+            <KCard title={t.guestBookings} sub={t.guestBookingsSub} count={queue?.bookings.length || 0} footer={t.disputesLink} onFooter={() => navigate('/admin/disputes')}>
+              {queue?.bookings.length
+                ? queue.bookings.slice(0, 8).map((b) => (
+                    <KRow key={b.id} initials="BK" name={b.listing ? listingTitleText(b.listing, lang) : b.id.slice(0, 8)} meta={b.id.slice(0, 12).toUpperCase()} pill={b.status} tone="blue" />
+                  ))
+                : <Empty text={t.none} />}
+            </KCard>
           </div>
-        </section>
+        </>
       )}
 
       {!loading && group === 'host' && (
-        <section style={styles.group}>
-          <div style={styles.chipRow}>
-            <Chip tone="green" label={t.passed} value={num(metrics?.listingsByStatus, 'APPROVED')} sub={t.hostingApproved} />
-            <Chip tone="gold" label={t.pending} value={num(metrics?.listingsByStatus, 'PENDING_REVIEW')} sub={t.hostingPending} />
-            <Chip tone="red" label={t.flagged} value={num(metrics?.listingsByStatus, 'REJECTED')} sub={t.hostingRejected} />
-            <Chip tone="blue" label={t.hostsCount} value={num(metrics?.usersByRole, 'HOST')} sub={t.hostsCount} />
+        <>
+          <div className="metrics">
+            <Metric label={t.hostingApproved} value={num(metrics?.listingsByStatus, 'APPROVED')} sub={t.publishedNow} tone={TONE.green} />
+            <Metric label={t.hostingPending} value={num(metrics?.listingsByStatus, 'PENDING_REVIEW')} sub={t.humanDecision} tone={TONE.gold} />
+            <Metric label={t.hostingRejected} value={num(metrics?.listingsByStatus, 'REJECTED')} sub={t.sinceMonth} tone={TONE.red} />
+            <Metric label={t.hostsCount} value={num(metrics?.usersByRole, 'HOST')} sub={t.hostAccounts} tone={TONE.blue} />
           </div>
-
-          <Card title={t.aiFlagsTitle} count={(queue?.listings || []).filter((l) => (claimChecksOf(l)?.flagCount || 0) > 0).length}>
+          <KCard
+            title={t.aiFlagsTitle}
+            sub={t.aiFlagsSub}
+            count={(queue?.listings || []).filter((l) => (claimChecksOf(l)?.flagCount || 0) > 0).length}
+            footer={t.reviewQueue}
+            onFooter={() => navigate('/admin/review')}
+          >
             {(() => {
               const flagged = (queue?.listings || []).filter((l) => (claimChecksOf(l)?.flagCount || 0) > 0)
-              if (!flagged.length) return <p style={styles.muted}>{t.aiNoFlags}</p>
+              if (!flagged.length) return <Empty text={t.aiNoFlags} />
               return flagged.map((listing) => {
                 const cc = claimChecksOf(listing)
-                const flags = (cc?.checks || []).filter((c) => c.verdict && c.verdict !== 'yes')
                 return (
-                  <div key={listing.id} style={styles.flagCard}>
-                    <div style={styles.flagHead}>
-                      <strong>{listingTitleText(listing, lang)}</strong>
-                      <span style={styles.flagBadge}>🚩 {cc?.flagCount || flags.length} {t.aiFlags}</span>
-                    </div>
-                    {flags.map((f, i) => (
-                      <div key={i} style={styles.flagLine}>
-                        ‘{isAr ? f.amenityAr : f.amenityEn}’ — {f.verdict}{f.reason ? ` · ${f.reason}` : ''}
-                      </div>
-                    ))}
-                    <div style={styles.rowActions}>
-                      {listing.status === 'PAUSED' ? (
-                        <button style={styles.smallBtn} disabled={actionBusy === listing.id} onClick={() => void takedownListing(listing.id, 'APPROVED')}>
-                          {actionBusy === listing.id ? t.working : t.restore}
-                        </button>
-                      ) : (
-                        <button style={styles.smallBtnDanger} disabled={actionBusy === listing.id} onClick={() => void takedownListing(listing.id, 'PAUSED')}>
-                          {actionBusy === listing.id ? t.working : t.takedown}
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  <KRow
+                    key={listing.id}
+                    initials="🚩"
+                    name={listingTitleText(listing, lang)}
+                    meta={`${cc?.flagCount || 0} ${t.flags}`}
+                    pill={listing.status === 'PAUSED' ? t.restore : t.decisionNeeded}
+                    tone="gold"
+                    actionLabel={listing.status === 'PAUSED' ? t.restore : t.takedown}
+                    onAction={() => void takedownListing(listing.id, listing.status === 'PAUSED' ? 'APPROVED' : 'PAUSED')}
+                    busy={actionBusy === listing.id}
+                    busyLabel={t.working}
+                  />
                 )
               })
             })()}
-          </Card>
-          {actionMsg && <p style={styles.hint}>{actionMsg}</p>}
-
-          <div style={styles.linkRow}>
-            <button style={styles.linkButton} onClick={() => go('/admin/review')}>{t.reviewQueue} →</button>
-          </div>
-        </section>
+          </KCard>
+        </>
       )}
 
       {!loading && group === 'accounting' && (
-        <section style={styles.group}>
-          <div style={styles.chipRow}>
-            {(revenue?.byCurrency || []).map((c) => (
-              <Chip key={c.currency} tone="green" label={`${t.totalRevenue} (${c.currency})`} valueText={moneyText(c.totalRevenueMinor, c.currency, lang)} sub={`${t.proj30}: ${moneyText(c.projection.next30DaysMinor, c.currency, lang)}`} />
+        <>
+          <div className="metrics">
+            {(revenue?.byCurrency || []).slice(0, 1).map((cur) => (
+              <Metric key={cur.currency} label={`${t.totalRevenue} (${cur.currency})`} value={moneyText(cur.totalRevenueMinor, cur.currency, lang)} sub={t.proj30(moneyText(cur.projection.next30DaysMinor, cur.currency, lang))} tone={TONE.blue} />
             ))}
-            {(revenue?.byCurrency || []).length === 0 && <Chip tone="gold" label={t.revenue} value={0} sub={t.none} />}
+            <Metric label={t.walletBalance} value={moneyText(metrics?.walletBalanceMinor || 0, 'USD', lang)} sub={t.walletsCount(metrics?.walletCount || 0)} tone={TONE.green} />
+            <Metric label={t.approvedVolume} value={moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'USD', lang)} sub={t.approvedOps(metrics?.approvedPaymentCount || 0)} tone={TONE.gold} />
+            <Metric label={t.refunds} value={num(metrics?.paymentsByStatus, 'REFUNDED')} sub={t.refunds} tone={TONE.red} />
           </div>
-
-          <div style={styles.chipRow}>
-            <Chip tone="blue" label={t.walletBalance} valueText={moneyText(metrics?.walletBalanceMinor || 0, 'USD', lang)} sub={`${metrics?.walletCount || 0}`} />
-            <Chip tone="green" label={t.approvedVolume} valueText={moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'USD', lang)} sub={`${t.approvedCount}: ${metrics?.approvedPaymentCount || 0}`} />
-            <Chip tone="red" label={t.refunds} value={num(metrics?.paymentsByStatus, 'REFUNDED')} sub={t.refunds} />
-          </div>
-
-          <Card title={t.movements} count={payouts?.payouts.length || 0}>
-            {payouts?.holdDays ? <p style={styles.hint}>{t.holdDaysNote(payouts.holdDays)}</p> : null}
+          <KCard title={t.movements} sub={t.movementsSub} count={payouts?.payouts.length || 0} footer={t.srRides(revenue?.srRidesCompletedCount || 0)}>
             {payouts?.payouts.length
               ? payouts.payouts.slice(0, 12).map((p) => (
-                  <div key={p.bookingId} style={styles.payoutRow}>
-                    <div style={styles.payoutMain}>
-                      <strong>{p.listingTitle || p.bookingId.slice(0, 8)}</strong>
-                      <small>{p.hostName || p.hostId?.slice(0, 8) || '-'}</small>
-                    </div>
-                    <div style={styles.payoutMeta}>
-                      <b dir="ltr">{moneyText(p.hostPayoutMinor, p.currency, lang)}</b>
-                      <small dir="ltr">
-                        {p.hostPayoutMethod ? `•••• ${p.hostPayoutMethod.last4}` : t.noAccount}
-                      </small>
-                      <span style={{ ...styles.payoutTag, ...(p.eligibleNow ? styles.tagGreen : styles.tagGold) }}>
-                        {p.eligibleNow ? t.payoutEligible : t.payoutHold}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              : <p style={styles.muted}>{t.none}</p>}
-          </Card>
-
-          {revenue ? (
-            <p style={styles.hint}>{t.srRides}: {revenue.srRidesCompletedCount}</p>
-          ) : null}
-
-          <div style={styles.linkRow}>
-            <button style={styles.linkButton} onClick={() => go('/finance')}>{t.finance} →</button>
-          </div>
-        </section>
-      )}
-
-      {!loading && group === 'management' && (
-        <section style={styles.group}>
-          {actionMsg && <p style={styles.hint}>{actionMsg}</p>}
-          <Card title={t.accountControl}>
-            <p style={styles.hint}>{t.accountControlHint}</p>
-            <AccountControlPanel lang={lang} />
-          </Card>
-          <Card title={t.loyalty}>
-            <p style={styles.hint}>{t.loyaltyHint}</p>
-            <LoyaltyPanel lang={lang} />
-          </Card>
-          <Card title={t.usersTitle} count={users.length}>
-            <form
-              style={styles.searchRow}
-              onSubmit={(e) => {
-                e.preventDefault()
-                void loadUsers()
-              }}
-            >
-              <input style={styles.input} placeholder={t.userSearch} value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
-              <button type="submit" style={styles.smallBtn}>{isAr ? 'بحث' : 'Search'}</button>
-            </form>
-            {users.map((u) => (
-              <div key={u.id} style={styles.dirRow}>
-                <div style={styles.dirMain}>
-                  <strong>{u.displayName}</strong>
-                  <small dir="ltr" style={styles.mono}>{u.email || '-'}</small>
-                  <span style={styles.roleBadges}>{u.roles.join(' · ')}</span>
-                </div>
-                <div style={styles.dirActions}>
-                  <span style={{ ...styles.statusTag, ...(u.status === 'ACTIVE' ? styles.tagGreen : styles.tagRed) }}>{u.status}</span>
-                  {u.status === 'ACTIVE' ? (
-                    <>
-                      <button style={styles.smallBtnDanger} disabled={actionBusy === u.id} onClick={() => void changeUserStatus(u.id, 'SUSPENDED')}>{t.suspend}</button>
-                      <button style={styles.smallBtnDanger} disabled={actionBusy === u.id} onClick={() => void changeUserStatus(u.id, 'CLOSED')}>{t.close}</button>
-                    </>
-                  ) : (
-                    <button style={styles.smallBtn} disabled={actionBusy === u.id} onClick={() => void changeUserStatus(u.id, 'ACTIVE')}>{t.reinstate}</button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {users.length === 0 && <p style={styles.muted}>{t.none}</p>}
-          </Card>
-
-          <Card title={t.bookingsTitle} count={bookings.length}>
-            <form
-              style={styles.searchRow}
-              onSubmit={(e) => {
-                e.preventDefault()
-                void loadBookings()
-              }}
-            >
-              <select style={styles.input} value={bookingStatus} onChange={(e) => setBookingStatus(e.target.value)}>
-                <option value="">{t.bookingStatusAll}</option>
-                {['PAYMENT_PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'DISPUTED'].map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-              <button type="submit" style={styles.smallBtn}>{isAr ? 'بحث' : 'Search'}</button>
-            </form>
-            {bookings.map((b) => (
-              <div key={b.id} style={styles.dirRow}>
-                <div style={styles.dirMain}>
-                  <strong>{b.listing ? (isAr ? b.listing.titleAr : b.listing.titleEn || b.listing.titleAr) : b.id.slice(0, 8)}</strong>
-                  <small>{b.guest?.displayName || b.guest?.id?.slice(0, 8) || '-'}</small>
-                  <span dir="ltr">{moneyText(b.amountMinor, b.currency, lang)}</span>
-                </div>
-                <div style={styles.dirActions}>
-                  <span style={{ ...styles.statusTag, ...(b.status === 'CANCELLED' ? styles.tagRed : styles.tagGold) }}>{b.status}</span>
-                  {['CONFIRMED', 'PAYMENT_PENDING'].includes(b.status) && (
-                    <button style={styles.smallBtnDanger} disabled={actionBusy === b.id} onClick={() => void doForceCancel(b.id)}>
-                      {actionBusy === b.id ? t.working : t.forceCancel}
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {bookings.length === 0 && <p style={styles.muted}>{t.none}</p>}
-          </Card>
-        </section>
-      )}
-
-      {!loading && group === 'management' && (
-        <section style={styles.group}>
-          <h2 className="" style={styles.cardTitle}>{t.needsTitle}</h2>
-          <div style={styles.chipRow}>
-            <Chip tone="red" label={t.needsStuck} value={needs?.counts.stuckPayments || 0} />
-            <Chip tone="gold" label={t.needsNoPayout} value={needs?.counts.noPayoutMethodHosts || 0} />
-            <Chip tone="red" label={t.needsImbalance} value={needs?.counts.imbalancedWallets || 0} />
-            <Chip tone="gold" label={t.needsReview} value={needs?.counts.agingReviewListings || 0} />
-            <Chip tone="gold" label={t.needsDisputes} value={needs?.counts.agingDisputes || 0} />
-            <Chip tone="red" label={t.needsSos} value={needs?.counts.agingSos || 0} />
-          </div>
-
-          <Card title={t.needsStuck} count={needs?.items.stuckBookings.length || 0}>
-            {needs?.items.stuckBookings.length
-              ? needs.items.stuckBookings.slice(0, 15).map((b) => (
-                  <div key={b.id} style={styles.dirRow}>
-                    <div style={styles.dirMain}>
-                      <strong>{b.listing?.titleAr || b.id.slice(0, 8)}</strong>
-                      <small dir="ltr">{new Date(b.createdAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')}</small>
-                    </div>
-                    <button style={styles.smallBtnDanger} disabled={actionBusy === b.id} onClick={() => void doForceCancel(b.id)}>
-                      {actionBusy === b.id ? t.working : t.forceCancel}
-                    </button>
-                  </div>
-                ))
-              : <p style={styles.muted}>{t.none}</p>}
-          </Card>
-
-          <Card title={t.needsNoPayout} count={needs?.items.noPayoutMethodHosts.length || 0}>
-            {needs?.items.noPayoutMethodHosts.length
-              ? needs.items.noPayoutMethodHosts.slice(0, 15).map((h) => (
-                  <Row key={h.userId} left={h.displayName} right={moneyText(h.cachedBalanceMinor, h.currency, lang)} />
-                ))
-              : <p style={styles.muted}>{t.none}</p>}
-          </Card>
-
-          <Card title={t.needsImbalance} count={needs?.items.imbalancedWallets.length || 0}>
-            {needs?.items.imbalancedWallets.length
-              ? needs.items.imbalancedWallets.slice(0, 15).map((w) => (
-                  <Row
-                    key={w.walletId}
-                    left={`${w.userId?.slice(0, 8) || w.walletId.slice(0, 8)} (${w.currency})`}
-                    right={`${moneyText(w.cachedBalanceMinor, w.currency, lang)} ≠ ${moneyText(w.computedBalanceMinor, w.currency, lang)}`}
+                  <KRow
+                    key={p.bookingId}
+                    initials="PA"
+                    name={p.listingTitle || p.bookingId.slice(0, 8)}
+                    meta={`${p.hostName || p.hostId?.slice(0, 8) || '-'} · ${p.hostPayoutMethod ? `•••• ${p.hostPayoutMethod.last4}` : t.noAccount} · ${moneyText(p.hostPayoutMinor, p.currency, lang)}`}
+                    pill={p.eligibleNow ? t.payoutEligible : t.payoutHold}
+                    tone={p.eligibleNow ? 'green' : 'gold'}
                   />
                 ))
-              : <p style={styles.muted}>{t.none}</p>}
-          </Card>
-        </section>
+              : <Empty text={t.none} />}
+          </KCard>
+        </>
+      )}
+
+      {!loading && group === 'management' && (
+        <>
+          {actionMsg && <div className="alert">{actionMsg}</div>}
+          <div className="grid">
+            <KCard title={t.accountControl} sub={t.accountControlHint}>
+              <div style={{ padding: '4px 8px' }}><AccountControlPanel lang={lang} /></div>
+            </KCard>
+            <KCard title={t.loyalty} sub={t.loyaltyHint} footer={t.scanLink}>
+              <div style={{ padding: '4px 8px' }}><LoyaltyPanel lang={lang} /></div>
+            </KCard>
+          </div>
+          <div style={{ height: 18 }} />
+          <div className="grid">
+            <KCard title={t.usersTitle} count={users.length}>
+              <div className="toolbar">
+                <input className="search" placeholder={t.userSearch} value={userSearch} onChange={(e) => setUserSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void loadUsers()} />
+                <button className="button ghost small" onClick={() => void loadUsers()}>{t.search}</button>
+              </div>
+              {users.length
+                ? users.map((u) => (
+                    <KRow
+                      key={u.id}
+                      initials={initialsOf(u.displayName)}
+                      name={u.displayName}
+                      meta={`${u.email || '-'} · ${u.roles.join(' · ')}`}
+                      pill={u.status}
+                      tone={u.status === 'ACTIVE' ? 'green' : 'red'}
+                      actionLabel={u.status === 'ACTIVE' ? t.suspend : t.reinstate}
+                      onAction={() => void changeUserStatus(u.id, u.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE')}
+                      busy={actionBusy === u.id}
+                      busyLabel={t.working}
+                    />
+                  ))
+                : <Empty text={t.none} />}
+            </KCard>
+            <KCard title={t.bookingDir} count={bookings.length}>
+              <div className="toolbar">
+                <select value={bookingStatus} onChange={(e) => setBookingStatus(e.target.value)} style={{ flex: 1 }}>
+                  <option value="">{t.bookingStatusAll}</option>
+                  {['PAYMENT_PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'DISPUTED'].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <button className="button ghost small" onClick={() => void loadBookings()}>{t.search}</button>
+              </div>
+              {bookings.length
+                ? bookings.map((b) => (
+                    <KRow
+                      key={b.id}
+                      initials="BK"
+                      name={b.listing ? (isAr ? b.listing.titleAr : b.listing.titleEn || b.listing.titleAr) : b.id.slice(0, 8)}
+                      meta={`${b.guest?.displayName || b.guest?.id?.slice(0, 8) || '-'} · ${moneyText(b.amountMinor, b.currency, lang)}`}
+                      pill={b.status}
+                      tone={b.status === 'CANCELLED' ? 'red' : 'gold'}
+                      actionLabel={['CONFIRMED', 'PAYMENT_PENDING'].includes(b.status) ? t.forceCancel : undefined}
+                      onAction={() => void doForceCancel(b.id)}
+                      busy={actionBusy === b.id}
+                      busyLabel={t.working}
+                    />
+                  ))
+                : <Empty text={t.none} />}
+            </KCard>
+          </div>
+          <div style={{ height: 18 }} />
+          <h2 style={{ fontSize: 18, margin: '4px 2px 14px' }}>{t.needsTitle}</h2>
+          <div className="metrics">
+            <Metric label={t.needsStuck} value={needs?.counts.stuckPayments || 0} tone={TONE.red} />
+            <Metric label={t.needsNoPayout} value={needs?.counts.noPayoutMethodHosts || 0} tone={TONE.gold} />
+            <Metric label={t.needsImbalance} value={needs?.counts.imbalancedWallets || 0} tone={TONE.red} />
+            <Metric label={t.needsReview} value={needs?.counts.agingReviewListings || 0} tone={TONE.gold} />
+            <Metric label={t.needsDisputes} value={needs?.counts.agingDisputes || 0} tone={TONE.gold} />
+            <Metric label={t.needsSos} value={needs?.counts.agingSos || 0} tone={TONE.red} />
+          </div>
+          <div className="grid">
+            <KCard title={t.needsStuck} count={needs?.items.stuckBookings.length || 0}>
+              {needs?.items.stuckBookings.length
+                ? needs.items.stuckBookings.slice(0, 12).map((b) => (
+                    <KRow
+                      key={b.id}
+                      initials="BK"
+                      name={b.listing?.titleAr || b.id.slice(0, 8)}
+                      meta={new Date(b.createdAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')}
+                      actionLabel={t.forceCancel}
+                      onAction={() => void doForceCancel(b.id)}
+                      busy={actionBusy === b.id}
+                      busyLabel={t.working}
+                    />
+                  ))
+                : <Empty text={t.none} />}
+            </KCard>
+            <KCard title={t.needsNoPayout} count={needs?.items.noPayoutMethodHosts.length || 0}>
+              {needs?.items.noPayoutMethodHosts.length
+                ? needs.items.noPayoutMethodHosts.slice(0, 12).map((h) => (
+                    <KRow key={h.userId} initials={initialsOf(h.displayName)} name={h.displayName} meta={moneyText(h.cachedBalanceMinor, h.currency, lang)} pill={t.noAccount} tone="grey" />
+                  ))
+                : <Empty text={t.none} />}
+            </KCard>
+          </div>
+        </>
       )}
 
       {!loading && group === 'hr' && (
-        <section style={styles.group}>
-          <Card title={t.hrDirectory} count={staff.length}>
-            {staff.length ? (
-              <div style={styles.staffTable}>
-                <div style={styles.staffHead}>
-                  <span>{t.hrName}</span>
-                  <span>{t.hrEmail}</span>
-                  <span>{t.hrRole}</span>
-                </div>
-                {staff.map((s) => (
-                  <div key={s.id} style={styles.staffRow}>
-                    <strong>{s.displayName}</strong>
-                    <span dir="ltr" style={styles.mono}>{s.email || '-'}</span>
-                    <span style={styles.roleBadges}>{s.roles.join(' · ')}</span>
-                  </div>
-                ))}
+        <div className="grid">
+          <KCard title={t.hrDirectory} sub={t.hrDirectorySub} count={staff.length}>
+            {staff.length
+              ? staff.map((s) => (
+                  <KRow key={s.id} initials={initialsOf(s.displayName)} name={s.displayName} meta={s.email || '-'} pill={s.roles.join(' · ')} tone={s.roles.includes('ADMIN') ? 'green' : 'blue'} />
+                ))
+              : <Empty text={t.hrEmpty} />}
+          </KCard>
+          <article className="card">
+            <header className="card-header"><div><h2>{t.hrAddTitle}</h2><p>{t.hrAddSub}</p></div></header>
+            <form className="form" onSubmit={submitStaff}>
+              <div className="field">
+                <label>{t.hrName}</label>
+                <input required value={hrName} onChange={(e) => setHrName(e.target.value)} />
               </div>
-            ) : (
-              <p style={styles.muted}>{t.hrEmpty}</p>
-            )}
-          </Card>
-
-          <form style={styles.hrForm} onSubmit={submitStaff}>
-            <h3 style={styles.hrFormTitle}>{t.hrAddTitle}</h3>
-            <label style={styles.field}>
-              <span>{t.hrName}</span>
-              <input style={styles.input} value={hrName} onChange={(e) => setHrName(e.target.value)} required />
-            </label>
-            <label style={styles.field}>
-              <span>{t.hrEmailField}</span>
-              <input
-                style={styles.input}
-                dir="ltr"
-                type="email"
-                placeholder="name@sybnb.app"
-                value={hrEmail}
-                onChange={(e) => setHrEmail(e.target.value)}
-                required
-              />
-              <small style={styles.hint}>{t.hrDomainNote}</small>
-            </label>
-            <label style={styles.field}>
-              <span>{t.hrRoleField}</span>
-              <select style={styles.input} value={hrRole} onChange={(e) => setHrRole(e.target.value)}>
-                {CREATABLE_ROLES.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
-            </label>
-
-            <p style={styles.mailboxNote}>ℹ︎ {t.hrMailboxNote}</p>
-            {hrError && <p style={styles.error}>{hrError}</p>}
-            {hrMessage && <p style={styles.success}>{hrMessage}</p>}
-
-            <button type="submit" disabled={hrBusy} style={styles.createButton}>
-              {hrBusy ? t.hrAdding : t.hrAdd}
-            </button>
-          </form>
-        </section>
+              <div className="field">
+                <label>{t.hrEmailField}</label>
+                <input required type="email" dir="ltr" placeholder="name@sybnb.app" value={hrEmail} onChange={(e) => setHrEmail(e.target.value)} />
+              </div>
+              <div className="field full">
+                <label>{t.hrRoleField}</label>
+                <select value={hrRole} onChange={(e) => setHrRole(e.target.value)}>
+                  {CREATABLE_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="field full"><p className="note">ℹ︎ {t.hrMailboxNote}</p></div>
+              {hrError && <div className="field full"><div className="alert">{hrError}</div></div>}
+              {hrMessage && <div className="field full"><p className="note" style={{ borderColor: 'rgba(41,211,155,.3)', background: 'rgba(41,211,155,.06)', color: '#9fe7cc' }}>{hrMessage}</p></div>}
+              <div className="field full">
+                <button className="button primary" type="submit" disabled={hrBusy}>{hrBusy ? t.hrAdding : t.hrAdd}</button>
+              </div>
+            </form>
+          </article>
+        </div>
       )}
-    </main>
+    </AdminShell>
   )
 }
 
-function Chip({
-  tone,
-  label,
-  value,
-  valueText,
-  sub,
-}: {
-  tone: 'green' | 'gold' | 'red' | 'blue'
-  label: string
-  value?: number
-  valueText?: string
-  sub?: string
+/* ---- kit helpers ---- */
+
+function Metric({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: string; tone: string }) {
+  return (
+    <article className="metric" style={{ ['--tone' as keyof CSSProperties]: tone } as CSSProperties}>
+      <span className="metric-label">{label}</span>
+      <strong className="metric-value">{value}</strong>
+      {sub ? <small>{sub}</small> : null}
+    </article>
+  )
+}
+
+function KCard({ title, sub, count, footer, onFooter, children }: { title: string; sub?: string; count?: number; footer?: string; onFooter?: () => void; children: ReactNode }) {
+  return (
+    <article className="card">
+      <header className="card-header">
+        <div><h2>{title}</h2>{sub ? <p>{sub}</p> : null}</div>
+        {typeof count === 'number' ? <span className="count">{count}</span> : null}
+      </header>
+      <div className="rows">{children}</div>
+      {footer ? <button className="card-footer" type="button" onClick={onFooter}>{footer}</button> : null}
+    </article>
+  )
+}
+
+function KRow({ initials, name, meta, pill, tone = 'grey', actionLabel, onAction, busy, busyLabel }: {
+  initials: string; name: string; meta?: string; pill?: string; tone?: 'green' | 'gold' | 'red' | 'blue' | 'grey'
+  actionLabel?: string; onAction?: () => void; busy?: boolean; busyLabel?: string
 }) {
-  const toneStyle = tone === 'green' ? styles.chipGreen : tone === 'gold' ? styles.chipGold : tone === 'red' ? styles.chipRed : styles.chipBlue
   return (
-    <div style={{ ...styles.chip, ...toneStyle }}>
-      <span style={styles.chipLabel}>{label}</span>
-      <strong style={styles.chipValue}>{valueText ?? value ?? 0}</strong>
-      {sub ? <small style={styles.chipSub}>{sub}</small> : null}
-    </div>
-  )
-}
-
-function Card({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
-  return (
-    <section style={styles.card}>
-      <div style={styles.cardHead}>
-        <h2 style={styles.cardTitle}>{title}</h2>
-        {typeof count === 'number' ? <span style={styles.cardCount}>{count}</span> : null}
+    <div className="row">
+      <div className="identity">
+        <span className="mini-avatar">{initials}</span>
+        <div><strong>{name}</strong>{meta ? <small>{meta}</small> : null}</div>
       </div>
-      <div style={styles.cardBody}>{children}</div>
-    </section>
-  )
-}
-
-function Row({ left, right }: { left: string; right: string }) {
-  return (
-    <div style={styles.simpleRow}>
-      <strong>{left}</strong>
-      <span dir="ltr">{right}</span>
+      <div className="row-meta">
+        {pill ? <span className={`pill ${tone}`}>{pill}</span> : null}
+        {actionLabel ? (
+          <button className="button ghost small" onClick={onAction} disabled={busy}>{busy ? (busyLabel || '…') : actionLabel}</button>
+        ) : null}
+      </div>
     </div>
   )
 }
 
-const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '32px 16px 90px', display: 'grid', gap: 20, maxWidth: 1180, margin: '0 auto' },
-  header: { display: 'grid', gap: 6 },
-  title: { margin: 0, fontSize: 32, lineHeight: 1.1 },
-  subtitle: { margin: 0, color: '#9aa6ba' },
-  tabs: { display: 'flex', flexWrap: 'wrap', gap: 8, borderBottom: '1px solid #242735', paddingBottom: 10 },
-  tab: { minHeight: 46, borderWidth: 1, borderStyle: 'solid', borderColor: '#242735', borderRadius: 999, background: '#101119', color: '#9aa6ba', fontWeight: 900, padding: '0 20px' },
-  tabActive: { background: 'rgba(213,169,21,.14)', borderColor: 'rgba(213,169,21,.55)', color: '#e5b80b' },
-  tabLink: { minHeight: 46, borderWidth: 1, borderStyle: 'solid', borderColor: 'transparent', borderRadius: 999, background: 'transparent', color: '#7f8aa0', fontWeight: 800, padding: '0 14px' },
-  navDivider: { width: 1, alignSelf: 'stretch', background: '#242735', margin: '2px 4px' },
-  group: { display: 'grid', gap: 16 },
-  chipRow: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
-  chip: { borderWidth: 1, borderStyle: 'solid', borderColor: '#242735', borderRadius: 12, background: '#101119', padding: 16, display: 'grid', gap: 6 },
-  chipGreen: { borderColor: 'rgba(32,210,155,.4)' },
-  chipGold: { borderColor: 'rgba(229,184,11,.4)' },
-  chipRed: { borderColor: 'rgba(255,78,119,.4)' },
-  chipBlue: { borderColor: 'rgba(82,108,255,.4)' },
-  chipLabel: { color: '#9aa6ba', fontSize: 13, fontWeight: 800 },
-  chipValue: { fontSize: 26, fontWeight: 950 },
-  chipSub: { color: '#6f7688', fontSize: 12, fontWeight: 700 },
-  card: { border: '1px solid #1e1e2a', borderRadius: 12, background: '#111118', padding: 16, display: 'grid', gap: 12 },
-  cardHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
-  cardTitle: { margin: 0, fontSize: 18 },
-  cardCount: { minWidth: 30, textAlign: 'center', borderRadius: 999, background: '#1d2332', color: '#fff', fontWeight: 900, padding: '2px 10px' },
-  cardBody: { display: 'grid', gap: 8 },
-  simpleRow: { display: 'flex', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid #1a1a24', paddingBottom: 8, color: '#9aa6ba' },
-  muted: { margin: 0, color: '#9aa6ba' },
-  hint: { margin: 0, color: '#6f7688', fontSize: 12, fontWeight: 600 },
-  error: { margin: 0, color: '#ffd1d1', fontWeight: 800 },
-  success: { margin: 0, color: '#20d29b', fontWeight: 800 },
-  linkRow: { display: 'flex', flexWrap: 'wrap', gap: 10 },
-  linkButton: { minHeight: 46, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 16px' },
-  flagCard: { border: '1px solid rgba(229,184,11,.4)', borderRadius: 8, background: 'rgba(229,184,11,.06)', padding: 12, display: 'grid', gap: 6 },
-  flagHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
-  flagBadge: { color: '#e5b80b', fontWeight: 900, fontSize: 13 },
-  flagLine: { color: '#ffe6a3', fontSize: 13, fontWeight: 700 },
-  payoutRow: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', borderBottom: '1px solid #1a1a24', paddingBottom: 10, flexWrap: 'wrap' },
-  payoutMain: { display: 'grid', gap: 2 },
-  payoutMeta: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-  payoutTag: { borderRadius: 8, padding: '4px 10px', fontWeight: 900, fontSize: 12 },
-  tagGreen: { background: 'rgba(32,210,155,.14)', color: '#20d29b' },
-  tagGold: { background: 'rgba(229,184,11,.14)', color: '#e5b80b' },
-  tagRed: { background: 'rgba(255,78,119,.14)', color: '#ff4e77' },
-  rowActions: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' },
-  smallBtn: { minHeight: 40, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
-  smallBtnDanger: { minHeight: 40, border: '1px solid rgba(255,78,119,.5)', borderRadius: 8, background: 'rgba(255,78,119,.12)', color: '#ffb3c6', fontWeight: 900, padding: '0 14px' },
-  searchRow: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
-  dirRow: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', borderBottom: '1px solid #1a1a24', paddingBottom: 10, flexWrap: 'wrap' },
-  dirMain: { display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', color: '#9aa6ba' },
-  dirActions: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
-  statusTag: { borderRadius: 8, padding: '4px 10px', fontWeight: 900, fontSize: 12 },
-  staffTable: { display: 'grid', gap: 0 },
-  staffHead: { display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 1fr', gap: 12, color: '#6f7688', fontSize: 12, fontWeight: 800, padding: '0 0 8px', borderBottom: '1px solid #242735' },
-  staffRow: { display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 1fr', gap: 12, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #1a1a24' },
-  mono: { color: '#9aa6ba', fontSize: 13 },
-  roleBadges: { color: '#8ea0ff', fontWeight: 900, fontSize: 13 },
-  hrForm: { border: '1px solid #242735', borderRadius: 12, background: '#101119', padding: 18, display: 'grid', gap: 14, maxWidth: 520 },
-  hrFormTitle: { margin: 0, fontSize: 18 },
-  field: { display: 'grid', gap: 6, color: '#9aa6ba', fontSize: 13, fontWeight: 800 },
-  input: { minHeight: 50, borderRadius: 10, border: '1px solid #30384d', background: '#0d1320', color: '#fff', padding: '0 14px', fontSize: 15, fontWeight: 700 },
-  mailboxNote: { margin: 0, color: '#8ea0ff', fontSize: 12, fontWeight: 700, lineHeight: 1.5 },
-  createButton: { minHeight: 54, border: 0, borderRadius: 10, background: '#d5a915', color: '#181207', fontWeight: 950, fontSize: 15 },
+function Empty({ text }: { text: string }) {
+  return <div className="empty"><div><span>∅</span>{text}</div></div>
 }

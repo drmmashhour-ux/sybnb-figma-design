@@ -143,15 +143,15 @@ export function App() {
         ) : path === '/settings' ? (
           <SettingsPage lang={lang} />
         ) : path === '/admin' || path === '/admin/guests' ? (
-          <AdminControlCenterPage lang={lang} group="guest" />
+          <AdminControlCenterPage lang={lang} group="guest" onLanguageChange={setLang} />
         ) : path === '/admin/hosts' ? (
-          <AdminControlCenterPage lang={lang} group="host" />
+          <AdminControlCenterPage lang={lang} group="host" onLanguageChange={setLang} />
         ) : path === '/admin/accounting' ? (
-          <AdminControlCenterPage lang={lang} group="accounting" />
+          <AdminControlCenterPage lang={lang} group="accounting" onLanguageChange={setLang} />
         ) : path === '/admin/management' ? (
-          <AdminControlCenterPage lang={lang} group="management" />
+          <AdminControlCenterPage lang={lang} group="management" onLanguageChange={setLang} />
         ) : path === '/admin/hr' ? (
-          <AdminControlCenterPage lang={lang} group="hr" />
+          <AdminControlCenterPage lang={lang} group="hr" onLanguageChange={setLang} />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
         ) : path === '/ai-brain' ? (
