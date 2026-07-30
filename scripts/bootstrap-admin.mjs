@@ -17,8 +17,12 @@ const password = process.env.ADMIN_PASSWORD || ''
 const displayName = process.env.ADMIN_NAME || 'SYBNB Admin'
 
 async function main() {
-  if (!email || !email.includes('@')) throw new Error('Set ADMIN_EMAIL to the admin business email.')
-  if (String(password).length < 8) throw new Error('Set ADMIN_PASSWORD to at least 8 characters.')
+  // Safe to run on every deploy: with no ADMIN_EMAIL/ADMIN_PASSWORD it simply skips (exit 0), so it
+  // never blocks a build. Set both env vars in Vercel and the first admin is created on next deploy.
+  if (!email || !email.includes('@') || String(password).length < 8) {
+    console.log('bootstrap-admin: skipped — set ADMIN_EMAIL (valid email) + ADMIN_PASSWORD (8+ chars) to create the first admin.')
+    return
+  }
 
   const passwordHash = hashPassword(String(password))
   const roles = ['ADMIN', 'GUEST'] // GUEST lets the same person also browse as a normal user.

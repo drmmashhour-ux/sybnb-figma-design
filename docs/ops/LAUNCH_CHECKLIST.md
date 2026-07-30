@@ -3,15 +3,21 @@
 The code blockers are fixed. What remains are **configuration/operations steps that need the owner's
 accounts and secrets** (they can't be done from the codebase). Do these in order.
 
-## 1. Create the first admin (unblocks all approvals)
-The control center can only *create* staff once an admin exists — so seed the first one directly.
-Run against the **production** database (set its `DATABASE_URL` in the environment first):
+## 1. Create the first admin (unblocks all approvals) — NO terminal needed
+The admin is now created **automatically on deploy** from env vars (a `postbuild` step runs the
+bootstrap; it safely skips when the vars are absent). So in **Vercel → Settings → Environment
+Variables**, add:
 
-```bash
-ADMIN_EMAIL=info@sybnb.app ADMIN_PASSWORD='<choose a strong password>' ADMIN_NAME='SYBNB Admin' npm run bootstrap:admin
-```
+| Variable | Value |
+|---|---|
+| `ADMIN_EMAIL` | `info@sybnb.app` |
+| `ADMIN_PASSWORD` | a strong password you choose (8+ chars) |
+| `ADMIN_NAME` | `SYBNB Admin` (optional) |
 
-Then sign in at **/host/stays → the Partner/Admin gate** with that email + password (once email OTP is on, step 2).
+Then **Redeploy**. On that deploy the first admin is created (idempotent — safe to redeploy).
+Sign in at **/host/stays → Partner/Admin gate** with that email + password (email OTP is already on).
+
+*(Prefer a terminal instead? `ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run bootstrap:admin` against the prod DB also works.)*
 
 ## 2. Set the production secrets (Vercel → Project → Settings → Environment Variables)
 | Variable | Enables | Without it |
