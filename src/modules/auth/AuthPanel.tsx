@@ -3,6 +3,7 @@ import type { CSSProperties, FormEvent } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   createGuestAccountSession,
+  resetPasswordWithEmailCode,
   sendEmailVerificationCode,
   signIn,
   verifyEmailVerificationCode,
@@ -41,6 +42,12 @@ const T = {
     passwordMismatch: 'كلمتا المرور غير متطابقتين.',
     fillAll: 'يرجى تعبئة جميع الحقول.',
     enterCode: 'أدخل رمز التحقق المرسل إلى بريدك.',
+    forgot: 'نسيت كلمة المرور؟',
+    resetTitle: 'إعادة تعيين كلمة المرور',
+    newPassword: 'كلمة المرور الجديدة',
+    resetCta: 'تحديث كلمة المرور',
+    resetDone: 'تم تحديث كلمة المرور. سجّل الدخول الآن.',
+    backToSignIn: 'العودة لتسجيل الدخول',
   },
   en: {
     welcome: 'Welcome to SYBNB',
@@ -66,13 +73,19 @@ const T = {
     passwordMismatch: 'The passwords do not match.',
     fillAll: 'Please fill in all fields.',
     enterCode: 'Enter the code we sent to your email.',
+    forgot: 'Forgot password?',
+    resetTitle: 'Reset your password',
+    newPassword: 'New password',
+    resetCta: 'Update password',
+    resetDone: 'Password updated. Sign in now.',
+    backToSignIn: 'Back to sign in',
   },
 }
 
 export function AuthPanel({ lang, onClose, onAuthed }: Props) {
   const t = T[lang]
   const isAr = lang === 'ar'
-  const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn')
+  const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgot'>('signIn')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
@@ -90,11 +103,57 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
     setMessage('')
   }
 
-  function switchMode(next: 'signIn' | 'signUp') {
+  function switchMode(next: 'signIn' | 'signUp' | 'forgot') {
     setMode(next)
     setCodeSent(false)
     setCode('')
     clearMessages()
+  }
+
+  async function handleSendResetCode() {
+    clearMessages()
+    if (!email.trim()) {
+      setError(t.fillAll)
+      return
+    }
+    setBusy(true)
+    try {
+      await sendEmailVerificationCode(email.trim(), 'password-reset')
+      setCodeSent(true)
+      setMessage(t.codeSent)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send the code')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleReset(event: FormEvent) {
+    event.preventDefault()
+    clearMessages()
+    if (!code.trim()) {
+      setError(t.enterCode)
+      return
+    }
+    if (!password || password !== confirmPassword) {
+      setError(t.passwordMismatch)
+      return
+    }
+    setBusy(true)
+    try {
+      await verifyEmailVerificationCode(email.trim(), code.trim(), 'password-reset')
+      await resetPasswordWithEmailCode(email.trim(), password)
+      setMode('signIn')
+      setCodeSent(false)
+      setCode('')
+      setPassword('')
+      setConfirmPassword('')
+      setMessage(t.resetDone)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reset the password')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function handleSignIn(event: FormEvent) {
@@ -176,9 +235,36 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
           <form style={styles.form} onSubmit={handleSignIn}>
             <input style={styles.inputWide} type="email" dir="ltr" placeholder={t.email} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
             <input style={styles.input} type="password" placeholder={t.password} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" />
+            {message && <p style={styles.message}>{message}</p>}
             {error && <p style={styles.error}>{error}</p>}
             <button style={styles.primary} disabled={busy} type="submit">{busy ? '…' : t.doSignIn}</button>
+            <button type="button" style={styles.link} onClick={() => switchMode('forgot')}>{t.forgot}</button>
             <button type="button" style={styles.link} onClick={() => switchMode('signUp')}>{t.noAccount}</button>
+          </form>
+        ) : mode === 'forgot' ? (
+          <form style={styles.form} onSubmit={handleReset}>
+            <p style={{ ...styles.subtitle, margin: '0 0 2px' }}>{t.resetTitle}</p>
+            <input style={styles.inputWide} type="email" dir="ltr" placeholder={t.email} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
+            {codeSent && (
+              <>
+                <input style={styles.inputWide} inputMode="numeric" dir="ltr" placeholder={t.code} value={code} onChange={(event) => setCode(event.target.value)} />
+                <div style={styles.row2}>
+                  <input style={styles.input} type="password" placeholder={t.newPassword} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
+                  <input style={styles.input} type="password" placeholder={t.confirmPassword} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+                </div>
+              </>
+            )}
+            {message && <p style={styles.message}>{message}</p>}
+            {error && <p style={styles.error}>{error}</p>}
+            {!codeSent ? (
+              <button style={styles.primary} disabled={busy} type="button" onClick={handleSendResetCode}>{busy ? '…' : t.sendCode}</button>
+            ) : (
+              <>
+                <button style={styles.primary} disabled={busy} type="submit">{busy ? '…' : t.resetCta}</button>
+                <button type="button" style={styles.link} disabled={busy} onClick={handleSendResetCode}>{t.resend}</button>
+              </>
+            )}
+            <button type="button" style={styles.link} onClick={() => switchMode('signIn')}>{t.backToSignIn}</button>
           </form>
         ) : (
           <form style={styles.form} onSubmit={handleCreate}>
