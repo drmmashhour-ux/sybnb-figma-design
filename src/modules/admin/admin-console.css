@@ -111,6 +111,12 @@
 .sybnb-admin .metric-label { color: var(--muted); font-size: 11px; font-weight: 700; }
 .sybnb-admin .metric-value { display: block; margin: 8px 0 3px; color: var(--tone, var(--blue)); font: 900 27px 'InterAdmin'; direction: ltr; text-align: start; }
 .sybnb-admin .metric small { color: #717d8e; font-size: 10px; }
+.sybnb-admin .metric.clickable { cursor: pointer; }
+.sybnb-admin .metric.clickable:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--tone, var(--teal)) 55%, var(--border)); }
+.sybnb-admin .metric.clickable:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.sybnb-admin .metric-go { position: absolute; top: 16px; inset-inline-end: 16px; color: var(--muted); font-size: 15px; opacity: 0; transform: translateX(-4px); transition: .18s ease; }
+.sybnb-admin [dir="rtl"] .metric-go, .sybnb-admin .metric-go { }
+.sybnb-admin .metric.clickable:hover .metric-go { opacity: .8; transform: translateX(0); }
 
 /* ---- cards + rows ---- */
 .sybnb-admin .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
@@ -139,6 +145,8 @@
 .sybnb-admin .pill.blue { color: #8badff; background: rgba(91,140,255,.1); }
 .sybnb-admin .pill.grey { color: var(--muted); background: rgba(154,166,186,.08); }
 .sybnb-admin .card-footer { padding: 13px 20px; border-top: 1px solid var(--border); color: var(--teal); font-size: 11px; font-weight: 700; background: transparent; border-inline: 0; border-bottom: 0; width: 100%; text-align: start; cursor: pointer; }
+.sybnb-admin .card-footer:hover { background: rgba(45,212,191,.06); }
+.sybnb-admin .card-footer-note { padding: 13px 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; font-weight: 600; }
 .sybnb-admin .money, .sybnb-admin .mono { font-family: 'InterAdmin'; direction: ltr; unicode-bidi: isolate; }
 .sybnb-admin .money { font-weight: 800; }
 

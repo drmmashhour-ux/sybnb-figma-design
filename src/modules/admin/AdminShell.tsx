@@ -112,7 +112,7 @@ export function AdminShell({ lang, active, title, subtitle, children, counts, on
               {isAr ? 'EN' : 'AR'}
             </button>
           )}
-          <button className="icon-button" type="button" aria-label={c.notifications}>⌁<span className="notification-dot" /></button>
+          <button className="icon-button" type="button" aria-label={c.notifications} onClick={() => navigate('/admin/management')}>⌁<span className="notification-dot" /></button>
           <span className="avatar" aria-label={c.profile}>{initials}</span>
         </div>
       </header>

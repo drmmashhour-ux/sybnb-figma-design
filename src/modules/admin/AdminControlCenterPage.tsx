@@ -431,9 +431,9 @@ export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange
       {!loading && group === 'guest' && (
         <>
           <div className="metrics">
-            <Metric label={t.approvedPayments} value={num(metrics?.paymentsByStatus, 'APPROVED')} sub={t.last30} tone={TONE.green} />
-            <Metric label={t.pendingDecision} value={(queue?.idDocuments.length || 0) + (queue?.payments.length || 0)} sub={t.idAndProof} tone={TONE.gold} />
-            <Metric label={t.openDisputes} value={openDisputes.length} sub={t.needsHuman} tone={TONE.red} />
+            <Metric label={t.approvedPayments} value={num(metrics?.paymentsByStatus, 'APPROVED')} sub={t.last30} tone={TONE.green} to="/admin/review" />
+            <Metric label={t.pendingDecision} value={(queue?.idDocuments.length || 0) + (queue?.payments.length || 0)} sub={t.idAndProof} tone={TONE.gold} to="/admin/review" />
+            <Metric label={t.openDisputes} value={openDisputes.length} sub={t.needsHuman} tone={TONE.red} to="/admin/disputes" />
           </div>
           <div className="grid">
             <KCard title={t.guestVerif} sub={t.guestVerifSub} count={queue?.idDocuments.length || 0} footer={t.reviewQueue} onFooter={() => navigate('/admin/review')}>
@@ -457,10 +457,10 @@ export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange
       {!loading && group === 'host' && (
         <>
           <div className="metrics">
-            <Metric label={t.hostingApproved} value={num(metrics?.listingsByStatus, 'APPROVED')} sub={t.publishedNow} tone={TONE.green} />
-            <Metric label={t.hostingPending} value={num(metrics?.listingsByStatus, 'PENDING_REVIEW')} sub={t.humanDecision} tone={TONE.gold} />
-            <Metric label={t.hostingRejected} value={num(metrics?.listingsByStatus, 'REJECTED')} sub={t.sinceMonth} tone={TONE.red} />
-            <Metric label={t.hostsCount} value={num(metrics?.usersByRole, 'HOST')} sub={t.hostAccounts} tone={TONE.blue} />
+            <Metric label={t.hostingApproved} value={num(metrics?.listingsByStatus, 'APPROVED')} sub={t.publishedNow} tone={TONE.green} to="/admin/review" />
+            <Metric label={t.hostingPending} value={num(metrics?.listingsByStatus, 'PENDING_REVIEW')} sub={t.humanDecision} tone={TONE.gold} to="/admin/review" />
+            <Metric label={t.hostingRejected} value={num(metrics?.listingsByStatus, 'REJECTED')} sub={t.sinceMonth} tone={TONE.red} to="/admin/review" />
+            <Metric label={t.hostsCount} value={num(metrics?.usersByRole, 'HOST')} sub={t.hostAccounts} tone={TONE.blue} to="/admin/management" />
           </div>
           <KCard
             title={t.aiFlagsTitle}
@@ -498,11 +498,11 @@ export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange
         <>
           <div className="metrics">
             {(revenue?.byCurrency || []).slice(0, 1).map((cur) => (
-              <Metric key={cur.currency} label={`${t.totalRevenue} (${cur.currency})`} value={moneyText(cur.totalRevenueMinor, cur.currency, lang)} sub={t.proj30(moneyText(cur.projection.next30DaysMinor, cur.currency, lang))} tone={TONE.blue} />
+              <Metric key={cur.currency} label={`${t.totalRevenue} (${cur.currency})`} value={moneyText(cur.totalRevenueMinor, cur.currency, lang)} sub={t.proj30(moneyText(cur.projection.next30DaysMinor, cur.currency, lang))} tone={TONE.blue} to="/admin/review" />
             ))}
-            <Metric label={t.walletBalance} value={moneyText(metrics?.walletBalanceMinor || 0, 'USD', lang)} sub={t.walletsCount(metrics?.walletCount || 0)} tone={TONE.green} />
-            <Metric label={t.approvedVolume} value={moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'USD', lang)} sub={t.approvedOps(metrics?.approvedPaymentCount || 0)} tone={TONE.gold} />
-            <Metric label={t.refunds} value={num(metrics?.paymentsByStatus, 'REFUNDED')} sub={t.refunds} tone={TONE.red} />
+            <Metric label={t.walletBalance} value={moneyText(metrics?.walletBalanceMinor || 0, 'USD', lang)} sub={t.walletsCount(metrics?.walletCount || 0)} tone={TONE.green} to="/admin/review" />
+            <Metric label={t.approvedVolume} value={moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'USD', lang)} sub={t.approvedOps(metrics?.approvedPaymentCount || 0)} tone={TONE.gold} to="/admin/review" />
+            <Metric label={t.refunds} value={num(metrics?.paymentsByStatus, 'REFUNDED')} sub={t.refunds} tone={TONE.red} to="/admin/review" />
           </div>
           <KCard title={t.movements} sub={t.movementsSub} count={payouts?.payouts.length || 0} footer={t.srRides(revenue?.srRidesCompletedCount || 0)}>
             {payouts?.payouts.length
@@ -528,7 +528,7 @@ export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange
             <KCard title={t.accountControl} sub={t.accountControlHint}>
               <div style={{ padding: '4px 8px' }}><AccountControlPanel lang={lang} /></div>
             </KCard>
-            <KCard title={t.loyalty} sub={t.loyaltyHint} footer={t.scanLink}>
+            <KCard title={t.loyalty} sub={t.loyaltyHint}>
               <div style={{ padding: '4px 8px' }}><LoyaltyPanel lang={lang} /></div>
             </KCard>
           </div>
@@ -587,12 +587,12 @@ export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange
           <div style={{ height: 18 }} />
           <h2 style={{ fontSize: 18, margin: '4px 2px 14px' }}>{t.needsTitle}</h2>
           <div className="metrics">
-            <Metric label={t.needsStuck} value={needs?.counts.stuckPayments || 0} tone={TONE.red} />
-            <Metric label={t.needsNoPayout} value={needs?.counts.noPayoutMethodHosts || 0} tone={TONE.gold} />
-            <Metric label={t.needsImbalance} value={needs?.counts.imbalancedWallets || 0} tone={TONE.red} />
-            <Metric label={t.needsReview} value={needs?.counts.agingReviewListings || 0} tone={TONE.gold} />
-            <Metric label={t.needsDisputes} value={needs?.counts.agingDisputes || 0} tone={TONE.gold} />
-            <Metric label={t.needsSos} value={needs?.counts.agingSos || 0} tone={TONE.red} />
+            <Metric label={t.needsStuck} value={needs?.counts.stuckPayments || 0} tone={TONE.red} to="/admin/review" />
+            <Metric label={t.needsNoPayout} value={needs?.counts.noPayoutMethodHosts || 0} tone={TONE.gold} to="/admin/accounting" />
+            <Metric label={t.needsImbalance} value={needs?.counts.imbalancedWallets || 0} tone={TONE.red} to="/admin/review" />
+            <Metric label={t.needsReview} value={needs?.counts.agingReviewListings || 0} tone={TONE.gold} to="/admin/review" />
+            <Metric label={t.needsDisputes} value={needs?.counts.agingDisputes || 0} tone={TONE.gold} to="/admin/disputes" />
+            <Metric label={t.needsSos} value={needs?.counts.agingSos || 0} tone={TONE.red} to="/admin/review" />
           </div>
           <div className="grid">
             <KCard title={t.needsStuck} count={needs?.items.stuckBookings.length || 0}>
@@ -664,12 +664,21 @@ export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange
 
 /* ---- kit helpers ---- */
 
-function Metric({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: string; tone: string }) {
+function Metric({ label, value, sub, tone, to }: { label: string; value: ReactNode; sub?: string; tone: string; to?: string }) {
+  const clickable = Boolean(to)
   return (
-    <article className="metric" style={{ ['--tone' as keyof CSSProperties]: tone } as CSSProperties}>
+    <article
+      className={`metric${clickable ? ' clickable' : ''}`}
+      style={{ ['--tone' as keyof CSSProperties]: tone } as CSSProperties}
+      onClick={clickable ? () => navigate(to!) : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(to!) } } : undefined}
+    >
       <span className="metric-label">{label}</span>
       <strong className="metric-value">{value}</strong>
       {sub ? <small>{sub}</small> : null}
+      {clickable ? <span className="metric-go" aria-hidden="true">→</span> : null}
     </article>
   )
 }
@@ -682,7 +691,7 @@ function KCard({ title, sub, count, footer, onFooter, children }: { title: strin
         {typeof count === 'number' ? <span className="count">{count}</span> : null}
       </header>
       <div className="rows">{children}</div>
-      {footer ? <button className="card-footer" type="button" onClick={onFooter}>{footer}</button> : null}
+      {footer ? (onFooter ? <button className="card-footer" type="button" onClick={onFooter}>{footer}</button> : <div className="card-footer-note">{footer}</div>) : null}
     </article>
   )
 }
