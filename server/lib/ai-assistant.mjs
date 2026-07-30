@@ -74,9 +74,22 @@ async function answerWithAi({ role, locale, question, context }) {
     messages: [{ role: 'user', content: userContent }],
   })
   const textBlock = response.content.find((block) => block.type === 'text')
-  const answer = textBlock?.text?.trim()
+  const answer = stripMarkdown(textBlock?.text?.trim())
   if (!answer) return { answer: fallbackAnswer(role, locale), source: 'template' }
   return { answer, source: 'ai', model: MODEL }
+}
+
+// The widget renders the answer as plain text, so any markdown the model emits (despite the prompt
+// asking for plain text) would show up as literal **, *, `, #. Strip the common inline markers.
+function stripMarkdown(text) {
+  if (!text) return ''
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1') // **bold**
+    .replace(/(^|\s)\*(?!\s)(.+?)(?<!\s)\*/g, '$1$2') // *italic* (not bare asterisks)
+    .replace(/`([^`]+)`/g, '$1') // `code`
+    .replace(/^#{1,6}\s+/gm, '') // # headings
+    .replace(/^\s*[-*]\s+/gm, '• ') // bullet markers -> a plain bullet
+    .trim()
 }
 
 // Deterministic, honest fallback — no API key needed. Points people to the right place instead of
