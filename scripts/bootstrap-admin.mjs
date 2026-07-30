@@ -25,24 +25,31 @@ async function main() {
   }
 
   const passwordHash = hashPassword(String(password))
-  const roles = ['ADMIN', 'GUEST'] // GUEST lets the same person also browse as a normal user.
-  const base = {
-    displayName,
-    passwordHash,
-    status: 'ACTIVE',
-    idDocumentStatus: 'APPROVED',
-    idDocumentSubmittedAt: new Date(),
-  }
+  const wantRoles = ['ADMIN', 'GUEST'] // GUEST lets the same person also browse as a normal user.
 
   const existing = await db().user.findUnique({ where: { email }, include: { roles: true } })
   if (existing) {
-    await db().userRole.deleteMany({ where: { userId: existing.id } })
-    const updated = await db().user.update({
+    // ADDITIVELY grant the admin role — never wipe the user's existing roles (e.g. HOST). Only ADD the
+    // roles they don't already have, so an owner who already uses this email as a host keeps that role.
+    const have = new Set(existing.roles.map((r) => r.role))
+    const toAdd = wantRoles.filter((r) => !have.has(r))
+    // Keep the account usable but DON'T clobber an existing password — if the user already has one they
+    // log in with the password they already know; only set the bootstrap password when there is none.
+    await db().user.update({
       where: { id: existing.id },
-      data: { ...base, roles: { create: roles.map((role) => ({ role })) } },
-      include: { roles: true },
+      data: {
+        status: 'ACTIVE',
+        idDocumentStatus: 'APPROVED',
+        idDocumentSubmittedAt: existing.idDocumentSubmittedAt ?? new Date(),
+        ...(existing.passwordHash ? {} : { passwordHash }),
+        ...(toAdd.length ? { roles: { create: toAdd.map((role) => ({ role })) } } : {}),
+      },
     })
-    console.log('Upgraded existing user to ADMIN:', updated.email, '->', updated.roles.map((r) => r.role).join(', '))
+    const finalRoles = [...have, ...toAdd].join(', ')
+    console.log(
+      `Granted ADMIN to existing user: ${email} -> ${finalRoles}` +
+        (existing.passwordHash ? ' (kept existing password)' : ' (set bootstrap password)'),
+    )
     return
   }
 
@@ -50,8 +57,12 @@ async function main() {
     data: {
       email,
       referralCode: 'ADMIN' + Math.random().toString(36).slice(2, 7).toUpperCase(),
-      ...base,
-      roles: { create: roles.map((role) => ({ role })) },
+      displayName,
+      passwordHash,
+      status: 'ACTIVE',
+      idDocumentStatus: 'APPROVED',
+      idDocumentSubmittedAt: new Date(),
+      roles: { create: wantRoles.map((role) => ({ role })) },
     },
     include: { roles: true },
   })
