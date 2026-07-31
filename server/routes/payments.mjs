@@ -50,7 +50,12 @@ function expectedTotalMinor(booking) {
   const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
 
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
+  // Tax: a host-set rate (metadata.taxRate, e.g. 0.13 for 13%) applied to the stay total wins; else a
+  // legacy flat metadata.taxesMinor; else the platform STR_TAX_RATE. Must mirror finance-ledger.mjs.
+  const listingTaxRate = metadataNumber(listingMetadata, 'taxRate')
+  const taxesMinor = listingTaxRate > 0
+    ? Math.round(stayAmountMinor * listingTaxRate)
+    : (metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0))
   const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
   const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
   const cancellationProtectionFeeMinor = cancellationProtectionPurchased
@@ -186,7 +191,8 @@ export async function finalizeStripeSession(session) {
 // plan charge is keyed by planCode and NEVER taken from the client (S6). Mirrors the wizard's displayed
 // prices (HOST_LISTING_PLANS in src/modules/seller/SellerListingWizard.tsx). Isolated from the
 // marketplace SELLER_PLAN_PRICE_MINOR table used by /api/payments/seller-plan-proof.
-export const STR_HOST_PLAN_PRICE_MINOR = { basic: 9, plus: 19, premium: 49, hotel: 100 }
+// NOTE: `basic` is temporarily $1 for a live-Stripe smoke test at launch. Revert to 9 after testing.
+export const STR_HOST_PLAN_PRICE_MINOR = { basic: 1, plus: 19, premium: 49, hotel: 100 }
 
 // Finalize an STR host listing-plan CARD payment. Acts only on a captured ('paid') session whose
 // metadata.purpose is 'str_host_plan'. Idempotent on the Stripe session id, so a retried / out-of-order

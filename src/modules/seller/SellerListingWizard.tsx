@@ -63,6 +63,7 @@ type WizardDraft = {
   price: string
   cleaningFee: string
   taxFee: string
+  weekendPrice: string
   size: string
   guestCapacity: string
   bedrooms: string
@@ -265,7 +266,7 @@ const HOST_LISTING_PLANS: Array<{
     id: 'basic',
     ar: 'Basic',
     en: 'Basic',
-    priceUsd: 9,
+    priceUsd: 1, // TEMP: $1 for a live-Stripe smoke test at launch; revert to 9 after (mirror payments.mjs)
     services: {
       ar: ['نشر إعلان واحد', 'رفع صور العقار', 'إثبات الملكية الأساسي', 'ظهور في البحث بعد موافقة الإدارة'],
       en: ['Publish one listing', 'Upload property photos', 'Basic ownership proof', 'Search visibility after admin approval'],
@@ -412,7 +413,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [geoStatus, setGeoStatus] = useState<'idle' | 'locating' | 'done' | 'denied' | 'error'>('idle')
   const [price, setPrice] = useState(draft.price || '15')
   const [cleaningFee, setCleaningFee] = useState(draft.cleaningFee || '0')
-  const [taxFee, setTaxFee] = useState(draft.taxFee || '0')
+  const [taxFee, setTaxFee] = useState(draft.taxFee || '0') // now a PERCENT (e.g. "13" = 13%)
+  const [weekendPrice, setWeekendPrice] = useState(draft.weekendPrice || '0')
   const [addOns, setAddOns] = useState<ListingAddOn[]>(draft.addOns || [])
   const addAddOn = (preset?: { key: string; ar: string; en: string }) =>
     setAddOns((current) => [
@@ -553,6 +555,7 @@ export function SellerListingWizard({ lang }: Props) {
       price,
       cleaningFee,
       taxFee,
+      weekendPrice,
       addOns,
       size,
       guestCapacity,
@@ -569,7 +572,7 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, listingPlan, listingPlanPaymentMethod, listingPlanPaymentConfirmed, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, addOns, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
+  }, [division, listingPlan, listingPlanPaymentMethod, listingPlanPaymentConfirmed, selectedType, title, description, governorate, city, area, address, latitude, longitude, mapPinConfirmed, price, cleaningFee, taxFee, weekendPrice, addOns, size, guestCapacity, bedrooms, bathrooms, instantBookEnabled, searchCapsuleEnabled, availabilityDates, variableNightPrice, availableStart, availableEnd, bookedDate, paymentDay, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -953,12 +956,14 @@ export function SellerListingWizard({ lang }: Props) {
         bedrooms: toNumber(bedrooms),
         bathrooms: toNumber(bathrooms),
         cleaningFeeMinor: toMinor(cleaningFee),
-        taxFeeMinor: toMinor(taxFee),
+        taxRate: toNumber(taxFee) / 100,
+        weekendPriceMinor: toMinor(weekendPrice),
         guestVisibleFees: {
           currency: 'USD',
           nightlyPriceMinor: toMinor(price),
+          weekendPriceMinor: toMinor(weekendPrice),
           cleaningFeeMinor: toMinor(cleaningFee),
-          taxFeeMinor: toMinor(taxFee),
+          taxRatePct: toNumber(taxFee),
         },
         listingPlan: selectedListingPlan.id,
         listingPlanPriceUsd: selectedListingPlan.priceUsd,
@@ -1119,12 +1124,14 @@ export function SellerListingWizard({ lang }: Props) {
             bedrooms: toNumber(bedrooms),
             bathrooms: toNumber(bathrooms),
             cleaningFeeMinor: toMinor(cleaningFee),
-            taxFeeMinor: toMinor(taxFee),
+            taxRate: toNumber(taxFee) / 100,
+            weekendPriceMinor: toMinor(weekendPrice),
             guestVisibleFees: {
               currency: 'USD',
               nightlyPriceMinor: toMinor(price),
+              weekendPriceMinor: toMinor(weekendPrice),
               cleaningFeeMinor: toMinor(cleaningFee),
-              taxFeeMinor: toMinor(taxFee),
+              taxRatePct: toNumber(taxFee),
             },
             listingPlan: selectedListingPlan.id,
             listingPlanPriceUsd: selectedListingPlan.priceUsd,
@@ -1157,6 +1164,7 @@ export function SellerListingWizard({ lang }: Props) {
     setPrice('15')
     setCleaningFee('0')
     setTaxFee('0')
+    setWeekendPrice('0')
     setAddOns([])
     setSize('40')
     setBedrooms('1')
@@ -1739,6 +1747,21 @@ export function SellerListingWizard({ lang }: Props) {
               </label>
               {division === 'STAYS' && (
                 <label>
+                  <span>{isAr ? 'سعر نهاية الأسبوع بالدولار (جمعة/سبت، اختياري)' : 'Weekend price USD (Fri/Sat, optional)'}</span>
+                  <div className="seller-price-input-shell">
+                    <b>USD</b>
+                    <input
+                      dir="ltr"
+                      inputMode="numeric"
+                      onChange={(event) => setWeekendPrice(event.target.value)}
+                      placeholder="0"
+                      value={weekendPrice}
+                    />
+                  </div>
+                </label>
+              )}
+              {division === 'STAYS' && (
+                <label>
                   <span>{isAr ? 'رسوم التنظيف بالدولار (اختياري)' : 'Cleaning fee USD (optional)'}</span>
                   <div className="seller-price-input-shell">
                     <b>USD</b>
@@ -1754,14 +1777,14 @@ export function SellerListingWizard({ lang }: Props) {
               )}
               {division === 'STAYS' && (
                 <label>
-                  <span>{isAr ? 'الضريبة بالدولار (اختياري)' : 'Tax USD (optional)'}</span>
+                  <span>{isAr ? 'الضريبة % (اختياري)' : 'Tax % (optional)'}</span>
                   <div className="seller-price-input-shell">
-                    <b>USD</b>
+                    <b>%</b>
                     <input
                       dir="ltr"
-                      inputMode="numeric"
+                      inputMode="decimal"
                       onChange={(event) => setTaxFee(event.target.value)}
-                      placeholder="0"
+                      placeholder="13"
                       value={taxFee}
                     />
                   </div>

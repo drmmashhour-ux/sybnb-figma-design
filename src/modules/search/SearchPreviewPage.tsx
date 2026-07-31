@@ -338,8 +338,10 @@ function listingImage(listing: PlatformListing) {
 
 function StayFeeDisclosure({ listing, lang }: { listing: PlatformListing; lang: Lang }) {
   const cleaningFee = metadataMinor(listing.metadata, 'cleaningFeeMinor')
-  const taxFee = metadataMinor(listing.metadata, 'taxFeeMinor')
   const basePrice = listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor
+  // Tax is a rate (metadata.taxRate, e.g. 0.13) applied to the nightly base; falls back to a legacy flat amount.
+  const taxRate = Number((listing.metadata as Record<string, unknown> | null)?.taxRate) || 0
+  const taxFee = taxRate > 0 ? Math.round(basePrice * taxRate) : metadataMinor(listing.metadata, 'taxFeeMinor')
   const total = basePrice + cleaningFee + taxFee
   const hasExtraFees = cleaningFee > 0 || taxFee > 0
 

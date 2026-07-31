@@ -68,7 +68,12 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     metadataNumber(listingMetadata, 'rentMinor') ||
     Math.max(0, Math.round(booking?.amountMinor || 0)) ||
     Math.round(staySplitBaseMinor / divisor)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (STR_TAX_RATE > 0 ? Math.round(rentMinor * STR_TAX_RATE) : 0)
+  // Tax: a host-set rate (metadata.taxRate, e.g. 0.13) applied to rent wins; else a legacy flat
+  // metadata.taxesMinor; else the platform STR_TAX_RATE (0 today = disclosed-not-charged).
+  const listingTaxRate = metadataNumber(listingMetadata, 'taxRate')
+  const taxesMinor = listingTaxRate > 0
+    ? Math.round(rentMinor * listingTaxRate)
+    : (metadataNumber(listingMetadata, 'taxesMinor') || (STR_TAX_RATE > 0 ? Math.round(rentMinor * STR_TAX_RATE) : 0))
   // Cleaning = whatever the guest actually paid on top of rent (+ tax), derived from the real
   // amounts so rent+cleaning+tax always reconciles to what was paid — instead of assuming a fixed
   // 5% of rent, which invented a phantom fee when the guest paid rent only.

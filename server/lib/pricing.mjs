@@ -38,10 +38,21 @@ export async function computeStayTotalMinor(listing, checkIn, checkOut) {
   })
   const overrideByDate = new Map(overrides.map((row) => [toISODate(row.date), row.priceOverrideMinor]))
 
-  const perNight = nights.map((date) => ({
-    date,
-    priceMinor: overrideByDate.get(date) ?? listing.priceMinor,
-  }))
+  // Weekend pricing: a host-set weekend rate (metadata.weekendPriceMinor) applies to Fri/Sat nights
+  // (the Syrian weekend). An explicit per-date override still wins over both weekend and base price.
+  const meta = listing?.metadata && typeof listing.metadata === 'object' ? listing.metadata : {}
+  const weekendPriceMinor = Number(meta.weekendPriceMinor) || 0
+  const isWeekendNight = (isoDate) => {
+    const dow = new Date(`${isoDate}T00:00:00Z`).getUTCDay() // 0=Sun … 5=Fri, 6=Sat
+    return dow === 5 || dow === 6
+  }
+
+  const perNight = nights.map((date) => {
+    const override = overrideByDate.get(date)
+    if (override != null) return { date, priceMinor: override }
+    if (weekendPriceMinor > 0 && isWeekendNight(date)) return { date, priceMinor: weekendPriceMinor }
+    return { date, priceMinor: listing.priceMinor }
+  })
   const totalMinor = perNight.reduce((sum, night) => sum + night.priceMinor, 0)
 
   return { totalMinor, nights: nights.length, perNight }
