@@ -56,7 +56,14 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   const routeContext = getRouteContext(path, isAr)
   const showFlowNav = !isLanding && !isAdminControlRoom
   function goBack() {
-    navigate(routeContext.backPath)
+    // Go back ONE page — the actual previous page the user came from (page by page), not always
+    // the landing. Uses real browser history; only falls back to the route's backPath when the user
+    // opened this page directly (e.g. a shared link) and there is no in-app history to step back to.
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back()
+    } else {
+      navigate(routeContext.backPath)
+    }
   }
 
   function goNext() {
