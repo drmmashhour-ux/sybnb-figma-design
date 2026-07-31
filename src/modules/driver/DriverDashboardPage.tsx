@@ -260,10 +260,9 @@ export function DriverDashboardPage({ lang }: Props) {
       </button>
 
       <section style={styles.driverTop}>
-        <div style={styles.availability}>
-          <button style={styles.availableButton} onClick={() => void loadOverview()}>{t.connected}</button>
-          <button style={styles.offlineButton} onClick={() => (window.location.hash = '/status')}>{t.disconnected}</button>
-        </div>
+        {/* Availability toggle removed: it was a fake control (no online/offline state exists).
+            A real go-online/offline switch needs a driver-availability field + endpoint in the
+            SR division, which is frozen under the STR-first plan — flagged separately. */}
         <h1 style={styles.driverTitle}>{t.title}</h1>
       </section>
 

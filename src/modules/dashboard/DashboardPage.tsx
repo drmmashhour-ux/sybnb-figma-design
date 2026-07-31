@@ -456,7 +456,14 @@ export function DashboardPage({ lang }: Props) {
       <section style={styles.previousTrips}>
         <h2>{t.previousTrips}</h2>
         {pastTrips.length ? pastTrips.map((trip) => (
-          <article key={trip.id} style={styles.previousTrip}>
+          <article
+            key={trip.id}
+            style={{ ...styles.previousTrip, cursor: 'pointer' }}
+            role="button"
+            tabIndex={0}
+            onClick={() => (window.location.hash = `/booking/${trip.id}`)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.hash = `/booking/${trip.id}` } }}
+          >
             <img style={styles.tripThumb} src={trip.image} alt="" />
             <div>
               <strong>{trip.title}</strong>
