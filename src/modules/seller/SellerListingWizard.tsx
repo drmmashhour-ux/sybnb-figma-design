@@ -483,6 +483,11 @@ export function SellerListingWizard({ lang }: Props) {
   // the car-specific fields and loops back to step 0.
   const [carBulkStage, setCarBulkStage] = useState<'idle' | 'prompt'>('idle')
   const isMultiRoomFlow = division === 'STAYS' && !isAdvertisingFlow
+  // STR daily-stay is a HOST flow, not a marketplace SELLER flow — pick the right wording for docs/CTAs.
+  const isHostListing = division === 'STAYS' && !isAdvertisingFlow
+  const docsWordAr = isHostListing ? 'المضيف' : 'البائع'
+  const docsWordEn = isHostListing ? 'host' : 'seller'
+  const DocsWordEn = isHostListing ? 'Host' : 'Seller'
 
   // One-way prefill only, never overwrite: the carBrand chip's ~30-item closed vocabulary and
   // the condition chip's new/used-only options are coarser than the real make/condition fields,
@@ -933,7 +938,7 @@ export function SellerListingWizard({ lang }: Props) {
       }
       if (!isAdvertisingFlow && !uploadedDocumentFiles.length) {
         setSubmitState('error')
-        setSubmitError(isAr ? 'ارفع مستندات البائع أو إثبات الملكية قبل إرسال الإعلان للمراجعة.' : 'Upload seller documents or ownership proof before sending the listing for review.')
+        setSubmitError(isAr ? `ارفع مستندات ${docsWordAr} أو إثبات الملكية قبل إرسال الإعلان للمراجعة.` : `Upload ${docsWordEn} documents or ownership proof before sending the listing for review.`)
         return
       }
       if (!isAdvertisingFlow && missingRequiredOfferProofSlots.length) {
@@ -2440,7 +2445,7 @@ export function SellerListingWizard({ lang }: Props) {
                 </div>
               )}
               <PaymentProofUpload
-                cta={isAdvertisingFlow ? (isAr ? 'رفع مستندات الإعلان' : 'Upload ad documents') : isAr ? 'رفع مستندات البائع' : 'Upload seller documents'}
+                cta={isAdvertisingFlow ? (isAr ? 'رفع مستندات الإعلان' : 'Upload ad documents') : isAr ? `رفع مستندات ${docsWordAr}` : `Upload ${docsWordEn} documents`}
                 emptyText={isAr ? 'لم يتم رفع مستندات بعد. ارفع PDF أو PNG أو JPG.' : 'No documents uploaded yet. Upload PDF, PNG, or JPG.'}
                 files={uploadedDocumentFiles}
                 help={
@@ -2454,7 +2459,7 @@ export function SellerListingWizard({ lang }: Props) {
                 }
                 lang={lang}
                 onAddFiles={addListingDocumentFiles}
-                title={isAdvertisingFlow ? (isAr ? 'مستندات الإعلان والخطة' : 'Ad and plan documents') : isAr ? 'مستندات البائع' : 'Seller documents'}
+                title={isAdvertisingFlow ? (isAr ? 'مستندات الإعلان والخطة' : 'Ad and plan documents') : isAr ? `مستندات ${docsWordAr}` : `${DocsWordEn} documents`}
               />
               <p className="seller-note-line">
                 {isAdvertisingFlow
@@ -2483,11 +2488,11 @@ export function SellerListingWizard({ lang }: Props) {
                         : 'The advertising request was prepared through the payment and submission flow.'
                       : uploadedDocumentFiles.length
                         ? isAr
-                          ? 'تم رفع مستندات البائع المطلوبة قبل الإرسال.'
-                          : 'Required seller documents were uploaded before submission.'
+                          ? `تم رفع مستندات ${docsWordAr} المطلوبة قبل الإرسال.`
+                          : `Required ${docsWordEn} documents were uploaded before submission.`
                         : isAr
-                          ? 'لا يمكن الإرسال قبل رفع مستندات البائع.'
-                          : 'Submission is blocked until seller documents are uploaded.'}
+                          ? `لا يمكن الإرسال قبل رفع مستندات ${docsWordAr}.`
+                          : `Submission is blocked until ${docsWordEn} documents are uploaded.`}
                   </li>
                   <li>
                     {isAdvertisingFlow
@@ -2500,11 +2505,11 @@ export function SellerListingWizard({ lang }: Props) {
                           : 'Send photos and documents before final submission'
                       : uploadedDocumentFiles.length
                         ? isAr
-                          ? `تم رفع ${uploadedDocumentFiles.length} مستند للبائع`
-                          : `${uploadedDocumentFiles.length} seller document uploaded`
+                          ? `تم رفع ${uploadedDocumentFiles.length} مستند ${docsWordAr}`
+                          : `${uploadedDocumentFiles.length} ${docsWordEn} document uploaded`
                         : isAr
-                          ? 'ارفع مستندات البائع قبل الإرسال النهائي'
-                          : 'Upload seller documents before final submission'}
+                          ? `ارفع مستندات ${docsWordAr} قبل الإرسال النهائي`
+                          : `Upload ${docsWordEn} documents before final submission`}
                   </li>
                   {!isAdvertisingFlow && <li>{selectedFilterLabels(sellerPropertyFilterGroups, visualFilters, lang).join(' · ')}</li>}
                   {!isAdvertisingFlow && activeOfferProofSlots.length > 0 && (
