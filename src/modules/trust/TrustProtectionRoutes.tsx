@@ -82,7 +82,7 @@ function TrustCenterHome({ lang }: { lang: Lang }) {
       <section className="trust-action-grid">
         <button className="danger" onClick={() => (window.location.hash = '/trust-center/sos')}><b>!</b>{isAr ? 'طوارئ SOS' : 'SOS'}</button>
         <button onClick={() => (window.location.hash = '/immocontact')}><b>⚑</b>{isAr ? 'تقرير صامت' : 'Silent report'}</button>
-        <button onClick={() => (window.location.hash = '/operations')}><b>⌖</b>{isAr ? 'مشاركة الموقع' : 'Share location'}</button>
+        <button onClick={() => (window.location.hash = '/trust-center/sos')}><b>⌖</b>{isAr ? 'مشاركة الموقع' : 'Share location'}</button>
       </section>
 
       <p className="trust-note">

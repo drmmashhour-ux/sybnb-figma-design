@@ -606,7 +606,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
       <section style={styles.topBar}>
         <div style={styles.topIcons}>
           <button aria-label={isAr ? 'التنبيهات' : 'Notifications'} style={styles.iconCircle} onClick={() => (window.location.hash = '/immocontact')}>⌁</button>
-          <button aria-label={isAr ? 'الإعدادات' : 'Settings'} style={styles.iconCircle} onClick={() => (window.location.hash = '/status')}>⚙</button>
+          <button aria-label={isAr ? 'الإعدادات' : 'Settings'} style={styles.iconCircle} onClick={() => (window.location.hash = '/settings')}>⚙</button>
         </div>
         <div style={styles.hostIdentity}>
           <strong>{providerCopy.dashboardTitle}</strong>

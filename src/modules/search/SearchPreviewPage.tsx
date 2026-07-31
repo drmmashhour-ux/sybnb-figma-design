@@ -259,7 +259,15 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         {listings.length ? (
           <div className="search-result-grid">
             {listings.map((listing) => (
-              <article key={listing.id} className="search-result-card">
+              <article
+                key={listing.id}
+                className="search-result-card"
+                role="button"
+                tabIndex={0}
+                style={{ cursor: 'pointer' }}
+                onClick={() => openListing(listing)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openListing(listing) } }}
+              >
                 <img src={listingImage(listing)} alt="" loading="lazy" />
                 <div className="search-result-body">
                   <div className="search-result-toprow">
@@ -280,7 +288,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                   <div className="search-result-actions">
                     <button
                       type="button"
-                      onClick={() => openListing(listing)}
+                      onClick={(e) => { e.stopPropagation(); openListing(listing) }}
                     >
                       {divisionCopy?.action || t.book}
                     </button>

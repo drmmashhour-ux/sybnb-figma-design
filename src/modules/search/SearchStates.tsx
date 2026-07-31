@@ -45,6 +45,13 @@ export function SearchStateCard({ lang, state, onReset }: SearchStatesProps) {
       <div style={{ ...styles.icon, background: `${copy.tone}22`, color: copy.tone }}>{copy.icon}</div>
       <h3 style={styles.title}>{copy.title}</h3>
       <p style={styles.body}>{copy.body}</p>
+      {state !== 'loading' && onReset && (
+        <div style={styles.actions}>
+          <button type="button" style={styles.primary} onClick={onReset}>
+            {state === 'error' ? t.retry : t.reset}
+          </button>
+        </div>
+      )}
     </section>
   )
 }
