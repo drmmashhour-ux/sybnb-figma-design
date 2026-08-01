@@ -21,25 +21,24 @@ function requireStripe() {
   return stripe
 }
 
-// Mirrors the client-side gate in BookingDetailPage.tsx (`hasIdDocument =
-// Boolean(booking?.guest?.idDocumentRef)`) -- that gate only hid the payment buttons in the UI,
-// it was never actually checked here, so any authenticated guest could pay for a booking via a
-// direct API call without ever uploading an ID document. Only requires the document to have been
-// uploaded (idDocumentRef set), not yet reviewed/approved -- review happens asynchronously via the
-// admin queue, same as the client-side condition.
-function requireIdDocumentUploaded(user) {
-  if (!user.idDocumentRef) {
-    const error = new Error('Upload an ID document before paying for this booking.')
-    error.statusCode = 403
-    error.code = 'ID_VERIFICATION_REQUIRED'
-    error.expose = true
-    throw error
-  }
+// Guests are NO LONGER required to upload an ID document to book or pay — same as Airbnb/Booking,
+// which never ask a guest for identity documents to make a reservation. (Identity/ownership
+// verification still applies to HOSTS during listing, which is a separate flow.) Kept as a no-op so
+// existing call sites stay in place and the policy can be re-enabled centrally if ever needed.
+function requireIdDocumentUploaded(_user) {
+  // intentionally no-op: guest ID is not required to pay
 }
 
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+// A fractional RATE (e.g. taxRate 0.13) must NOT be rounded — metadataNumber would turn 0.13 into 0 and
+// silently drop the tax. Read it raw (finite, > 0).
+function metadataRate(metadata, key) {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
 }
 
 // Mirrors src/modules/bookings/guestFeeSummary.ts so the Stripe charge matches what the guest saw.
@@ -52,7 +51,7 @@ function expectedTotalMinor(booking) {
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
   // Tax: a host-set rate (metadata.taxRate, e.g. 0.13 for 13%) applied to the stay total wins; else a
   // legacy flat metadata.taxesMinor; else the platform STR_TAX_RATE. Must mirror finance-ledger.mjs.
-  const listingTaxRate = metadataNumber(listingMetadata, 'taxRate')
+  const listingTaxRate = metadataRate(listingMetadata, 'taxRate')
   const taxesMinor = listingTaxRate > 0
     ? Math.round(stayAmountMinor * listingTaxRate)
     : (metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0))
@@ -65,15 +64,69 @@ function expectedTotalMinor(booking) {
   return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
 }
 
-// SYP is not a Stripe-supported settlement currency, so test-mode charges run in STRIPE_CURRENCY
-// (USD by default) using a configurable placeholder rate. Swap SYP_PER_USD for a live FX feed
-// before this ever handles real money.
-function stripeChargeAmount(totalMinor) {
+// Convert a booking's SYBNB total into the Stripe charge (currency + unit_amount in the smallest unit).
+// CRITICAL — STR stays are USD-native: `totalMinor` is already in WHOLE USD units ($1 = 1). Those must
+// be charged as `totalMinor * 100` cents. The old code always ran the SYP→USD FX conversion, so a $1
+// stay became (1 / 15000) * 100 ≈ 0 → floored to Stripe's $0.50 minimum — i.e. every USD stay was
+// charged $0.50. Only a genuinely SYP-priced booking goes through the FX conversion.
+export function stripeChargeAmount(totalMinor, bookingCurrency) {
+  if (String(bookingCurrency || '').toUpperCase() === 'USD') {
+    // Whole USD units → cents. Stripe's minimum charge is 50 cents ($0.50).
+    return { currency: 'usd', unitAmount: Math.max(50, Math.round(totalMinor * 100)) }
+  }
+  // SYP is not a Stripe-supported settlement currency, so charges run in STRIPE_CURRENCY (USD by
+  // default) using a configurable placeholder rate. Swap SYP_PER_USD for a live FX feed for real money.
   const currency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
   if (currency === 'syp') return { currency, unitAmount: Math.max(100, Math.round(totalMinor)) }
   const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
   const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd) * 100))
   return { currency, unitAmount }
+}
+
+export function isStripeConfigured() {
+  return Boolean(stripe)
+}
+
+// finalizeStripeSession stores the captured PaymentIntent as `stripe://payment_intents/<id>` on the
+// proof's proofAssetUrl. Pull the id back out so we can refund against it.
+export function extractStripePaymentIntentId(reference) {
+  const match = String(reference || '').match(/^stripe:\/\/payment_intents\/(.+)$/)
+  return match ? match[1] : null
+}
+
+// Smallest-unit amount to refund for a SYBNB amount. USD bookings are whole-USD units → *100. Unlike a
+// CHARGE, a refund has NO 50-cent floor — a partial refund of any positive amount is valid.
+export function stripeRefundCents(amountMinor, bookingCurrency) {
+  if (String(bookingCurrency || '').toUpperCase() === 'USD') return Math.max(0, Math.round(amountMinor * 100))
+  const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
+  return Math.max(0, Math.round((amountMinor / sypPerUsd) * 100))
+}
+
+// Issue a REAL card refund against the original PaymentIntent. Throws when Stripe isn't configured or the
+// intent is missing so the caller can fall back to an internal wallet credit (guest is always made whole).
+export async function createStripeCardRefund({ paymentIntentId, amountMinor, bookingCurrency }) {
+  if (!stripe) {
+    const error = new Error('Stripe is not configured.')
+    error.code = 'STRIPE_NOT_CONFIGURED'
+    throw error
+  }
+  if (!paymentIntentId) {
+    const error = new Error('No Stripe payment intent to refund.')
+    error.code = 'STRIPE_REFUND_NO_INTENT'
+    throw error
+  }
+  const amountCents = stripeRefundCents(amountMinor, bookingCurrency)
+  if (amountCents <= 0) return { refunded: false, amountCents: 0 }
+  // Deterministic idempotency key so a network timeout AFTER Stripe already committed the refund can't
+  // create a SECOND refund on retry (and can't trigger the caller's wallet-credit fallback on top of a
+  // real card refund). Each PaymentIntent is refunded at most once across every cancel/dispute path
+  // (the atomic booking status-claim guarantees single cancellation), so the amount is identical on any
+  // retry and Stripe safely returns the original refund object instead of erroring or double-charging us.
+  const refund = await stripe.refunds.create(
+    { payment_intent: paymentIntentId, amount: amountCents },
+    { idempotencyKey: `sybnb-refund:${paymentIntentId}:${amountCents}` },
+  )
+  return { refunded: true, refundId: refund.id, amountCents }
 }
 
 async function firstAdminId(tx) {
@@ -191,8 +244,7 @@ export async function finalizeStripeSession(session) {
 // plan charge is keyed by planCode and NEVER taken from the client (S6). Mirrors the wizard's displayed
 // prices (HOST_LISTING_PLANS in src/modules/seller/SellerListingWizard.tsx). Isolated from the
 // marketplace SELLER_PLAN_PRICE_MINOR table used by /api/payments/seller-plan-proof.
-// NOTE: `basic` is temporarily $1 for a live-Stripe smoke test at launch. Revert to 9 after testing.
-export const STR_HOST_PLAN_PRICE_MINOR = { basic: 1, plus: 19, premium: 49, hotel: 100 }
+export const STR_HOST_PLAN_PRICE_MINOR = { basic: 9, plus: 19, premium: 49, hotel: 100 }
 
 // Finalize an STR host listing-plan CARD payment. Acts only on a captured ('paid') session whose
 // metadata.purpose is 'str_host_plan'. Idempotent on the Stripe session id, so a retried / out-of-order
@@ -286,7 +338,7 @@ export async function handlePayments(req, res, url, context) {
     requireStripe()
 
     const totalMinor = expectedTotalMinor(booking)
-    const { currency, unitAmount } = stripeChargeAmount(totalMinor)
+    const { currency, unitAmount } = stripeChargeAmount(totalMinor, booking.currency)
     const listingTitle = booking.listing?.titleEn || booking.listing?.titleAr || 'SYBNB stay'
 
     const session = await stripe.checkout.sessions.create({

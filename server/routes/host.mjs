@@ -11,18 +11,26 @@ import {
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
-import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
+import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS, purgeStaleListingMedia } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
 import { generateOrTemplate } from '../lib/ai-listing-description.mjs'
 import { correctText } from '../lib/ai-text-correct.mjs'
 import { checkListingHonesty } from '../lib/ai-truth-check.mjs'
+import { categorizeListingPhotos } from '../lib/ai-photo-categorize.mjs'
+import { enhancePhotoBuffer } from '../lib/ai-photo-enhance.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { deleteListingMedia } from '../lib/listing-media-storage.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
 import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
 import { encryptPayoutAccount, payoutAccountLast4 } from '../lib/payout-account.mjs'
 import { checkListingClaims, claimCheckSignature } from '../lib/listing-claim-check.mjs'
+import {
+  STR_HOST_PLAN_PRICE_MINOR,
+  createStripeCardRefund,
+  extractStripePaymentIntentId,
+  isStripeConfigured,
+} from './payments.mjs'
 
 // SECURITY (S7/S10): the ONLY guest + payment-proof fields a host is allowed to receive.
 // A host must never see the guest's email, nor a proof's uploaded transfer screenshot (proofAssetUrl),
@@ -54,6 +62,36 @@ function hostSafePayoutView(payoutMethod) {
 }
 
 export async function handleHost(req, res, url, context) {
+  // The host listing-plan fee is a one-time charge per STR listing, recorded as an APPROVED
+  // paymentProof (provider 'str_host_plan'). The wizard used to remember that payment ONLY in the
+  // browser it was paid in (client draft state), so a page refresh — or continuing on a second
+  // device — made it demand payment AGAIN even though the fee was already captured. This endpoint
+  // lets the wizard confirm the payment server-side on load, so it can skip the plan step without
+  // ever re-charging. "Unconsumed" = the host has more approved plan fees than STAYS listings they
+  // own (each created listing consumes one plan). Distinct plan prices let us map the paid amount
+  // back to the exact plan code, so a host who paid for Basic can't silently claim a pricier plan.
+  if (url.pathname === '/api/host/str-plan-status') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+
+    const [approvedPlans, consumedListings] = await Promise.all([
+      db().paymentProof.findMany({
+        where: { userId: context.user.id, provider: 'str_host_plan', status: 'APPROVED' },
+        select: { amountMinor: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      db().listing.count({ where: { ownerId: context.user.id, division: 'STAYS' } }),
+    ])
+
+    const hasPaidPlan = approvedPlans.length > consumedListings
+    const priceToPlan = Object.fromEntries(
+      Object.entries(STR_HOST_PLAN_PRICE_MINOR).map(([code, minor]) => [minor, code]),
+    )
+    const paidPlanCode = hasPaidPlan ? priceToPlan[approvedPlans[0].amountMinor] || null : null
+
+    return json(res, 200, { hasPaidPlan, paidPlanCode })
+  }
+
   if (url.pathname === '/api/host/earnings') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['HOST', 'SELLER'])
@@ -116,6 +154,9 @@ export async function handleHost(req, res, url, context) {
     await completeExpiredBookings({ listing: { ownerId: context.user.id } })
     await expireOldListings({ ownerId: context.user.id })
     await expireOpenAuctions({ listing: { ownerId: context.user.id } })
+    // Reclaim orphaned photo storage from long-dead listings (throttled, global, best-effort — never
+    // blocks this dashboard load, and resumes next time if a run is cut short).
+    void purgeStaleListingMedia().catch(() => {})
 
     const listings = await db().listing.findMany({
       where: { ownerId: context.user.id },
@@ -283,6 +324,54 @@ export async function handleHost(req, res, url, context) {
     return json(res, 200, { ok: true, ...result })
   }
 
+  // AI "photo tour": label each uploaded photo by room/space so the wizard can auto-group them (host can
+  // re-tag). Reuses the same Claude-vision gating as the truth-check — returns 'unavailable' with no key.
+  if (url.pathname === '/api/host/listing-photo-categories') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const photos = Array.isArray(body?.photos) ? body.photos.slice(0, 16) : []
+    const locale = body?.locale === 'ar' ? 'ar' : 'en'
+    const result = await categorizeListingPhotos({ photos, locale })
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // PREMIUM (paid) photo enhancement — faithful AI super-resolution/denoise via the ai-photo-enhance
+  // capsule (fal.ai). Distinct from the FREE on-device enhancer. Host/seller only; bounded by the
+  // PREMIUM_PHOTO_ENHANCE rate-limit rule so provider spend can't run away. Returns the enhanced JPEG as
+  // base64 so the wizard can swap the staged photo in place. When no FAL_KEY is set the capsule throws a
+  // clean 501 (feature simply off) — the client hides the button in that case.
+  if (url.pathname === '/api/host/photos/enhance') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const body = await readJson(req)
+    const mimeType = typeof body?.mimeType === 'string' ? body.mimeType : ''
+    if (!/^image\/(jpeg|png|webp)$/.test(mimeType)) {
+      const error = new Error('Photo must be a JPEG, PNG, or WebP image.')
+      error.statusCode = 400
+      error.code = 'ENHANCE_TYPE_INVALID'
+      error.expose = true
+      throw error
+    }
+    const buffer = Buffer.from(typeof body?.fileBase64 === 'string' ? body.fileBase64 : '', 'base64')
+    if (!buffer.length) {
+      const error = new Error('No photo data to enhance.')
+      error.statusCode = 400
+      error.code = 'ENHANCE_EMPTY'
+      error.expose = true
+      throw error
+    }
+    if (buffer.length > 12 * 1024 * 1024) {
+      const error = new Error('Photo must be smaller than 12MB.')
+      error.statusCode = 400
+      error.code = 'ENHANCE_TOO_LARGE'
+      error.expose = true
+      throw error
+    }
+    const enhanced = await enhancePhotoBuffer(buffer, { mimeType })
+    return json(res, 200, { ok: true, fileBase64: enhanced.toString('base64'), mimeType: 'image/jpeg' })
+  }
+
   const insightReadMatch = url.pathname.match(/^\/api\/host\/insights\/([^/]+)\/read$/)
   if (insightReadMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
@@ -345,6 +434,10 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
+    // If the booking was paid by CARD (Stripe), we issue a REAL card refund AFTER the transaction commits
+    // (never call an external API inside a DB transaction). Populated inside the tx; acted on after.
+    let deferredCardRefund = null
+
     const booking = await db().$transaction(async (tx) => {
       // SECURITY (S4): claim the transition atomically on the status we validated above. Without this, a
       // concurrent guest-cancel (which refunds) could commit and then this host-confirm would overwrite it
@@ -383,16 +476,39 @@ export async function handleHost(req, res, url, context) {
           },
         })
 
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
-          amountMinor: approvedPayment?.amountMinor || existing.amountMinor,
-          currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['booking-refund', existing.id, approvedPayment?.id],
-          note: 'Guest refund after host cancelled a protected booking.',
+        // If the guest paid by CARD (Stripe), refund the money back to their CARD (done after commit),
+        // NOT as an internal wallet credit they could never cash out. Sham Cash / local-wallet payments
+        // (no card to refund) still get the internal wallet credit as before. A host cancel is a full
+        // refund (no late fee is withheld from the guest when the HOST is the one cancelling).
+        // The host-safe payment projection deliberately omits provider/proofAssetUrl, so read the Stripe
+        // intent from the proof server-side (never exposed to the host), matching the dispute-refund path.
+        const guestRefundMinor = approvedPayment?.amountMinor || existing.amountMinor
+        const stripeProof = await tx.paymentProof.findFirst({
+          where: { bookingId: existing.id, provider: 'stripe', status: { in: ['REFUNDED', 'APPROVED'] } },
+          orderBy: { createdAt: 'desc' },
         })
+        const stripeIntentId = stripeProof ? extractStripePaymentIntentId(stripeProof.proofAssetUrl) : null
+        if (stripeIntentId && guestRefundMinor > 0 && isStripeConfigured()) {
+          deferredCardRefund = {
+            paymentIntentId: stripeIntentId,
+            amountMinor: guestRefundMinor,
+            currency: existing.currency,
+            bookingId: existing.id,
+            guestId: existing.guestId,
+            proofId: approvedPayment?.id,
+          }
+        } else {
+          await recordWalletEntry(tx, {
+            userId: existing.guestId,
+            type: 'REFUND',
+            amountMinor: guestRefundMinor,
+            currency: existing.currency,
+            referenceType: 'booking_refund',
+            referenceId: existing.id,
+            keyParts: ['booking-refund', existing.id, approvedPayment?.id],
+            note: 'Guest refund after host cancelled a protected booking.',
+          })
+        }
 
         // Floor the reversal at the admin wallet's balance so undoing the admin's share can never
         // push it negative (if the share was already withdrawn, only what remains is reversed). Lock
@@ -460,6 +576,40 @@ export async function handleHost(req, res, url, context) {
         },
       })
     })
+
+    // Card refund runs AFTER the transaction commits (never call Stripe inside a DB transaction). On
+    // success the guest's money is back on their card. If Stripe fails, fall back to an internal wallet
+    // credit so the guest is still made whole, and log it for follow-up.
+    if (deferredCardRefund) {
+      try {
+        const refund = await createStripeCardRefund({
+          paymentIntentId: deferredCardRefund.paymentIntentId,
+          amountMinor: deferredCardRefund.amountMinor,
+          bookingCurrency: deferredCardRefund.currency,
+        })
+        await db().adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'BOOKING_CARD_REFUNDED',
+            entityType: 'bookings',
+            entityId: deferredCardRefund.bookingId,
+            after: { stripeRefundId: refund.refundId || null, amountMinor: deferredCardRefund.amountMinor, currency: deferredCardRefund.currency },
+          },
+        })
+      } catch (refundError) {
+        console.error('[sybnb] Stripe card refund failed after host cancel; crediting wallet as fallback:', refundError?.message || refundError)
+        await recordWalletEntry(db(), {
+          userId: deferredCardRefund.guestId,
+          type: 'REFUND',
+          amountMinor: deferredCardRefund.amountMinor,
+          currency: deferredCardRefund.currency,
+          referenceType: 'booking_refund',
+          referenceId: deferredCardRefund.bookingId,
+          keyParts: ['booking-host-cancel-refund-card-fallback', deferredCardRefund.bookingId, deferredCardRefund.proofId],
+          note: 'Fallback wallet refund — the Stripe card refund could not be completed.',
+        })
+      }
+    }
 
     await db().adminAuditLog.create({
       data: {
@@ -971,10 +1121,10 @@ export async function handleHost(req, res, url, context) {
       }
 
       // ListingMedia rows cascade-delete with the listing automatically (schema onDelete: Cascade),
-      // but the on-disk files need explicit cleanup first, before the DB rows referencing them are gone.
+      // but the stored files (Blob/CDN or local) need explicit cleanup first, before the rows are gone.
       const media = await db().listingMedia.findMany({ where: { listingId: existing.id } })
       for (const item of media) {
-        await deleteListingMedia(String(item.url || '').split('/').pop())
+        await deleteListingMedia(item.url) // full url: blob→CDN delete, dev→local file delete
       }
       await db().listing.delete({ where: { id: existing.id } })
 
