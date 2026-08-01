@@ -7,6 +7,7 @@ import { consumePhoneVerificationCode, hasRecentlyVerifiedPhone, sendPhoneVerifi
 import { requireAuth } from '../lib/auth-context.mjs'
 import { attachReferralOnRegister, generateUniqueReferralCode } from '../lib/referrals.mjs'
 import { isMailerConfigured, sendPasswordChangedEmail } from '../lib/mailer.mjs'
+import { checkLoginLock, clearLoginFailures, hashLoginSubject, recordLoginFailure } from '../lib/login-lockout.mjs'
 
 const NAME_FIELD_MAX_LENGTH = 120
 
@@ -467,6 +468,21 @@ export async function handleAuth(req, res, url, context) {
       throw error
     }
 
+    // Per-ACCOUNT lockout (defense-in-depth over the per-IP rate limit). Keyed on the submitted
+    // identifier, hashed — so it applies uniformly whether or not the account exists, which keeps it
+    // enumeration-safe (an attacker can't tell "locked real account" from "locked nonexistent one").
+    const loginSubjectHash = hashLoginSubject(validEmail || validPhone)
+    const lock = await checkLoginLock(loginSubjectHash)
+    if (lock.locked) {
+      res.setHeader('retry-after', String(lock.retryAfterSeconds))
+      const minutes = Math.max(1, Math.ceil(lock.retryAfterSeconds / 60))
+      const error = new Error(`Too many failed sign-in attempts. Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`)
+      error.statusCode = 429
+      error.code = 'ACCOUNT_TEMPORARILY_LOCKED'
+      error.expose = true
+      throw error
+    }
+
     const user = await db().user.findUnique({ where, include: { roles: true } })
     // Security audit finding F-03: always run verifyPassword, even when no user matched, using a
     // fixed decoy hash in that case. Without this, the "no such account" branch short-circuits
@@ -475,12 +491,37 @@ export async function handleAuth(req, res, url, context) {
     // though the error message is identical either way.
     const passwordOk = verifyPassword(body.password, user?.passwordHash || DUMMY_PASSWORD_HASH)
     if (!user || user.status !== 'ACTIVE' || !passwordOk) {
+      // Count this failure toward the per-account lockout. On the transition INTO a lock, write a
+      // single security event so it surfaces on the admin office dashboard + audit trail.
+      const failure = await recordLoginFailure(loginSubjectHash)
+      if (failure.justLocked) {
+        await db()
+          .adminAuditLog.create({
+            data: {
+              actorUserId: user?.id || null,
+              action: 'SECURITY_LOGIN_LOCKOUT',
+              entityType: 'security',
+              entityId: loginSubjectHash,
+              after: {
+                attemptCount: failure.attemptCount,
+                lockedUntil: failure.lockedUntil,
+                identifierType: validEmail ? 'email' : 'phone',
+                accountExists: Boolean(user),
+              },
+            },
+          })
+          .catch(() => {})
+      }
       const error = new Error('Invalid login credentials.')
       error.statusCode = 401
       error.code = 'INVALID_CREDENTIALS'
       error.expose = true
       throw error
     }
+
+    // Password confirmed valid → reset the failure counter (the staff second-factor gate below has its
+    // own protection, so a fumbled OTP must not count toward brute-force lockout of a correct password).
+    await clearLoginFailures(loginSubjectHash)
 
     // Real email-OTP gate for staff sign-in (admin/host/driver dashboards), checked only after
     // credentials are already confirmed valid so this can't be used to enumerate accounts by

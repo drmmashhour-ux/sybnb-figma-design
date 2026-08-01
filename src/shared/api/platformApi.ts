@@ -619,6 +619,10 @@ type CreateListingInput = {
 }
 
 export const LAST_SUBMITTED_LISTING_KEY = 'sybnb.v6.lastSubmittedListing'
+// In-flight STR draft marker for idempotent retry (see createAndSubmitPrototypeListing). Holds the
+// created listing id + how many photos have uploaded, so a failed-then-retried submit resumes the same
+// draft instead of piling up duplicate drafts.
+const PENDING_LISTING_DRAFT_KEY = 'sybnb.v6.pendingListingDraft'
 export const SELLER_SESSION_KEY = 'sybnb.v6.sellerSession'
 export const GUEST_SESSION_KEY = 'sybnb.v6.guestSession'
 export const GUEST_SESSION_TOKEN_KEY = 'sybnb-v6-guest-token'
@@ -665,25 +669,101 @@ export async function fetchPrototypeContracts() {
   return apiRequest<PlatformContracts>('/api/contracts')
 }
 
-export async function createAndSubmitPrototypeListing(input: CreateListingInput) {
+export async function createAndSubmitPrototypeListing(
+  input: CreateListingInput & {
+    photos?: File[]
+    availability?: Array<{ date: string; status: 'BLOCKED' | 'AVAILABLE'; priceOverrideMinor?: number | null }>
+  },
+) {
+  const { photos, availability, ...listingInput } = input
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
-  const created = await apiRequest<{ ok: true; listing: PlatformListing }>('/api/listings', {
-    method: 'POST',
-    token: session.token,
-    body: {
-      division: 'STAYS',
-      ...input,
-    },
-  })
+
+  // IDEMPOTENT DRAFT REUSE (Option A): the create → upload photos → set availability → submit sequence
+  // used to create a brand-new draft on EVERY call. So if any photo upload or the availability PATCH
+  // failed mid-way (a bad file, a transient 500), the listing was created but never submitted, and each
+  // retry piled up another orphaned duplicate draft. Now we remember the in-flight draft (id + how many
+  // photos already uploaded) in sessionStorage, keyed by a fingerprint of the listing's core fields, and
+  // RESUME it on retry instead of starting over — no duplicate drafts, and photos aren't re-uploaded.
+  const fingerprint = JSON.stringify([listingInput.titleAr, listingInput.titleEn, listingInput.priceMinor, listingInput.currency])
+  let listingId: string | null = null
+  let photosUploaded = 0
+  try {
+    const raw = sessionStorage.getItem(PENDING_LISTING_DRAFT_KEY)
+    if (raw) {
+      const saved = JSON.parse(raw) as { listingId?: string; photosUploaded?: number; fingerprint?: string }
+      if (saved?.listingId && saved.fingerprint === fingerprint) {
+        listingId = saved.listingId
+        photosUploaded = Number(saved.photosUploaded) || 0
+      }
+    }
+  } catch {
+    /* corrupt draft marker — fall through and create a fresh draft */
+  }
+
+  const rememberDraft = () => {
+    try {
+      sessionStorage.setItem(PENDING_LISTING_DRAFT_KEY, JSON.stringify({ listingId, photosUploaded, fingerprint }))
+    } catch {
+      /* storage full / disabled — non-fatal, we just lose retry-resume */
+    }
+  }
+
+  if (!listingId) {
+    const created = await apiRequest<{ ok: true; listing: PlatformListing }>('/api/listings', {
+      method: 'POST',
+      token: session.token,
+      body: {
+        division: 'STAYS',
+        ...listingInput,
+      },
+    })
+    listingId = created.listing.id
+    photosUploaded = 0
+    rememberDraft()
+  }
+
+  // Upload the guest-facing photos BEFORE submit, in order (so each media row's sortOrder matches the
+  // metadata.photoCategories index). Without this the listing was created + submitted with NO photos —
+  // the reason a submitted stay showed up blank everywhere. Resume after any already uploaded on a prior
+  // attempt so a mid-sequence failure never re-uploads (and never duplicates) earlier photos.
+  if (photos && photos.length) {
+    for (let i = photosUploaded; i < photos.length; i += 1) {
+      const fileBase64 = await readFileAsBase64(photos[i])
+      await apiRequest<{ ok: true }>(`/api/listings/${listingId}/media`, {
+        method: 'POST',
+        token: session.token,
+        body: { fileBase64, mimeType: photos[i].type },
+      })
+      photosUploaded = i + 1
+      rememberDraft()
+    }
+  }
+
+  // Persist the availability the host set in the wizard (per-night prices on the open days + any blocked
+  // date). Available-by-default is preserved — we only write the dates the host explicitly touched, never
+  // a mass block, so a listing can't come out unbookable.
+  if (availability && availability.length) {
+    await apiRequest<{ ok: true }>(`/api/host/listings/${listingId}/availability`, {
+      method: 'PATCH',
+      token: session.token,
+      body: { dates: availability },
+    })
+  }
 
   const submitted = await apiRequest<{ ok: true; listing: PlatformListing }>(
-    `/api/listings/${created.listing.id}/submit`,
+    `/api/listings/${listingId}/submit`,
     {
       method: 'PATCH',
       token: session.token,
     },
   )
 
+  // Submitted cleanly — clear the in-flight draft marker so the next listing starts fresh.
+  try {
+    sessionStorage.removeItem(PENDING_LISTING_DRAFT_KEY)
+  } catch {
+    /* ignore */
+  }
   sessionStorage.setItem(LAST_SUBMITTED_LISTING_KEY, JSON.stringify(submitted.listing))
   return submitted.listing
 }
@@ -919,6 +999,27 @@ export async function uploadListingPhoto(listingId: string, file: File) {
   })
 }
 
+// PREMIUM (paid) photo enhancement — sends a staged photo to the server, which runs faithful AI
+// super-resolution/denoise (fal.ai) and returns the enhanced JPEG. Distinct from the free on-device
+// enhancer. Requires a host/seller session; the server rate-limits it so provider cost stays bounded.
+// Throws PREMIUM_ENHANCE_NOT_CONFIGURED (501) when no key is set, so callers can hide the feature.
+export async function enhanceHostPhoto(file: File): Promise<File> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const fileBase64 = await readFileAsBase64(file)
+  const result = await apiRequest<{ ok: true; fileBase64: string; mimeType: string }>(
+    '/api/host/photos/enhance',
+    {
+      method: 'POST',
+      token: session.token,
+      body: { fileBase64, mimeType: file.type },
+    },
+  )
+  const binary = atob(result.fileBase64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return new File([bytes], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: result.mimeType || 'image/jpeg' })
+}
+
 export async function submitAccommodation(accommodationId: string) {
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
   const response = await apiRequest<{ ok: true; accommodation: PlatformAccommodation }>(
@@ -1017,6 +1118,42 @@ export async function checkListingHonesty(
     { method: 'POST', token: session.token, body: { claims, photos, locale } },
   )
   return { status: response.status, items: response.items || [], warnings: response.warnings || [] }
+}
+
+// Room/space vocabulary for the AI "photo tour". Keep in sync with server ai-photo-categorize.mjs.
+export const PHOTO_ROOM_CATEGORIES = [
+  'bedroom',
+  'bathroom',
+  'living_room',
+  'kitchen',
+  'dining',
+  'balcony',
+  'exterior',
+  'view',
+  'pool',
+  'entrance',
+  'other',
+] as const
+export type PhotoRoomCategory = (typeof PHOTO_ROOM_CATEGORIES)[number]
+export type PhotoCategoryItem = { index: number; category: PhotoRoomCategory; confidence: number | null }
+
+// AI "photo tour": ask the server to label each uploaded photo by room/space. Returns one item per photo
+// the model classified (by 0-based index). status: ok | skipped | unavailable (no AI key). The host can
+// re-tag anything — this only SUGGESTS.
+export async function categorizeListingPhotos(
+  photos: { data: string; mediaType: string }[],
+  locale: 'ar' | 'en',
+): Promise<{ status: string; items: PhotoCategoryItem[] }> {
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; status: string; items?: PhotoCategoryItem[] }>(
+    '/api/host/listing-photo-categories',
+    { method: 'POST', token: session.token, body: { photos, locale } },
+  )
+  return { status: response.status, items: response.items || [] }
 }
 
 export async function createSellerAccountSession(input: {
@@ -1348,8 +1485,9 @@ export type ListingSearchFilters = {
   radiusKm?: number
 }
 
-export async function fetchApprovedListings(division = 'STAYS', filters: ListingSearchFilters = {}) {
+export async function fetchApprovedListingsPage(division = 'STAYS', filters: ListingSearchFilters = {}, cursor?: string | null) {
   const params = new URLSearchParams({ division })
+  if (cursor) params.set('cursor', cursor)
   if (filters.governorate) params.set('governorate', filters.governorate)
   if (filters.city) params.set('city', filters.city)
   if (filters.area) params.set('area', filters.area)
@@ -1378,11 +1516,18 @@ export async function fetchApprovedListings(division = 'STAYS', filters: Listing
   if (filters.centerLng !== undefined) params.set('centerLng', String(filters.centerLng))
   if (filters.radiusKm !== undefined) params.set('radiusKm', String(filters.radiusKm))
   try {
-    const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
-    return response.listings
+    const response = await apiRequest<{ ok: true; listings: PlatformListing[]; nextCursor: string | null }>(`/api/listings?${params.toString()}`)
+    return { listings: response.listings, nextCursor: response.nextCursor ?? null }
   } catch {
-    return fallbackApprovedListings(division)
+    return { listings: fallbackApprovedListings(division), nextCursor: null }
   }
+}
+
+// Backward-compatible wrapper: first page as a plain array (division / marketplace / cars / rentals
+// browse pages that don't paginate). The STR search page uses fetchApprovedListingsPage for "load more".
+export async function fetchApprovedListings(division = 'STAYS', filters: ListingSearchFilters = {}) {
+  const { listings } = await fetchApprovedListingsPage(division, filters)
+  return listings
 }
 
 export type ListingAvailabilityEntry = {
@@ -1893,6 +2038,23 @@ export async function confirmStrPlanPayment(sessionId: string) {
   return { proof: response.proof, planCode: response.planCode }
 }
 
+// Ask the server whether this host already has an UNCONSUMED paid listing plan (a captured plan fee
+// that no listing has used yet). The wizard calls this on load so a page refresh — or continuing on a
+// different device — recognizes an already-paid plan instead of charging again. Returns the exact plan
+// code the host paid for, so it can't be silently upgraded.
+export async function fetchStrPlanStatus() {
+  const session =
+    getStoredSellerSession() ||
+    getStoredStaffSession('HOST') ||
+    getStoredStaffSession('SELLER') ||
+    (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ hasPaidPlan: boolean; paidPlanCode: string | null }>(
+    '/api/host/str-plan-status',
+    { method: 'GET', token: session.token },
+  )
+  return { hasPaidPlan: response.hasPaidPlan, paidPlanCode: response.paidPlanCode }
+}
+
 // Sham Cash host-plan payment: submit the transfer receipt (real file, stored server-side) + the
 // transaction reference. Creates a PENDING proof the admin verifies before approving. Card doesn't use
 // this — Stripe auto-verifies the charge.
@@ -2028,6 +2190,52 @@ export async function fetchPrototypeAdminMetrics() {
     token,
   }))
   return response.metrics
+}
+
+export type OfficeDashboardSecurityEvent = {
+  id: string
+  action: string
+  entityType: string
+  createdAt: string
+  after: unknown
+  actor: { displayName: string | null; email: string | null } | null
+}
+
+export type OfficeDashboard = {
+  generatedAt: string
+  security: {
+    activeLocks: number
+    lockouts24h: number
+    recentEvents: OfficeDashboardSecurityEvent[]
+  }
+  bookings: {
+    total: number
+    byStatus: Record<string, number>
+    checkInsToday: number
+    upcoming7d: number
+    cancellations7d: number
+  }
+  revenue: {
+    currency: string
+    grossApprovedMinor: number
+    approvedCount: number
+    refunded7dMinor: number
+    refunded7dCount: number
+  }
+  pending: {
+    listingsAwaitingReview: number
+    openDisputes: number
+    payoutsReady: number
+    idChecksPending: number
+  }
+}
+
+// The office-tablet snapshot. ADMIN/SUPPORT-gated server-side. Safe to poll on an interval (all
+// bounded aggregate queries) and to bake into a downloaded offline HTML file.
+export async function fetchOfficeDashboard() {
+  return runAdminRequest((token) =>
+    apiRequest<{ ok: true } & OfficeDashboard>('/api/admin/office-dashboard', { token }),
+  )
 }
 
 export type PlatformRevenueByCurrency = {
@@ -2207,6 +2415,30 @@ export async function forceCancelBooking(bookingId: string, reason?: string) {
     }),
   )
   return response.booking
+}
+
+// Manual payout hold — persists on the booking and is ENFORCED by the release endpoint (a held payout
+// can't be released). `held: false` removes the hold.
+export async function holdBookingPayout(bookingId: string, held: boolean) {
+  return runAdminRequest((token) =>
+    apiRequest<{ ok: true; bookingId: string; payoutHeld: boolean }>(`/api/admin/bookings/${bookingId}/payout-hold`, {
+      method: 'POST',
+      token,
+      body: { held },
+    }),
+  )
+}
+
+// Admin note into a booking's message thread — the guest + host see it in that booking's inbox.
+export async function sendAdminBookingMessage(bookingId: string, target: 'guest' | 'host', body: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; message: Record<string, unknown> }>(`/api/admin/bookings/${bookingId}/message`, {
+      method: 'POST',
+      token,
+      body: { target, body },
+    }),
+  )
+  return response.message
 }
 
 // A4: booking directory / search.

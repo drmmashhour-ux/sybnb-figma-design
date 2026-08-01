@@ -10,11 +10,13 @@ import { readDriverDocument } from '../lib/driver-document-storage.mjs'
 import { hashPassword, idempotencyKey } from '../lib/security.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail } from '../lib/validate.mjs'
 import { generateUniqueReferralCode } from '../lib/referrals.mjs'
+import { createStripeCardRefund, extractStripePaymentIntentId, isStripeConfigured } from './payments.mjs'
 import { decryptPayoutAccount } from '../lib/payout-account.mjs'
 import { randomUUID } from 'node:crypto'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStandingStats, ruleTier, validTiersFor } from '../lib/account-standing.mjs'
 import { suggestTier } from '../lib/ai-loyalty.mjs'
+import { countActiveLoginLocks } from '../lib/login-lockout.mjs'
 
 // The internal staff roles the HR department manages/creates. Deliberately NOT HOST/DRIVER/SELLER
 // (those self-register through the normal flow) — only privileged back-office roles.
@@ -278,6 +280,7 @@ export async function handleAdmin(req, res, url, context) {
             checkOut: booking.checkOut,
             eligibleAt: payoutEligibleAt(booking.checkOut),
             eligibleNow: isPayoutEligible(booking),
+            payoutHeld: booking.metadata?.payoutHeld === true,
             hostPayoutMinor: split.hostGrossMinor,
             currency: booking.currency,
           }
@@ -411,6 +414,15 @@ export async function handleAdmin(req, res, url, context) {
         include: { listing: { include: { owner: { select: { id: true, payoutMethod: true } } } }, payments: true },
       })
       if (!freshBooking || !isPayoutEligible(freshBooking)) throw payoutNotEligibleError()
+      // Manual admin hold — an admin can pause this payout even once it's time-eligible. Enforced here so
+      // the hold actually stops the money, not just a UI note. Cleared via POST .../payout-hold {held:false}.
+      if (freshBooking.metadata?.payoutHeld === true) {
+        const error = new Error('This payout is on manual hold. Remove the hold before releasing it.')
+        error.statusCode = 409
+        error.code = 'PAYOUT_ON_MANUAL_HOLD'
+        error.expose = true
+        throw error
+      }
       // Re-check the payout method inside the transaction too, in case it was removed concurrently.
       if (!freshBooking.listing?.owner?.payoutMethod) {
         const error = new Error('This host has no payout method on file.')
@@ -987,6 +999,108 @@ export async function handleAdmin(req, res, url, context) {
       take: limit,
     })
     return json(res, 200, { ok: true, auditLog })
+  }
+
+  // Office-tablet dashboard: one curated, presentation-ready snapshot the admin can watch live OR
+  // download as a self-contained offline HTML file to keep on a tablet in the office. Four panels:
+  // security (login lockouts + recent security events), bookings/occupancy, revenue/payouts, and the
+  // pending-work queue. All bounded aggregate queries — safe to poll on an auto-refresh interval.
+  if (url.pathname === '/api/admin/office-dashboard') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+
+    const now = new Date()
+    const startOfToday = new Date(now)
+    startOfToday.setHours(0, 0, 0, 0)
+    const endOfToday = new Date(startOfToday)
+    endOfToday.setDate(endOfToday.getDate() + 1)
+    const in7d = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+    const ago24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    const ago7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const payoutHoldCutoff = new Date(now.getTime() - PAYOUT_HOLD_DAYS * 24 * 60 * 60 * 1000)
+
+    const [
+      bookingsByStatus,
+      totalBookings,
+      checkInsToday,
+      upcoming7d,
+      cancellations7d,
+      approvedAgg,
+      refundedAgg,
+      listingsAwaitingReview,
+      openDisputes,
+      payoutsReady,
+      idChecksPending,
+      activeLocks,
+      lockouts24h,
+      recentSecurityEvents,
+    ] = await Promise.all([
+      db().booking.groupBy({ by: ['status'], _count: { _all: true } }),
+      db().booking.count(),
+      db().booking.count({ where: { checkIn: { gte: startOfToday, lt: endOfToday }, status: { in: ['CONFIRMED', 'COMPLETED'] } } }),
+      db().booking.count({ where: { checkIn: { gte: now, lt: in7d }, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] } } }),
+      db().booking.count({ where: { status: 'CANCELLED', updatedAt: { gte: ago7d } } }),
+      db().paymentProof.aggregate({ _sum: { amountMinor: true }, _count: { _all: true }, where: { status: 'APPROVED' } }),
+      db().paymentProof.aggregate({ _sum: { amountMinor: true }, _count: { _all: true }, where: { status: 'REFUNDED', reviewedAt: { gte: ago7d } } }),
+      db().listing.count({ where: { status: 'PENDING_REVIEW' } }),
+      db().dispute.count({ where: { status: 'OPEN' } }),
+      db().booking.count({ where: { status: 'COMPLETED', checkOut: { lt: payoutHoldCutoff } } }),
+      db().user.count({ where: { idDocumentStatus: 'PENDING_REVIEW' } }),
+      countActiveLoginLocks(),
+      db().adminAuditLog.count({ where: { action: 'SECURITY_LOGIN_LOCKOUT', createdAt: { gte: ago24h } } }),
+      db().adminAuditLog.findMany({
+        where: {
+          OR: [
+            { entityType: 'security' },
+            { action: { in: ['BOOKING_CARD_REFUNDED', 'DISPUTE_REFUNDED', 'ADMIN_FORCE_CANCEL', 'ACCOUNT_STATUS_CHANGED', 'BOOKING_GUEST_CANCELLED'] } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        select: {
+          id: true,
+          action: true,
+          entityType: true,
+          createdAt: true,
+          after: true,
+          actor: { select: { displayName: true, email: true } },
+        },
+      }),
+    ])
+
+    const byStatus = Object.fromEntries(bookingsByStatus.map((row) => [row.status, row._count._all]))
+
+    return json(res, 200, {
+      ok: true,
+      generatedAt: now.toISOString(),
+      security: {
+        activeLocks,
+        lockouts24h,
+        // Security events never carry the raw identifier (entityId is a hash), so this is safe to render
+        // and to bake into a downloaded snapshot.
+        recentEvents: recentSecurityEvents,
+      },
+      bookings: {
+        total: totalBookings,
+        byStatus,
+        checkInsToday,
+        upcoming7d,
+        cancellations7d,
+      },
+      revenue: {
+        currency: 'USD',
+        grossApprovedMinor: approvedAgg._sum.amountMinor || 0,
+        approvedCount: approvedAgg._count._all || 0,
+        refunded7dMinor: refundedAgg._sum.amountMinor || 0,
+        refunded7dCount: refundedAgg._count._all || 0,
+      },
+      pending: {
+        listingsAwaitingReview,
+        openDisputes,
+        payoutsReady,
+        idChecksPending,
+      },
+    })
   }
 
   if (url.pathname === '/api/admin/platform-metrics') {
@@ -1681,6 +1795,10 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
 
+    // A card (Stripe) payment is refunded to the CARD after the transaction commits (never call Stripe
+    // inside a DB transaction); populated in the tx, acted on after.
+    let deferredCardRefund = null
+
     const result = await db().$transaction(async (tx) => {
       // Atomically claim the cancel on the expected statuses so concurrent guest-cancel / dispute-refund
       // / host-confirm all lose the race (they claim on their own statuses and match zero rows).
@@ -1714,17 +1832,30 @@ export async function handleAdmin(req, res, url, context) {
           },
         })
 
-        // Guest refund — keyed on the booking (not the payment) so it can only ever fire ONCE.
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
-          amountMinor: refundMinor,
-          currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['admin-force-cancel-refund', existing.id],
-          note: 'Admin force-cancelled the booking and refunded the guest.',
-        })
+        // Guest refund — to the CARD if paid by Stripe (deferred to after commit), else internal wallet
+        // credit for Sham Cash. Keyed on the booking so it can only ever fire ONCE.
+        const stripeIntentId =
+          approvedPayment.provider === 'stripe' ? extractStripePaymentIntentId(approvedPayment.proofAssetUrl) : null
+        if (stripeIntentId && refundMinor > 0 && isStripeConfigured()) {
+          deferredCardRefund = {
+            paymentIntentId: stripeIntentId,
+            amountMinor: refundMinor,
+            currency: existing.currency,
+            bookingId: existing.id,
+            guestId: existing.guestId,
+          }
+        } else {
+          await recordWalletEntry(tx, {
+            userId: existing.guestId,
+            type: 'REFUND',
+            amountMinor: refundMinor,
+            currency: existing.currency,
+            referenceType: 'booking_refund',
+            referenceId: existing.id,
+            keyParts: ['admin-force-cancel-refund', existing.id],
+            note: 'Admin force-cancelled the booking and refunded the guest.',
+          })
+        }
 
         // Reverse the platform's admin-share, capped at what the recipient can actually give back.
         if (adminRecipientId) {
@@ -1783,7 +1914,129 @@ export async function handleAdmin(req, res, url, context) {
       })
       return updated
     })
+
+    // Real card refund runs AFTER the transaction commits. If Stripe fails, fall back to a wallet credit
+    // so the guest is still made whole, and log it for follow-up.
+    if (deferredCardRefund) {
+      try {
+        const refund = await createStripeCardRefund({
+          paymentIntentId: deferredCardRefund.paymentIntentId,
+          amountMinor: deferredCardRefund.amountMinor,
+          bookingCurrency: deferredCardRefund.currency,
+        })
+        await db().adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'BOOKING_CARD_REFUNDED',
+            entityType: 'bookings',
+            entityId: deferredCardRefund.bookingId,
+            after: { stripeRefundId: refund.refundId || null, amountMinor: deferredCardRefund.amountMinor, currency: deferredCardRefund.currency, via: 'admin_force_cancel' },
+          },
+        })
+      } catch (refundError) {
+        console.error('[sybnb] Stripe card refund failed after admin force-cancel; crediting wallet as fallback:', refundError?.message || refundError)
+        await recordWalletEntry(db(), {
+          userId: deferredCardRefund.guestId,
+          type: 'REFUND',
+          amountMinor: deferredCardRefund.amountMinor,
+          currency: deferredCardRefund.currency,
+          referenceType: 'booking_refund',
+          referenceId: deferredCardRefund.bookingId,
+          keyParts: ['admin-force-cancel-refund-card-fallback', deferredCardRefund.bookingId],
+          note: 'Fallback wallet refund — the Stripe card refund could not be completed.',
+        })
+      }
+    }
+
     return json(res, 200, { ok: true, booking: result })
+  }
+
+  // ---- A3b: manual payout hold / release-hold ----
+  // Persists metadata.payoutHeld on the booking. The payout-release endpoint (above) refuses to release
+  // while this is true — so "Hold payout" actually stops the money instead of being a UI-only note.
+  const payoutHoldMatch = url.pathname.match(/^\/api\/admin\/bookings\/([^/]+)\/payout-hold$/)
+  if (payoutHoldMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req).catch(() => ({}))
+    const held = body.held !== false // default true (explicit false removes the hold)
+    const booking = await db().booking.findUnique({ where: { id: payoutHoldMatch[1] } })
+    if (!booking) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    await db().booking.update({
+      where: { id: booking.id },
+      data: { metadata: { ...(booking.metadata && typeof booking.metadata === 'object' ? booking.metadata : {}), payoutHeld: held } },
+    })
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: held ? 'ADMIN_PAYOUT_HELD' : 'ADMIN_PAYOUT_HOLD_REMOVED',
+        entityType: 'bookings',
+        entityId: booking.id,
+        after: { payoutHeld: held },
+      },
+    })
+    return json(res, 200, { ok: true, bookingId: booking.id, payoutHeld: held })
+  }
+
+  // ---- A3c: admin note into a booking's message thread (visible to guest + host in that booking) ----
+  const adminMessageMatch = url.pathname.match(/^\/api\/admin\/bookings\/([^/]+)\/message$/)
+  if (adminMessageMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const text = typeof body.body === 'string' ? body.body.trim() : ''
+    if (!text) {
+      const error = new Error('Message body is required.')
+      error.statusCode = 400
+      error.code = 'MESSAGE_BODY_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (text.length > 4000) {
+      const error = new Error('Message body is too long.')
+      error.statusCode = 400
+      error.code = 'MESSAGE_BODY_TOO_LONG'
+      error.expose = true
+      throw error
+    }
+    const booking = await db().booking.findUnique({ where: { id: adminMessageMatch[1] } })
+    if (!booking) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // Reuse an existing thread (booking- or listing/guest-keyed) or create the booking thread. findFirst
+    // avoids colliding with the [listingId, guestId] unique constraint if the guest inquired pre-booking.
+    let thread = await db().messageThread.findFirst({
+      where: { OR: [{ bookingId: booking.id }, { listingId: booking.listingId, guestId: booking.guestId }] },
+    })
+    if (!thread) {
+      thread = await db().messageThread.create({
+        data: { bookingId: booking.id, listingId: booking.listingId, guestId: booking.guestId },
+      })
+    }
+    const message = await db().message.create({
+      data: { threadId: thread.id, senderUserId: context.user.id, senderRole: 'ADMIN', body: text },
+      include: { sender: { select: { id: true, displayName: true } } },
+    })
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_BOOKING_MESSAGE_SENT',
+        entityType: 'bookings',
+        entityId: booking.id,
+        after: { target: body.target === 'host' ? 'host' : 'guest', messageId: message.id },
+      },
+    })
+    return json(res, 201, { ok: true, message })
   }
 
   // ---- A4: single booking lookup ----
