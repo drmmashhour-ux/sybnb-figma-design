@@ -1,0 +1,19 @@
+{
+  "name": "SYBNB — Syria Stays",
+  "short_name": "SYBNB",
+  "description": "SYBNB stays and admin — bookings, payments, and the office dashboard. Installs to the home screen and keeps the last snapshot available offline.",
+  "id": "/",
+  "start_url": "/#/admin/office",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0f1d",
+  "theme_color": "#0a0f1d",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

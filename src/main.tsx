@@ -29,3 +29,15 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>,
 )
+
+// PWA: register the service worker so the app is installable to a tablet/home screen and the office
+// dashboard's last snapshot survives offline. Production-only — in dev a service worker would fight
+// Vite's HMR by caching modules. The SW itself is network-first for HTML (see public/sw.js), so it can
+// never pin the whole origin to stale code. Registration failure is non-fatal (the app works without it).
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
+      console.warn('[sybnb] service worker registration failed:', error?.message || error)
+    })
+  })
+}
