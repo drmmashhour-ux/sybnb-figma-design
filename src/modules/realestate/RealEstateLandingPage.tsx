@@ -2,11 +2,11 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 
-// SYBNB Homes — the STANDALONE real-estate platform entry (Buy / Rent / Sell), isolated from the STR
-// stays landing and the SR ride landing per the owner's "each division is its own platform" directive.
-// Centris-style: a single hero that toggles Buy vs Rent and funnels into the existing search pages
-// (/buy, /rentals), plus a door for owners to list a property (/sell). Pure presentation — no platform
-// data — so it stays cleanly isolated.
+// Synitres (synitres.com) — the STANDALONE sale/buy/rent + marketplace platform for Syria (the "Centris
+// of Syria"), isolated from the STR stays landing and the SR ride landing per the owner's "each division
+// is its own platform" directive. Centris-style: a single hero that toggles Buy vs Rent and funnels into
+// the existing search pages (/buy, /rentals), plus doors to list a property (/sell) and browse the goods
+// marketplace (/marketplace). Pure presentation — no platform data — so it stays cleanly isolated.
 
 type Props = {
   lang: Lang
@@ -15,7 +15,8 @@ type Props = {
 
 const copy = {
   ar: {
-    eyebrow: 'سكن سوريا',
+    brand: 'Synitres',
+    eyebrow: 'سوق سوريا العقاري',
     title: 'ابحث عن منزلك في سوريا — شراءً أو إيجاراً',
     subtitle: 'آلاف العقارات الموثّقة: شقق، فلل، ومحلات — بحث بالخريطة والفلاتر، وتواصل آمن مع المالك.',
     tabBuy: 'شراء',
@@ -29,11 +30,15 @@ const copy = {
     sellTitle: 'اعرض عقارك',
     sellDesc: 'انشر إعلانك مجاناً، وتواصل مع المهتمين عبر IMMOContact الآمن.',
     sellCta: 'أضف إعلاناً',
+    marketTitle: 'السوق',
+    marketDesc: 'بيع وشراء المنتجات المستعملة والجديدة محلياً — إلكترونيات، أثاث، والمزيد.',
+    marketCta: 'تصفح السوق',
     trust: 'عقارات موثّقة · بحث بالخريطة · تواصل محميّ',
     back: 'الرئيسية',
   },
   en: {
-    eyebrow: 'Syria Homes',
+    brand: 'Synitres',
+    eyebrow: "Syria's property market",
     title: 'Find your home in Syria — to buy or to rent',
     subtitle: 'Thousands of verified properties: apartments, villas, and shops — map + filter search, and safe contact with the owner.',
     tabBuy: 'Buy',
@@ -47,6 +52,9 @@ const copy = {
     sellTitle: 'List your property',
     sellDesc: 'Publish your listing for free and reach interested people through safe IMMOContact.',
     sellCta: 'Add a listing',
+    marketTitle: 'Marketplace',
+    marketDesc: 'Buy and sell used and new goods locally — electronics, furniture, and more.',
+    marketCta: 'Browse marketplace',
     trust: 'Verified listings · Map search · Protected contact',
     back: 'Home',
   },
@@ -62,9 +70,9 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <header style={styles.topbar}>
         <button style={styles.brandBtn} onClick={() => go('/')}>
-          <span style={styles.brandMark}>🏠</span>
+          <span style={styles.brandMark}>🏙️</span>
           <span style={styles.brandText}>
-            SYBNB <span style={{ color: '#D4AF6A' }}>Homes</span>
+            Syn<span style={{ color: '#D4AF6A' }}>itres</span>
           </span>
         </button>
         <div style={styles.langRow}>
@@ -95,6 +103,7 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
       <section style={styles.cards}>
         <Card icon="🏢" title={t.buyTitle} desc={t.buyDesc} cta={t.tabBuy} onClick={() => go('/buy')} accent="#2DD4BF" />
         <Card icon="🔑" title={t.rentTitle} desc={t.rentDesc} cta={t.tabRent} onClick={() => go('/rentals')} accent="#38bdf8" />
+        <Card icon="🛍️" title={t.marketTitle} desc={t.marketDesc} cta={t.marketCta} onClick={() => go('/marketplace')} accent="#a78bfa" />
         <Card icon="➕" title={t.sellTitle} desc={t.sellDesc} cta={t.sellCta} onClick={() => go('/sell')} accent="#D4AF6A" />
       </section>
     </main>

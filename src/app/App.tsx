@@ -183,7 +183,7 @@ export function App() {
           <ListingDetailPage listingId={listingMatch[1]} lang={lang} />
         ) : path === '/sr' || path === '/rides-home' ? (
           <SrLandingPage lang={lang} onLanguageChange={setLang} />
-        ) : path === '/homes' || path === '/realestate' ? (
+        ) : path === '/synitres' || path === '/homes' || path === '/realestate' ? (
           <RealEstateLandingPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/ride' || path === '/ride-preview' ? (
           <SrRidePage lang={lang} />
@@ -224,7 +224,7 @@ export function App() {
 
   // SR (Syria Rides) is its OWN platform surface — render its standalone entry full-bleed, WITHOUT the
   // STR app chrome (AppShell), so it reads as an independent product per the isolation directive.
-  const chromeless = path === '/sr' || path === '/rides-home' || path === '/homes' || path === '/realestate'
+  const chromeless = path === '/sr' || path === '/rides-home' || path === '/synitres' || path === '/homes' || path === '/realestate'
   if (chromeless) return routed
 
   return (
