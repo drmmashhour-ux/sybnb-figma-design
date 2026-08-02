@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   claimPrototypeSrRide,
+  declinePrototypeSrRide,
   fetchDriverDocuments,
   fetchDriverVehicles,
   fetchPendingSrRides,
@@ -70,6 +71,7 @@ const copy = {
     disconnected: 'غير متصل',
     available: 'متاح',
     accept: 'قبول',
+    decline: 'رفض',
     pendingEmpty: 'لا توجد طلبات رحلات بانتظار سائق الآن.',
     pendingLoading: 'جار البحث عن طلبات قريبة...',
     claiming: 'جار القبول...',
@@ -142,6 +144,7 @@ const copy = {
     disconnected: 'Offline',
     available: 'Available',
     accept: 'Accept',
+    decline: 'Decline',
     pendingEmpty: 'No ride requests waiting for a driver right now.',
     pendingLoading: 'Looking for nearby requests...',
     claiming: 'Claiming...',
@@ -253,6 +256,21 @@ export function DriverDashboardPage({ lang }: Props) {
     try {
       await claimPrototypeSrRide(rideId)
       await Promise.all([loadOverview(), loadPendingRides()])
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+      await loadPendingRides()
+    } finally {
+      setClaimingRideId('')
+    }
+  }
+
+  // Decline an exclusive offer → the server re-dispatches it to the next nearest driver.
+  async function declineRide(rideId: string) {
+    setClaimingRideId(rideId)
+    setClaimError('')
+    try {
+      await declinePrototypeSrRide(rideId)
+      await loadPendingRides()
     } catch (error) {
       setClaimError(error instanceof Error ? error.message : t.claimError)
       await loadPendingRides()
@@ -377,7 +395,8 @@ export function DriverDashboardPage({ lang }: Props) {
               pendingRides.map((pendingRide) => (
                 <article key={pendingRide.id} style={{ ...styles.offerCard, ...(pendingRide.offeredToMe ? styles.offerCardMine : null) }}>
                   {pendingRide.offeredToMe ? <strong style={styles.offerBadge}>{t.offeredToYou}</strong> : null}
-                  <span>{String(pendingRide.metadata.dropoff || '-')}</span>
+                  {/* Pre-accept the dropoff + rider name are withheld (privacy) — show the pickup. */}
+                  <span>{String(pendingRide.metadata.pickup || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
                   {typeof pendingRide.pickupDistanceKm === 'number' ? (
                     <em dir="ltr" style={styles.pickupDistance}>
@@ -387,9 +406,16 @@ export function DriverDashboardPage({ lang }: Props) {
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
-                  <button disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
-                    {claimingRideId === pendingRide.id ? t.claiming : t.accept}
-                  </button>
+                  <div style={styles.offerActions}>
+                    <button style={styles.acceptBtn} disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
+                      {claimingRideId === pendingRide.id ? t.claiming : t.accept}
+                    </button>
+                    {pendingRide.offeredToMe ? (
+                      <button style={styles.declineBtn} disabled={claimingRideId === pendingRide.id} onClick={() => void declineRide(pendingRide.id)}>
+                        {t.decline}
+                      </button>
+                    ) : null}
+                  </div>
                 </article>
               ))
             )}
@@ -431,7 +457,8 @@ export function DriverDashboardPage({ lang }: Props) {
       <section style={styles.driverCtas}>
         <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>{t.sos}</button>
         <button style={styles.reportButton} onClick={() => (window.location.hash = '/immocontact')}>{t.reportIssue}</button>
-        <button style={styles.startButton} onClick={() => (window.location.hash = '/ride')}>{t.start}</button>
+        {/* Removed a mis-wired "Start ride" button that sent the DRIVER to the rider request page (/ride).
+            A driver starts a trip via the per-ride status controls after claiming + PIN verification. */}
       </section>
 
       <section style={styles.dispatchPanel}>
@@ -599,6 +626,9 @@ const styles: Record<string, CSSProperties> = {
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   offerCardMine: { border: '2px solid #20d29b', background: '#0a1712', boxShadow: '0 0 0 3px rgba(32,210,155,.15)' },
   offerBadge: { color: '#20d29b', fontWeight: 950, fontSize: 13, letterSpacing: '.02em' },
+  offerActions: { display: 'flex', gap: 8 },
+  acceptBtn: { flex: 1, minHeight: 44, border: 0, borderRadius: 10, background: '#20d29b', color: '#04100d', fontWeight: 900, cursor: 'pointer' },
+  declineBtn: { minHeight: 44, border: '1px solid #3a2530', borderRadius: 10, background: 'transparent', color: '#f08a8a', fontWeight: 800, padding: '0 16px', cursor: 'pointer' },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },

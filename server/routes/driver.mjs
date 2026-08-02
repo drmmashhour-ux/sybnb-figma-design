@@ -137,10 +137,13 @@ export async function handleDriver(req, res, url, context) {
       currency: row.currency,
       status: row.status,
       requestedAt: row.requestedAt,
-      metadata: row.metadata,
+      // PRIVACY (SR audit): pre-accept, a driver sees only what's needed to decide — the PICKUP area,
+      // category and estimated distance + the fare/distance-to-pickup. The rider's NAME and the DROPOFF
+      // are withheld until the ride is actually claimed (they're in the post-claim payload). This blocks
+      // an idle online driver from harvesting "who is travelling from <home> to <address> right now".
+      metadata: { pickup: row.metadata?.pickup, category: row.metadata?.category, distanceKm: row.metadata?.distanceKm },
       pickupDistanceKm: row.pickupDistanceKm != null ? Number(row.pickupDistanceKm) : null,
       offeredToMe: Boolean(row.offeredToMe),
-      rider: { id: row.riderId, displayName: row.riderName },
     }))
     return json(res, 200, { ok: true, online: true, rides })
   }

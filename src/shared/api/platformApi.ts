@@ -2720,6 +2720,15 @@ export async function claimPrototypeSrRide(rideId: string) {
   return response.ride
 }
 
+// Decline a ride currently offered exclusively to this driver → it re-dispatches to the next nearest.
+export async function declinePrototypeSrRide(rideId: string) {
+  const session = await ensurePrototypeDriverSession()
+  return apiRequest<{ ok: true; reoffered: boolean }>(`/api/sr/rides/${rideId}/decline`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+}
+
 export async function updatePrototypeDriverRideStatus(
   rideId: string,
   status: 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED',
