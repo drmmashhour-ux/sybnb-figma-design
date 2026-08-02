@@ -1114,7 +1114,7 @@ export async function askAssistant(
 }
 
 export type AssistantActionPayload = { listingId: string; checkIn: string; checkOut: string; guests: number }
-export type AssistantActionProposal = { action: 'CREATE_BOOKING_DRAFT'; proposalId: string; expiresAt: string; entityType: string; entityId: string; message: string }
+export type AssistantActionProposal = { action: 'CREATE_BOOKING_DRAFT'; proposalId: string; expiresAt: string; entityType: string; entityId: string; message: string; summary: { action: 'CREATE_BOOKING_DRAFT'; listingId: string; checkIn: string; checkOut: string; guests: number; available: boolean; nights: number; total: { amountMinor: number; currency: string } } }
 
 export async function proposeAssistantBookingDraft(payload: AssistantActionPayload, locale: 'ar' | 'en' | 'fr'): Promise<AssistantActionProposal> {
   const session = getStoredStaffSession('ADMIN') || getStoredStaffSession('HOST') || getStoredStaffSession('SELLER') || getStoredSellerSession() || (await ensurePrototypeGuestSession())

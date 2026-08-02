@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { answerAssistant, redactAssistantText } from '../../server/lib/ai-assistant.mjs'
 import { createBookingDraft, searchListings } from '../../server/lib/assistant-tools.mjs'
+import { assistantDraftMatchesConfirmedFacts } from '../../server/lib/assistant-confirmations.mjs'
 import { createOpenAiResponse } from '../../server/lib/openai-responses.mjs'
 
 afterEach(() => {
@@ -26,6 +27,15 @@ describe('assistant safety boundaries', () => {
   it('rejects model-claimed booking confirmation', async () => {
     const listingId = '00000000-0000-4000-8000-000000000001'
     await expect(createBookingDraft({ listingId, checkIn: '2026-09-01', checkOut: '2026-09-02', guests: 2, confirmed: true }, { confirmationClaimed: true })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
+  })
+
+  it('fails the final draft check when confirmed price or material facts change', () => {
+    const facts = { available: true, total: { amountMinor: 10_000, currency: 'SYP' }, guests: 2, nights: 1 }
+    const result = { draft: { total: { amountMinor: 10_000, currency: 'SYP' }, guests: 2, nights: 1 } }
+    expect(assistantDraftMatchesConfirmedFacts(result, facts)).toBe(true)
+    expect(assistantDraftMatchesConfirmedFacts({ draft: { ...result.draft, total: { amountMinor: 10_001, currency: 'SYP' } } }, facts)).toBe(false)
+    expect(assistantDraftMatchesConfirmedFacts({ draft: { ...result.draft, guests: 3 } }, facts)).toBe(false)
+    expect(assistantDraftMatchesConfirmedFacts(null, facts)).toBe(false)
   })
 
   it('retries one transient OpenAI failure and keeps the key in the authorization header', async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { askAssistant, confirmAssistantBookingDraft, proposeAssistantBookingDraft, type AssistantActionPayload, type AssistantDraft, type AssistantListingCard } from '../api/platformApi'
+import { askAssistant, confirmAssistantBookingDraft, proposeAssistantBookingDraft, type AssistantActionPayload, type AssistantActionProposal, type AssistantDraft, type AssistantListingCard } from '../api/platformApi'
 
 type Locale = 'ar' | 'en' | 'fr'
 type Msg = { role: 'user' | 'assistant'; text: string; listings?: AssistantListingCard[]; draft?: AssistantDraft | null }
@@ -24,7 +24,7 @@ function EnabledAssistant({ initialLocale }: { initialLocale: Locale }) {
   const [messages, setMessages] = useState<Msg[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [details, setDetails] = useState({ checkIn: '', checkOut: '', guests: 1 })
-  const [pending, setPending] = useState<{ proposalId: string; payload: AssistantActionPayload; message: string } | null>(null)
+  const [pending, setPending] = useState<{ proposalId: string; payload: AssistantActionPayload; message: string; summary: AssistantActionProposal['summary'] } | null>(null)
   const threadRef = useRef<HTMLDivElement>(null)
   const isAr = locale === 'ar'; const t = copy[locale]
 
@@ -43,7 +43,7 @@ function EnabledAssistant({ initialLocale }: { initialLocale: Locale }) {
   async function proposeDraft() {
     if (selected.length !== 1 || !details.checkIn || !details.checkOut || busy) return
     const payload = { listingId: selected[0], ...details }; setBusy(true)
-    try { const proposal = await proposeAssistantBookingDraft(payload, locale); setPending({ proposalId: proposal.proposalId, payload, message: proposal.message }) }
+    try { const proposal = await proposeAssistantBookingDraft(payload, locale); setPending({ proposalId: proposal.proposalId, payload, message: proposal.message, summary: proposal.summary }) }
     catch { setMessages((items) => [...items, { role: 'assistant', text: t.error }]) } finally { setBusy(false) }
   }
   async function resolveDraft(decision: boolean) {
@@ -66,7 +66,7 @@ function EnabledAssistant({ initialLocale }: { initialLocale: Locale }) {
       </div>
       {selected.length > 1 ? <button style={styles.compareBtn} onClick={() => void send(`${t.compare}: ${selected.join(', ')}`)}>{t.compare} ({selected.length}/3 {t.selected})</button> : null}
       {selected.length === 1 ? <div style={styles.draftFields}><label>{t.checkIn}<input type="date" value={details.checkIn} onChange={(e) => setDetails((v) => ({ ...v, checkIn: e.target.value }))}/></label><label>{t.checkOut}<input type="date" value={details.checkOut} onChange={(e) => setDetails((v) => ({ ...v, checkOut: e.target.value }))}/></label><label>{t.guests}<input type="number" min={1} max={30} value={details.guests} onChange={(e) => setDetails((v) => ({ ...v, guests: Number(e.target.value) }))}/></label><button style={styles.confirmBtn} onClick={() => void proposeDraft()}>{t.prepare}</button></div> : null}
-      {pending ? <div role="alertdialog" aria-label={t.confirm} style={styles.confirmation}><p>{pending.message}</p><button style={styles.confirmBtn} onClick={() => void resolveDraft(true)}>{t.confirm}</button><button style={styles.compareBtn} onClick={() => void resolveDraft(false)}>{t.reject}</button></div> : null}
+      {pending ? <div role="alertdialog" aria-label={t.confirm} style={styles.confirmation}><p>{pending.message}</p><strong dir="ltr">{pending.summary.checkIn} → {pending.summary.checkOut} · {pending.summary.guests} {t.guests}</strong><strong dir="ltr">{new Intl.NumberFormat(locale === 'ar' ? 'ar-SY' : locale).format(pending.summary.total.amountMinor / 100)} {pending.summary.total.currency}</strong><button style={styles.confirmBtn} onClick={() => void resolveDraft(true)}>{t.confirm}</button><button style={styles.compareBtn} onClick={() => void resolveDraft(false)}>{t.reject}</button></div> : null}
       <form style={styles.inputRow} onSubmit={(event) => { event.preventDefault(); void send() }}><input value={input} maxLength={1000} onChange={(event) => setInput(event.target.value)} placeholder={t.placeholder} style={styles.inputBox} aria-label={t.placeholder}/><button type="submit" disabled={busy || !input.trim()} style={styles.sendBtn}>{t.send}</button></form>
     </section>
   )

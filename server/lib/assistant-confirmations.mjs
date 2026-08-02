@@ -27,6 +27,21 @@ function text(value, name, max) { if (typeof value !== 'string' || !value.trim()
 function stable(value) { if (value instanceof Date) return JSON.stringify(value.toISOString()); if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`; if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`; return JSON.stringify(value) }
 function hash(value) { return createHash('sha256').update(stable(value)).digest('hex') }
 function requireGuest(roles) { if (!Array.isArray(roles) || !roles.includes('GUEST')) fail('Guest authorization is required.', 'ASSISTANT_GUEST_REQUIRED', 403) }
+function isoDate(value) { return value instanceof Date ? value.toISOString().slice(0, 10) : String(value || '').slice(0, 10) }
+
+function confirmationSummary(action, payload, snapshot) {
+  if (action === 'CREATE_BOOKING_DRAFT') return { action, listingId: payload.listingId, checkIn: payload.checkIn, checkOut: payload.checkOut, guests: payload.guests, available: snapshot.facts.available, nights: snapshot.facts.nights, total: snapshot.facts.total }
+  const base = { action, bookingId: payload.bookingId, status: snapshot.facts.status, currentCheckIn: isoDate(snapshot.facts.checkIn), currentCheckOut: isoDate(snapshot.facts.checkOut), currentTotal: { amountMinor: snapshot.facts.amountMinor, currency: snapshot.facts.currency } }
+  if (action === 'CHANGE_DATES') return { ...base, requestedCheckIn: payload.checkIn, requestedCheckOut: payload.checkOut }
+  if (action === 'CHANGE_GUEST_COUNT') return { ...base, requestedGuests: payload.guests }
+  return base
+}
+
+export function assistantDraftMatchesConfirmedFacts(result, confirmedFacts) {
+  const actual = result?.draft && { available: true, total: result.draft.total, guests: result.draft.guests, nights: result.draft.nights }
+  const expected = { available: confirmedFacts.available, total: confirmedFacts.total, guests: confirmedFacts.guests, nights: confirmedFacts.nights }
+  return Boolean(actual) && hash(actual) === hash(expected)
+}
 
 export function normalizeAssistantAction(action, raw) {
   if (!ASSISTANT_ACTIONS.includes(action)) fail('Action is not approved.', 'ASSISTANT_ACTION_INVALID', 400)
@@ -60,7 +75,7 @@ export async function proposeAssistantAction({ actorUserId, roles, action, paylo
   const snapshot = await currentFacts(action, payload, actorUserId)
   await audit(actorUserId, 'AI_ASSISTANT_SERVER_FACT_RETRIEVED', snapshot.entityType, snapshot.entityId, { action, fields: action === 'CREATE_BOOKING_DRAFT' ? ['availability', 'total', 'fees', 'dates', 'guests'] : ['status', 'dates', 'amount', 'currency', 'updatedAt'] })
   const proposal = await db().assistantConfirmation.create({ data: { actorUserId, action, payloadHash: hash(payload), factHash: hash(snapshot.facts), entityType: snapshot.entityType, entityId: snapshot.entityId, expiresAt: new Date(Date.now() + TTL_MS) } })
-  const safe = { action, proposalId: proposal.id, expiresAt: proposal.expiresAt.toISOString(), entityType: proposal.entityType, entityId: proposal.entityId }
+  const safe = { action, proposalId: proposal.id, expiresAt: proposal.expiresAt.toISOString(), entityType: proposal.entityType, entityId: proposal.entityId, summary: confirmationSummary(action, payload, snapshot) }
   await audit(actorUserId, 'AI_ASSISTANT_TOOL_PROPOSED', proposal.entityType, proposal.entityId, { action, proposalId: proposal.id })
   await audit(actorUserId, 'AI_ASSISTANT_CONFIRMATION_REQUESTED', proposal.entityType, proposal.entityId, { action, proposalId: proposal.id, expiresAt: safe.expiresAt })
   return { ...safe, message: (COPY[locale] || COPY.en).requested }
@@ -89,13 +104,23 @@ export async function resolveAssistantAction({ actorUserId, roles, proposalId, p
   const claimed = await db().assistantConfirmation.updateMany({ where: { id: proposal.id, actorUserId, status: 'PENDING', consumedAt: null, expiresAt: { gt: new Date() } }, data: { status: 'ACCEPTED', consumedAt: new Date() } })
   if (claimed.count !== 1) { await audit(actorUserId, 'AI_ASSISTANT_ATTEMPT_BLOCKED', proposal.entityType, proposal.entityId, { action: proposal.action, proposalId, code: 'REPLAY' }); fail((COPY[locale] || COPY.en).invalid) }
   await audit(actorUserId, 'AI_ASSISTANT_CONFIRMATION_ACCEPTED', proposal.entityType, proposal.entityId, { action: proposal.action, proposalId })
-  const result = await executeConfirmed(proposal.action, payload, actorUserId)
+  let result
+  try { result = await executeConfirmed(proposal.action, payload, actorUserId, snapshot.facts) }
+  catch (error) {
+    await db().assistantConfirmation.update({ where: { id: proposal.id }, data: { status: 'INVALIDATED' } })
+    await audit(actorUserId, 'AI_ASSISTANT_ATTEMPT_BLOCKED', proposal.entityType, proposal.entityId, { action: proposal.action, proposalId, code: error.code || 'EXECUTION_BLOCKED' })
+    throw error
+  }
   await audit(actorUserId, 'AI_ASSISTANT_TOOL_EXECUTED', proposal.entityType, proposal.entityId, { action: proposal.action, proposalId, outcome: result.outcome })
   return { accepted: true, message: (COPY[locale] || COPY.en).accepted, ...result }
 }
 
-async function executeConfirmed(action, payload, actorUserId) {
-  if (action === 'CREATE_BOOKING_DRAFT') return { executed: true, outcome: 'DRAFT_PREPARED', result: await createBookingDraft(payload, { user: { id: actorUserId }, roles: ['GUEST'], confirmationClaimed: true }) }
+async function executeConfirmed(action, payload, actorUserId, confirmedFacts) {
+  if (action === 'CREATE_BOOKING_DRAFT') {
+    const result = await createBookingDraft(payload, { user: { id: actorUserId }, roles: ['GUEST'], confirmationClaimed: true })
+    if (!assistantDraftMatchesConfirmedFacts(result, confirmedFacts)) fail('Material booking facts changed during confirmation.', 'ASSISTANT_CONFIRMATION_CHANGED', 409)
+    return { executed: true, outcome: 'DRAFT_PREPARED', result }
+  }
   const routes = {
     SEND_MESSAGE: `#/bookings/${payload.bookingId}/messages`, CANCEL_BOOKING: `#/bookings/${payload.bookingId}`,
     REQUEST_REFUND: `#/bookings/${payload.bookingId}/support`, CHANGE_DATES: `#/bookings/${payload.bookingId}`,

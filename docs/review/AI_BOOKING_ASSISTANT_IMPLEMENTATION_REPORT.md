@@ -13,6 +13,7 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Added prompt redaction, bounded session-only history, no provider storage, provider timeout/retry, safe fallback responses, tool-round/result limits, and plain-text treatment of model output.
 - Added a deterministic narrative boundary: sensitive listing and booking facts are summarized from approved tool records, while a tool-free model response that claims a price, availability, rating, fee, tax, policy, host fact, or completed consequential action is discarded in favor of a safe localized template.
 - Added actor-bound, ten-minute, one-time confirmation proposals for booking drafts, messaging, cancellation, refund requests, date changes, guest-count changes, and payment-flow initiation. Exact payload and current fact hashes invalidate consent after any material change; atomic consumption blocks duplicates and replay.
+- Added informed-confirmation summaries generated only from deterministic server facts. The guest sees the exact dates, guest count, verified total, and currency before accepting; a final result comparison fails closed on a last-moment price or material-data race.
 - Kept all non-draft mutations in existing SYBNB flows. Confirmation returns only the appropriate existing navigation target and never sends a message, changes a booking, cancels, refunds, or charges directly.
 - Added deterministic lifecycle audits for requests, fact retrieval, tool proposal, confirmation request/accept/reject, execution handoff, blocked attempts, and safe fallback without storing prompts, message bodies, refund reasons, secrets, or payment data.
 
@@ -21,7 +22,7 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - TypeScript and production build: passed.
 - Production-style Vite build: passed.
 - Prisma schema validation: passed.
-- Full unit regression: 11 files, 104 tests passed, including malicious-model fabricated-price/availability coverage.
+- Full unit regression: 11 files, 105 tests passed, including malicious-model fabricated-price/availability and last-moment material-change coverage.
 - Full API regression: 83 files, 507 tests passed in one clean run before the final independent action-rate-limit case was added.
 - Full security regression: 3 files, 19 tests passed.
 - Final assistant database/API suite: 9 passed, covering authentication, request validation, French fallback, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, verified pricing, and independent request/action rate limits.

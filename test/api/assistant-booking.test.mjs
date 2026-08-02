@@ -73,6 +73,7 @@ describe('AI booking assistant authorization and audit', () => {
     await expect(executeAssistantTool('createBookingDraft', args, { user: { id: guest.user.id }, roles: ['GUEST'] })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
     const proposed = await request(app).post('/api/assistant/actions/propose').set('Authorization', `Bearer ${guest.token}`).send({ action: 'CREATE_BOOKING_DRAFT', payload: args, locale: 'en' })
     expect(proposed.status).toBe(200)
+    expect(proposed.body.proposal.summary).toEqual({ action: 'CREATE_BOOKING_DRAFT', listingId: listing.id, checkIn: '2026-10-01', checkOut: '2026-10-02', guests: 2, available: true, nights: 1, total: { amountMinor: 10_000, currency: 'SYP' } })
     const confirmed = await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: proposed.body.proposal.proposalId, payload: args, decision: true, locale: 'en' })
     expect(confirmed.status).toBe(200)
     expect(confirmed.body.confirmation.result.draft.total).toEqual({ amountMinor: 10_000, currency: 'SYP' })
