@@ -317,10 +317,12 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     propertyType: 'any',
     roomType: 'any',
     bedType: 'any',
-    amenities: ['wifi', 'parking'],
+    // Start with NO amenity requirements so the default search isn't silently narrowed to listings that
+    // happen to have wifi+parking — the buyer adds amenity filters explicitly.
+    amenities: [],
     access: [],
-    trust: ['verifiedHost'],
-    payments: ['shamCash'],
+    trust: [],
+    payments: [],
   })
   const hasGuestAccount = typeof window !== 'undefined' && Boolean(sessionStorage.getItem(GUEST_TOKEN_KEY))
   const activeFilterLabels = useMemo(
