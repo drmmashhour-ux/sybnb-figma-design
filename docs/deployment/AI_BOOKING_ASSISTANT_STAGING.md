@@ -14,9 +14,11 @@ OPENAI_API_KEY=<server-side secret>
 OPENAI_MODEL=gpt-5.6-luna
 RATE_LIMIT_ASSISTANT_ASK_MAX=20
 RATE_LIMIT_ASSISTANT_ASK_WINDOW_MS=60000
+RATE_LIMIT_ASSISTANT_ACTION_MAX=20
+RATE_LIMIT_ASSISTANT_ACTION_WINDOW_MS=60000
 ```
 
-Keep `OPENAI_API_KEY` out of all `VITE_*` variables. Preserve the existing required `RATE_LIMIT_STORE=db` setting for multi-instance staging. Run the repository validation and isolated browser suite, deploy to the existing staging target, and verify the server health endpoint before a limited internal test. This change requires no database migration.
+Keep `OPENAI_API_KEY` out of all `VITE_*` variables. Preserve the existing required `RATE_LIMIT_STORE=db` setting for multi-instance staging. Before starting the staging application, apply `20260802120000_add_assistant_confirmations` with the existing migration deployment command. Run the repository validation and isolated browser suite, deploy to the existing staging target, and verify the server health endpoint before a limited internal test.
 
 ## Production guard
 
@@ -31,4 +33,4 @@ Fast rollback requires no code or data operation:
 3. Confirm `POST /api/assistant/ask` returns `ASSISTANT_UNAVAILABLE`.
 4. If code rollback is required, revert the assistant commits in reverse order. Do not delete audit records.
 
-There are no assistant transcript tables or booking-draft rows to migrate or clean up. Inert drafts expire in client/session use and never reserve inventory.
+The confirmation table contains no transcripts or raw action payloads. Inert drafts never reserve inventory. Keep confirmation and audit rows during a normal rollback; disabling both flags immediately closes the endpoints and UI. A database rollback is not required, and the additive table may remain for forensic/audit continuity.

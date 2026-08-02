@@ -12,17 +12,20 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Kept reservation, payment, refund, cancellation, and message execution outside the tool allowlist. Existing application screens retain final confirmation authority.
 - Added prompt redaction, bounded session-only history, no provider storage, provider timeout/retry, safe fallback responses, tool-round/result limits, and plain-text treatment of model output.
 - Added a deterministic narrative boundary: sensitive listing and booking facts are summarized from approved tool records, while a tool-free model response that claims a price, availability, rating, fee, tax, policy, host fact, or completed consequential action is discarded in favor of a safe localized template.
+- Added actor-bound, ten-minute, one-time confirmation proposals for booking drafts, messaging, cancellation, refund requests, date changes, guest-count changes, and payment-flow initiation. Exact payload and current fact hashes invalidate consent after any material change; atomic consumption blocks duplicates and replay.
+- Kept all non-draft mutations in existing SYBNB flows. Confirmation returns only the appropriate existing navigation target and never sends a message, changes a booking, cancels, refunds, or charges directly.
+- Added deterministic lifecycle audits for requests, fact retrieval, tool proposal, confirmation request/accept/reject, execution handoff, blocked attempts, and safe fallback without storing prompts, message bodies, refund reasons, secrets, or payment data.
 
 ## Verification
 
-- TypeScript: passed.
+- TypeScript and production build: passed.
 - Production-style Vite build: passed.
 - Prisma schema validation: passed.
-- Full unit regression baseline: 11 files, 102 tests passed. After narrative hardening, the assistant-focused subset contains 10 passing tests, including a malicious-model fabricated-price/availability test.
-- Full API regression: 83 files, 503 tests passed in one clean serial run.
+- Full unit regression: 11 files, 104 tests passed, including malicious-model fabricated-price/availability coverage.
+- Full API regression: 83 files, 507 tests passed in one clean run before the final independent action-rate-limit case was added.
 - Full security regression: 3 files, 19 tests passed.
-- Assistant database/API tests: 5 passed, covering authentication, request validation, French fallback, minimized audit events, cross-user denial, server-verified confirmation, fabricated-price rejection, verified pricing, and per-user rate limiting.
-- Assistant browser coverage: 4 passed across Chromium and WebKit, covering RTL/French switching and 320px mobile fit.
+- Final assistant database/API suite: 9 passed, covering authentication, request validation, French fallback, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, verified pricing, and independent request/action rate limits.
+- Assistant browser coverage: 6 passed across Chromium and WebKit, covering RTL/French switching, 320px mobile fit, and the separate propose/confirm draft flow.
 - Full browser regression: 40 passed, 2 expected WebKit keyboard skips, and 2 unrelated pre-existing landing-heading assertions failed because the current page heading changed from `منصة سوريا الكاملة` to `تشعر أنك في المكان الصحيح`. Both assistant browser tests passed in both engines.
 - Built-client scan found no `OPENAI_API_KEY` or test provider secret strings.
 
@@ -34,7 +37,7 @@ The floating control has an accessible name and 48px target. The panel is a name
 
 - A live OpenAI staging credential and representative eval set are needed to measure tool-selection quality, latency, refusal quality, and cost; automated tests do not call an external provider.
 - Stored listing metadata is not uniform. Missing amenities, rules, fees, taxes, policies, ratings, or images intentionally render as unavailable rather than being inferred.
-- Booking drafts are deliberately inert because the current schema has no draft status. Final creation continues through the existing transactional booking route.
+- Booking drafts are deliberately inert because the current schema has no draft status. Final creation continues through the existing transactional booking route. Other confirmed actions currently open their existing product flow rather than completing the mutation inside the assistant.
 - The global application language engine remains Arabic/English. French is scoped to the assistant milestone and does not translate unrelated SYBNB pages.
 - Manual assistive-technology, small-device, slow-network, and staging abuse testing are still required before internal rollout.
 - Production enablement, deployment, payment execution, automated messaging, cancellation, and refunds remain explicitly unauthorized.

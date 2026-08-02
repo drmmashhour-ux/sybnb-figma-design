@@ -182,4 +182,26 @@ test.describe('AI booking assistant staging widget', () => {
     expect(box!.x).toBeGreaterThanOrEqual(0)
     expect(box!.x + box!.width).toBeLessThanOrEqual(320)
   })
+
+  test('requires a separate server proposal before preparing a draft', async ({ page }) => {
+    const listingId = '11111111-1111-4111-8111-111111111111'
+    let proposed = false
+    await page.route('**/api/auth/checkout-guest', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, token: 'test-guest-token', user: { id: '33333333-3333-4333-8333-333333333333', email: null, displayName: 'Test guest', roles: ['GUEST'] } }) }))
+    await page.route('**/api/assistant/ask', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, answer: 'Verified result', source: 'test', draft: null, listings: [{ id: listingId, title: { en: 'Verified stay', fr: 'Séjour vérifié', ar: 'إقامة موثقة' }, price: { amountMinor: 10000, currency: 'SYP', basis: 'nightly_base' }, availability: null, locationSummary: 'Damascus', rating: null, reviewCount: 0, image: null, link: `#/listing/${listingId}`, propertyType: 'apartment', amenities: ['wifi'] }] }) }))
+    await page.route('**/api/assistant/actions/propose', async (route) => { proposed = true; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, proposal: { action: 'CREATE_BOOKING_DRAFT', proposalId: '22222222-2222-4222-8222-222222222222', expiresAt: '2026-12-01T00:00:00Z', entityType: 'listing', entityId: listingId, message: 'Please confirm this action.' } }) }) })
+    await page.route('**/api/assistant/actions/confirm', async (route) => { expect(proposed).toBe(true); const body = route.request().postDataJSON(); expect(body.decision).toBe(true); await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, confirmation: { accepted: true, result: { draft: { listingId, checkIn: '2026-10-01', checkOut: '2026-10-02', guests: 2, nights: 1, total: { amountMinor: 10000, currency: 'SYP' }, expiresAt: '2026-10-01T00:10:00Z', confirmationRequired: true, bookingLink: `#/booking/review/${listingId}` } } } }) }) })
+    await page.goto('/#/stays')
+    await page.getByRole('button', { name: 'اسأل SYBNB AI' }).click()
+    await page.getByRole('dialog', { name: 'مساعد الحجز' }).getByRole('button', { name: 'EN' }).click()
+    await page.getByPlaceholder('Where would you like to stay?').fill('Damascus')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await page.getByText('Verified stay').locator('..').getByRole('checkbox').check()
+    await page.getByLabel('Check-in').fill('2026-10-01')
+    await page.getByLabel('Check-out').fill('2026-10-02')
+    await page.getByLabel('Guests').fill('2')
+    await page.getByRole('button', { name: 'Prepare booking draft' }).click()
+    await expect(page.getByRole('alertdialog')).toContainText('Please confirm this action.')
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Confirm' }).click()
+    await expect(page.locator('strong').filter({ hasText: 'Booking draft prepared — no reservation or payment has been made.' })).toBeVisible()
+  })
 })

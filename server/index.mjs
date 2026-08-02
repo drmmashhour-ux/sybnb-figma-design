@@ -95,6 +95,7 @@ const RATE_LIMIT_RULES = [
   { name: 'PREMIUM_PHOTO_ENHANCE', method: 'POST', pattern: /^\/api\/host\/photos\/enhance$/, max: 40, windowMs: 60 * 1000, byUser: true },
   // "Ask SYBNB AI" assistant — can spend AI money, so cap per user account.
   { name: 'ASSISTANT_ASK', method: 'POST', pattern: /^\/api\/assistant\/ask$/, max: 20, windowMs: 60 * 1000, byUser: true },
+  { name: 'ASSISTANT_ACTION', method: 'POST', pattern: /^\/api\/assistant\/actions\/(?:propose|confirm)$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'BOOKING_CREATE', method: 'POST', pattern: /^\/api\/bookings$/, max: 10, windowMs: 60 * 1000, byUser: true },
   { name: 'PAYMENT_PROOF', method: 'POST', pattern: /^\/api\/payments\/(seller-plan-proof|local-wallet-proof)$/, max: 10, windowMs: 60 * 1000, byUser: true },

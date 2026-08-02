@@ -1099,7 +1099,6 @@ export async function askAssistant(
   question: string,
   locale: 'ar' | 'en' | 'fr',
   history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
-  confirmation?: { action: 'createBookingDraft'; listingId: string },
 ): Promise<AssistantResponse> {
   const session =
     getStoredStaffSession('ADMIN') ||
@@ -1109,9 +1108,24 @@ export async function askAssistant(
     (await ensurePrototypeGuestSession())
   const response = await apiRequest<{ ok: true } & AssistantResponse>(
     '/api/assistant/ask',
-    { method: 'POST', token: session.token, body: { question, locale, history, ...(confirmation ? { confirmation } : {}) } },
+    { method: 'POST', token: session.token, body: { question, locale, history } },
   )
   return { answer: response.answer || '', source: response.source, listings: response.listings || [], draft: response.draft || null }
+}
+
+export type AssistantActionPayload = { listingId: string; checkIn: string; checkOut: string; guests: number }
+export type AssistantActionProposal = { action: 'CREATE_BOOKING_DRAFT'; proposalId: string; expiresAt: string; entityType: string; entityId: string; message: string }
+
+export async function proposeAssistantBookingDraft(payload: AssistantActionPayload, locale: 'ar' | 'en' | 'fr'): Promise<AssistantActionProposal> {
+  const session = getStoredStaffSession('ADMIN') || getStoredStaffSession('HOST') || getStoredStaffSession('SELLER') || getStoredSellerSession() || (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; proposal: AssistantActionProposal }>('/api/assistant/actions/propose', { method: 'POST', token: session.token, body: { action: 'CREATE_BOOKING_DRAFT', payload, locale } })
+  return response.proposal
+}
+
+export async function confirmAssistantBookingDraft(proposalId: string, payload: AssistantActionPayload, decision: boolean, locale: 'ar' | 'en' | 'fr'): Promise<{ accepted: boolean; result?: { draft?: AssistantDraft } }> {
+  const session = getStoredStaffSession('ADMIN') || getStoredStaffSession('HOST') || getStoredStaffSession('SELLER') || getStoredSellerSession() || (await ensurePrototypeGuestSession())
+  const response = await apiRequest<{ ok: true; confirmation: { accepted: boolean; result?: { draft?: AssistantDraft } } }>('/api/assistant/actions/confirm', { method: 'POST', token: session.token, body: { proposalId, payload, decision, locale } })
+  return response.confirmation
 }
 
 export type AssistantListingCard = {

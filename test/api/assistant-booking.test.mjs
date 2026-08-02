@@ -2,6 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { executeAssistantTool, getBookingStatus } from '../../server/lib/assistant-tools.mjs'
+import { proposeAssistantAction } from '../../server/lib/assistant-confirmations.mjs'
 import { testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode, verifyEmailForTest } from '../support/testServer.mjs'
 
 describe('AI booking assistant authorization and audit', () => {
@@ -36,6 +37,8 @@ describe('AI booking assistant authorization and audit', () => {
     delete process.env.SYBNB_DEPLOY_ENV
     delete process.env.RATE_LIMIT_ASSISTANT_ASK_MAX
     delete process.env.RATE_LIMIT_ASSISTANT_ASK_WINDOW_MS
+    delete process.env.RATE_LIMIT_ASSISTANT_ACTION_MAX
+    delete process.env.RATE_LIMIT_ASSISTANT_ACTION_WINDOW_MS
     delete process.env.RATE_LIMIT_STORE
   })
 
@@ -60,14 +63,76 @@ describe('AI booking assistant authorization and audit', () => {
     await expect(executeAssistantTool('getBookingStatus', { bookingId: booking.id }, { user: { id: otherGuest.user.id }, roles: ['GUEST'] })).rejects.toMatchObject({ code: 'ASSISTANT_BOOKING_UNAVAILABLE' })
   })
 
-  it('requires a server-verified confirmation for a booking draft', async () => {
+  it('denies consequential proposals to non-guest roles', async () => {
+    await expect(proposeAssistantAction({ actorUserId: host.id, roles: ['HOST'], action: 'CREATE_BOOKING_DRAFT', payload: { listingId: listing.id, checkIn: '2026-10-01', checkOut: '2026-10-02', guests: 1 }, locale: 'en' })).rejects.toMatchObject({ code: 'ASSISTANT_GUEST_REQUIRED', statusCode: 403 })
+  })
+
+  it('requires a claimed one-time server confirmation for a booking draft', async () => {
     const args = { listingId: listing.id, checkIn: '2026-10-01', checkOut: '2026-10-02', guests: 2 }
-    await expect(executeAssistantTool('createBookingDraft', { ...args, amountMinor: 1 }, { user: { id: guest.user.id }, roles: ['GUEST'], confirmedDraftListingId: listing.id })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
+    await expect(executeAssistantTool('createBookingDraft', { ...args, amountMinor: 1 }, { user: { id: guest.user.id }, roles: ['GUEST'], confirmationClaimed: true })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
     await expect(executeAssistantTool('createBookingDraft', args, { user: { id: guest.user.id }, roles: ['GUEST'] })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
-    const result = await executeAssistantTool('createBookingDraft', args, { user: { id: guest.user.id }, roles: ['GUEST'], confirmedDraftListingId: listing.id })
-    expect(result.draft.total).toEqual({ amountMinor: 10_000, currency: 'SYP' })
-    expect(result.draft.confirmationRequired).toBe(true)
-    expect(result.notice).toMatch(/No inventory is reserved/)
+    const proposed = await request(app).post('/api/assistant/actions/propose').set('Authorization', `Bearer ${guest.token}`).send({ action: 'CREATE_BOOKING_DRAFT', payload: args, locale: 'en' })
+    expect(proposed.status).toBe(200)
+    const confirmed = await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: proposed.body.proposal.proposalId, payload: args, decision: true, locale: 'en' })
+    expect(confirmed.status).toBe(200)
+    expect(confirmed.body.confirmation.result.draft.total).toEqual({ amountMinor: 10_000, currency: 'SYP' })
+    expect(confirmed.body.confirmation.result.notice).toMatch(/No inventory is reserved/)
+  })
+
+  it('invalidates changed facts and rejects replay, forged payloads, expiry, and cross-user claims', async () => {
+    const payload = { listingId: listing.id, checkIn: '2026-11-01', checkOut: '2026-11-02', guests: 2 }
+    const propose = async () => (await request(app).post('/api/assistant/actions/propose').set('Authorization', `Bearer ${guest.token}`).send({ action: 'CREATE_BOOKING_DRAFT', payload, locale: 'fr' })).body.proposal
+
+    const crossUser = await propose()
+    expect((await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${otherGuest.token}`).send({ proposalId: crossUser.proposalId, payload, decision: true, locale: 'fr' })).status).toBe(409)
+
+    const forged = await propose()
+    expect((await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: forged.proposalId, payload: { ...payload, guests: 3 }, decision: true, locale: 'fr' })).status).toBe(409)
+
+    const expired = await propose()
+    await db().assistantConfirmation.update({ where: { id: expired.proposalId }, data: { expiresAt: new Date(Date.now() - 1_000) } })
+    expect((await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: expired.proposalId, payload, decision: true, locale: 'ar' })).status).toBe(409)
+
+    const changed = await propose()
+    await db().listing.update({ where: { id: listing.id }, data: { priceMinor: 11_000 } })
+    const stale = await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: changed.proposalId, payload, decision: true, locale: 'ar' })
+    expect(stale.status).toBe(409)
+    expect(stale.body.error.message).toContain('غير صالح')
+
+    const replay = await propose()
+    const first = await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: replay.proposalId, payload, decision: true, locale: 'en' })
+    const second = await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: replay.proposalId, payload, decision: true, locale: 'en' })
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(409)
+    await db().listing.update({ where: { id: listing.id }, data: { priceMinor: 10_000 } })
+  })
+
+  it('proposes all consequential actions without duplicating existing mutations or logging sensitive text', async () => {
+    const cases = [
+      ['SEND_MESSAGE', { bookingId: booking.id, message: 'private guest message 4111111111111111' }],
+      ['CANCEL_BOOKING', { bookingId: booking.id }],
+      ['REQUEST_REFUND', { bookingId: booking.id, reason: 'private refund reason' }],
+      ['CHANGE_DATES', { bookingId: booking.id, checkIn: '2026-09-03', checkOut: '2026-09-04' }],
+      ['CHANGE_GUEST_COUNT', { bookingId: booking.id, guests: 3 }],
+      ['INITIATE_PAYMENT', { bookingId: booking.id }],
+    ]
+    for (const [action, payload] of cases) {
+      const response = await request(app).post('/api/assistant/actions/propose').set('Authorization', `Bearer ${guest.token}`).send({ action, payload, locale: 'en' })
+      expect(response.status).toBe(200)
+      expect(response.body.proposal.action).toBe(action)
+    }
+    const rejectedProposal = await request(app).post('/api/assistant/actions/propose').set('Authorization', `Bearer ${guest.token}`).send({ action: 'CANCEL_BOOKING', payload: { bookingId: booking.id }, locale: 'en' })
+    const rejected = await request(app).post('/api/assistant/actions/confirm').set('Authorization', `Bearer ${guest.token}`).send({ proposalId: rejectedProposal.body.proposal.proposalId, payload: { bookingId: booking.id }, decision: false, locale: 'en' })
+    expect(rejected.body.confirmation).toMatchObject({ accepted: false, executed: false })
+    const unchanged = await db().booking.findUnique({ where: { id: booking.id } })
+    expect(unchanged.status).toBe('REQUESTED')
+    const audits = await db().adminAuditLog.findMany({ where: { actorUserId: guest.user.id, action: { startsWith: 'AI_ASSISTANT_' } } })
+    const actions = new Set(audits.map((item) => item.action))
+    for (const action of ['AI_ASSISTANT_REQUEST_RECEIVED', 'AI_ASSISTANT_SERVER_FACT_RETRIEVED', 'AI_ASSISTANT_TOOL_PROPOSED', 'AI_ASSISTANT_CONFIRMATION_REQUESTED', 'AI_ASSISTANT_CONFIRMATION_ACCEPTED', 'AI_ASSISTANT_CONFIRMATION_REJECTED', 'AI_ASSISTANT_TOOL_EXECUTED', 'AI_ASSISTANT_ATTEMPT_BLOCKED', 'AI_ASSISTANT_SAFE_FALLBACK']) expect(actions.has(action)).toBe(true)
+    const serialized = JSON.stringify(audits)
+    expect(serialized).not.toContain('private guest message')
+    expect(serialized).not.toContain('4111111111111111')
+    expect(serialized).not.toContain('private refund reason')
   })
 
   it('enforces the existing per-user assistant rate limit', async () => {
@@ -79,5 +144,17 @@ describe('AI booking assistant authorization and audit', () => {
     expect((await ask()).status).toBe(200)
     expect((await ask()).status).toBe(200)
     expect((await ask()).status).toBe(429)
+  })
+
+  it('rate limits action proposals and confirmations independently', async () => {
+    process.env.RATE_LIMIT_STORE = 'db'
+    process.env.RATE_LIMIT_ASSISTANT_ACTION_MAX = '2'
+    process.env.RATE_LIMIT_ASSISTANT_ACTION_WINDOW_MS = '60000'
+    await db().rateLimitHit.deleteMany({ where: { key: { startsWith: 'ASSISTANT_ACTION:' } } })
+    const payload = { listingId: listing.id, checkIn: '2026-12-01', checkOut: '2026-12-02', guests: 2 }
+    const propose = () => request(app).post('/api/assistant/actions/propose').set('Authorization', `Bearer ${guest.token}`).send({ action: 'CREATE_BOOKING_DRAFT', payload, locale: 'en' })
+    expect((await propose()).status).toBe(200)
+    expect((await propose()).status).toBe(200)
+    expect((await propose()).status).toBe(429)
   })
 })

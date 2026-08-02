@@ -115,7 +115,6 @@ export const ASSISTANT_TOOL_DEFINITIONS = [
   ['getListingDetails', 'Get public stored details, amenities, rules, cancellation policy, fees and taxes for one approved stay.', { listingId: { type: 'string' } }, ['listingId']],
   ['checkAvailability', 'Check current availability for one approved stay and date range.', { listingId: { type: 'string' }, checkIn: { type: 'string' }, checkOut: { type: 'string' } }, ['listingId', 'checkIn', 'checkOut']],
   ['calculateBookingTotal', 'Calculate the verified stored total through the existing pricing engine.', { listingId: { type: 'string' }, checkIn: { type: 'string' }, checkOut: { type: 'string' }, guests: { type: 'integer' } }, ['listingId', 'checkIn', 'checkOut']],
-  ['createBookingDraft', 'Prepare an inert booking draft after the server confirms the user clicked the confirmation control. Does not reserve or charge.', { listingId: { type: 'string' }, checkIn: { type: 'string' }, checkOut: { type: 'string' }, guests: { type: 'integer' } }, ['listingId', 'checkIn', 'checkOut', 'guests']],
   ['getBookingStatus', 'Get only the signed-in guest own booking status.', { bookingId: { type: 'string' } }, ['bookingId']],
   ['createSupportHandoff', 'Create a privacy-minimized support handoff audit event when the assistant cannot safely help.', { reason: { type: 'string' } }, ['reason']],
 ].map(([name, description, properties, required = []]) => ({ type: 'function', name, description, parameters: { type: 'object', additionalProperties: false, properties, required }, strict: name !== 'searchListings' }))
@@ -133,7 +132,7 @@ export async function executeAssistantTool(name, rawArgs, context) {
   else if (name === 'createSupportHandoff') result = await createSupportHandoff(args, context)
   else invalid('Tool is not approved.')
 
-  await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: `AI_ASSISTANT_TOOL_${name.toUpperCase()}`, entityType: 'ai_assistant', entityId, after: { ok: true } } })
+  await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_ASSISTANT_SERVER_FACT_RETRIEVED', entityType: 'ai_assistant', entityId, after: { tool: name, ok: true } } })
   return result
 }
 
@@ -203,7 +202,7 @@ export async function calculateBookingTotal(raw) {
 
 export async function createBookingDraft(raw, context = {}) {
   const args = object(raw); exact(args, ['listingId', 'checkIn', 'checkOut', 'guests'])
-  if (context.confirmedDraftListingId !== args.listingId) invalid('Explicit confirmation is required to prepare a booking draft.')
+  if (context.confirmationClaimed !== true) invalid('A valid one-time server confirmation is required to prepare a booking draft.')
   const total = await calculateBookingTotal(args)
   if (!total.available) return { created: false, reason: 'unavailable' }
   return { created: true, draft: { listingId: total.listingId, checkIn: args.checkIn, checkOut: args.checkOut, guests: total.guests, nights: total.nights, total: total.total, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), confirmationRequired: true, bookingLink: `#/booking/review/${total.listingId}` }, notice: 'No inventory is reserved and no payment is taken.' }

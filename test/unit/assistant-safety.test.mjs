@@ -25,7 +25,7 @@ describe('assistant safety boundaries', () => {
 
   it('rejects model-claimed booking confirmation', async () => {
     const listingId = '00000000-0000-4000-8000-000000000001'
-    await expect(createBookingDraft({ listingId, checkIn: '2026-09-01', checkOut: '2026-09-02', guests: 2, confirmed: true }, {})).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
+    await expect(createBookingDraft({ listingId, checkIn: '2026-09-01', checkOut: '2026-09-02', guests: 2, confirmed: true }, { confirmationClaimed: true })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
   })
 
   it('retries one transient OpenAI failure and keeps the key in the authorization header', async () => {

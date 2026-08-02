@@ -8,7 +8,7 @@ The existing `POST /api/assistant/ask` route and `AssistantWidget` remain the on
 
 Conversation history is session-memory only in the widget and is bounded before submission. The server stores no transcript. Audit events contain actor, action, entity identifiers, tool names, and outcome categories; they exclude prompts, responses, email, phone, payment data, message bodies, and provider credentials.
 
-Booking drafts are inert, short-lived prepared summaries. They do not reserve inventory or move money. Reservation, payment, cancellation, refund, and message execution are outside the assistant tool allowlist. The user must continue through the existing product flow and explicitly confirm there.
+Consequential actions use the existing assistant route namespace with a two-step server protocol: propose, then confirm. A proposal is bound to the authenticated actor, approved action, normalized payload hash, current server-fact hash, entity, and a ten-minute expiry. Confirmation atomically consumes the proposal, recalculates facts, and fails closed on expiry, replay, actor mismatch, payload changes, or changed availability/pricing/booking state. Raw messages and refund reasons are never stored. Booking drafts remain inert. Messaging, cancellation, refund, booking changes, and payment are handed to existing product flows after confirmation; the assistant does not duplicate or execute those mutations.
 
 ## Trust boundaries and threats
 
@@ -17,13 +17,15 @@ Booking drafts are inert, short-lived prepared summaries. They do not reserve in
 | Prompt injection or arbitrary SQL/URL execution | Fixed system policy, fixed function allowlist, strict schemas, server validators, no SQL or URL tool |
 | Fabricated listing facts or totals | Client cards and sensitive narrative summaries are built deterministically from tool results; tool-free model claims about prices, availability, ratings, fees, taxes, policies, hosts, or completed actions fail to a safe template; unknown stored fields are omitted; totals use the existing pricing engine |
 | Cross-user access/IDOR | Authentication is mandatory; booking status is scoped to `guestId`; unpublished listings are never returned; no host private fields are selected |
-| Consequential action without consent | No payment/refund/cancel/message execution tools; draft creation is inert and requires explicit confirmation in existing flows |
+| Consequential action without consent or replay | Actor-bound, expiring, one-time confirmation records; exact payload and fact hashes; atomic claim; existing mutation flows remain authoritative |
 | Secret or personal-data exposure | `OPENAI_API_KEY` is server-only; prompts contain pseudonymous actor role and bounded criteria; prompt/log redaction removes common email, phone, bearer-token, and card patterns |
 | Cost/abuse amplification | Existing per-user `ASSISTANT_ASK` limiter, bounded history/tool rounds/results, provider timeout, one retry for transient failures, request/body limits |
 | Feature accidentally enabled in production | Server requires both `AI_BOOKING_ASSISTANT_ENABLED=1` and `SYBNB_DEPLOY_ENV=staging`; startup fails for any other enabled environment |
 | Model output rendered as code/markup | Output is treated as untrusted plain text; structured UI uses server-owned tool records and React escaping |
-| Stale availability | Every draft recalculates availability and price; final booking remains subject to the existing transactional overlap checks |
+| Stale or changed material facts | Confirmation rechecks and hashes availability, dates, guests, pricing breakdown, fees, currency, status, and update time; mismatches invalidate consent |
 
 ## Data minimization
 
 Only the last bounded session messages, locale, role, and non-sensitive search criteria are sent to the model. Listing tool results contain public listing fields. Host IDs, guest IDs, emails, phones, payment proof data, internal notes, and cross-tenant records are excluded.
+
+Confirmation rows store identifiers and SHA-256 hashes, not action payloads. Audit events use fixed action/result categories and identifiers; they do not store raw prompts, responses, message bodies, refund reasons, secrets, or payment data.
