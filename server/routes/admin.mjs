@@ -1103,6 +1103,73 @@ export async function handleAdmin(req, res, url, context) {
     })
   }
 
+  // SR live-ops dispatch board: every in-flight ride + every online driver, with coordinates, for the
+  // admin dispatch map. Coordinates come straight from PostGIS geometry via ST_X/ST_Y (no spatial_ref_sys
+  // dependency). ADMIN/SUPPORT only. Rider/driver emails are never selected — only display names.
+  if (url.pathname === '/api/admin/sr/dispatch') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+
+    const [activeRides, onlineDrivers] = await Promise.all([
+      db().$queryRaw`
+        SELECT r.id, r.status, r.requested_at AS "requestedAt",
+               ST_Y(r.pickup_geo) AS "pickupLat", ST_X(r.pickup_geo) AS "pickupLng",
+               ru.display_name AS "riderName", du.display_name AS "driverName"
+        FROM ride_requests r
+        JOIN users ru ON ru.id = r.rider_id
+        LEFT JOIN users du ON du.id = r.driver_id
+        WHERE r.status IN ('REQUESTED','MATCHING','DRIVER_ASSIGNED','DRIVER_ARRIVING','IN_PROGRESS')
+          AND r.pickup_geo IS NOT NULL
+        ORDER BY r.requested_at DESC
+        LIMIT 100
+      `,
+      db().$queryRaw`
+        SELECT dp.user_id AS "driverId", u.display_name AS "driverName",
+               ST_Y(dp.last_location_geo) AS lat, ST_X(dp.last_location_geo) AS lng,
+               dp.last_location_at AS "lastLocationAt",
+               EXISTS(
+                 SELECT 1 FROM ride_requests r
+                 WHERE r.driver_id = dp.user_id AND r.status IN ('DRIVER_ASSIGNED','DRIVER_ARRIVING','IN_PROGRESS')
+               ) AS busy
+        FROM driver_profiles dp
+        JOIN users u ON u.id = dp.user_id
+        WHERE dp.active = true AND dp.last_location_geo IS NOT NULL
+          AND dp.last_location_at > now() - interval '15 minutes'
+        ORDER BY dp.last_location_at DESC
+        LIMIT 200
+      `,
+    ])
+
+    const rides = activeRides.map((r) => ({
+      id: r.id,
+      status: r.status,
+      requestedAt: r.requestedAt,
+      pickup: { lat: Number(r.pickupLat), lng: Number(r.pickupLng) },
+      riderName: r.riderName,
+      driverName: r.driverName,
+    }))
+    const drivers = onlineDrivers.map((d) => ({
+      driverId: d.driverId,
+      driverName: d.driverName,
+      location: { lat: Number(d.lat), lng: Number(d.lng) },
+      lastLocationAt: d.lastLocationAt,
+      busy: Boolean(d.busy),
+    }))
+
+    return json(res, 200, {
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      counts: {
+        activeRides: rides.length,
+        waitingRides: rides.filter((r) => ['REQUESTED', 'MATCHING'].includes(r.status)).length,
+        onlineDrivers: drivers.length,
+        busyDrivers: drivers.filter((d) => d.busy).length,
+      },
+      rides,
+      drivers,
+    })
+  }
+
   if (url.pathname === '/api/admin/platform-metrics') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
