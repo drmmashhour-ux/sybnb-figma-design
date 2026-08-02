@@ -7,8 +7,8 @@ import { colors, withAlpha } from '../../shared/theme/tokens'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from './MortgageCalculator'
-import { PropertyGallery } from './PropertyGallery'
-import { realEstateAttrs, valuationTone, listingPhotoUrls } from './propertyAttrs'
+import { PhotoGallery, listingPhotoUrls } from '../../shared/gallery/PhotoGallery'
+import { realEstateAttrs, valuationTone } from './propertyAttrs'
 import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 
 type Props = { listingId: string; lang: Lang }
@@ -87,7 +87,7 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
         <button style={styles.copyBtn} onClick={copyLink}>{copied ? t.copied : `🔗 ${t.copy}`}</button>
       </div>
 
-      <PropertyGallery photos={photos} lang={lang} />
+      <PhotoGallery photos={photos} lang={lang} />
 
       <div style={styles.pillRow}>
         <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>

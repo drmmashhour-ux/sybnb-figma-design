@@ -14,6 +14,7 @@ import {
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
+import { PhotoGallery, listingPhotoUrls } from '../../shared/gallery/PhotoGallery'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
@@ -218,7 +219,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number; perNight: Array<{ date: string; priceMinor: number }> } | null>(null)
   const [payCurrency] = useState<'USD'>('USD')
-  const [photoIndex, setPhotoIndex] = useState(0)
   const [offerSummary, setOfferSummary] = useState<{ count: number; cheapestMinor: number | null }>({ count: 0, cheapestMinor: null })
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [siblingRooms, setSiblingRooms] = useState<PlatformListing[]>([])
@@ -460,71 +460,35 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
       {listing && (
         <>
-          <section style={styles.detailHero}>
-            <button style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
-              ↗
-            </button>
-            <button
-              style={styles.heroNextButton}
-              disabled={status === 'saving'}
-              onClick={() => actionBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-              aria-label={isAr ? 'الانتقال لإرسال الطلب' : 'Go to send request'}
-            >
-              →
-            </button>
-            <div style={styles.media}>
-              {(() => {
-                const photoUrls = (listing.media || [])
-                  .map((item) => item.url || item.src || item.assetUrl)
-                  .filter((value): value is string => typeof value === 'string' && value.length > 0)
-                const index = photoUrls.length ? ((photoIndex % photoUrls.length) + photoUrls.length) % photoUrls.length : 0
-                return (
-                  <>
-                    <img
-                      src={photoUrls[index] || listingImage(listing)}
-                      alt={title}
-                      style={styles.mediaImage}
-                      onError={(event) => {
-                        const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                        if (event.currentTarget.src.endsWith(fallback)) return
-                        event.currentTarget.src = fallback
-                      }}
-                    />
-                    {photoUrls.length > 1 && (
-                      <>
-                        <button
-                          type="button"
-                          aria-label={isAr ? 'الصورة السابقة' : 'Previous photo'}
-                          style={{ ...styles.galleryArrow, insetInlineStart: 12 }}
-                          onClick={() => setPhotoIndex((i) => i - 1)}
-                        >
-                          ‹
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={isAr ? 'الصورة التالية' : 'Next photo'}
-                          style={{ ...styles.galleryArrow, insetInlineEnd: 12 }}
-                          onClick={() => setPhotoIndex((i) => i + 1)}
-                        >
-                          ›
-                        </button>
-                        <span style={styles.galleryCount}>
-                          {index + 1} / {photoUrls.length}
-                        </span>
-                      </>
-                    )}
-                  </>
-                )
-              })()}
-              <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
-              {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
-              {listing.division === 'CARS' && (
-                <span style={styles.dealRatingBadge}>
-                  <DealRatingBadge dealRating={listing.dealRating} lang={lang} />
-                </span>
-              )}
-            </div>
-          </section>
+          <PhotoGallery
+            variant="hero"
+            lang={lang}
+            heroStyle={styles.detailHero}
+            photos={listingPhotoUrls(listing, listingImage(listing))}
+            fallback={DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'}
+            overlay={
+              <>
+                <button style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
+                  ↗
+                </button>
+                <button
+                  style={styles.heroNextButton}
+                  disabled={status === 'saving'}
+                  onClick={() => actionBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  aria-label={isAr ? 'الانتقال لإرسال الطلب' : 'Go to send request'}
+                >
+                  →
+                </button>
+                <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
+                {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
+                {listing.division === 'CARS' && (
+                  <span style={styles.dealRatingBadge}>
+                    <DealRatingBadge dealRating={listing.dealRating} lang={lang} />
+                  </span>
+                )}
+              </>
+            }
+          />
 
           {listing.division === 'CARS' && listing.auction != null && (
             <AuctionBidPanel lang={lang} listing={listing} onContactSeller={() => void requestListing()} />
@@ -974,11 +938,7 @@ const styles: Record<string, CSSProperties> = {
   detailHero: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', minHeight: 330, overflow: 'hidden', position: 'relative' },
   heroIconButton: { position: 'absolute', top: 18, insetInlineStart: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
   heroNextButton: { position: 'absolute', top: 18, insetInlineEnd: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
-  media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
-  mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
   mediaBadge: { position: 'absolute', insetInlineStart: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
-  galleryArrow: { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, borderRadius: '50%', border: '1px solid rgba(255,255,255,.35)', background: 'rgba(8,9,15,.6)', color: '#fff', fontSize: 26, lineHeight: 1, cursor: 'pointer', display: 'grid', placeItems: 'center', backdropFilter: 'blur(8px)', zIndex: 2 },
-  galleryCount: { position: 'absolute', insetInlineEnd: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '6px 12px', fontSize: 13, fontWeight: 700, zIndex: 2 },
   dealRatingBadge: { position: 'absolute', insetInlineEnd: 14, bottom: 14 },
   instantBookBadge: { position: 'absolute', insetInlineStart: 14, top: 14, borderRadius: 999, background: 'rgba(213,169,21,.9)', color: '#1a1400', fontWeight: 950, border: '1px solid rgba(255,255,255,.25)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   detailBody: { border: '1px solid #263146', borderRadius: 8, background: '#10141f', padding: 18, display: 'grid', gap: 16, boxShadow: '0 18px 60px rgba(0,0,0,.24)' },

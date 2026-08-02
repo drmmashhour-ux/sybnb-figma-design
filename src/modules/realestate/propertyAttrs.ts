@@ -33,19 +33,6 @@ export function realEstateAttrs(listing: PlatformListing): RealEstateAttrs {
   }
 }
 
-// Every guest-facing photo URL on a listing, in upload order, deduped. Falls back to the given
-// placeholder when the listing has no real media yet, so a gallery always has at least one image.
-export function listingPhotoUrls(listing: PlatformListing, fallback: string): string[] {
-  const urls = (listing.media || [])
-    .map((m) => {
-      const item = m as Record<string, unknown>
-      return item.url || item.src || item.assetUrl
-    })
-    .filter((v): v is string => typeof v === 'string' && v.length > 0)
-  const deduped = Array.from(new Set(urls))
-  return deduped.length ? deduped : [fallback]
-}
-
 // Colour for a valuation tier (Below/At/Above market); null when there is no classification.
 export function valuationTone(tier?: string | null): string | null {
   if (tier === 'BELOW_MARKET') return '#20d29b'
