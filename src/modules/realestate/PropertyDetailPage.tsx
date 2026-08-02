@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { fetchPrototypeListing, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListings, fetchPrototypeListing, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
@@ -21,6 +21,7 @@ const copy = {
     mapTitle: 'الموقع على الخريطة', getDirections: 'الاتجاهات · GPS',
     belowMarket: 'أقل من سعر السوق', atMarket: 'ضمن سعر السوق', aboveMarket: 'أعلى من سعر السوق', estValue: 'القيمة التقديرية',
     contact: 'اطلب زيارة / تواصل', copy: 'نسخ الرابط', copied: 'تم نسخ الرابط',
+    similar: 'عقارات مشابهة',
   },
   en: {
     back: 'All properties', loading: 'Loading…', error: 'Could not load this property.',
@@ -29,6 +30,7 @@ const copy = {
     mapTitle: 'Location on map', getDirections: 'Directions · GPS',
     belowMarket: 'Below market', atMarket: 'At market', aboveMarket: 'Above market', estValue: 'Estimated value',
     contact: 'Request a visit / contact', copy: 'Copy link', copied: 'Link copied',
+    similar: 'Similar properties',
   },
 }
 
@@ -38,13 +40,25 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
   const [listing, setListing] = useState<PlatformListing | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [copied, setCopied] = useState(false)
+  const [similar, setSimilar] = useState<PlatformListing[]>([])
 
   useEffect(() => {
     setState('loading')
+    setSimilar([])
     fetchPrototypeListing(listingId)
       .then((l) => { setListing(l); setState('ready') })
       .catch(() => setState('error'))
   }, [listingId])
+
+  // "Similar properties": other approved listings in the same division + city (the seller-written
+  // metadata.city), current one excluded, capped at 4. Best-effort — a failure just hides the strip.
+  useEffect(() => {
+    if (!listing) return
+    const city = typeof (listing.metadata as Record<string, unknown> | null)?.city === 'string' ? String((listing.metadata as Record<string, unknown>).city) : undefined
+    fetchApprovedListings(listing.division, city ? { city } : {})
+      .then((rows) => setSimilar(rows.filter((r) => r.id !== listing.id).slice(0, 4)))
+      .catch(() => setSimilar([]))
+  }, [listing])
 
   const isBuy = listing?.division === 'BUY'
   const attrs = useMemo(() => (listing ? realEstateAttrs(listing) : null), [listing])
@@ -127,6 +141,32 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
       {isBuy ? <MortgageCalculator priceMinor={listing.priceMinor} currency={listing.currency} lang={lang} /> : null}
 
       <button style={styles.contactBtn} onClick={contact}>{t.contact}</button>
+
+      {similar.length ? (
+        <section style={styles.similarWrap}>
+          <strong style={styles.similarTitle}>{t.similar}</strong>
+          <div style={styles.similarGrid}>
+            {similar.map((r) => {
+              const a = realEstateAttrs(r)
+              const img = listingGalleryPhotos(r, isBuy ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp', lang)[0].url
+              return (
+                <a key={r.id} href={`#/property/${r.id}`} style={styles.simCard}>
+                  <img src={img} alt="" style={styles.simImg} />
+                  <div style={styles.simBody}>
+                    <strong style={styles.simTitle}>{listingTitleText(r, lang)}</strong>
+                    <span style={styles.simPrice} dir="ltr">{moneyText(r.priceMinor, r.currency, lang)}</span>
+                    <span style={styles.simMeta} dir="ltr">
+                      {a.bedrooms !== undefined ? `🛏 ${a.bedrooms}` : ''}
+                      {a.sizeSqm !== undefined ? ` · 📐 ${a.sizeSqm}` : ''}
+                      {a.location ? ` · 📍 ${a.location}` : ''}
+                    </span>
+                  </div>
+                </a>
+              )
+            })}
+          </div>
+        </section>
+      ) : null}
     </main>
   )
 }
@@ -161,6 +201,15 @@ const styles: Record<string, CSSProperties> = {
   mapRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
   directionsLink: { color: colors.green, fontWeight: 800, fontSize: 13, textDecoration: 'none', border: `1px solid ${withAlpha(colors.green, 0.5)}`, borderRadius: 8, padding: '6px 12px' },
   contactBtn: { minHeight: 50, borderRadius: 12, border: 'none', background: colors.green, color: '#04211d', fontWeight: 900, fontSize: 16, cursor: 'pointer', marginTop: 4 },
+  similarWrap: { display: 'grid', gap: 10, marginTop: 10 },
+  similarTitle: { fontSize: 18, color: colors.ink },
+  similarGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' },
+  simCard: { border: `1px solid ${colors.line}`, borderRadius: 12, background: colors.bg2, overflow: 'hidden', textDecoration: 'none', color: 'inherit', display: 'grid' },
+  simImg: { width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', background: colors.bg2, display: 'block' },
+  simBody: { display: 'grid', gap: 3, padding: '9px 11px' },
+  simTitle: { fontSize: 14, color: colors.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  simPrice: { fontSize: 14, fontWeight: 800, color: colors.green },
+  simMeta: { fontSize: 12, color: colors.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   muted: { color: colors.muted, fontSize: 13 },
   err: { color: '#dc2626', fontSize: 15 },
 }
