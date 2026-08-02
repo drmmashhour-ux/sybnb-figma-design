@@ -31,7 +31,7 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Full security regression: 3 files, 19 tests passed.
 - Final assistant database/API suite: 12 passed, covering authentication, request validation, localized provider failure, fixed-code support handoff, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, retention cleanup, verified pricing, and independent request/action rate limits.
 - Assistant browser coverage: 6 passed across Chromium and WebKit, covering RTL/French switching, 320px mobile fit, the separate propose/confirm draft flow, and proof that a coexisting privileged staff token is never sent to assistant endpoints.
-- The least-privilege client delta passed TypeScript and all 6 assistant browser checks. Its production-bundle rerun reached Vite output generation but could not write artifacts because the local filesystem had only ~250 MB free (`ENOSPC`); the preceding assistant checkpoint production build passed.
+- The least-privilege client delta passed TypeScript, the full production build (including public assets), and all 6 assistant browser checks.
 - Full browser regression: 40 passed, 2 expected WebKit keyboard skips, and 2 unrelated pre-existing landing-heading assertions failed because the current page heading changed from `منصة سوريا الكاملة` to `تشعر أنك في المكان الصحيح`. Both assistant browser tests passed in both engines.
 - Built-client scan found no `OPENAI_API_KEY` or test provider secret strings.
 
@@ -46,5 +46,4 @@ The floating control has an accessible name and 48px target. The panel is a name
 - Booking drafts are deliberately inert because the current schema has no draft status. Final creation continues through the existing transactional booking route. Other confirmed actions currently open their existing product flow rather than completing the mutation inside the assistant.
 - The global application language engine remains Arabic/English. French is scoped to the assistant milestone and does not translate unrelated SYBNB pages.
 - Manual assistive-technology, small-device, slow-network, and staging abuse testing are still required before internal rollout.
-- Re-run `npm run build` after reclaiming local disk space to close the latest bundle-evidence gap.
 - Production enablement, deployment, payment execution, automated messaging, cancellation, and refunds remain explicitly unauthorized.
