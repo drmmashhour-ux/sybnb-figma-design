@@ -4,6 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { fetchMyProperties, type MyProperty } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
+import { SYNITRES_INQUIRY_FOCUS_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 import { realEstateAttrs } from './propertyAttrs'
 
 type Props = { lang: Lang }
@@ -14,14 +15,14 @@ const copy = {
     loading: 'جار التحميل…', signIn: 'سجّل الدخول كبائع لعرض عقاراتك.',
     empty: 'لا توجد عقارات بعد.', addListing: 'أضف إعلاناً',
     inquiries: 'استفسارات', viewPage: 'عرض الصفحة', edit: 'تعديل / إعادة إرسال',
-    buy: 'للبيع', rent: 'إيجار', back: 'الرئيسية',
+    buy: 'للبيع', rent: 'إيجار', back: 'الرئيسية', openInbox: 'افتح الرسائل',
   },
   en: {
     title: 'My properties', subtitle: 'Manage your real-estate listings, their status, and inquiries.',
     loading: 'Loading…', signIn: 'Sign in as a seller to see your properties.',
     empty: 'No properties yet.', addListing: 'Add a listing',
     inquiries: 'inquiries', viewPage: 'View page', edit: 'Edit / resubmit',
-    buy: 'For sale', rent: 'Rental', back: 'Home',
+    buy: 'For sale', rent: 'Rental', back: 'Home', openInbox: 'Open messages',
   },
 }
 
@@ -71,7 +72,13 @@ export function MyPropertiesPage({ lang }: Props) {
                   <div style={styles.rowTop}>
                     <span style={{ ...styles.divisionPill, ...(p.division === 'BUY' ? styles.buyPill : styles.rentPill) }}>{p.division === 'BUY' ? t.buy : t.rent}</span>
                     <span style={styles.statusPill}>{statusText(p.status, lang)}</span>
-                    {p.inquiryCount > 0 ? <span style={styles.inquiryPill}>💬 {p.inquiryCount} {t.inquiries}</span> : null}
+                    {p.inquiryCount > 0 ? (
+                      <button
+                        style={styles.inquiryPill}
+                        title={t.openInbox}
+                        onClick={() => { sessionStorage.setItem(SYNITRES_INQUIRY_FOCUS_LISTING_KEY, p.id); go('/host/inquiries') }}
+                      >💬 {p.inquiryCount} {t.inquiries}</button>
+                    ) : null}
                   </div>
                   <strong style={styles.name}>{listingTitleText(p, lang)}</strong>
                   <span style={styles.meta} dir="ltr">
@@ -109,7 +116,7 @@ const styles: Record<string, CSSProperties> = {
   buyPill: { background: withAlpha(colors.green, 0.15), color: colors.green },
   rentPill: { background: withAlpha(colors.blue, 0.15), color: '#8fb0ff' },
   statusPill: { fontSize: 11, fontWeight: 800, color: colors.muted, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '2px 10px' },
-  inquiryPill: { fontSize: 11, fontWeight: 800, color: '#f7c05b', border: `1px solid ${withAlpha('#f7c05b', 0.4)}`, borderRadius: 999, padding: '2px 10px' },
+  inquiryPill: { fontSize: 11, fontWeight: 800, color: '#f7c05b', background: 'transparent', border: `1px solid ${withAlpha('#f7c05b', 0.4)}`, borderRadius: 999, padding: '3px 10px', cursor: 'pointer' },
   name: { fontSize: 16, color: colors.ink },
   meta: { color: colors.muted, fontSize: 13 },
   rowActions: { display: 'flex', gap: 8, alignItems: 'center' },

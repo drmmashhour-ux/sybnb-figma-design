@@ -9,6 +9,7 @@ import {
   type PlatformHostInquiryThread,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { SYNITRES_INQUIRY_FOCUS_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 
 type Props = {
   lang: Lang
@@ -71,7 +72,14 @@ export function HostInquiriesPage({ lang, mode = 'host' }: Props) {
     try {
       const result = await fetchHostInquiries(mode)
       setThreads(result)
-      if (!preserveSelection && result.length) setActiveThreadId(result[0].id)
+      if (!preserveSelection && result.length) {
+        // Deep-link from Synitres "My properties": open on the property whose inquiry count was clicked.
+        // One-shot — consumed on arrival, then this is a normal "first thread" selection.
+        const focusListingId = typeof window !== 'undefined' ? sessionStorage.getItem(SYNITRES_INQUIRY_FOCUS_LISTING_KEY) : null
+        if (focusListingId) sessionStorage.removeItem(SYNITRES_INQUIRY_FOCUS_LISTING_KEY)
+        const focused = focusListingId ? result.find((thread) => thread.listingId === focusListingId) : null
+        setActiveThreadId((focused || result[0]).id)
+      }
       setStatus('ready')
     } catch (error) {
       setStatus('error')

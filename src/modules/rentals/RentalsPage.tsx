@@ -11,7 +11,8 @@ import { PaymentCapsule } from '../payments/PaymentCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from '../realestate/MortgageCalculator'
-import { realEstateAttrs, valuationTone, SYNITRES_PRESELECT_LISTING_KEY } from '../realestate/propertyAttrs'
+import { realEstateAttrs, valuationTone } from '../realestate/propertyAttrs'
+import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 
 type Props = {
   lang: Lang

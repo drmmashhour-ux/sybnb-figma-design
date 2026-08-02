@@ -3,11 +3,6 @@ import type { PlatformListing } from '../../shared/api/platformApi'
 // Shared Synitres property helpers, used by the buy/rent browse page AND the standalone /property/:id
 // page so both read a listing's metadata identically.
 
-// Deep-link handoff: the standalone /property/:id page writes the listing id here before routing the
-// buyer into the /buy or /rentals IMMOContact flow, so RentalsPage opens with that exact property
-// preselected instead of a blank search. One-shot — RentalsPage clears it on arrival.
-export const SYNITRES_PRESELECT_LISTING_KEY = 'sybnb.v6.synitresPreselectListing'
-
 export type RealEstateAttrs = {
   bedrooms?: number
   bathrooms?: number

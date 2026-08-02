@@ -7,7 +7,8 @@ import { colors, withAlpha } from '../../shared/theme/tokens'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from './MortgageCalculator'
-import { realEstateAttrs, valuationTone, SYNITRES_PRESELECT_LISTING_KEY } from './propertyAttrs'
+import { realEstateAttrs, valuationTone } from './propertyAttrs'
+import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 
 type Props = { listingId: string; lang: Lang }
 
