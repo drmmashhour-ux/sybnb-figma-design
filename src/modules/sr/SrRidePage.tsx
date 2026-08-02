@@ -8,6 +8,7 @@ import {
   fetchPrototypeSrRide,
   fetchPrototypeWallet,
   fetchSrQuote,
+  fetchSrRideDriver,
   fetchSrRideHistory,
   fetchSrRideLocation,
   fetchSrRoute,
@@ -19,6 +20,7 @@ import {
   type PlatformRideRequest,
   type PlatformSrQuote,
   type PlatformSrRoute,
+  type SrRideDriverCard,
 } from '../../shared/api/platformApi'
 import { SrTripMap } from './SrTripMap'
 import { moneyText, statusText } from '../../shared/i18n/display'
@@ -69,6 +71,7 @@ const copy = {
     shareCopied: 'تم نسخ رابط المشاركة.',
     stopShare: 'إيقاف المشاركة',
     shareStopped: 'تم إيقاف مشاركة الرحلة.',
+    newDriver: 'سائق جديد',
     rateRide: 'قيّم رحلتك',
     rateThanks: 'شكراً لتقييمك.',
     tip: 'إكرامية',
@@ -120,6 +123,7 @@ const copy = {
     shareCopied: 'Share link copied.',
     stopShare: 'Stop sharing',
     shareStopped: 'Trip sharing stopped.',
+    newDriver: 'New driver',
     rateRide: 'Rate your ride',
     rateThanks: 'Thanks for your rating.',
     tip: 'Tip',
@@ -161,6 +165,7 @@ export function SrRidePage({ lang }: Props) {
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
   const [route, setRoute] = useState<PlatformSrRoute | null>(null)
   const [driverLoc, setDriverLoc] = useState<{ lat: number; lng: number } | null>(null)
+  const [driverCard, setDriverCard] = useState<SrRideDriverCard | null>(null)
   const [history, setHistory] = useState<PlatformRideRequest[]>([])
   const [balanceMinor, setBalanceMinor] = useState<number | null>(null)
   const [actionMsg, setActionMsg] = useState('')
@@ -271,6 +276,15 @@ export function SrRidePage({ lang }: Props) {
     const interval = window.setInterval(poll, 5000)
     return () => window.clearInterval(interval)
   }, [ride?.id, ride?.status, ride?.driverId])
+
+  // The PII-safe driver card (who's coming + which car + rating) — fetched once a driver is assigned.
+  useEffect(() => {
+    if (!ride?.driverId) {
+      setDriverCard(null)
+      return
+    }
+    fetchSrRideDriver(ride.id).then(setDriverCard).catch(() => setDriverCard(null))
+  }, [ride?.id, ride?.driverId])
 
   async function useCurrentLocation() {
     setMessage('')
@@ -546,7 +560,7 @@ export function SrRidePage({ lang }: Props) {
           <h2 style={styles.cardTitle}>{t.status}</h2>
           <Info label={t.rideId} value={ride ? ride.id.slice(0, 8).toUpperCase() : '-'} />
           <Info label={t.status} value={statusText(ride?.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.driver} value={ride?.driverId ? ride.driverId.slice(0, 8).toUpperCase() : '-'} />
+          <Info label={t.driver} value={driverCard?.firstName || (ride?.driverId ? t.driver : '-')} />
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
@@ -556,6 +570,25 @@ export function SrRidePage({ lang }: Props) {
           )}
           {ride?.driverId && (
             <div style={styles.message}>{t.driverAssigned}</div>
+          )}
+          {/* Rider#8: PII-safe driver card — who's coming, which car, and their rating (no contact PII). */}
+          {ride?.driverId && driverCard && (
+            <div style={styles.driverCard}>
+              <div style={styles.driverCardTop}>
+                <span style={styles.driverName}>{driverCard.firstName || t.driver}</span>
+                {driverCard.rating.average != null ? (
+                  <span style={styles.driverRating} dir="ltr">★ {driverCard.rating.average} · {driverCard.rating.count}</span>
+                ) : (
+                  <span style={styles.driverRatingMuted}>{t.newDriver}</span>
+                )}
+              </div>
+              {driverCard.vehicle ? (
+                <div style={styles.driverVehicle} dir="ltr">
+                  <span>{[driverCard.vehicle.color, driverCard.vehicle.make, driverCard.vehicle.model, driverCard.vehicle.year].filter(Boolean).join(' ')}</span>
+                  <strong style={styles.driverPlate}>{driverCard.vehicle.plate}</strong>
+                </div>
+              ) : null}
+            </div>
           )}
           {ride?.pickupPin && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && (
             <div style={styles.pickupCode}>
@@ -704,6 +737,13 @@ const styles: Record<string, CSSProperties> = {
   sosBtn: { flex: 1, minHeight: 44, border: 0, borderRadius: 10, background: '#dc2626', color: '#fff', fontWeight: 900, cursor: 'pointer' },
   shareBtn: { flex: 1, minHeight: 44, border: '1px solid #2a3b4d', borderRadius: 10, background: 'transparent', color: '#e6ebf4', fontWeight: 800, cursor: 'pointer' },
   cancelBtn: { flex: 1, minHeight: 44, border: '1px solid #3a2530', borderRadius: 10, background: 'transparent', color: '#f08a8a', fontWeight: 800, cursor: 'pointer' },
+  driverCard: { marginTop: 10, border: '1px solid #263651', borderRadius: 12, background: '#0d1522', padding: 12, display: 'grid', gap: 8 },
+  driverCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  driverName: { fontWeight: 900, fontSize: 16, color: '#e6ebf4' },
+  driverRating: { color: '#f7c05b', fontWeight: 800, fontSize: 13 },
+  driverRatingMuted: { color: '#9aa6ba', fontWeight: 700, fontSize: 12 },
+  driverVehicle: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, color: '#9aa6ba', fontSize: 13 },
+  driverPlate: { color: '#e6ebf4', fontWeight: 900, letterSpacing: 1, border: '1px solid #35507d', borderRadius: 6, padding: '2px 8px', background: '#0d1826' },
   shareBox: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   shareLink: { color: '#19d7ff', fontSize: 12, margin: 0, wordBreak: 'break-all', flex: 1, minWidth: 180 },
   stopShareBtn: { minHeight: 36, border: '1px solid #3a2530', borderRadius: 8, background: 'transparent', color: '#f08a8a', fontWeight: 800, padding: '0 12px', cursor: 'pointer', whiteSpace: 'nowrap' },

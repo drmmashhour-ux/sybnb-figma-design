@@ -265,6 +265,37 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
     expect(res.status).toBe(403)
   })
 
+  it('the rider gets a PII-safe driver card once assigned — first name, car, rating; NO contact PII', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'driver-card')
+    await db().user.update({ where: { id: driver.user.id }, data: { displayName: 'Kareem Al-Halabi' } })
+    await db().driverVehicle.create({
+      data: { driverId: driver.user.id, make: 'Toyota', model: 'Corolla', year: 2019, plate: 'DAM-4412', color: 'Silver', category: 'SR Economy', status: 'APPROVED' },
+    })
+    await claim(app, driver.token, ride.id)
+
+    const res = await request(app).get(`/api/sr/rides/${ride.id}/driver`).set('Authorization', `Bearer ${rider.token}`)
+    expect(res.status).toBe(200)
+    expect(res.body.driver.firstName).toBe('Kareem') // first name only, never the full legal identity
+    expect(res.body.driver.vehicle.plate).toBe('DAM-4412')
+    expect(res.body.driver.vehicle.make).toBe('Toyota')
+    expect(res.body.driver.rating).toHaveProperty('average')
+    // no contact PII anywhere in the payload
+    const blob = JSON.stringify(res.body)
+    expect(blob).not.toContain('@')
+    expect(blob).not.toMatch(/email|phone|Al-Halabi|driverId|"id"/)
+  })
+
+  it('the driver card is null before a driver is assigned, and a non-party is 403', async () => {
+    const { rider, ride } = await setupRide(app, 'driver-card-unassigned')
+    const unassigned = await request(app).get(`/api/sr/rides/${ride.id}/driver`).set('Authorization', `Bearer ${rider.token}`)
+    expect(unassigned.status).toBe(200)
+    expect(unassigned.body.driver).toBeNull()
+
+    const stranger = await registerUser(app, 'GUEST', 'driver-card-stranger')
+    const forbidden = await request(app).get(`/api/sr/rides/${ride.id}/driver`).set('Authorization', `Bearer ${stranger.token}`)
+    expect(forbidden.status).toBe(403)
+  })
+
   it('a share link past its TTL stops resolving (410 SHARE_EXPIRED)', async () => {
     const { rider, driver, ride } = await setupRide(app, 'share-ttl')
     await claim(app, driver.token, ride.id)

@@ -2635,6 +2635,23 @@ export async function fetchSrRideLocation(rideId: string) {
   return response
 }
 
+export type SrRideDriverCard = {
+  firstName: string | null
+  rating: { average: number | null; count: number }
+  vehicle: { make: string; model: string; year: number; plate: string; color: string | null } | null
+}
+
+// A PII-safe view of the assigned driver for the rider: first name, car, and reputation — never the
+// driver's email/phone. Returns null while the ride is still unassigned.
+export async function fetchSrRideDriver(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; driver: SrRideDriverCard | null }>(
+    `/api/sr/rides/${rideId}/driver`,
+    { token: session.token },
+  )
+  return response.driver
+}
+
 export async function createPrototypeSrRide(input: {
   pickup: string
   dropoff: string

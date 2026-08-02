@@ -284,6 +284,43 @@ export async function handleSrRides(req, res, url, context) {
     return json(res, 200, { ok: true, ride: safeRide })
   }
 
+  // Rider#8 — a PII-SAFE driver card the rider (or ride party) can show once a driver is assigned: who is
+  // coming and in what car, with a reputation number — deliberately WITHOUT the driver's email/phone or
+  // any other contact PII (the rider reaches the driver only through masked in-ride messaging / SOS).
+  const rideDriverMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/driver$/)
+  if (rideDriverMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    const ride = loadRideOrThrow(await db().rideRequest.findUnique({ where: { id: rideDriverMatch[1] } }))
+    const isParty = context.roles.includes('ADMIN') || context.roles.includes('SUPPORT') || ride.riderId === context.user.id || ride.driverId === context.user.id
+    if (!isParty) forbidRide()
+    if (!ride.driverId) return json(res, 200, { ok: true, driver: null })
+
+    const driver = await db().user.findUnique({ where: { id: ride.driverId }, select: { displayName: true } })
+    // Prefer the approved vehicle matching the ride's category, else any approved vehicle.
+    const category = typeof ride.metadata?.category === 'string' ? ride.metadata.category : null
+    const vehicles = await db().driverVehicle.findMany({
+      where: { driverId: ride.driverId, status: 'APPROVED' },
+      select: { make: true, model: true, year: true, plate: true, color: true, category: true },
+      orderBy: { updatedAt: 'desc' },
+    })
+    const vehicle = vehicles.find((v) => category && v.category === category) || vehicles[0] || null
+    const rating = await rideRatingSummary(ride.driverId)
+    // First name only — enough for the rider to greet the driver without exposing a full legal identity.
+    const firstName = (driver?.displayName || '').trim().split(/\s+/)[0] || null
+
+    return json(res, 200, {
+      ok: true,
+      driver: {
+        firstName,
+        rating,
+        vehicle: vehicle
+          ? { make: vehicle.make, model: vehicle.model, year: vehicle.year, plate: vehicle.plate, color: vehicle.color || null }
+          : null,
+      },
+    })
+  }
+
   const assignMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/assign-driver$/)
   if (assignMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
