@@ -101,9 +101,9 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
       </section>
 
       <section style={styles.cards}>
+        {/* Synitres = real estate only. The goods/services marketplace is a SEPARATE platform (RezekMe). */}
         <Card icon="🏢" title={t.buyTitle} desc={t.buyDesc} cta={t.tabBuy} onClick={() => go('/buy')} accent="#2DD4BF" />
         <Card icon="🔑" title={t.rentTitle} desc={t.rentDesc} cta={t.tabRent} onClick={() => go('/rentals')} accent="#38bdf8" />
-        <Card icon="🛍️" title={t.marketTitle} desc={t.marketDesc} cta={t.marketCta} onClick={() => go('/marketplace')} accent="#a78bfa" />
         <Card icon="➕" title={t.sellTitle} desc={t.sellDesc} cta={t.sellCta} onClick={() => go('/sell')} accent="#D4AF6A" />
       </section>
     </main>

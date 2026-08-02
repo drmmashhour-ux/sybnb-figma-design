@@ -23,6 +23,10 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   // (My Trips / Wallet / Settings / Book now) are for clients and don't belong here, so they're
   // hidden on host pages. The brand logo + language toggle stay.
   const isHostArea = path.startsWith('/host') || path === '/become-host'
+  // Synitres (synitres.com) browse routes: the same shared shell, but wearing the Synitres brand instead
+  // of SYBNB so the sale/buy/rent + marketplace platform reads as its own product (the /sell tunnel and
+  // the /synitres landing already carry Synitres branding of their own).
+  const isSynitresBrowse = path === '/buy' || path === '/rentals' || path === '/marketplace'
   // A direct/shared link into /listing/:id has no return-path in sessionStorage yet -- the listing
   // page writes the correct one once its fetch resolves and fires this event so the breadcrumb
   // (otherwise computed once at mount, before that write lands) picks it up without a full reload.
@@ -91,8 +95,18 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
       </a>
       {!isAdvertisingTunnel && !isAdminControlRoom && (
         <header className="top-nav">
-          <button className="brand-lockup" onClick={() => navigate('/')} aria-label="SYBNB home">
-            <BrandLogo logo="platform" size="nav" className="top-nav-logo" />
+          <button
+            className="brand-lockup"
+            onClick={() => navigate(isSynitresBrowse ? '/synitres' : '/')}
+            aria-label={isSynitresBrowse ? 'Synitres home' : 'SYBNB home'}
+          >
+            {isSynitresBrowse ? (
+              <span style={{ fontWeight: 900, fontSize: 20, letterSpacing: '.02em', color: '#2DD4BF' }}>
+                Syn<span style={{ color: '#D4AF6A' }}>itres</span>
+              </span>
+            ) : (
+              <BrandLogo logo="platform" size="nav" className="top-nav-logo" />
+            )}
           </button>
 
           <nav className="nav-actions" aria-label={isAr ? 'إجراءات الحساب' : 'Account actions'}>
