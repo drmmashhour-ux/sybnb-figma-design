@@ -20,13 +20,14 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Added localized fail-safe handling for provider timeouts, rate limits, outages, malformed/unsafe output, and audit-write failures. Upstream error text is never returned or logged; only fixed failure categories are audited.
 - Restricted human-support handoffs to six fixed server-approved reason codes. Free-form model text containing personal or payment data fails validation before database or audit access.
 - Enforced least-privilege browser authentication: all guest-site assistant requests use only the isolated guest session, never a simultaneously stored admin, host, or seller token.
+- Added client-side staging defense in depth: the widget requires both its enablement flag and an explicit `VITE_SYBNB_DEPLOY_ENV=staging` marker, while the existing server staging gate remains authoritative.
 
 ## Verification
 
 - TypeScript and production build: passed.
 - Production-style Vite build: passed.
 - Prisma schema validation: passed.
-- Full unit regression: 11 files, 109 tests passed, including malicious-model fabricated-price/availability, privacy-safe handoff validation, unapproved-tool denial during audit outages, provider-failure leakage prevention, last-moment material-change, and bounded-retention coverage.
+- Full unit regression: 11 files, 110 tests passed, including server/client staging gates, malicious-model fabricated-price/availability, privacy-safe handoff validation, unapproved-tool denial during audit outages, provider-failure leakage prevention, last-moment material-change, and bounded-retention coverage.
 - Current full API regression: 83 files, 512 tests passed in one clean isolated-database run after all assistant hardening checkpoints.
 - Full security regression: 3 files, 19 tests passed.
 - Final assistant database/API suite: 12 passed, covering authentication, request validation, localized provider failure, fixed-code support handoff, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, retention cleanup, verified pricing, and independent request/action rate limits.

@@ -33,7 +33,7 @@ export default defineConfig({
       command: `npx vite --host 127.0.0.1 --port ${FRONTEND_PORT}`,
       port: FRONTEND_PORT,
       reuseExistingServer: false,
-      env: { VITE_API_BASE_URL: `http://127.0.0.1:${API_PORT}`, VITE_AI_BOOKING_ASSISTANT_ENABLED: '1' },
+      env: { VITE_API_BASE_URL: `http://127.0.0.1:${API_PORT}`, VITE_AI_BOOKING_ASSISTANT_ENABLED: '1', VITE_SYBNB_DEPLOY_ENV: 'staging' },
       timeout: 30_000,
     },
   ],

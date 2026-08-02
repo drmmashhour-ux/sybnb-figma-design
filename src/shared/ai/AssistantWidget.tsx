@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { askAssistant, confirmAssistantBookingDraft, proposeAssistantBookingDraft, type AssistantActionPayload, type AssistantActionProposal, type AssistantDraft, type AssistantListingCard } from '../api/platformApi'
+import { assistantClientEnabled } from './assistantClientConfig'
 
 type Locale = 'ar' | 'en' | 'fr'
 type Msg = { role: 'user' | 'assistant'; text: string; listings?: AssistantListingCard[]; draft?: AssistantDraft | null }
@@ -12,7 +13,7 @@ const copy = {
 }
 
 export function AssistantWidget({ lang }: { lang: 'ar' | 'en' }) {
-  if (import.meta.env.VITE_AI_BOOKING_ASSISTANT_ENABLED !== '1') return null
+  if (!assistantClientEnabled(import.meta.env)) return null
   return <EnabledAssistant initialLocale={lang} />
 }
 
