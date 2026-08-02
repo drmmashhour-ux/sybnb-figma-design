@@ -11,6 +11,7 @@ import { getCurrentPath } from './routes'
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AdminControlCenterPage = lazyNamed(() => import('../modules/admin/AdminControlCenterPage'), 'AdminControlCenterPage')
 const AdminOfficeDashboardPage = lazyNamed(() => import('../modules/admin/AdminOfficeDashboardPage'), 'AdminOfficeDashboardPage')
+const AdminSrDispatchPage = lazyNamed(() => import('../modules/admin/AdminSrDispatchPage'), 'AdminSrDispatchPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
 const BookingReviewPage = lazyNamed(() => import('../modules/bookings/BookingReviewPage'), 'BookingReviewPage')
@@ -157,6 +158,8 @@ export function App() {
           <AdminReviewPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/admin/office' ? (
           <AdminOfficeDashboardPage lang={lang} />
+        ) : path === '/admin/sr-dispatch' ? (
+          <AdminSrDispatchPage lang={lang} />
         ) : path === '/ai-brain' ? (
           <AiBrainPage lang={lang} />
         ) : path === '/competitors' ? (

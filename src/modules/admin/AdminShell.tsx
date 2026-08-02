@@ -4,7 +4,7 @@ import { navigate } from '../../app/routes'
 import { getStoredStaffSession } from '../../shared/api/platformApi'
 import './admin-console.css'
 
-export type AdminNavKey = 'guests' | 'hosts' | 'accounting' | 'management' | 'hr' | 'operations' | 'reports' | 'office'
+export type AdminNavKey = 'guests' | 'hosts' | 'accounting' | 'management' | 'hr' | 'operations' | 'reports' | 'office' | 'srDispatch'
 
 type NavItem = { key: AdminNavKey; hash: string; icon: string; ar: string; en: string }
 
@@ -20,6 +20,7 @@ const OPS_NAV: NavItem[] = [
   { key: 'operations', hash: '/admin/review', icon: '⌘', ar: 'العمليات', en: 'Operations' },
   { key: 'reports', hash: '/admin/reports', icon: '▤', ar: 'التقارير والنزاعات', en: 'Reports & disputes' },
   { key: 'office', hash: '/admin/office', icon: '▦', ar: 'لوحة المكتب', en: 'Office dashboard' },
+  { key: 'srDispatch', hash: '/admin/sr-dispatch', icon: '⊕', ar: 'عمليات SR', en: 'SR operations' },
 ]
 
 const CHROME = {

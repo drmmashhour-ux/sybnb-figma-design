@@ -2242,6 +2242,33 @@ export async function fetchOfficeDashboard() {
   )
 }
 
+export type SrDispatchRide = {
+  id: string
+  status: string
+  requestedAt: string
+  pickup: { lat: number; lng: number }
+  riderName: string | null
+  driverName: string | null
+}
+export type SrDispatchDriver = {
+  driverId: string
+  driverName: string | null
+  location: { lat: number; lng: number }
+  lastLocationAt: string
+  busy: boolean
+}
+export type SrDispatchBoard = {
+  generatedAt: string
+  counts: { activeRides: number; waitingRides: number; onlineDrivers: number; busyDrivers: number }
+  rides: SrDispatchRide[]
+  drivers: SrDispatchDriver[]
+}
+
+// SR live-ops dispatch board — active rides + online drivers with coordinates, for the admin map.
+export async function fetchSrDispatch() {
+  return runAdminRequest((token) => apiRequest<{ ok: true } & SrDispatchBoard>('/api/admin/sr/dispatch', { token }))
+}
+
 export type PlatformRevenueByCurrency = {
   currency: string
   totalRevenueMinor: number
