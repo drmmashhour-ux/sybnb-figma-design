@@ -27,13 +27,13 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Production-style Vite build: passed.
 - Prisma schema validation: passed.
 - Full unit regression: 11 files, 109 tests passed, including malicious-model fabricated-price/availability, privacy-safe handoff validation, unapproved-tool denial during audit outages, provider-failure leakage prevention, last-moment material-change, and bounded-retention coverage.
-- Full API regression: 83 files, 507 tests passed in one clean run before the final independent action-rate-limit case was added.
+- Current full API regression: 83 files, 512 tests passed in one clean isolated-database run after all assistant hardening checkpoints.
 - Full security regression: 3 files, 19 tests passed.
 - Final assistant database/API suite: 12 passed, covering authentication, request validation, localized provider failure, fixed-code support handoff, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, retention cleanup, verified pricing, and independent request/action rate limits.
 - Assistant browser coverage: 6 passed across Chromium and WebKit, covering RTL/French switching, 320px mobile fit, the separate propose/confirm draft flow, and proof that a coexisting privileged staff token is never sent to assistant endpoints.
 - The least-privilege client delta passed TypeScript, the full production build (including public assets), and all 6 assistant browser checks.
 - Full browser regression: 40 passed, 2 expected WebKit keyboard skips, and 2 unrelated pre-existing landing-heading assertions failed because the current page heading changed from `منصة سوريا الكاملة` to `تشعر أنك في المكان الصحيح`. Both assistant browser tests passed in both engines.
-- Built-client scan found no `OPENAI_API_KEY` or test provider secret strings.
+- Current built-client scan found no `OPENAI_API_KEY`, placeholder/test provider secrets, privileged staff-token fixture, or payment-number fixture strings.
 
 ## Accessibility and mobile validation
 
