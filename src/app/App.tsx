@@ -38,6 +38,7 @@ const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesP
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
 const SrLandingPage = lazyNamed(() => import('../modules/sr/SrLandingPage'), 'SrLandingPage')
+const RealEstateLandingPage = lazyNamed(() => import('../modules/realestate/RealEstateLandingPage'), 'RealEstateLandingPage')
 const LegalPlaceholderPage = lazyNamed(() => import('../modules/legal/LegalPlaceholderPage'), 'LegalPlaceholderPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
 const CarBrowsePage = lazyNamed(() => import('../modules/cars/CarBrowsePage'), 'CarBrowsePage')
@@ -182,6 +183,8 @@ export function App() {
           <ListingDetailPage listingId={listingMatch[1]} lang={lang} />
         ) : path === '/sr' || path === '/rides-home' ? (
           <SrLandingPage lang={lang} onLanguageChange={setLang} />
+        ) : path === '/homes' || path === '/realestate' ? (
+          <RealEstateLandingPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/ride' || path === '/ride-preview' ? (
           <SrRidePage lang={lang} />
         ) : isSellerRoute(path) ? (
@@ -221,7 +224,7 @@ export function App() {
 
   // SR (Syria Rides) is its OWN platform surface — render its standalone entry full-bleed, WITHOUT the
   // STR app chrome (AppShell), so it reads as an independent product per the isolation directive.
-  const chromeless = path === '/sr' || path === '/rides-home'
+  const chromeless = path === '/sr' || path === '/rides-home' || path === '/homes' || path === '/realestate'
   if (chromeless) return routed
 
   return (
