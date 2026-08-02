@@ -14,6 +14,7 @@ import {
   raiseSrSos,
   rateSrRide,
   shareSrRide,
+  revokeSrShare,
   tipSrRide,
   type PlatformRideRequest,
   type PlatformSrQuote,
@@ -66,6 +67,8 @@ const copy = {
     cancelRide: 'إلغاء الرحلة',
     sosRaised: 'تم إرسال تنبيه الطوارئ — فريق SYBNB يتابع.',
     shareCopied: 'تم نسخ رابط المشاركة.',
+    stopShare: 'إيقاف المشاركة',
+    shareStopped: 'تم إيقاف مشاركة الرحلة.',
     rateRide: 'قيّم رحلتك',
     rateThanks: 'شكراً لتقييمك.',
     tip: 'إكرامية',
@@ -115,6 +118,8 @@ const copy = {
     cancelRide: 'Cancel ride',
     sosRaised: 'Emergency alert sent — the SYBNB team is on it.',
     shareCopied: 'Share link copied.',
+    stopShare: 'Stop sharing',
+    shareStopped: 'Trip sharing stopped.',
     rateRide: 'Rate your ride',
     rateThanks: 'Thanks for your rating.',
     tip: 'Tip',
@@ -332,6 +337,17 @@ export function SrRidePage({ lang }: Props) {
       const coords = await getBrowserLocation()
       await raiseSrSos(ride.id, coords || undefined)
       setActionMsg(t.sosRaised)
+    } catch (error) {
+      setActionMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
+  async function doStopShare() {
+    if (!ride) return
+    setActionMsg('')
+    try {
+      await revokeSrShare(ride.id)
+      setShareLink('')
+      setActionMsg(t.shareStopped)
     } catch (error) {
       setActionMsg(error instanceof Error ? error.message : t.error)
     }
@@ -569,9 +585,12 @@ export function SrRidePage({ lang }: Props) {
             </div>
           )}
           {shareLink ? (
-            <p style={styles.shareLink} dir="ltr">
-              {shareLink}
-            </p>
+            <div style={styles.shareBox}>
+              <p style={styles.shareLink} dir="ltr">
+                {shareLink}
+              </p>
+              <button style={styles.stopShareBtn} onClick={() => void doStopShare()}>{t.stopShare}</button>
+            </div>
           ) : null}
 
           {ride?.status === 'COMPLETED' && !rated && (
@@ -685,7 +704,9 @@ const styles: Record<string, CSSProperties> = {
   sosBtn: { flex: 1, minHeight: 44, border: 0, borderRadius: 10, background: '#dc2626', color: '#fff', fontWeight: 900, cursor: 'pointer' },
   shareBtn: { flex: 1, minHeight: 44, border: '1px solid #2a3b4d', borderRadius: 10, background: 'transparent', color: '#e6ebf4', fontWeight: 800, cursor: 'pointer' },
   cancelBtn: { flex: 1, minHeight: 44, border: '1px solid #3a2530', borderRadius: 10, background: 'transparent', color: '#f08a8a', fontWeight: 800, cursor: 'pointer' },
-  shareLink: { color: '#19d7ff', fontSize: 12, margin: '8px 0 0', wordBreak: 'break-all' },
+  shareBox: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  shareLink: { color: '#19d7ff', fontSize: 12, margin: 0, wordBreak: 'break-all', flex: 1, minWidth: 180 },
+  stopShareBtn: { minHeight: 36, border: '1px solid #3a2530', borderRadius: 8, background: 'transparent', color: '#f08a8a', fontWeight: 800, padding: '0 12px', cursor: 'pointer', whiteSpace: 'nowrap' },
   rateBox: { marginTop: 12, border: '1px solid #263651', borderRadius: 10, padding: 12, display: 'grid', gap: 8, color: '#9aa6ba' },
   starsRow: { display: 'flex', gap: 4 },
   starBtn: { background: 'transparent', border: 0, color: '#f7c05b', fontSize: 26, cursor: 'pointer', padding: '0 2px' },

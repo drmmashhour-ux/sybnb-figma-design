@@ -242,4 +242,42 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
     const res = await request(app).get('/api/sr/rides/shared/not-a-real-token')
     expect(res.status).toBe(404)
   })
+
+  it('the rider can revoke a share link — the token stops resolving (404)', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'share-revoke')
+    await claim(app, driver.token, ride.id)
+    const share = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    const token = share.body.share.token
+    expect((await request(app).get(`/api/sr/rides/shared/${token}`)).status).toBe(200)
+
+    const revoke = await request(app).delete(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    expect(revoke.status).toBe(200)
+    expect(revoke.body.revoked).toBe(true)
+    // the old link no longer resolves
+    expect((await request(app).get(`/api/sr/rides/shared/${token}`)).status).toBe(404)
+  })
+
+  it('a non-rider cannot revoke a share link (403)', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'share-revoke-forbidden')
+    await claim(app, driver.token, ride.id)
+    await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    const res = await request(app).delete(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${driver.token}`)
+    expect(res.status).toBe(403)
+  })
+
+  it('a share link past its TTL stops resolving (410 SHARE_EXPIRED)', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'share-ttl')
+    await claim(app, driver.token, ride.id)
+    const share = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    const token = share.body.share.token
+    // Age the token past the 12h TTL.
+    await db().rideRequest.update({ where: { id: ride.id }, data: { shareTokenCreatedAt: new Date(Date.now() - 13 * 3600_000) } })
+    const watch = await request(app).get(`/api/sr/rides/shared/${token}`)
+    expect(watch.status).toBe(410)
+    expect(watch.body.error.code).toBe('SHARE_EXPIRED')
+    // Re-sharing mints a fresh, working token.
+    const reshare = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    expect(reshare.body.share.token).not.toBe(token)
+    expect((await request(app).get(`/api/sr/rides/shared/${reshare.body.share.token}`)).status).toBe(200)
+  })
 })

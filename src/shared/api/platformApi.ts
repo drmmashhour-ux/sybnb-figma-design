@@ -2684,13 +2684,20 @@ export async function raiseSrSos(rideId: string, coords?: { lat: number; lng: nu
 }
 
 // Share the live trip — returns a token + a public tracking path a rider can send to a trusted contact.
+// The link stops leaking live location once the ride ends and expires after `expiresInHours`.
 export async function shareSrRide(rideId: string) {
   const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; share: { token: string; path: string; apiPath: string } }>(
+  const response = await apiRequest<{ ok: true; share: { token: string; path: string; apiPath: string; expiresInHours?: number } }>(
     `/api/sr/rides/${rideId}/share`,
     { method: 'POST', token: session.token },
   )
   return response.share
+}
+
+// Revoke a previously-shared trip link — every outstanding copy stops resolving immediately.
+export async function revokeSrShare(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true; revoked: true }>(`/api/sr/rides/${rideId}/share`, { method: 'DELETE', token: session.token })
 }
 
 export async function rateSrRide(rideId: string, stars: number, comment?: string) {

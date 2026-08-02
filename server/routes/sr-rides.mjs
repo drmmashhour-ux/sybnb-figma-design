@@ -16,6 +16,10 @@ const SR_TRACKABLE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRES
 const RIDE_MESSAGING_ACTIVE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const SR_AVG_SPEED_KMH = 30
 const MAX_PIN_ATTEMPTS = 5
+// A trip-share link is a bearer token for a stranger (a friend/family member the rider chose to share
+// with). It stops leaking live location the moment the ride leaves a trackable state, and it also
+// expires on its own so a link that escapes can't be polled indefinitely.
+const SR_SHARE_TTL_HOURS = Number(process.env.SR_SHARE_TTL_HOURS || 12)
 
 async function ensureDriverHasNoActiveRide(driverId, client = db()) {
   const activeRide = await client.rideRequest.findFirst({
@@ -647,17 +651,29 @@ export async function handleSrRides(req, res, url, context) {
   // ---- SR SAFETY (014): trip share ----
   const shareMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/share$/)
   if (shareMatch) {
-    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    requireAuth(context)
     const rideId = shareMatch[1]
+    // The rider can revoke a share link at any time — the token is cleared and every outstanding copy
+    // of the link stops resolving immediately.
+    if (req.method === 'DELETE') {
+      requireAuth(context)
+      const ride = loadRideOrThrow(await db().rideRequest.findUnique({ where: { id: rideId } }))
+      if (ride.riderId !== context.user.id) forbidRide()
+      await db().rideRequest.update({ where: { id: rideId }, data: { shareToken: null, shareTokenCreatedAt: null } })
+      return json(res, 200, { ok: true, revoked: true })
+    }
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST', 'DELETE'])
+    requireAuth(context)
     const ride = loadRideOrThrow(await db().rideRequest.findUnique({ where: { id: rideId } }))
     if (ride.riderId !== context.user.id) forbidRide()
     let token = ride.shareToken
-    if (!token) {
+    // Re-mint if there is no token yet, or the existing one has aged past its TTL — so re-sharing an
+    // old ride hands out a fresh link rather than resurrecting an expired one.
+    const expired = ride.shareTokenCreatedAt && Date.now() - new Date(ride.shareTokenCreatedAt).getTime() > SR_SHARE_TTL_HOURS * 3600_000
+    if (!token || expired) {
       token = crypto.randomBytes(24).toString('base64url')
       await db().rideRequest.update({ where: { id: rideId }, data: { shareToken: token, shareTokenCreatedAt: new Date() } })
     }
-    return json(res, 201, { ok: true, share: { token, path: `/sr/track/${token}`, apiPath: `/api/sr/rides/shared/${token}` } })
+    return json(res, 201, { ok: true, share: { token, path: `/sr/track/${token}`, apiPath: `/api/sr/rides/shared/${token}`, expiresInHours: SR_SHARE_TTL_HOURS } })
   }
 
   const sharedMatch = url.pathname.match(/^\/api\/sr\/rides\/shared\/([^/]+)$/)
@@ -665,7 +681,8 @@ export async function handleSrRides(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     const token = sharedMatch[1]
     const rows = await db().$queryRaw`
-      SELECT status, ST_Y(last_location_geo::geometry) AS lat, ST_X(last_location_geo::geometry) AS lng, last_location_at AS at,
+      SELECT status, share_token_created_at AS shared_at,
+             ST_Y(last_location_geo::geometry) AS lat, ST_X(last_location_geo::geometry) AS lng, last_location_at AS at,
              ST_Y(dropoff_geo::geometry) AS dropoff_lat, ST_X(dropoff_geo::geometry) AS dropoff_lng
       FROM ride_requests WHERE share_token = ${token} LIMIT 1
     `
@@ -674,6 +691,14 @@ export async function handleSrRides(req, res, url, context) {
       const error = new Error('This trip-share link is not valid.')
       error.statusCode = 404
       error.code = 'SHARE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // TTL: a link older than the window stops resolving even though the token row still exists.
+    if (row.shared_at && Date.now() - new Date(row.shared_at).getTime() > SR_SHARE_TTL_HOURS * 3600_000) {
+      const error = new Error('This trip-share link has expired.')
+      error.statusCode = 410
+      error.code = 'SHARE_EXPIRED'
       error.expose = true
       throw error
     }
