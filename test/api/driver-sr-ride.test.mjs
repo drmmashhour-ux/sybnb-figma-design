@@ -63,10 +63,13 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
     expect(res.status).toBe(403)
   })
 
-  it('the requested ride shows up in the driver pending queue', async () => {
+  it('the requested ride shows up in the driver pending queue (once the driver is online)', async () => {
     const ride = await requestRide(app, rider.token, 'flow-2')
+    // Presence (Phase 1): only ONLINE drivers receive the pending pool, so go online first.
+    await request(app).patch('/api/driver/availability').set('Authorization', `Bearer ${driver.token}`).send({ online: true })
     const res = await request(app).get('/api/driver/rides/pending').set('Authorization', `Bearer ${driver.token}`)
     expect(res.status).toBe(200)
+    expect(res.body.online).toBe(true)
     expect(res.body.rides.some((r) => r.id === ride.id)).toBe(true)
   })
 

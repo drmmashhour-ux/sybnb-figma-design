@@ -136,6 +136,7 @@ model DriverProfile {
   vehiclePlate             String?                   @map("vehicle_plate")
   active                   Boolean                   @default(false)
   lastLocationGeo          Unsupported("geometry")?  @map("last_location_geo")
+  lastLocationAt           DateTime?                 @map("last_location_at")
   payoutMethod             String?                   @map("payout_method")
   payoutAccountRef         String?                   @map("payout_account_ref")
   createdAt                DateTime                  @default(now()) @map("created_at")

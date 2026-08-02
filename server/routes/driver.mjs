@@ -6,6 +6,7 @@ import { deleteDriverDocument, readDriverDocument, saveDriverDocument } from '..
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { chargeCompletedRide, srRideFinanceSplit } from '../lib/sr-payments.mjs'
 import { assertVehicleEligible } from '../lib/fleet.mjs'
+import { assertSyriaCoords } from '../lib/sr-geocoding.mjs'
 
 const DRIVER_DOCUMENT_TYPES = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE']
 // SECURITY (015): the private assetUrl/storage key is NEVER returned in JSON — bytes stream only via /file.
@@ -15,24 +16,118 @@ const DRIVER_DOCUMENT_SAFE_SELECT = {
 }
 
 export async function handleDriver(req, res, url, context) {
+  // SR DRIVER PRESENCE (Phase 1): go online/offline. Only a fully-vetted (road-ready) driver may go
+  // ONLINE; going offline is always allowed. Optionally pins the driver's current location in the same
+  // call so they start receiving nearby offers immediately.
+  if (url.pathname === '/api/driver/availability') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['online', 'lat', 'lng'], 'driver availability body')
+    const online = Boolean(body.online)
+    if (online) await requireRoadReadyDriver(context)
+    const coords =
+      body.lat != null && body.lng != null
+        ? assertSyriaCoords(body.lat, body.lng, { fieldName: 'driver location' })
+        : null
+
+    // A road-ready driver normally already has a profile; upsert so the toggle is robust either way.
+    await db().driverProfile.upsert({
+      where: { userId: context.user.id },
+      create: { userId: context.user.id, active: online },
+      update: { active: online },
+    })
+    if (online && coords) {
+      await db().$executeRaw`
+        UPDATE driver_profiles
+        SET last_location_geo = ST_SetSRID(ST_MakePoint(${coords.lng}::double precision, ${coords.lat}::double precision), 4326),
+            last_location_at = now()
+        WHERE user_id::text = ${context.user.id}
+      `
+    }
+    return json(res, 200, { ok: true, online, location: coords ? { lat: coords.lat, lng: coords.lng } : null })
+  }
+
+  // Idle location broadcast while online, so dispatch/nearest-first can find the driver. Rejected when
+  // the driver is offline (you only advertise your position while available — matches Uber).
+  if (url.pathname === '/api/driver/location') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    await requireRoadReadyDriver(context)
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['lat', 'lng'], 'driver location body')
+    const { lat, lng } = assertSyriaCoords(body.lat, body.lng, { fieldName: 'driver location' })
+    const updated = await db().$executeRaw`
+      UPDATE driver_profiles
+      SET last_location_geo = ST_SetSRID(ST_MakePoint(${lng}::double precision, ${lat}::double precision), 4326),
+          last_location_at = now()
+      WHERE user_id::text = ${context.user.id} AND active = true
+    `
+    if (updated === 0) {
+      const error = new Error('Go online before broadcasting your location.')
+      error.statusCode = 409
+      error.code = 'DRIVER_OFFLINE'
+      error.expose = true
+      throw error
+    }
+    return json(res, 200, { ok: true, location: { lat, lng, at: new Date().toISOString() } })
+  }
+
   if (url.pathname === '/api/driver/rides/pending') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     await requireRoadReadyDriver(context) // SECURITY (015): only fully-vetted drivers can see the rider pool
-    const rides = await db().rideRequest.findMany({
-      where: { driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
-      include: {
-        rider: {
-          // SECURITY: never expose the rider's email to drivers (esp. the whole pending pool). Contact stays in-app.
-          select: {
-            id: true,
-            displayName: true,
-          },
-        },
-      },
-      orderBy: { requestedAt: 'asc' },
-      take: 20,
+
+    // Only ONLINE drivers get offers (Uber). Offline → empty pool + a clear flag for the client.
+    const profile = await db().driverProfile.findUnique({
+      where: { userId: context.user.id },
+      select: { active: true },
     })
-    return json(res, 200, { ok: true, rides })
+    if (!profile?.active) return json(res, 200, { ok: true, online: false, rides: [] })
+
+    // NEAREST-FIRST: order the unassigned pool by real-world distance from the driver's last known
+    // location to each ride's pickup (PostGIS geography metres → km). Rides with no pickup coords, or
+    // when the driver hasn't shared a location yet, fall back to oldest-first (NULLS LAST). Rider email
+    // is never selected — only id + display name reach a driver.
+    const rows = await db().$queryRaw`
+      SELECT r.id,
+             r.fare_minor    AS "fareMinor",
+             r.currency,
+             r.status,
+             r.requested_at  AS "requestedAt",
+             r.metadata,
+             u.id            AS "riderId",
+             u.display_name  AS "riderName",
+             CASE
+               WHEN dp.last_location_geo IS NOT NULL AND r.pickup_geo IS NOT NULL
+               -- Great-circle (haversine) km computed straight from the lon/lat values via ST_X/ST_Y.
+               -- Deliberately NOT ST_DistanceSphere / a ::geography cast: those need SRID 4326 populated
+               -- in spatial_ref_sys, which isn't guaranteed on every PostGIS setup. This mirrors the
+               -- codebase's existing JS haversine (sr-geocoding.mjs) and depends on nothing but the
+               -- stored coordinates. LEAST/GREATEST clamp the acos argument against float rounding.
+               THEN ROUND((6371 * acos(LEAST(1, GREATEST(-1,
+                      cos(radians(ST_Y(dp.last_location_geo))) * cos(radians(ST_Y(r.pickup_geo))) *
+                        cos(radians(ST_X(r.pickup_geo)) - radians(ST_X(dp.last_location_geo))) +
+                      sin(radians(ST_Y(dp.last_location_geo))) * sin(radians(ST_Y(r.pickup_geo)))
+                    ))))::numeric, 2)
+               ELSE NULL
+             END AS "pickupDistanceKm"
+      FROM ride_requests r
+      JOIN users u ON u.id = r.rider_id
+      LEFT JOIN driver_profiles dp ON dp.user_id::text = ${context.user.id}
+      WHERE r.driver_id IS NULL AND r.status IN ('REQUESTED', 'MATCHING')
+      ORDER BY "pickupDistanceKm" ASC NULLS LAST, r.requested_at ASC
+      LIMIT 20
+    `
+    const rides = rows.map((row) => ({
+      id: row.id,
+      fareMinor: row.fareMinor,
+      currency: row.currency,
+      status: row.status,
+      requestedAt: row.requestedAt,
+      metadata: row.metadata,
+      pickupDistanceKm: row.pickupDistanceKm != null ? Number(row.pickupDistanceKm) : null,
+      rider: { id: row.riderId, displayName: row.riderName },
+    }))
+    return json(res, 200, { ok: true, online: true, rides })
   }
 
   if (url.pathname === '/api/driver/rides') {
