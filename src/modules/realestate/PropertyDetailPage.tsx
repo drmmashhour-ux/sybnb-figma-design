@@ -7,7 +7,7 @@ import { colors, withAlpha } from '../../shared/theme/tokens'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from './MortgageCalculator'
-import { realEstateAttrs, valuationTone } from './propertyAttrs'
+import { realEstateAttrs, valuationTone, SYNITRES_PRESELECT_LISTING_KEY } from './propertyAttrs'
 
 type Props = { listingId: string; lang: Lang }
 
@@ -65,7 +65,9 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
   }
 
   function contact() {
-    // Route to the division's browse+contact flow (buyer account + document + IMMOContact live there).
+    // Route to the division's browse+contact flow (buyer account + document + IMMOContact live there),
+    // carrying this exact listing so it opens preselected instead of a blank search.
+    if (listing) sessionStorage.setItem(SYNITRES_PRESELECT_LISTING_KEY, listing.id)
     window.location.hash = listing?.division === 'RENTALS' ? '/rentals' : '/buy'
   }
 

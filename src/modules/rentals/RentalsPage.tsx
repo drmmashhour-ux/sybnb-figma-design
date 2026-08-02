@@ -4,14 +4,14 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { aiParsePropertySearch, fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type AiPropertySearchFilters, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
+import { aiParsePropertySearch, fetchApprovedListings, fetchPrototypeListing, sendListingInquiryDocument, sendListingInquiryMessage, type AiPropertySearchFilters, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from '../realestate/MortgageCalculator'
-import { realEstateAttrs, valuationTone } from '../realestate/propertyAttrs'
+import { realEstateAttrs, valuationTone, SYNITRES_PRESELECT_LISTING_KEY } from '../realestate/propertyAttrs'
 
 type Props = {
   lang: Lang
@@ -397,8 +397,31 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setMessage('')
     try {
       const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS', filters || {})
-      setListings(nextListings)
-      setSelectedId(nextListings[0]?.id || '')
+      // Synitres deep-link: a buyer arriving from a shared /property/:id page carries that exact listing
+      // (SYNITRES_PRESELECT_LISTING_KEY) so it opens preselected here even if the default search wouldn't
+      // surface it. One-shot — consumed and cleared on arrival, then the flow behaves like a normal search.
+      const preselectId = typeof window !== 'undefined' ? sessionStorage.getItem(SYNITRES_PRESELECT_LISTING_KEY) : null
+      let resultListings = nextListings
+      let focusId = nextListings[0]?.id || ''
+      if (preselectId) {
+        sessionStorage.removeItem(SYNITRES_PRESELECT_LISTING_KEY)
+        const already = nextListings.find((listing) => listing.id === preselectId)
+        if (already) {
+          focusId = already.id
+        } else {
+          try {
+            const one = await fetchPrototypeListing(preselectId)
+            // Only merge a publicly-viewable listing from this same division.
+            if (one && one.division === (isBuyMode ? 'BUY' : 'RENTALS') && one.status === 'APPROVED') {
+              resultListings = [one, ...nextListings]
+              focusId = one.id
+            }
+          } catch { /* best-effort — fall back to the normal first result */ }
+        }
+        setHasSearched(true) // reveal the results immediately; the buyer already chose this property
+      }
+      setListings(resultListings)
+      setSelectedId(focusId)
       setStatus('ready')
     } catch (error) {
       setListings([])
