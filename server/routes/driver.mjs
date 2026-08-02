@@ -109,12 +109,24 @@ export async function handleDriver(req, res, url, context) {
                       sin(radians(ST_Y(dp.last_location_geo))) * sin(radians(ST_Y(r.pickup_geo)))
                     ))))::numeric, 2)
                ELSE NULL
-             END AS "pickupDistanceKm"
+             END AS "pickupDistanceKm",
+             -- Auto-dispatch: this ride is currently offered EXCLUSIVELY to me (accept-now). COALESCE to
+             -- false so an OPEN ride (offered_driver_id NULL) is FALSE, not NULL — otherwise "ORDER BY
+             -- offeredToMe DESC" would sort NULLs first and push open rides ahead of my own offer.
+             COALESCE(r.offered_driver_id::text = ${context.user.id} AND r.offer_expires_at > now(), false) AS "offeredToMe"
       FROM ride_requests r
       JOIN users u ON u.id = r.rider_id
       LEFT JOIN driver_profiles dp ON dp.user_id::text = ${context.user.id}
       WHERE r.driver_id IS NULL AND r.status IN ('REQUESTED', 'MATCHING')
-      ORDER BY "pickupDistanceKm" ASC NULLS LAST, r.requested_at ASC
+        -- Show a ride only if it's open (no live offer) OR it's offered to ME. Rides in another driver's
+        -- exclusive window are hidden until that window lapses, then they open to the nearest-first pool.
+        AND (
+          r.offered_driver_id IS NULL
+          OR r.offer_expires_at IS NULL
+          OR r.offer_expires_at <= now()
+          OR r.offered_driver_id::text = ${context.user.id}
+        )
+      ORDER BY "offeredToMe" DESC, "pickupDistanceKm" ASC NULLS LAST, r.requested_at ASC
       LIMIT 20
     `
     const rides = rows.map((row) => ({
@@ -125,6 +137,7 @@ export async function handleDriver(req, res, url, context) {
       requestedAt: row.requestedAt,
       metadata: row.metadata,
       pickupDistanceKm: row.pickupDistanceKm != null ? Number(row.pickupDistanceKm) : null,
+      offeredToMe: Boolean(row.offeredToMe),
       rider: { id: row.riderId, displayName: row.riderName },
     }))
     return json(res, 200, { ok: true, online: true, rides })

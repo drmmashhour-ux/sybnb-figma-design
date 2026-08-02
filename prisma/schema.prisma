@@ -680,6 +680,8 @@ model RideRequest {
   pickupVerifiedAt     DateTime?                @map("pickup_verified_at")
   pinAttempts          Int                      @default(0) @map("pin_attempts")
   driverMatchedAt      DateTime?                @map("driver_matched_at")
+  offeredDriverId      String?                  @map("offered_driver_id")
+  offerExpiresAt       DateTime?                @map("offer_expires_at")
   cancelledAt          DateTime?                @map("cancelled_at")
   cancelledByRole      String?                  @map("cancelled_by_role")
   cancelReason         String?                  @map("cancel_reason")

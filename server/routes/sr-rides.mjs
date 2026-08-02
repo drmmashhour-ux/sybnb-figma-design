@@ -4,6 +4,7 @@ import { requireAuth, requireVerifiedDriver, requireRoadReadyDriver } from '../l
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRide, assertSyriaCoords, haversineKm } from '../lib/sr-geocoding.mjs'
 import { routeRoad } from '../lib/sr-routing.mjs'
+import { offerRideToNearestDriver } from '../lib/sr-dispatch.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { assertRiderCanAfford, chargeRiderCancellationFee, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
@@ -210,6 +211,14 @@ export async function handleSrRides(req, res, url, context) {
       `
     }
 
+    // AUTO-DISPATCH (Phase 2): offer the ride to the nearest online driver for a short exclusive window.
+    // Best-effort — if no driver is nearby/online it simply stays in the open nearest-first pool.
+    if (quote.pickupCoords) {
+      await offerRideToNearestDriver(ride.id, quote.pickupCoords).catch((error) =>
+        console.error('[sr-dispatch] offer on create failed:', error?.message || error),
+      )
+    }
+
     return json(res, 201, { ok: true, ride })
   }
 
@@ -332,6 +341,22 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    // AUTO-DISPATCH exclusive window: during a ride's offer window it can be claimed ONLY by the driver
+    // it was offered to. It opens to everyone once the window lapses (the atomic WHERE below is the
+    // race-safe backstop; this pre-check just returns a clearer message).
+    if (
+      existing.offeredDriverId &&
+      existing.offeredDriverId !== context.user.id &&
+      existing.offerExpiresAt &&
+      existing.offerExpiresAt > new Date()
+    ) {
+      const error = new Error('This ride is reserved for the nearest driver for a few seconds — it will open shortly if not accepted.')
+      error.statusCode = 409
+      error.code = 'RIDE_OFFERED_TO_OTHER'
+      error.expose = true
+      throw error
+    }
+
     // SECURITY (one-driver-one-ride, race-safe): the active-ride check and the claim must be atomic, or a
     // driver firing two claims concurrently passes both checks and ends up holding two active rides. Wrap
     // them in one transaction and serialize this driver's concurrent claims with an advisory lock on their
@@ -357,9 +382,22 @@ export async function handleSrRides(req, res, url, context) {
         excludeRideId: existing.id, message: 'This ride cannot start: the rider wallet no longer covers the fare.',
       })
       const updated = await tx.rideRequest.updateMany({
-        where: { id: claimMatch[1], driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
+        // The OR mirrors the pre-check but ATOMICALLY: a claim only lands if the ride is open (no live
+        // offer / expired) or offered to this driver — so a concurrent claim during another driver's
+        // window can't slip through. Clearing the offer fields on success tidies the record.
+        where: {
+          id: claimMatch[1],
+          driverId: null,
+          status: { in: ['REQUESTED', 'MATCHING'] },
+          OR: [
+            { offeredDriverId: null },
+            { offerExpiresAt: null },
+            { offerExpiresAt: { lte: new Date() } },
+            { offeredDriverId: context.user.id },
+          ],
+        },
         // driverMatchedAt anchors the rider's free-cancel grace window (019).
-        data: { driverId: context.user.id, status: 'DRIVER_ASSIGNED', driverMatchedAt: new Date() },
+        data: { driverId: context.user.id, status: 'DRIVER_ASSIGNED', driverMatchedAt: new Date(), offeredDriverId: null, offerExpiresAt: null },
       })
       if (updated.count > 0) {
         await placeRideHold(tx, { id: existing.id, riderId: existing.riderId, fareMinor: existing.fareMinor, currency: existing.currency })
