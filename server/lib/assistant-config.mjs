@@ -12,4 +12,6 @@ export function openAiConfigured(env = process.env) {
   return assistantEnabled(env) && Boolean(env.OPENAI_API_KEY)
 }
 
-export const OPENAI_ASSISTANT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna'
+export function openAiAssistantModel(env = process.env) {
+  return env.OPENAI_MODEL || 'gpt-5.6-luna'
+}

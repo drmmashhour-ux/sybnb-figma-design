@@ -1,4 +1,4 @@
-import { OPENAI_ASSISTANT_MODEL } from './assistant-config.mjs'
+import { openAiAssistantModel } from './assistant-config.mjs'
 
 const ENDPOINT = 'https://api.openai.com/v1/responses'
 const TRANSIENT = new Set([408, 409, 429, 500, 502, 503, 504])
@@ -12,7 +12,7 @@ export async function createOpenAiResponse(payload, { fetchImpl = fetch, timeout
       const response = await fetchImpl(ENDPOINT, {
         method: 'POST', signal: controller.signal,
         headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: OPENAI_ASSISTANT_MODEL, store: false, ...payload }),
+        body: JSON.stringify({ model: openAiAssistantModel(), store: false, ...payload }),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
