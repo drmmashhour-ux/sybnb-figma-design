@@ -37,6 +37,7 @@ const HostInsightsPanel = lazyNamed(() => import('../modules/host/HostInsightsPa
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
+const SrLandingPage = lazyNamed(() => import('../modules/sr/SrLandingPage'), 'SrLandingPage')
 const LegalPlaceholderPage = lazyNamed(() => import('../modules/legal/LegalPlaceholderPage'), 'LegalPlaceholderPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
 const CarBrowsePage = lazyNamed(() => import('../modules/cars/CarBrowsePage'), 'CarBrowsePage')
@@ -92,8 +93,7 @@ export function App() {
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
 
-  return (
-    <AppShell lang={lang} onLanguageChange={setLang} path={path}>
+  const routed = (
       <Suspense fallback={<RouteLoading lang={lang} />}>
         {staffRequiredRole && !hasStaffSession ? (
           <StaffAccessPage lang={lang} role={staffRequiredRole} returnPath={path} />
@@ -180,6 +180,8 @@ export function App() {
           <BookingDetailPage bookingId={bookingMatch[1]} lang={lang} />
         ) : listingMatch ? (
           <ListingDetailPage listingId={listingMatch[1]} lang={lang} />
+        ) : path === '/sr' || path === '/rides-home' ? (
+          <SrLandingPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/ride' || path === '/ride-preview' ? (
           <SrRidePage lang={lang} />
         ) : isSellerRoute(path) ? (
@@ -215,6 +217,16 @@ export function App() {
           <LandingPage lang={lang} />
         )}
       </Suspense>
+  )
+
+  // SR (Syria Rides) is its OWN platform surface — render its standalone entry full-bleed, WITHOUT the
+  // STR app chrome (AppShell), so it reads as an independent product per the isolation directive.
+  const chromeless = path === '/sr' || path === '/rides-home'
+  if (chromeless) return routed
+
+  return (
+    <AppShell lang={lang} onLanguageChange={setLang} path={path}>
+      {routed}
     </AppShell>
   )
 }
