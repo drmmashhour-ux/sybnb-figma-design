@@ -11,6 +11,11 @@ export const OFFER_WINDOW_SECONDS = Number(process.env.SR_OFFER_WINDOW_SECONDS ?
 const MAX_OFFER_RADIUS_KM = Number(process.env.SR_OFFER_MAX_KM ?? 10)
 // Ignore drivers whose last GPS fix is older than this (minutes) — they may have closed the app.
 const LOCATION_FRESH_MINUTES = Number(process.env.SR_LOCATION_FRESH_MIN ?? 5)
+// How many nearest drivers a ride is offered to EXCLUSIVELY (one after another, each getting its own
+// window) before it falls fully open to the whole nearest-first pool. Bounds the cascade so a ride never
+// cycles forever, and so liquidity always wins in a scarce market (after the cascade every nearby driver
+// sees it at once).
+const MAX_OFFER_HOPS = Number(process.env.SR_OFFER_MAX_HOPS ?? 3)
 
 const ACTIVE_RIDE_STATUSES = "('DRIVER_ASSIGNED','DRIVER_ARRIVING','IN_PROGRESS')"
 
@@ -86,4 +91,68 @@ export async function offerRideToNearestDriver(rideId, pickup, { excludeDriverId
     },
   })
   return nearest
+}
+
+// AUTO-DISPATCH cascade: advance any ride whose exclusive offer has EXPIRED without being accepted — the
+// timed-out driver is recorded (so they're skipped for the next exclusive offer, but NOT hidden from the
+// open pool) and the ride is re-offered to the next nearest online driver. After MAX_OFFER_HOPS exclusive
+// offers all lapse, the ride is left fully OPEN so the whole nearest-first pool can grab it.
+//
+// Serverless-native: driven opportunistically off the drivers' pending-ride poll (no cron needed — a
+// per-minute cron is far too coarse for a ~20s offer window). Best-effort and NEVER throws — dispatch
+// staleness is not a security hole and must never break the poll response.
+//
+// Concurrency: each advance is a single atomic CAS (updateMany guarded on the exact expired offer
+// snapshot), so two drivers polling at once can't double-advance the same ride — the first wins, the
+// second matches zero rows and moves on.
+export async function sweepExpiredOffers({ client = db() } = {}) {
+  try {
+    const stale = await client.rideRequest.findMany({
+      where: {
+        driverId: null,
+        status: { in: ['REQUESTED', 'MATCHING'] },
+        offeredDriverId: { not: null },
+        offerExpiresAt: { lte: new Date() },
+      },
+      select: { id: true, offeredDriverId: true, offerExpiresAt: true, metadata: true },
+      take: 25,
+    })
+    if (stale.length === 0) return 0
+
+    let advanced = 0
+    for (const ride of stale) {
+      const meta = ride.metadata && typeof ride.metadata === 'object' ? ride.metadata : {}
+      const declinedBy = Array.isArray(meta.declinedBy) ? meta.declinedBy : []
+      const priorTimedOut = Array.isArray(meta.offerTimedOut) ? meta.offerTimedOut : []
+      // The driver who just let the window lapse joins the timed-out set (skipped for re-offers only).
+      const timedOut = priorTimedOut.includes(ride.offeredDriverId) ? priorTimedOut : [...priorTimedOut, ride.offeredDriverId]
+      const nextMeta = { ...meta, offerTimedOut: timedOut }
+
+      // Cascade exhausted → leave the ride fully OPEN for the whole nearest-first pool (incl. the drivers
+      // who timed out, who can still self-claim from the open pool).
+      let data
+      if (timedOut.length >= MAX_OFFER_HOPS) {
+        data = { offeredDriverId: null, offerExpiresAt: null, metadata: nextMeta }
+      } else {
+        const pickup = await ridePickupCoords(ride.id, client)
+        const next = pickup
+          ? await findNearestOnlineDriver(pickup, { excludeDriverIds: [...new Set([...timedOut, ...declinedBy])], client })
+          : null
+        data = next
+          ? { offeredDriverId: next.driverId, offerExpiresAt: new Date(Date.now() + OFFER_WINDOW_SECONDS * 1000), metadata: nextMeta }
+          : { offeredDriverId: null, offerExpiresAt: null, metadata: nextMeta } // nobody nearby → open pool
+      }
+
+      // Atomic CAS: only advance if the ride is STILL this exact expired offer and unclaimed.
+      const claim = await client.rideRequest.updateMany({
+        where: { id: ride.id, driverId: null, offeredDriverId: ride.offeredDriverId, offerExpiresAt: ride.offerExpiresAt },
+        data,
+      })
+      if (claim.count > 0) advanced += 1
+    }
+    return advanced
+  } catch (error) {
+    console.error('[sr-dispatch] expired-offer sweep failed (rides stay as-is):', error?.message || error)
+    return 0
+  }
 }

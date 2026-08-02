@@ -7,6 +7,7 @@ import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { chargeCompletedRide, srRideFinanceSplit } from '../lib/sr-payments.mjs'
 import { assertVehicleEligible } from '../lib/fleet.mjs'
 import { assertSyriaCoords } from '../lib/sr-geocoding.mjs'
+import { sweepExpiredOffers } from '../lib/sr-dispatch.mjs'
 
 const DRIVER_DOCUMENT_TYPES = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE']
 // SECURITY (015): the private assetUrl/storage key is NEVER returned in JSON — bytes stream only via /file.
@@ -82,6 +83,11 @@ export async function handleDriver(req, res, url, context) {
       select: { active: true },
     })
     if (!profile?.active) return json(res, 200, { ok: true, online: false, rides: [] })
+
+    // AUTO-DISPATCH cascade: advance any ride whose exclusive offer lapsed to the next nearest driver
+    // (or open it to the pool once the cascade is exhausted). Piggy-backs on this poll so no cron is
+    // needed for the ~20s offer window. Best-effort — never blocks or breaks the pool response.
+    await sweepExpiredOffers().catch(() => {})
 
     // NEAREST-FIRST: order the unassigned pool by real-world distance from the driver's last known
     // location to each ride's pickup (PostGIS geography metres → km). Rides with no pickup coords, or

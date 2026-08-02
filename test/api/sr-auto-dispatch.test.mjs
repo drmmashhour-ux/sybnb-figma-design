@@ -14,6 +14,9 @@ const CITIES = {
   // Deir ez-Zor — far from the others (no cross-contamination); here `far` is within offer radius so a
   // declined offer can re-dispatch to it.
   deir: { pickup: { lat: 35.33, lng: 40.14 }, near: { lat: 35.332, lng: 40.142 }, far: { lat: 35.37, lng: 40.18 }, dropoff: { lat: 35.34, lng: 40.13 } },
+  // Latakia + Qamishli — additional isolated cities for the expired-offer cascade tests.
+  latakia: { pickup: { lat: 35.53, lng: 35.79 }, near: { lat: 35.532, lng: 35.792 }, far: { lat: 35.57, lng: 35.83 }, dropoff: { lat: 35.52, lng: 35.78 } },
+  qamishli: { pickup: { lat: 37.05, lng: 41.23 }, near: { lat: 37.052, lng: 41.232 }, far: { lat: 37.09, lng: 41.27 }, dropoff: { lat: 37.04, lng: 41.22 } },
 }
 
 describe('SR auto-dispatch: nearest driver gets an exclusive offer window', () => {
@@ -124,5 +127,54 @@ describe('SR auto-dispatch: nearest driver gets an exclusive offer window', () =
     const farClaim = await claim(far.token, ride.id)
     expect(farClaim.status).toBe(200)
     expect(farClaim.body.ride.driverId).toBe(far.user.id)
+  })
+
+  it('an EXPIRED (un-answered) offer CASCADES to the next nearest driver on the next poll', async () => {
+    const { near, far, ride } = await setupTrip('latakia')
+    // near got the exclusive offer but let it lapse (a timeout — NOT a decline).
+    await db().rideRequest.update({ where: { id: ride.id }, data: { offerExpiresAt: new Date(Date.now() - 1000) } })
+
+    // Any online driver's pending poll advances the cascade (no cron needed).
+    await pending(far.token)
+
+    const row = await db().rideRequest.findUnique({
+      where: { id: ride.id },
+      select: { offeredDriverId: true, offerExpiresAt: true, metadata: true },
+    })
+    expect(row.offeredDriverId).toBe(far.user.id) // re-offered to the next nearest
+    expect(new Date(row.offerExpiresAt).getTime()).toBeGreaterThan(Date.now()) // a fresh window
+    expect(row.metadata.offerTimedOut).toContain(near.user.id) // the lapsed driver recorded
+
+    // far now sees it flagged offeredToMe; the timed-out near driver does NOT (it's far's window now).
+    const farPool = await pending(far.token)
+    expect(farPool.body.rides.find((r) => r.id === ride.id)?.offeredToMe).toBe(true)
+    const nearPool = await pending(near.token)
+    expect(nearPool.body.rides.some((r) => r.id === ride.id)).toBe(false)
+  })
+
+  it('when no next driver is available the ride opens to the pool — a timed-out driver can still claim it', async () => {
+    const c = CITIES.qamishli
+    const rider = await registerUser('GUEST', 'ad-rider-qam')
+    const solo = await registerUser('DRIVER', 'ad-solo-qam')
+    await goOnline(solo.token, c.near)
+    const res = await request(app)
+      .post('/api/sr/rides')
+      .set('Authorization', `Bearer ${rider.token}`)
+      .send({ pickup: 'p', dropoff: 'd', category: 'SR Economy', pickupCoords: c.pickup, dropoffCoords: c.dropoff })
+    const ride = res.body.ride
+    expect((await db().rideRequest.findUnique({ where: { id: ride.id }, select: { offeredDriverId: true } })).offeredDriverId).toBe(solo.user.id)
+
+    // The only online driver lets the window lapse; the next poll finds no other driver → opens the pool.
+    await db().rideRequest.update({ where: { id: ride.id }, data: { offerExpiresAt: new Date(Date.now() - 1000) } })
+    const pool = await pending(solo.token)
+
+    const row = await db().rideRequest.findUnique({ where: { id: ride.id }, select: { offeredDriverId: true, metadata: true } })
+    expect(row.offeredDriverId).toBeNull() // fully open
+    expect(row.metadata.offerTimedOut).toContain(solo.user.id)
+    // Unlike a decliner, a timed-out driver is NOT hidden from the open pool — solo still sees + can claim it.
+    expect(pool.body.rides.some((r) => r.id === ride.id)).toBe(true)
+    const claimRes = await claim(solo.token, ride.id)
+    expect(claimRes.status).toBe(200)
+    expect(claimRes.body.ride.driverId).toBe(solo.user.id)
   })
 })
