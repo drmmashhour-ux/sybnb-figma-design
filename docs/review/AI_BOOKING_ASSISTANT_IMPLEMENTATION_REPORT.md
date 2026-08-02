@@ -15,9 +15,15 @@ Status: implemented for staging validation; disabled by default; not deployed.
 ## Verification
 
 - TypeScript: passed.
-- Assistant unit tests: 7 passed.
+- Production-style Vite build: passed.
+- Prisma schema validation: passed.
+- Full unit regression: 11 files, 102 tests passed. The assistant-focused subset contains 8 passing tests.
+- Full API regression: 83 files, 503 tests passed in one clean serial run.
+- Full security regression: 3 files, 19 tests passed.
 - Assistant database/API tests: 5 passed, covering authentication, request validation, French fallback, minimized audit events, cross-user denial, server-verified confirmation, fabricated-price rejection, verified pricing, and per-user rate limiting.
-- Browser coverage adds desktop RTL/French switching and 320px mobile-fit assertions for Chromium and WebKit projects.
+- Assistant browser coverage: 4 passed across Chromium and WebKit, covering RTL/French switching and 320px mobile fit.
+- Full browser regression: 40 passed, 2 expected WebKit keyboard skips, and 2 unrelated pre-existing landing-heading assertions failed because the current page heading changed from `منصة سوريا الكاملة` to `تشعر أنك في المكان الصحيح`. Both assistant browser tests passed in both engines.
+- Built-client scan found no `OPENAI_API_KEY` or test provider secret strings.
 
 ## Accessibility and mobile validation
 
