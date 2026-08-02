@@ -2653,6 +2653,49 @@ export async function createPrototypeSrRide(input: {
   return response.ride
 }
 
+// ---- Rider in-ride actions (all scoped to the ride's rider/driver server-side) ----
+
+export async function cancelSrRide(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  return apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/sr/rides/${rideId}/cancel`, { method: 'POST', token: session.token })
+}
+
+// Emergency SOS on an active ride — best-effort attaches the rider's GPS.
+export async function raiseSrSos(rideId: string, coords?: { lat: number; lng: number }, note?: string) {
+  const session = await ensurePrototypeGuestSession()
+  const body: Record<string, unknown> = {}
+  if (coords) {
+    body.lat = coords.lat
+    body.lng = coords.lng
+  }
+  if (note) body.note = note
+  return apiRequest<{ ok: true; sosEvent: { id: string; status: string } }>(`/api/sr/rides/${rideId}/sos`, { method: 'POST', token: session.token, body })
+}
+
+// Share the live trip — returns a token + a public tracking path a rider can send to a trusted contact.
+export async function shareSrRide(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; share: { token: string; path: string; apiPath: string } }>(
+    `/api/sr/rides/${rideId}/share`,
+    { method: 'POST', token: session.token },
+  )
+  return response.share
+}
+
+export async function rateSrRide(rideId: string, stars: number, comment?: string) {
+  const session = await ensurePrototypeGuestSession()
+  return apiRequest<{ ok: true }>(`/api/sr/rides/${rideId}/rate`, {
+    method: 'POST',
+    token: session.token,
+    body: comment ? { stars, comment } : { stars },
+  })
+}
+
+export async function tipSrRide(rideId: string, amountMinor: number) {
+  const session = await ensurePrototypeGuestSession()
+  return apiRequest<{ ok: true }>(`/api/sr/rides/${rideId}/tip`, { method: 'POST', token: session.token, body: { amountMinor } })
+}
+
 // The authenticated rider's own SR trips, most recent first (Trips list + receipts).
 export async function fetchSrRideHistory() {
   const session = await ensurePrototypeGuestSession()
