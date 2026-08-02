@@ -31,4 +31,6 @@ Only the last bounded session messages, locale, role, and non-sensitive search c
 
 Confirmation rows store identifiers and SHA-256 hashes, not action payloads. Audit events use fixed action/result categories and identifiers; they do not store raw prompts, responses, message bodies, refund reasons, secrets, or payment data.
 
+Human-support handoffs accept only fixed reason codes (`MISSING_LISTING_DATA`, `CONFLICTING_DATA`, `SENSITIVE_REQUEST`, `OUTSIDE_PERMISSION`, `HUMAN_REQUESTED`, or `SAFETY_CONCERN`). Free-form model or user text is rejected before audit persistence.
+
 The existing authenticated maintenance cron deletes consumed or expired confirmation rows after 24 hours by default (`ASSISTANT_CONFIRMATION_RETENTION_HOURS`, bounded to 1–720). Pending, unexpired confirmations are retained only while operationally usable. Audit events follow the platform's separate audit-log retention policy.

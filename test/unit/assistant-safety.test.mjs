@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { answerAssistant, redactAssistantText } from '../../server/lib/ai-assistant.mjs'
-import { createBookingDraft, searchListings } from '../../server/lib/assistant-tools.mjs'
+import { ASSISTANT_TOOL_DEFINITIONS, createBookingDraft, createSupportHandoff, searchListings, SUPPORT_HANDOFF_REASONS } from '../../server/lib/assistant-tools.mjs'
 import { assistantConfirmationRetentionHours, assistantDraftMatchesConfirmedFacts } from '../../server/lib/assistant-confirmations.mjs'
 import { createOpenAiResponse } from '../../server/lib/openai-responses.mjs'
 
@@ -22,6 +22,12 @@ describe('assistant safety boundaries', () => {
   it('rejects unknown tool fields and incomplete date ranges before database access', async () => {
     await expect(searchListings({ destination: 'Damascus', rawSql: 'select *' })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
     await expect(searchListings({ checkIn: '2026-09-01' })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
+  })
+
+  it('accepts only fixed privacy-safe support handoff reason codes', async () => {
+    const definition = ASSISTANT_TOOL_DEFINITIONS.find((tool) => tool.name === 'createSupportHandoff')
+    expect(definition.parameters.properties.reason.enum).toEqual(SUPPORT_HANDOFF_REASONS)
+    await expect(createSupportHandoff({ reason: 'Guest me@example.com card 4111111111111111' }, { user: { id: 'user-1' } })).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
   })
 
   it('rejects model-claimed booking confirmation', async () => {

@@ -5,6 +5,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const OCCUPYING = ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED']
 const ALLOWED_AMENITIES = ['wifi', 'parking', 'elevator', 'balcony', 'garden', 'pool', 'ac', 'heating', 'furnished', 'generator', 'kitchen']
 const ALLOWED_TYPES = ['apartment', 'family house', 'villa', 'commercial', 'land', 'new project', 'room', 'house']
+export const SUPPORT_HANDOFF_REASONS = ['MISSING_LISTING_DATA', 'CONFLICTING_DATA', 'SENSITIVE_REQUEST', 'OUTSIDE_PERMISSION', 'HUMAN_REQUESTED', 'SAFETY_CONCERN']
 
 function invalid(message) {
   const error = new Error(message)
@@ -116,7 +117,7 @@ export const ASSISTANT_TOOL_DEFINITIONS = [
   ['checkAvailability', 'Check current availability for one approved stay and date range.', { listingId: { type: 'string' }, checkIn: { type: 'string' }, checkOut: { type: 'string' } }, ['listingId', 'checkIn', 'checkOut']],
   ['calculateBookingTotal', 'Calculate the verified stored total through the existing pricing engine.', { listingId: { type: 'string' }, checkIn: { type: 'string' }, checkOut: { type: 'string' }, guests: { type: 'integer' } }, ['listingId', 'checkIn', 'checkOut']],
   ['getBookingStatus', 'Get only the signed-in guest own booking status.', { bookingId: { type: 'string' } }, ['bookingId']],
-  ['createSupportHandoff', 'Create a privacy-minimized support handoff audit event when the assistant cannot safely help.', { reason: { type: 'string' } }, ['reason']],
+  ['createSupportHandoff', 'Create a privacy-minimized support handoff when the assistant cannot safely help. Use only an approved reason code; never place user text or personal data in tool arguments.', { reason: { type: 'string', enum: SUPPORT_HANDOFF_REASONS } }, ['reason']],
 ].map(([name, description, properties, required = []]) => ({ type: 'function', name, description, parameters: { type: 'object', additionalProperties: false, properties, required }, strict: name !== 'searchListings' }))
 
 export async function executeAssistantTool(name, rawArgs, context) {
@@ -132,7 +133,8 @@ export async function executeAssistantTool(name, rawArgs, context) {
   else if (name === 'createSupportHandoff') result = await createSupportHandoff(args, context)
   else invalid('Tool is not approved.')
 
-  await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_ASSISTANT_SERVER_FACT_RETRIEVED', entityType: 'ai_assistant', entityId, after: { tool: name, ok: true } } })
+  const auditAction = name === 'createSupportHandoff' ? 'AI_ASSISTANT_TOOL_EXECUTED' : 'AI_ASSISTANT_SERVER_FACT_RETRIEVED'
+  await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: auditAction, entityType: 'ai_assistant', entityId, after: { tool: name, ok: true } } })
   return result
 }
 
@@ -216,7 +218,8 @@ export async function getBookingStatus(raw, context) {
 }
 
 export async function createSupportHandoff(raw, context) {
-  const args = object(raw); exact(args, ['reason']); const reason = text(args.reason, 'reason', 160, true)
-  await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_ASSISTANT_SUPPORT_HANDOFF', entityType: 'ai_assistant', entityId: context.user.id, after: { reasonCategory: reason.replace(/[^a-z0-9 _-]/gi, '').slice(0, 80) } } })
-  return { created: true, support: { email: 'info@sybnb.app', whatsapp: '+963 998 191 422' } }
+  const args = object(raw); exact(args, ['reason']); const reason = text(args.reason, 'reason', 40, true)
+  if (!SUPPORT_HANDOFF_REASONS.includes(reason)) invalid('Support handoff reason is invalid.')
+  await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_ASSISTANT_SUPPORT_HANDOFF', entityType: 'ai_assistant', entityId: context.user.id, after: { reasonCode: reason } } })
+  return { created: true, reasonCode: reason, support: { email: 'info@sybnb.app', whatsapp: '+963 998 191 422' } }
 }

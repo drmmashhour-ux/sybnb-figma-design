@@ -78,6 +78,17 @@ describe('AI booking assistant authorization and audit', () => {
     await expect(executeAssistantTool('getBookingStatus', { bookingId: booking.id }, { user: { id: otherGuest.user.id }, roles: ['GUEST'] })).rejects.toMatchObject({ code: 'ASSISTANT_BOOKING_UNAVAILABLE' })
   })
 
+  it('stores only an approved support reason code and rejects sensitive free text', async () => {
+    const context = { user: { id: guest.user.id }, roles: ['GUEST'] }
+    await expect(executeAssistantTool('createSupportHandoff', { reason: 'Guest me@example.com card 4111111111111111' }, context)).rejects.toMatchObject({ code: 'ASSISTANT_TOOL_INVALID' })
+    const result = await executeAssistantTool('createSupportHandoff', { reason: 'SENSITIVE_REQUEST' }, context)
+    expect(result).toMatchObject({ created: true, reasonCode: 'SENSITIVE_REQUEST' })
+    const audit = await db().adminAuditLog.findFirst({ where: { actorUserId: guest.user.id, action: 'AI_ASSISTANT_SUPPORT_HANDOFF' }, orderBy: { createdAt: 'desc' } })
+    expect(audit.after).toEqual({ reasonCode: 'SENSITIVE_REQUEST' })
+    expect(JSON.stringify(audit)).not.toContain('example.com')
+    expect(JSON.stringify(audit)).not.toContain('4111111111111111')
+  })
+
   it('denies consequential proposals to non-guest roles', async () => {
     await expect(proposeAssistantAction({ actorUserId: host.id, roles: ['HOST'], action: 'CREATE_BOOKING_DRAFT', payload: { listingId: listing.id, checkIn: '2026-10-01', checkOut: '2026-10-02', guests: 1 }, locale: 'en' })).rejects.toMatchObject({ code: 'ASSISTANT_GUEST_REQUIRED', statusCode: 403 })
   })

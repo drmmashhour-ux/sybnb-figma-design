@@ -18,16 +18,17 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Added deterministic lifecycle audits for requests, fact retrieval, tool proposal, confirmation request/accept/reject, execution handoff, blocked attempts, and safe fallback without storing prompts, message bodies, refund reasons, secrets, or payment data.
 - Extended the existing fail-closed maintenance cron to purge consumed or expired assistant confirmation rows after a bounded 24-hour default retention window; no new scheduler or transcript store was added.
 - Added localized fail-safe handling for provider timeouts, rate limits, outages, malformed/unsafe output, and audit-write failures. Upstream error text is never returned or logged; only fixed failure categories are audited.
+- Restricted human-support handoffs to six fixed server-approved reason codes. Free-form model text containing personal or payment data fails validation before database or audit access.
 
 ## Verification
 
 - TypeScript and production build: passed.
 - Production-style Vite build: passed.
 - Prisma schema validation: passed.
-- Full unit regression: 11 files, 108 tests passed, including malicious-model fabricated-price/availability, unapproved-tool denial during audit outages, provider-failure leakage prevention, last-moment material-change, and bounded-retention coverage.
+- Full unit regression: 11 files, 109 tests passed, including malicious-model fabricated-price/availability, privacy-safe handoff validation, unapproved-tool denial during audit outages, provider-failure leakage prevention, last-moment material-change, and bounded-retention coverage.
 - Full API regression: 83 files, 507 tests passed in one clean run before the final independent action-rate-limit case was added.
 - Full security regression: 3 files, 19 tests passed.
-- Final assistant database/API suite: 11 passed, covering authentication, request validation, localized provider failure, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, retention cleanup, verified pricing, and independent request/action rate limits.
+- Final assistant database/API suite: 12 passed, covering authentication, request validation, localized provider failure, fixed-code support handoff, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, retention cleanup, verified pricing, and independent request/action rate limits.
 - Assistant browser coverage: 6 passed across Chromium and WebKit, covering RTL/French switching, 320px mobile fit, and the separate propose/confirm draft flow.
 - Full browser regression: 40 passed, 2 expected WebKit keyboard skips, and 2 unrelated pre-existing landing-heading assertions failed because the current page heading changed from `منصة سوريا الكاملة` to `تشعر أنك في المكان الصحيح`. Both assistant browser tests passed in both engines.
 - Built-client scan found no `OPENAI_API_KEY` or test provider secret strings.
