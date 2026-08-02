@@ -1097,20 +1097,43 @@ export async function generateListingDescription(
 // privileged first), falling back to the auto-created guest session so the helper always works.
 export async function askAssistant(
   question: string,
-  locale: 'ar' | 'en',
-): Promise<{ answer: string; source: string }> {
+  locale: 'ar' | 'en' | 'fr',
+  history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+  confirmation?: { action: 'createBookingDraft'; listingId: string },
+): Promise<AssistantResponse> {
   const session =
     getStoredStaffSession('ADMIN') ||
     getStoredStaffSession('HOST') ||
     getStoredStaffSession('SELLER') ||
     getStoredSellerSession() ||
     (await ensurePrototypeGuestSession())
-  const response = await apiRequest<{ ok: true; answer: string; source: string }>(
+  const response = await apiRequest<{ ok: true } & AssistantResponse>(
     '/api/assistant/ask',
-    { method: 'POST', token: session.token, body: { question, locale } },
+    { method: 'POST', token: session.token, body: { question, locale, history, ...(confirmation ? { confirmation } : {}) } },
   )
-  return { answer: response.answer || '', source: response.source }
+  return { answer: response.answer || '', source: response.source, listings: response.listings || [], draft: response.draft || null }
 }
+
+export type AssistantListingCard = {
+  id: string
+  title: { ar: string; en: string; fr: string }
+  price: { amountMinor: number; currency: string; basis: 'stay_total' | 'nightly_base' }
+  availability: boolean | null
+  locationSummary: string | null
+  rating: number | null
+  reviewCount: number
+  image: string | null
+  link: string
+  propertyType: string | null
+  amenities: string[]
+}
+
+export type AssistantDraft = {
+  listingId: string; checkIn: string; checkOut: string; guests: number; nights: number
+  total: { amountMinor: number; currency: string }; expiresAt: string; confirmationRequired: true; bookingLink: string
+}
+
+export type AssistantResponse = { answer: string; source: string; listings: AssistantListingCard[]; draft: AssistantDraft | null }
 
 // AI "Correct & improve" — polishes the host's OWN text (spelling/grammar/clarity), never invents
 // facts. Same session fallback as the description writer so it works throughout the listing flow.
