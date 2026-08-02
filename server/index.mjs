@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { pathToFileURL } from 'node:url'
 import { API_ENDPOINTS, PLATFORM_SECURITY_RULES } from './contracts.mjs'
 import { getAuthContext } from './lib/auth-context.mjs'
+import { assertAssistantProductionSafe } from './lib/assistant-config.mjs'
 import { loadEnv, validateProductionConfig } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { checkRateLimit, checkRateLimitDb, clientIp } from './lib/rate-limit.mjs'
@@ -29,6 +30,7 @@ import { handleWallet } from './routes/wallet.mjs'
 import { handleCron } from './routes/cron.mjs'
 
 loadEnv()
+assertAssistantProductionSafe()
 
 // Last-resort process guards (L5). Every request is already wrapped in try/catch (handleRequest) and
 // no route leaves a floating promise, so these should never fire — but a future stray rejection must

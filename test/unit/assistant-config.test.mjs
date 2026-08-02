@@ -1,0 +1,20 @@
+import { describe, expect, it } from 'vitest'
+import { assistantEnabled, assertAssistantProductionSafe, openAiConfigured } from '../../server/lib/assistant-config.mjs'
+
+describe('AI booking assistant configuration', () => {
+  it('is enabled only by an explicit staging pair', () => {
+    expect(assistantEnabled({ SYBNB_DEPLOY_ENV: 'staging', AI_BOOKING_ASSISTANT_ENABLED: '1' })).toBe(true)
+    expect(assistantEnabled({ SYBNB_DEPLOY_ENV: 'production', AI_BOOKING_ASSISTANT_ENABLED: '1' })).toBe(false)
+    expect(assistantEnabled({ SYBNB_DEPLOY_ENV: 'staging', AI_BOOKING_ASSISTANT_ENABLED: '0' })).toBe(false)
+  })
+
+  it('refuses an enabled non-staging process', () => {
+    expect(() => assertAssistantProductionSafe({ SYBNB_DEPLOY_ENV: 'production', AI_BOOKING_ASSISTANT_ENABLED: '1' })).toThrow(/only be enabled/)
+    expect(() => assertAssistantProductionSafe({ SYBNB_DEPLOY_ENV: 'staging', AI_BOOKING_ASSISTANT_ENABLED: '1' })).not.toThrow()
+  })
+
+  it('never treats a client flag as provider configuration', () => {
+    expect(openAiConfigured({ SYBNB_DEPLOY_ENV: 'staging', AI_BOOKING_ASSISTANT_ENABLED: '1', VITE_OPENAI_API_KEY: 'leak' })).toBe(false)
+    expect(openAiConfigured({ SYBNB_DEPLOY_ENV: 'staging', AI_BOOKING_ASSISTANT_ENABLED: '1', OPENAI_API_KEY: 'server-only' })).toBe(true)
+  })
+})
