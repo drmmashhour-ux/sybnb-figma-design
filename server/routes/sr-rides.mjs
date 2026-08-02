@@ -153,7 +153,20 @@ export async function handleSrRides(req, res, url, context) {
   }
 
   if (url.pathname === '/api/sr/rides') {
-    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    // Rider trip history: the authenticated rider's own rides, most recent first (for the Trips list +
+    // receipts). Never exposes another rider's trips — scoped to context.user.id.
+    if (req.method === 'GET') {
+      requireAuth(context, ['GUEST'])
+      const rides = await db().rideRequest.findMany({
+        where: { riderId: context.user.id },
+        orderBy: { requestedAt: 'desc' },
+        take: 30,
+        // Only the driver's id + display name reach the rider — never the driver's email/phone.
+        include: { driver: { select: { id: true, displayName: true } } },
+      })
+      return json(res, 200, { ok: true, rides })
+    }
+    if (req.method !== 'POST') return methodNotAllowed(res, ['GET', 'POST'])
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
     // SR-INPUT: reject unknown fields and bound the free-text so a rider can't persist arbitrary/oversized data.

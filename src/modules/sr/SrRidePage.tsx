@@ -6,6 +6,7 @@ import {
   createPrototypeSrRide,
   fetchPrototypeSrRide,
   fetchSrQuote,
+  fetchSrRideHistory,
   fetchSrRideLocation,
   fetchSrRoute,
   type PlatformRideRequest,
@@ -49,6 +50,8 @@ const copy = {
     km: 'كم',
     min: 'دقيقة',
     approx: 'تقديري',
+    myRides: 'رحلاتي',
+    noRides: 'لا رحلات بعد',
     accuracy: 'دقة الموقع',
     saved: 'تم حفظ الرحلة',
     error: 'تعذر تنفيذ طلب SR',
@@ -84,6 +87,8 @@ const copy = {
     km: 'km',
     min: 'min',
     approx: 'approx.',
+    myRides: 'My rides',
+    noRides: 'No rides yet',
     accuracy: 'Accuracy',
     saved: 'Ride saved',
     error: 'Could not complete SR request',
@@ -120,6 +125,7 @@ export function SrRidePage({ lang }: Props) {
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
   const [route, setRoute] = useState<PlatformSrRoute | null>(null)
   const [driverLoc, setDriverLoc] = useState<{ lat: number; lng: number } | null>(null)
+  const [history, setHistory] = useState<PlatformRideRequest[]>([])
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
@@ -189,6 +195,14 @@ export function SrRidePage({ lang }: Props) {
       cancelled = true
     }
   }, [pickupPoint?.lat, pickupPoint?.lng, dropoffPoint?.lat, dropoffPoint?.lng])
+
+  // Rider trip history — refreshed on mount and whenever the active ride's status changes (so a just-
+  // completed trip appears without a manual reload).
+  useEffect(() => {
+    fetchSrRideHistory()
+      .then(setHistory)
+      .catch(() => {})
+  }, [ride?.status])
 
   // Poll the driver's live GPS position for the moving marker, once a driver is assigned and en route.
   useEffect(() => {
@@ -435,6 +449,32 @@ export function SrRidePage({ lang }: Props) {
           )}
         </article>
       </section>
+
+      <section style={styles.historySection}>
+        <h2 style={styles.historyTitle}>{t.myRides}</h2>
+        {history.length === 0 ? (
+          <p style={styles.historyEmpty}>{t.noRides}</p>
+        ) : (
+          <ul style={styles.historyList}>
+            {history.map((h) => (
+              <li key={h.id} style={styles.historyItem}>
+                <div style={styles.historyRoute}>
+                  <span>
+                    {String(h.metadata.pickup || '-')} → {String(h.metadata.dropoff || '-')}
+                  </span>
+                  <time dir="ltr" style={styles.historyDate}>
+                    {new Date(h.requestedAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')}
+                  </time>
+                </div>
+                <div style={styles.historyMeta}>
+                  <b dir="ltr">{moneyText(h.fareMinor || 0, h.currency, lang)}</b>
+                  <span style={styles.historyStatus}>{statusText(h.status, lang)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </main>
   )
 }
@@ -464,6 +504,15 @@ const styles: Record<string, CSSProperties> = {
   cardTitle: { fontSize: 22, margin: 0 },
   mapPreview: { minHeight: 170, border: '1px solid #263651', borderRadius: 8, background: 'linear-gradient(135deg,#0c1220,#122033)', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 18, position: 'relative', overflow: 'hidden' },
   routeMeta: { margin: '10px 0 0', color: '#20d29b', fontWeight: 800, fontSize: 14, letterSpacing: '.02em' },
+  historySection: { marginTop: 24, borderTop: '1px solid #1e2a3c', paddingTop: 18 },
+  historyTitle: { margin: '0 0 12px', fontSize: 18, color: '#e6ebf4' },
+  historyEmpty: { color: '#8f96a8', fontSize: 14, margin: 0 },
+  historyList: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 10 },
+  historyItem: { border: '1px solid #1e2a3c', borderRadius: 12, background: '#0b0d14', padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  historyRoute: { display: 'grid', gap: 3 },
+  historyDate: { color: '#8f96a8', fontSize: 12 },
+  historyMeta: { display: 'grid', gap: 3, textAlign: 'end' },
+  historyStatus: { color: '#20d29b', fontSize: 12, fontWeight: 700 },
   dot: { width: 24, height: 24, borderRadius: 999, background: '#19d7ff', boxShadow: '0 0 0 16px rgba(25,215,255,.13), 0 0 36px rgba(25,215,255,.55)' },
   label: { display: 'grid', gap: 7, color: '#9aa6ba', fontSize: 12, fontWeight: 900 },
   input: { minHeight: 52, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 14px', fontWeight: 900 },

@@ -2626,6 +2626,13 @@ export async function createPrototypeSrRide(input: {
   return response.ride
 }
 
+// The authenticated rider's own SR trips, most recent first (Trips list + receipts).
+export async function fetchSrRideHistory() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; rides: PlatformRideRequest[] }>('/api/sr/rides', { token: session.token })
+  return response.rides
+}
+
 export async function fetchPrototypeSrRide(rideId: string) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/sr/rides/${rideId}`, {
