@@ -6,9 +6,13 @@ import {
   createPrototypeSrRide,
   fetchPrototypeSrRide,
   fetchSrQuote,
+  fetchSrRideLocation,
+  fetchSrRoute,
   type PlatformRideRequest,
   type PlatformSrQuote,
+  type PlatformSrRoute,
 } from '../../shared/api/platformApi'
+import { SrTripMap } from './SrTripMap'
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { OpenDisputeForm } from '../disputes/OpenDisputeForm'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
@@ -42,6 +46,9 @@ const copy = {
     pickupCode: 'رمز الانطلاق',
     pickupCodeHint: 'اقرأ هذا الرمز للسائق عند الوصول لبدء الرحلة.',
     location: 'الموقع',
+    km: 'كم',
+    min: 'دقيقة',
+    approx: 'تقديري',
     accuracy: 'دقة الموقع',
     saved: 'تم حفظ الرحلة',
     error: 'تعذر تنفيذ طلب SR',
@@ -74,6 +81,9 @@ const copy = {
     pickupCode: 'Pickup code',
     pickupCodeHint: 'Read this code to your driver at pickup to start the trip.',
     location: 'Location',
+    km: 'km',
+    min: 'min',
+    approx: 'approx.',
     accuracy: 'Accuracy',
     saved: 'Ride saved',
     error: 'Could not complete SR request',
@@ -108,6 +118,8 @@ export function SrRidePage({ lang }: Props) {
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
   const [ride, setRide] = useState<PlatformRideRequest | null>(null)
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
+  const [route, setRoute] = useState<PlatformSrRoute | null>(null)
+  const [driverLoc, setDriverLoc] = useState<{ lat: number; lng: number } | null>(null)
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
@@ -159,6 +171,40 @@ export function SrRidePage({ lang }: Props) {
     }, 4000)
     return () => window.clearInterval(interval)
   }, [ride])
+
+  // Live trip map: fetch the real road route (OSRM → polyline + ETA) whenever the pickup/dropoff coords
+  // resolve. Quote coords drive it before booking; the map stays in sync as the rider adjusts.
+  const pickupPoint = quote?.pickupCoords ?? (pickupCoords ?? null)
+  const dropoffPoint = quote?.dropoffCoords ?? null
+  useEffect(() => {
+    if (!pickupPoint || !dropoffPoint) {
+      setRoute(null)
+      return
+    }
+    let cancelled = false
+    fetchSrRoute({ pickupCoords: pickupPoint, dropoffCoords: dropoffPoint })
+      .then((r) => !cancelled && setRoute(r))
+      .catch(() => !cancelled && setRoute(null))
+    return () => {
+      cancelled = true
+    }
+  }, [pickupPoint?.lat, pickupPoint?.lng, dropoffPoint?.lat, dropoffPoint?.lng])
+
+  // Poll the driver's live GPS position for the moving marker, once a driver is assigned and en route.
+  useEffect(() => {
+    const trackable = ride?.driverId && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status)
+    if (!trackable) {
+      setDriverLoc(null)
+      return
+    }
+    const poll = () =>
+      fetchSrRideLocation(ride!.id)
+        .then((r) => setDriverLoc(r.location ? { lat: r.location.lat, lng: r.location.lng } : null))
+        .catch(() => {})
+    poll()
+    const interval = window.setInterval(poll, 5000)
+    return () => window.clearInterval(interval)
+  }, [ride?.id, ride?.status, ride?.driverId])
 
   async function useCurrentLocation() {
     setMessage('')
@@ -241,9 +287,23 @@ export function SrRidePage({ lang }: Props) {
       <section style={styles.grid}>
         <article style={styles.card}>
           <div style={styles.mapPreview}>
-            <span style={styles.dot} />
-            <strong>{t.location}</strong>
-            <p>{t.manualHint}</p>
+            {pickupPoint && dropoffPoint ? (
+              <>
+                <SrTripMap pickup={pickupPoint} dropoff={dropoffPoint} driver={driverLoc} route={route?.geometry ?? null} height={240} />
+                {route && route.distanceKm != null ? (
+                  <p style={styles.routeMeta} dir="ltr">
+                    🛣️ {route.distanceKm} {t.km} · ⏱️ {route.durationMin} {t.min}
+                    {route.source !== 'osrm' ? ` · ${t.approx}` : ''}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <span style={styles.dot} />
+                <strong>{t.location}</strong>
+                <p>{t.manualHint}</p>
+              </>
+            )}
           </div>
 
           <button style={styles.secondaryButton} onClick={() => void useCurrentLocation()}>
@@ -403,6 +463,7 @@ const styles: Record<string, CSSProperties> = {
   card: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#101722', padding: 16, display: 'grid', gap: 12 },
   cardTitle: { fontSize: 22, margin: 0 },
   mapPreview: { minHeight: 170, border: '1px solid #263651', borderRadius: 8, background: 'linear-gradient(135deg,#0c1220,#122033)', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 18, position: 'relative', overflow: 'hidden' },
+  routeMeta: { margin: '10px 0 0', color: '#20d29b', fontWeight: 800, fontSize: 14, letterSpacing: '.02em' },
   dot: { width: 24, height: 24, borderRadius: 999, background: '#19d7ff', boxShadow: '0 0 0 16px rgba(25,215,255,.13), 0 0 36px rgba(25,215,255,.55)' },
   label: { display: 'grid', gap: 7, color: '#9aa6ba', fontSize: 12, fontWeight: 900 },
   input: { minHeight: 52, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 14px', fontWeight: 900 },

@@ -2566,6 +2566,35 @@ export async function fetchSrQuote(input: {
   return response.quote
 }
 
+export type PlatformSrRoute = {
+  distanceKm: number | null
+  durationMin: number | null
+  geometry: Array<[number, number]> | null // OSRM GeoJSON coords: [lng, lat][]
+  source: 'osrm' | 'haversine' | 'haversine-fallback'
+}
+
+// Real road route + ETA for the trip map (OSRM when configured, straight-line fallback otherwise).
+export async function fetchSrRoute(input: { pickupCoords: { lat: number; lng: number }; dropoffCoords: { lat: number; lng: number } }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; route: PlatformSrRoute }>('/api/sr/route', {
+    method: 'POST',
+    token: session.token,
+    body: { pickupCoords: input.pickupCoords, dropoffCoords: input.dropoffCoords },
+  })
+  return response.route
+}
+
+// The driver's live location for a ride (for the moving marker on the trip map). null until the driver
+// starts sharing. Only the rider/driver/admin on the ride may read it (server-enforced).
+export async function fetchSrRideLocation(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; status: string; location: { lat: number; lng: number; at: string } | null }>(
+    `/api/sr/rides/${rideId}/location`,
+    { token: session.token },
+  )
+  return response
+}
+
 export async function createPrototypeSrRide(input: {
   pickup: string
   dropoff: string
