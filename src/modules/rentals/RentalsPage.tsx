@@ -113,6 +113,13 @@ const copy = {
     price: 'الإيجار الشهري',
     owner: 'المالك',
     status: 'الحالة',
+    bedroomsLabel: 'غرف النوم',
+    bathroomsLabel: 'الحمّامات',
+    sizeLabel: 'المساحة',
+    typeLabel: 'النوع',
+    locationLabel: 'الموقع',
+    amenitiesLabel: 'المزايا',
+    sqm: 'م²',
     empty: 'لا توجد عقارات شهرية منشورة بعد.',
     loading: 'جار التحميل',
     error: 'تعذر تحميل عقارات الإيجار الشهري',
@@ -183,6 +190,13 @@ const copy = {
     price: 'Monthly rent',
     owner: 'Owner',
     status: 'Status',
+    bedroomsLabel: 'Bedrooms',
+    bathroomsLabel: 'Bathrooms',
+    sizeLabel: 'Size',
+    typeLabel: 'Type',
+    locationLabel: 'Location',
+    amenitiesLabel: 'Amenities',
+    sqm: 'm²',
     empty: 'No published monthly rentals yet.',
     loading: 'Loading',
     error: 'Could not load monthly rentals',
@@ -585,6 +599,20 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 <div style={styles.resultBody}>
                   <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
                   <h2 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h2>
+                  {(() => {
+                    const a = realEstateAttrs(listing)
+                    const chips = [
+                      a.bedrooms !== undefined ? `🛏 ${a.bedrooms}` : null,
+                      a.bathrooms !== undefined ? `🛁 ${a.bathrooms}` : null,
+                      a.sizeSqm !== undefined ? `📐 ${a.sizeSqm} ${t.sqm}` : null,
+                    ].filter(Boolean) as string[]
+                    return (chips.length || a.location) ? (
+                      <div style={styles.attrRow} dir={isAr ? 'rtl' : 'ltr'}>
+                        {chips.map((c) => <span key={c} style={styles.attrChip}>{c}</span>)}
+                        {a.location ? <span style={styles.attrLocation}>📍 {a.location}</span> : null}
+                      </div>
+                    ) : null
+                  })()}
                   <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>
                   <div style={styles.metaRow}>
                     <span>{t.price}</span>
@@ -634,6 +662,26 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(selectedListing, lang)}</p>
                   <Info label={t.price} value={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)} />
+                  {(() => {
+                    const a = realEstateAttrs(selectedListing)
+                    return (
+                      <>
+                        {a.propertyType ? <Info label={t.typeLabel} value={a.propertyType} /> : null}
+                        {a.location ? <Info label={t.locationLabel} value={a.location} /> : null}
+                        {a.bedrooms !== undefined ? <Info label={t.bedroomsLabel} value={String(a.bedrooms)} /> : null}
+                        {a.bathrooms !== undefined ? <Info label={t.bathroomsLabel} value={String(a.bathrooms)} /> : null}
+                        {a.sizeSqm !== undefined ? <Info label={t.sizeLabel} value={`${a.sizeSqm} ${t.sqm}`} /> : null}
+                        {a.amenities.length ? (
+                          <div style={styles.amenityWrap}>
+                            <span style={styles.amenityLabel}>{t.amenitiesLabel}</span>
+                            <div style={styles.amenityChips}>
+                              {a.amenities.slice(0, 12).map((am) => <span key={am} style={styles.amenityChip}>{am}</span>)}
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    )
+                  })()}
                   <Info label={t.owner} value={selectedListing.owner?.displayName || selectedListing.ownerId.slice(0, 8).toUpperCase()} />
                   <Info label={t.status} value={statusText(selectedListing.status, lang)} />
                 </div>
@@ -715,6 +763,27 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   )
 }
 
+// Pull the Centris-style property attributes out of a listing's metadata (written by the seller wizard),
+// coercing loosely-typed JSON. Location prefers area → city → governorate, joined for display.
+function realEstateAttrs(listing: PlatformListing) {
+  const m = listing.metadata || {}
+  const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v)) ? Number(v) : undefined)
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined)
+  const amenities = Array.isArray((m as Record<string, unknown>).amenities)
+    ? ((m as Record<string, unknown>).amenities as unknown[]).filter((a): a is string => typeof a === 'string')
+    : []
+  const mr = m as Record<string, unknown>
+  const location = [str(mr.area), str(mr.city), str(mr.governorate)].filter(Boolean).join(' · ')
+  return {
+    bedrooms: num(mr.bedrooms),
+    bathrooms: num(mr.bathrooms),
+    sizeSqm: num(mr.sizeSqm) ?? num(mr.areaSqm),
+    propertyType: str(mr.propertyType),
+    location: location || undefined,
+    amenities,
+  }
+}
+
 function listingImage(listing: PlatformListing, isBuyMode = false) {
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   return typeof mediaUrl === 'string' ? mediaUrl : isBuyMode ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp'
@@ -780,6 +849,13 @@ const styles: Record<string, CSSProperties> = {
   cardTitle: { margin: 0, fontSize: 22, lineHeight: 1.15 },
   cardBody: { margin: 0, color: colors.muted, lineHeight: 1.55 },
   metaRow: { borderTop: `1px solid ${colors.line}`, paddingTop: 10, display: 'flex', justifyContent: 'space-between', gap: 12, color: colors.muted },
+  attrRow: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '2px 0' },
+  attrChip: { fontSize: 13, fontWeight: 700, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 8, padding: '3px 8px' },
+  attrLocation: { fontSize: 12, color: colors.muted },
+  amenityWrap: { borderTop: `1px solid ${colors.line}`, paddingTop: 10, display: 'grid', gap: 6 },
+  amenityLabel: { color: colors.muted, fontSize: 13 },
+  amenityChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  amenityChip: { fontSize: 12, fontWeight: 600, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '3px 10px' },
   selectedCard: { border: `1px solid ${withAlpha(colors.green, 0.42)}`, borderRadius: 18, background: withAlpha(colors.green, 0.08), padding: 14, display: 'grid', gap: 14 },
   selectedImage: { width: '100%', aspectRatio: '16 / 10', borderRadius: 14, objectFit: 'cover', background: colors.bg2 },
   selectedContent: { display: 'grid', gap: 10 },
