@@ -11,7 +11,8 @@ import { PaymentCapsule } from '../payments/PaymentCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from '../realestate/MortgageCalculator'
-import { realEstateAttrs, valuationTone } from '../realestate/propertyAttrs'
+import { PropertyGallery } from '../realestate/PropertyGallery'
+import { realEstateAttrs, valuationTone, listingPhotoUrls } from '../realestate/propertyAttrs'
 import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 
 type Props = {
@@ -786,7 +787,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           {selectedListing ? (
             <>
               <section style={styles.selectedCard}>
-                <img src={listingImage(selectedListing, isBuyMode)} alt="" style={styles.selectedImage} />
+                <PropertyGallery photos={listingPhotoUrls(selectedListing, listingImage(selectedListing, isBuyMode))} lang={lang} aspectRatio="16 / 10" />
                 <div style={styles.selectedContent}>
                   <span style={styles.statusPill}>{t.protected}</span>
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>
