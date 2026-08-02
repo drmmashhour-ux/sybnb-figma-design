@@ -159,3 +159,27 @@ test.describe('responsive overflow', () => {
     })
   }
 })
+
+test.describe('AI booking assistant staging widget', () => {
+  test('opens accessibly, switches French, and preserves Arabic RTL', async ({ page }) => {
+    await page.goto('/#/stays')
+    await page.getByRole('button', { name: 'اسأل SYBNB AI' }).click()
+    const dialog = page.getByRole('dialog', { name: 'مساعد الحجز' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute('dir', 'rtl')
+    await dialog.getByRole('button', { name: 'FR' }).click()
+    await expect(page.getByRole('dialog', { name: 'Assistant de réservation' })).toHaveAttribute('dir', 'ltr')
+    await expect(page.getByPlaceholder('Où souhaitez-vous séjourner ?')).toBeVisible()
+  })
+
+  test('fits a 320px mobile viewport without horizontal overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 })
+    await page.goto('/#/stays')
+    await page.getByRole('button', { name: 'اسأل SYBNB AI' }).click()
+    const dialog = page.getByRole('dialog')
+    const box = await dialog.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.x).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320)
+  })
+})
