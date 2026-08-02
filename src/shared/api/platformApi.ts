@@ -1154,20 +1154,15 @@ export async function generateListingDescription(
   }
 }
 
-// "Ask SYBNB AI" — role-aware assistant for any signed-in user. The server derives the role
-// (guest/host/admin) from the session token, so we send whichever session the user has (most
-// privileged first), falling back to the auto-created guest session so the helper always works.
+// "Ask SYBNB AI" is a guest-website capability. Always use the isolated guest session even when a
+// staff/seller session also exists in this browser; this prevents unnecessary privileged tokens from
+// crossing the assistant trust boundary and matches the server's guest-only action authorization.
 export async function askAssistant(
   question: string,
   locale: 'ar' | 'en' | 'fr',
   history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
 ): Promise<AssistantResponse> {
-  const session =
-    getStoredStaffSession('ADMIN') ||
-    getStoredStaffSession('HOST') ||
-    getStoredStaffSession('SELLER') ||
-    getStoredSellerSession() ||
-    (await ensurePrototypeGuestSession())
+  const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true } & AssistantResponse>(
     '/api/assistant/ask',
     { method: 'POST', token: session.token, body: { question, locale, history } },
@@ -1179,13 +1174,13 @@ export type AssistantActionPayload = { listingId: string; checkIn: string; check
 export type AssistantActionProposal = { action: 'CREATE_BOOKING_DRAFT'; proposalId: string; expiresAt: string; entityType: string; entityId: string; message: string; summary: { action: 'CREATE_BOOKING_DRAFT'; listingId: string; checkIn: string; checkOut: string; guests: number; available: boolean; nights: number; total: { amountMinor: number; currency: string } } }
 
 export async function proposeAssistantBookingDraft(payload: AssistantActionPayload, locale: 'ar' | 'en' | 'fr'): Promise<AssistantActionProposal> {
-  const session = getStoredStaffSession('ADMIN') || getStoredStaffSession('HOST') || getStoredStaffSession('SELLER') || getStoredSellerSession() || (await ensurePrototypeGuestSession())
+  const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; proposal: AssistantActionProposal }>('/api/assistant/actions/propose', { method: 'POST', token: session.token, body: { action: 'CREATE_BOOKING_DRAFT', payload, locale } })
   return response.proposal
 }
 
 export async function confirmAssistantBookingDraft(proposalId: string, payload: AssistantActionPayload, decision: boolean, locale: 'ar' | 'en' | 'fr'): Promise<{ accepted: boolean; result?: { draft?: AssistantDraft } }> {
-  const session = getStoredStaffSession('ADMIN') || getStoredStaffSession('HOST') || getStoredStaffSession('SELLER') || getStoredSellerSession() || (await ensurePrototypeGuestSession())
+  const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; confirmation: { accepted: boolean; result?: { draft?: AssistantDraft } } }>('/api/assistant/actions/confirm', { method: 'POST', token: session.token, body: { proposalId, payload, decision, locale } })
   return response.confirmation
 }

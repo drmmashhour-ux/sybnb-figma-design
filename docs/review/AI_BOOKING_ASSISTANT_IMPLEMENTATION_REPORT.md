@@ -19,6 +19,7 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Extended the existing fail-closed maintenance cron to purge consumed or expired assistant confirmation rows after a bounded 24-hour default retention window; no new scheduler or transcript store was added.
 - Added localized fail-safe handling for provider timeouts, rate limits, outages, malformed/unsafe output, and audit-write failures. Upstream error text is never returned or logged; only fixed failure categories are audited.
 - Restricted human-support handoffs to six fixed server-approved reason codes. Free-form model text containing personal or payment data fails validation before database or audit access.
+- Enforced least-privilege browser authentication: all guest-site assistant requests use only the isolated guest session, never a simultaneously stored admin, host, or seller token.
 
 ## Verification
 
@@ -29,7 +30,8 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Full API regression: 83 files, 507 tests passed in one clean run before the final independent action-rate-limit case was added.
 - Full security regression: 3 files, 19 tests passed.
 - Final assistant database/API suite: 12 passed, covering authentication, request validation, localized provider failure, fixed-code support handoff, minimized audit events, cross-user and non-guest denial, server-verified confirmation, expiry, replay, forged payloads, material price changes, all consequential proposal types, lifecycle audit events, sensitive-log exclusion, retention cleanup, verified pricing, and independent request/action rate limits.
-- Assistant browser coverage: 6 passed across Chromium and WebKit, covering RTL/French switching, 320px mobile fit, and the separate propose/confirm draft flow.
+- Assistant browser coverage: 6 passed across Chromium and WebKit, covering RTL/French switching, 320px mobile fit, the separate propose/confirm draft flow, and proof that a coexisting privileged staff token is never sent to assistant endpoints.
+- The least-privilege client delta passed TypeScript and all 6 assistant browser checks. Its production-bundle rerun reached Vite output generation but could not write artifacts because the local filesystem had only ~250 MB free (`ENOSPC`); the preceding assistant checkpoint production build passed.
 - Full browser regression: 40 passed, 2 expected WebKit keyboard skips, and 2 unrelated pre-existing landing-heading assertions failed because the current page heading changed from `منصة سوريا الكاملة` to `تشعر أنك في المكان الصحيح`. Both assistant browser tests passed in both engines.
 - Built-client scan found no `OPENAI_API_KEY` or test provider secret strings.
 
@@ -44,4 +46,5 @@ The floating control has an accessible name and 48px target. The panel is a name
 - Booking drafts are deliberately inert because the current schema has no draft status. Final creation continues through the existing transactional booking route. Other confirmed actions currently open their existing product flow rather than completing the mutation inside the assistant.
 - The global application language engine remains Arabic/English. French is scoped to the assistant milestone and does not translate unrelated SYBNB pages.
 - Manual assistive-technology, small-device, slow-network, and staging abuse testing are still required before internal rollout.
+- Re-run `npm run build` after reclaiming local disk space to close the latest bundle-evidence gap.
 - Production enablement, deployment, payment execution, automated messaging, cancellation, and refunds remain explicitly unauthorized.
