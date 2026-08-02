@@ -769,10 +769,12 @@ function realEstateAttrs(listing: PlatformListing) {
   const m = listing.metadata || {}
   const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v)) ? Number(v) : undefined)
   const str = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined)
-  const amenities = Array.isArray((m as Record<string, unknown>).amenities)
-    ? ((m as Record<string, unknown>).amenities as unknown[]).filter((a): a is string => typeof a === 'string')
-    : []
   const mr = m as Record<string, unknown>
+  // The seller wizard stores the visual-filter selection (incl. amenities) under metadata.visualFilters —
+  // the same shape the server search reads. Fall back to a flat metadata.amenities just in case.
+  const visual = (mr.visualFilters && typeof mr.visualFilters === 'object' ? mr.visualFilters : {}) as Record<string, unknown>
+  const rawAmenities = Array.isArray(visual.amenities) ? visual.amenities : Array.isArray(mr.amenities) ? mr.amenities : []
+  const amenities = (rawAmenities as unknown[]).filter((a): a is string => typeof a === 'string')
   const location = [str(mr.area), str(mr.city), str(mr.governorate)].filter(Boolean).join(' · ')
   return {
     bedrooms: num(mr.bedrooms),
