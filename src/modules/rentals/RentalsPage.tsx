@@ -4,7 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
+import { aiParsePropertySearch, fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type AiPropertySearchFilters, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
@@ -130,6 +130,9 @@ const copy = {
     sqm: 'م²',
     mapTitle: 'الموقع على الخريطة',
     getDirections: 'الاتجاهات · GPS',
+    aiPlaceholder: 'اكتب طلبك: شقة 3 غرف في دمشق بأقل من 25 مليون مع مصعد',
+    aiSearch: 'بحث ذكي',
+    aiUnderstood: 'فهمت',
     belowMarket: 'أقل من سعر السوق',
     atMarket: 'ضمن سعر السوق',
     aboveMarket: 'أعلى من سعر السوق',
@@ -213,6 +216,9 @@ const copy = {
     sqm: 'm²',
     mapTitle: 'Location on map',
     getDirections: 'Directions · GPS',
+    aiPlaceholder: 'Describe it: 3-bed apartment in Damascus under 25 million with an elevator',
+    aiSearch: 'AI search',
+    aiUnderstood: 'Understood',
     belowMarket: 'Below market',
     atMarket: 'At market',
     aboveMarket: 'Above market',
@@ -306,6 +312,9 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [showFilters, setShowFilters] = useState(true)
   const [hasSearched, setHasSearched] = useState(false)
   const [sortMode, setSortMode] = useState<SortMode>('newest')
+  const [aiQuery, setAiQuery] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiUnderstood, setAiUnderstood] = useState<AiPropertySearchFilters | null>(null)
   const [activeSearchPanel, setActiveSearchPanel] = useState<SearchPanel>(null)
   const [selectedGovernorate, setSelectedGovernorate] = useState('damascus')
   const [selectedCity, setSelectedCity] = useState('damascus-city')
@@ -434,8 +443,38 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setActiveSearchPanel(null)
     setHasSearched(true)
     setShowFilters(false)
+    setAiUnderstood(null)
     // Actually run the search against the chosen location + filters (previously this only closed the panel).
     void loadRentals(currentFilters())
+  }
+
+  // AI search (Synitres): parse the free-text query into filters, reflect them, and run the search.
+  async function doAiSearch() {
+    const q = aiQuery.trim()
+    if (!q || aiBusy) return
+    setAiBusy(true)
+    setMessage('')
+    try {
+      const ai = await aiParsePropertySearch(q)
+      setAiUnderstood(ai)
+      setHasSearched(true)
+      setShowFilters(false)
+      if (ai.propertyType) setVisualFilters((v) => ({ ...v, propertyType: ai.propertyType as string }))
+      // Merge the AI-parsed fields over the current location filters (AI wins where it found something).
+      const base = currentFilters()
+      await loadRentals({
+        ...base,
+        propertyType: ai.propertyType ?? base.propertyType,
+        bedrooms: ai.bedrooms ?? base.bedrooms,
+        amenities: ai.amenities?.length ? ai.amenities : base.amenities,
+        minPrice: ai.minPrice ?? base.minPrice,
+        maxPrice: ai.maxPrice ?? base.maxPrice,
+      })
+    } catch {
+      setMessage(t.error)
+    } finally {
+      setAiBusy(false)
+    }
   }
 
   function chooseMainGroup(value: string) {
@@ -502,6 +541,32 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           <strong>{t.searchTitle}</strong>
           <small>{t.searchCapsuleHint}</small>
         </div>
+
+        {/* AI search (Synitres): type a request in plain words; it fills the filters and searches. */}
+        <div style={styles.aiRow}>
+          <input
+            style={styles.aiInput}
+            value={aiQuery}
+            placeholder={t.aiPlaceholder}
+            onChange={(e) => setAiQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void doAiSearch() }}
+          />
+          <button style={styles.aiButton} disabled={aiBusy || !aiQuery.trim()} onClick={() => void doAiSearch()}>
+            {aiBusy ? '…' : `✨ ${t.aiSearch}`}
+          </button>
+        </div>
+        {aiUnderstood ? (
+          <div style={styles.aiUnderstood}>
+            {t.aiUnderstood}:{' '}
+            {[
+              aiUnderstood.propertyType,
+              aiUnderstood.bedrooms ? `${aiUnderstood.bedrooms}+ ${isAr ? 'غرف' : 'bed'}` : null,
+              aiUnderstood.maxPrice ? `≤ ${moneyText(aiUnderstood.maxPrice, 'SYP', lang)}` : null,
+              aiUnderstood.minPrice ? `≥ ${moneyText(aiUnderstood.minPrice, 'SYP', lang)}` : null,
+              ...(aiUnderstood.amenities || []),
+            ].filter(Boolean).join(' · ') || (isAr ? 'بحث عام' : 'general search')}
+          </div>
+        ) : null}
         <section style={styles.mainGroupCapsule}>
           <strong>{t.mainGroup}</strong>
           <div style={styles.mainGroupGrid}>
@@ -939,6 +1004,10 @@ const styles: Record<string, CSSProperties> = {
   amenityLabel: { color: colors.muted, fontSize: 13 },
   amenityChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   amenityChip: { fontSize: 12, fontWeight: 600, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '3px 10px' },
+  aiRow: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' },
+  aiInput: { flex: 1, minWidth: 220, minHeight: 44, borderRadius: 10, border: `1px solid ${colors.line}`, background: colors.bg2, color: colors.ink, padding: '0 14px', fontSize: 14 },
+  aiButton: { minHeight: 44, borderRadius: 10, border: 'none', background: colors.green, color: '#04211d', fontWeight: 900, padding: '0 18px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  aiUnderstood: { marginTop: 8, color: colors.green, fontSize: 13, fontWeight: 700 },
   pillRow: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
   valuationPill: { fontSize: 11, fontWeight: 800, border: '1px solid', borderRadius: 999, padding: '2px 9px', background: 'transparent' },
   valuationRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', borderTop: `1px solid ${colors.line}`, paddingTop: 10 },

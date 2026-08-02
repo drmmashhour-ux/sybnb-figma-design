@@ -141,6 +141,15 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
     expect(submit.body.listing.status).toBe('PENDING_REVIEW')
   })
 
+  it('POST /api/listings/ai-search parses a free-text query into filters (routed before the :id guard)', async () => {
+    const res = await request(app).post('/api/listings/ai-search').send({ query: '3 bedroom apartment under 25 million with elevator' })
+    expect(res.status).toBe(200)
+    expect(res.body.filters.propertyType).toBe('apartment')
+    expect(res.body.filters.bedrooms).toBe(3)
+    expect(res.body.filters.maxPrice).toBe(25_000_000)
+    expect(res.body.filters.amenities).toContain('elevator')
+  })
+
   it('never returns a non-APPROVED property in public search', async () => {
     const draft = await createProperty('BUY', 500_000, { propertyType: 'apartment', governorate: 'damascus', city: 'damascus-city' })
     await db().listing.update({ where: { id: draft.id }, data: { status: 'PENDING_REVIEW' } })

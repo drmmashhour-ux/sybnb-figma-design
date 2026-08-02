@@ -8,6 +8,7 @@ import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes, PHOTO_REQUIRED_DIVISIONS } from '../lib/listing-attributes.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
 import { computePropertyValuation, loadPropertyComparablePool } from '../lib/property-valuation.mjs'
+import { parsePropertyQuery } from '../lib/ai-property-search.mjs'
 import { haversineKm, isValidCoords } from '../lib/sr-geocoding.mjs'
 import { expireStalePaymentPendingBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
@@ -32,6 +33,16 @@ import {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function handleListings(req, res, url, context) {
+  // AI property search (Synitres module): parse a free-text query into the structured filters GET
+  // /api/listings understands. Must run BEFORE the :id guard below (else "ai-search" is read as a
+  // listing id). Public — searching needs no account. Never throws for a normal request.
+  if (url.pathname === '/api/listings/ai-search') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req).catch(() => ({}))
+    const filters = await parsePropertyQuery(body.query)
+    return json(res, 200, { ok: true, filters })
+  }
+
   const idSegmentMatch = url.pathname.match(/^\/api\/listings\/([^/]+)(?:\/(?:quote|availability|reviews|submit))?$/)
   if (idSegmentMatch && !UUID_RE.test(idSegmentMatch[1])) {
     const error = new Error('Listing not found.')

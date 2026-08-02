@@ -682,6 +682,24 @@ export async function fetchPrototypeContracts() {
   return apiRequest<PlatformContracts>('/api/contracts')
 }
 
+export type AiPropertySearchFilters = {
+  propertyType?: string
+  bedrooms?: number
+  minPrice?: number
+  maxPrice?: number
+  amenities?: string[]
+}
+
+// AI property search (Synitres): parse a free-text query ("3-bed apartment under 25M with elevator")
+// into structured filters. Works with or without an API key (server falls back to a keyword parser).
+export async function aiParsePropertySearch(query: string) {
+  const response = await apiRequest<{ ok: true; filters: AiPropertySearchFilters }>('/api/listings/ai-search', {
+    method: 'POST',
+    body: { query },
+  })
+  return response.filters
+}
+
 export async function createAndSubmitPrototypeListing(
   input: CreateListingInput & {
     photos?: File[]
