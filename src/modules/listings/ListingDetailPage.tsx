@@ -19,7 +19,6 @@ import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
 import { DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
-import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { DealRatingBadge } from '../cars/DealRatingBadge'
 import { AuctionBidPanel } from '../cars/AuctionBidPanel'
 
@@ -219,6 +218,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number; perNight: Array<{ date: string; priceMinor: number }> } | null>(null)
   const [payCurrency] = useState<'USD'>('USD')
+  const [photoIndex, setPhotoIndex] = useState(0)
   const [offerSummary, setOfferSummary] = useState<{ count: number; cheapestMinor: number | null }>({ count: 0, cheapestMinor: null })
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [siblingRooms, setSiblingRooms] = useState<PlatformListing[]>([])
@@ -233,13 +233,10 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const actionLabel = useMemo(() => actionForDivision(listing?.division || 'STAYS', lang), [lang, listing?.division])
   const detailCopy = useMemo(() => detailCopyForDivision(listing?.division || 'STAYS', lang, t), [lang, listing?.division, t])
   const returnPath = useMemo(() => readListingReturnPath(), [])
-  // Before dates are picked there's no server-computed stayQuote yet. Convert only legacy SYP
-  // stays; USD-native stays should flow through unchanged so the guest never sees mixed money.
+  // USD-only platform: nightly price is already in USD; show it directly (no SYP conversion).
   const selectedNights = isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut) ? nightsBetween(dateRange.checkIn, dateRange.checkOut) : 0
   const billableNights = Math.max(selectedNights, 1)
-  const fallbackNightlyMinor = payCurrency === 'USD' && listing?.currency === 'SYP'
-    ? sypMinorToRoundedUsdMinor(listing.priceMinor)
-    : listing?.priceMinor ?? 0
+  const fallbackNightlyMinor = listing?.priceMinor ?? 0
   const displayedTotalMinor = stayQuote?.totalMinor ?? fallbackNightlyMinor * billableNights
   const protectionFeeMinor = Math.round(displayedTotalMinor * 0.03)
   const protectedTotalMinor = displayedTotalMinor + protectionFeeMinor
@@ -476,16 +473,49 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               →
             </button>
             <div style={styles.media}>
-              <img
-                src={listingImage(listing)}
-                alt={title}
-                style={styles.mediaImage}
-                onError={(event) => {
-                  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                  if (event.currentTarget.src.endsWith(fallback)) return
-                  event.currentTarget.src = fallback
-                }}
-              />
+              {(() => {
+                const photoUrls = (listing.media || [])
+                  .map((item) => item.url || item.src || item.assetUrl)
+                  .filter((value): value is string => typeof value === 'string' && value.length > 0)
+                const index = photoUrls.length ? ((photoIndex % photoUrls.length) + photoUrls.length) % photoUrls.length : 0
+                return (
+                  <>
+                    <img
+                      src={photoUrls[index] || listingImage(listing)}
+                      alt={title}
+                      style={styles.mediaImage}
+                      onError={(event) => {
+                        const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+                        if (event.currentTarget.src.endsWith(fallback)) return
+                        event.currentTarget.src = fallback
+                      }}
+                    />
+                    {photoUrls.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          aria-label={isAr ? 'الصورة السابقة' : 'Previous photo'}
+                          style={{ ...styles.galleryArrow, insetInlineStart: 12 }}
+                          onClick={() => setPhotoIndex((i) => i - 1)}
+                        >
+                          ‹
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={isAr ? 'الصورة التالية' : 'Next photo'}
+                          style={{ ...styles.galleryArrow, insetInlineEnd: 12 }}
+                          onClick={() => setPhotoIndex((i) => i + 1)}
+                        >
+                          ›
+                        </button>
+                        <span style={styles.galleryCount}>
+                          {index + 1} / {photoUrls.length}
+                        </span>
+                      </>
+                    )}
+                  </>
+                )
+              })()}
               <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
               {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
               {listing.division === 'CARS' && (
@@ -576,7 +606,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                     <section style={styles.panel}>
                       <strong>{t.specialOfferBadge(offerSummary.count, 180)}</strong>
                       {offerSummary.cheapestMinor != null && (
-                        <span>{moneyText(sypMinorToRoundedUsdMinor(offerSummary.cheapestMinor), 'USD', lang)} / {isAr ? 'ليلة' : 'night'}</span>
+                        <span>{moneyText(offerSummary.cheapestMinor, 'USD', lang)} / {isAr ? 'ليلة' : 'night'}</span>
                       )}
                     </section>
                   )}
@@ -761,7 +791,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       {listingTitleText(room, lang)}
                       {room.hasActiveOffer ? ` · ${t.specialOfferNight}` : ''}
                     </span>
-                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(sypMinorToRoundedUsdMinor(room.priceMinor), 'USD', lang)}</strong>
+                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(room.priceMinor, 'USD', lang)}</strong>
                     <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${room.id}`)}>
                       {t.openRoom}
                     </button>
@@ -947,6 +977,8 @@ const styles: Record<string, CSSProperties> = {
   media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
   mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
   mediaBadge: { position: 'absolute', insetInlineStart: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
+  galleryArrow: { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, borderRadius: '50%', border: '1px solid rgba(255,255,255,.35)', background: 'rgba(8,9,15,.6)', color: '#fff', fontSize: 26, lineHeight: 1, cursor: 'pointer', display: 'grid', placeItems: 'center', backdropFilter: 'blur(8px)', zIndex: 2 },
+  galleryCount: { position: 'absolute', insetInlineEnd: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '6px 12px', fontSize: 13, fontWeight: 700, zIndex: 2 },
   dealRatingBadge: { position: 'absolute', insetInlineEnd: 14, bottom: 14 },
   instantBookBadge: { position: 'absolute', insetInlineStart: 14, top: 14, borderRadius: 999, background: 'rgba(213,169,21,.9)', color: '#1a1400', fontWeight: 950, border: '1px solid rgba(255,255,255,.25)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   detailBody: { border: '1px solid #263146', borderRadius: 8, background: '#10141f', padding: 18, display: 'grid', gap: 16, boxShadow: '0 18px 60px rgba(0,0,0,.24)' },

@@ -53,6 +53,18 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
     else if (roles.includes('DRIVER')) navigate('/driver')
     else navigate('/trips')
   }
+  // The header account button. A user with MULTIPLE staff roles (e.g. an owner who is BOTH host and
+  // admin) must NOT be yanked out of the workspace they're in: clicking it while hosting used to jump to
+  // the admin dashboard (routeAfterAuth prioritizes ADMIN), which made the host and admin areas bleed
+  // together. Respect the current context first; only fall back to role-priority on a neutral page.
+  const goToMyWorkspace = () => {
+    const roles = session?.user.roles || []
+    if ((path.startsWith('/host') || path.startsWith('/sell')) && (roles.includes('HOST') || roles.includes('SELLER'))) return navigate('/host')
+    if (path.startsWith('/admin') && roles.includes('ADMIN')) return navigate('/admin')
+    if (path.startsWith('/driver') && roles.includes('DRIVER')) return navigate('/driver')
+    if (path.startsWith('/trips') || path.startsWith('/booking')) return navigate('/trips')
+    routeAfterAuth(roles)
+  }
   const routeContext = getRouteContext(path, isAr)
   const showFlowNav = !isLanding && !isAdminControlRoom
   function goBack() {
@@ -101,7 +113,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
             </div>
             {session ? (
               <>
-                <button className="menu-action" onClick={() => routeAfterAuth(session.user.roles || [])}>
+                <button className="menu-action" onClick={goToMyWorkspace}>
                   {session.user.displayName || (isAr ? 'حسابي' : 'My account')}
                 </button>
                 <button className="menu-action" onClick={logout}>

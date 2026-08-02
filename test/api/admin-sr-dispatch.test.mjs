@@ -71,4 +71,36 @@ describe('GET /api/admin/sr/dispatch', () => {
     expect(myDriver.driverName).toBeTruthy()
     expect(myDriver.busy).toBe(false)
   })
+
+  it('admin can force-cancel a stuck ride; non-admins cannot; a terminal ride 409s', async () => {
+    const rider = await registerUser('GUEST', 'cancel-rider')
+    const ride = (
+      await request(app)
+        .post('/api/sr/rides')
+        .set('Authorization', `Bearer ${rider.token}`)
+        .send({ pickup: 'p', dropoff: 'd', category: 'SR Economy', pickupCoords: { lat: 35.13, lng: 36.75 }, dropoffCoords: { lat: 35.14, lng: 36.74 } })
+    ).body.ride
+
+    // A non-admin guest cannot force-cancel (403).
+    const guest = await registerUser('GUEST', 'cancel-guest')
+    const forbidden = await request(app).post(`/api/admin/sr/rides/${ride.id}/cancel`).set('Authorization', `Bearer ${guest.token}`).send({})
+    expect(forbidden.status).toBe(403)
+
+    // Admin force-cancels → CANCELLED.
+    const cancel = await request(app).post(`/api/admin/sr/rides/${ride.id}/cancel`).set('Authorization', `Bearer ${admin.token}`).send({ reason: 'unresponsive driver' })
+    expect(cancel.status).toBe(200)
+    expect(cancel.body.ride.status).toBe('CANCELLED')
+
+    // The rider is now free to request again (their reservation released with the terminal status).
+    const reRequest = await request(app)
+      .post('/api/sr/rides')
+      .set('Authorization', `Bearer ${rider.token}`)
+      .send({ pickup: 'p2', dropoff: 'd2', category: 'SR Economy', pickupCoords: { lat: 35.13, lng: 36.75 }, dropoffCoords: { lat: 35.14, lng: 36.74 } })
+    expect(reRequest.status).toBe(201)
+
+    // Cancelling the already-terminal (first) ride again → 409.
+    const again = await request(app).post(`/api/admin/sr/rides/${ride.id}/cancel`).set('Authorization', `Bearer ${admin.token}`).send({})
+    expect(again.status).toBe(409)
+    expect(again.body.error.code).toBe('SR_RIDE_NOT_CANCELLABLE')
+  })
 })

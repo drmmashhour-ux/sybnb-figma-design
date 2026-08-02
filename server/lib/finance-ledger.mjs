@@ -19,6 +19,13 @@ function metadataNumber(metadata, key) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }
 
+// A fractional RATE (e.g. taxRate 0.13) must NOT be rounded — metadataNumber would turn 0.13 into 0 and
+// silently drop the tax from the host/platform split. Read it raw (finite, > 0).
+function metadataRate(metadata, key) {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
 // Mirrors the split the admin finance panel has always displayed (rentMinor / cleaningFeeMinor /
 // taxesMinor / adminCommissionMinor / hostPayoutMinor) so the real wallet ledger finally matches
 // what admin sees, instead of only pulling out taxes and an opt-in protection fee.
@@ -70,7 +77,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     Math.round(staySplitBaseMinor / divisor)
   // Tax: a host-set rate (metadata.taxRate, e.g. 0.13) applied to rent wins; else a legacy flat
   // metadata.taxesMinor; else the platform STR_TAX_RATE (0 today = disclosed-not-charged).
-  const listingTaxRate = metadataNumber(listingMetadata, 'taxRate')
+  const listingTaxRate = metadataRate(listingMetadata, 'taxRate')
   const taxesMinor = listingTaxRate > 0
     ? Math.round(rentMinor * listingTaxRate)
     : (metadataNumber(listingMetadata, 'taxesMinor') || (STR_TAX_RATE > 0 ? Math.round(rentMinor * STR_TAX_RATE) : 0))

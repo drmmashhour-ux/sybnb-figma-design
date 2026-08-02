@@ -80,7 +80,7 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
     }
   }
 
-  const currency = earnings?.totals.currency || 'SYP'
+  const currency = earnings?.totals.currency || 'USD'
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>

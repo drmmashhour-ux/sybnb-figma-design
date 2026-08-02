@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListingsPage, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { getGovernorate, getCity } from '../../engines/search/syriaData'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
@@ -158,6 +158,8 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
   const [listings, setListings] = useState<PlatformListing[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const isStaysEntry = entry === 'stays'
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
@@ -184,16 +186,42 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     setLastSearch(value || null)
 
     try {
-      const results = await fetchApprovedListings(
+      const { listings: results, nextCursor: cursor } = await fetchApprovedListingsPage(
         toApiDivision(value?.division || effectiveInitialDivision),
         value ? toListingSearchFilters(value) : {},
       )
       const visibleResults = isStaysEntry ? results.filter((listing) => !isSampleListing(listing)) : results
       setListings(visibleResults)
+      setNextCursor(cursor)
       setState('empty')
     } catch {
       setListings([])
+      setNextCursor(null)
       setState('error')
+    }
+  }
+
+  // "Load more" — keyset pagination: fetch the next page from the server cursor and append, so guests
+  // can reach every matching listing (not just the first page).
+  async function loadMoreResults() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const { listings: more, nextCursor: cursor } = await fetchApprovedListingsPage(
+        toApiDivision(lastSearch?.division || effectiveInitialDivision),
+        lastSearch ? toListingSearchFilters(lastSearch) : {},
+        nextCursor,
+      )
+      const visibleMore = isStaysEntry ? more.filter((listing) => !isSampleListing(listing)) : more
+      setListings((current) => {
+        const seen = new Set(current.map((l) => l.id))
+        return [...current, ...visibleMore.filter((l) => !seen.has(l.id))]
+      })
+      setNextCursor(cursor)
+    } catch {
+      /* keep what we have; the button stays so the guest can retry */
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -257,6 +285,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <strong>{listings.length}</strong>
         </div>
         {listings.length ? (
+          <>
           <div className="search-result-grid">
             {listings.map((listing) => (
               <article
@@ -297,6 +326,17 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               </article>
             ))}
           </div>
+          {nextCursor && (
+            <button
+              type="button"
+              onClick={() => void loadMoreResults()}
+              disabled={loadingMore}
+              style={{ justifySelf: 'center', marginTop: 16, minHeight: 48, borderRadius: 12, border: '1px solid #2a3350', background: '#141a28', color: '#dce3ff', fontWeight: 900, padding: '0 24px', cursor: loadingMore ? 'default' : 'pointer' }}
+            >
+              {loadingMore ? '…' : lang === 'ar' ? 'عرض المزيد' : 'Load more'}
+            </button>
+          )}
+          </>
         ) : (
           <p className="search-empty-copy">{t.pendingOnly}</p>
         )}

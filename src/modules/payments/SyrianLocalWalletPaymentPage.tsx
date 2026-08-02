@@ -1,7 +1,6 @@
 import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import {
   createSyrianLocalWalletQrPayload,
   SYRIAN_LOCAL_WALLET_QR_ASSET,
@@ -88,12 +87,13 @@ const copy = {
   },
 }
 
-export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042', amountMinor = 10, currency = 'SYP' }: Props) {
+export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042', amountMinor = 10, currency = 'USD' }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const walletAmountDue = Math.max(Number(amountMinor || 10), 1)
-  const walletCurrency = currency || 'SYP'
-  const cardAmountDue = walletCurrency === 'USD' ? walletAmountDue : sypMinorToRoundedUsdMinor(walletAmountDue)
+  // USD-only platform: the local wallet (Sham Cash) collects the same USD amount as the card. No SYP.
+  const walletCurrency = 'USD'
+  const cardAmountDue = walletAmountDue
   const cardCurrency = 'USD'
   const amountDue = walletAmountDue
   const transactionReference = useMemo(
@@ -350,7 +350,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
               </div>
               <div className="wallet-stat">
                 <span>{t.currency}</span>
-                <strong>{isAr && walletCurrency === 'SYP' ? 'ل.س' : walletCurrency}</strong>
+                <strong>{walletCurrency}</strong>
               </div>
             </article>
           </section>

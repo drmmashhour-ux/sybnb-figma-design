@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { createStripeCardRefund, extractStripePaymentIntentId, isStripeConfigured } from './payments.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
 import { getCountryConfig, disputeWindowHours, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
 
@@ -93,6 +94,8 @@ export async function handleDisputes(req, res, url, context) {
     // idempotency-keyed on the SUBJECT (ride/booking), not the dispute — so the ledger's unique key makes
     // a second refund on the same subject impossible, even under concurrent adjudication.
     const subjectKey = dispute.rideId || dispute.bookingId
+    // For a booking paid by CARD (Stripe), the refund goes back to the CARD after commit; populated in tx.
+    let deferredCardRefund = null
     const updated = await db().$transaction(async (tx) => {
       const priorRefund = await tx.walletEntry.findUnique({ where: { idempotencyKey: idempotencyKey(['dispute-refund', subjectKey]) } })
       if (priorRefund) {
@@ -119,16 +122,35 @@ export async function handleDisputes(req, res, url, context) {
           throw err
         }
       }
-      await recordWalletEntry(tx, {
-        userId: subject.customerId,
-        type: 'CREDIT',
-        amountMinor: refundMinor,
-        currency: subject.currency,
-        referenceType: 'dispute_refund',
-        referenceId: subjectKey,
-        keyParts: ['dispute-refund', subjectKey],
-        note: 'Consumer-protection refund credited after admin adjudication.',
-      })
+      // If this is a BOOKING paid by CARD (Stripe), refund the CARD (after commit) instead of a wallet
+      // credit. Rides and Sham Cash bookings keep the internal wallet credit.
+      const stripeProof = dispute.bookingId
+        ? await tx.paymentProof.findFirst({
+            where: { bookingId: dispute.bookingId, provider: 'stripe', status: { in: ['REFUNDED', 'APPROVED'] } },
+            orderBy: { createdAt: 'desc' },
+          })
+        : null
+      const stripeIntentId = stripeProof ? extractStripePaymentIntentId(stripeProof.proofAssetUrl) : null
+      if (stripeIntentId && refundMinor > 0 && isStripeConfigured()) {
+        deferredCardRefund = {
+          paymentIntentId: stripeIntentId,
+          amountMinor: refundMinor,
+          currency: subject.currency,
+          subjectKey,
+          customerId: subject.customerId,
+        }
+      } else {
+        await recordWalletEntry(tx, {
+          userId: subject.customerId,
+          type: 'CREDIT',
+          amountMinor: refundMinor,
+          currency: subject.currency,
+          referenceType: 'dispute_refund',
+          referenceId: subjectKey,
+          keyParts: ['dispute-refund', subjectKey],
+          note: 'Consumer-protection refund credited after admin adjudication.',
+        })
+      }
       const d = await tx.dispute.update({
         where: { id: dispute.id },
         data: { status: 'RESOLVED_REFUNDED', refundMinor, currency: subject.currency, resolutionNote: note, resolvedById: context.user.id, resolvedAt: new Date() },
@@ -138,6 +160,31 @@ export async function handleDisputes(req, res, url, context) {
       })
       return d
     })
+
+    // Real card refund runs AFTER the transaction commits. On Stripe failure, fall back to a wallet
+    // credit so the customer is still made whole.
+    if (deferredCardRefund) {
+      try {
+        await createStripeCardRefund({
+          paymentIntentId: deferredCardRefund.paymentIntentId,
+          amountMinor: deferredCardRefund.amountMinor,
+          bookingCurrency: deferredCardRefund.currency,
+        })
+      } catch (refundError) {
+        console.error('[sybnb] Stripe card refund failed after dispute refund; crediting wallet as fallback:', refundError?.message || refundError)
+        await recordWalletEntry(db(), {
+          userId: deferredCardRefund.customerId,
+          type: 'CREDIT',
+          amountMinor: deferredCardRefund.amountMinor,
+          currency: deferredCardRefund.currency,
+          referenceType: 'dispute_refund',
+          referenceId: deferredCardRefund.subjectKey,
+          keyParts: ['dispute-refund', deferredCardRefund.subjectKey],
+          note: 'Fallback wallet refund — the Stripe card refund could not be completed.',
+        })
+      }
+    }
+
     return json(res, 200, { ok: true, dispute: updated })
   }
 

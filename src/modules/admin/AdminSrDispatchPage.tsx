@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { fetchSrDispatch, type SrDispatchBoard } from '../../shared/api/platformApi'
+import { adminCancelSrRide, fetchSrDispatch, type SrDispatchBoard } from '../../shared/api/platformApi'
 import { SrDispatchMap } from '../sr/SrDispatchMap'
 
 type Props = { lang: Lang }
@@ -24,6 +24,8 @@ const copy = {
     legFree: 'سائق متاح',
     legBusy: 'سائق مشغول',
     updated: 'آخر تحديث',
+    cancel: 'إلغاء الرحلة',
+    cancelConfirm: 'إلغاء هذه الرحلة إدارياً وتحرير مبلغ الراكب المحجوز؟',
   },
   en: {
     back: 'Back',
@@ -40,6 +42,8 @@ const copy = {
     legFree: 'Driver available',
     legBusy: 'Driver busy',
     updated: 'Updated',
+    cancel: 'Cancel ride',
+    cancelConfirm: 'Force-cancel this ride and release the rider’s reserved funds?',
   },
 }
 
@@ -47,6 +51,21 @@ export function AdminSrDispatchPage({ lang }: Props) {
   const t = copy[lang]
   const [board, setBoard] = useState<SrDispatchBoard | null>(null)
   const [error, setError] = useState(false)
+  const [cancelling, setCancelling] = useState('')
+
+  async function cancelRide(rideId: string) {
+    if (!window.confirm(t.cancelConfirm)) return
+    setCancelling(rideId)
+    try {
+      await adminCancelSrRide(rideId)
+      const next = await fetchSrDispatch()
+      setBoard(next)
+    } catch {
+      /* surfaced by the next refresh */
+    } finally {
+      setCancelling('')
+    }
+  }
 
   useEffect(() => {
     const load = () =>
@@ -88,6 +107,21 @@ export function AdminSrDispatchPage({ lang }: Props) {
             <Legend color="#22c55e" label={t.legFree} />
             <Legend color="#f59e0b" label={t.legBusy} />
           </div>
+          {board.rides.length > 0 ? (
+            <div style={styles.ridesList}>
+              {board.rides.map((r) => (
+                <div key={r.id} style={styles.rideRow}>
+                  <span style={styles.rideInfo}>
+                    {(r.riderName || r.id.slice(0, 8)) + ' · ' + r.status + (r.driverName ? ' · ' + r.driverName : '')}
+                  </span>
+                  <button style={styles.rideCancel} disabled={cancelling === r.id} onClick={() => void cancelRide(r.id)}>
+                    {cancelling === r.id ? '…' : t.cancel}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <p style={styles.updated}>
             {t.updated}: {new Date(board.generatedAt).toLocaleTimeString(lang === 'ar' ? 'ar-SY' : 'en-US')}
           </p>
@@ -132,6 +166,10 @@ const styles: Record<string, CSSProperties> = {
   legendItem: { display: 'inline-flex', alignItems: 'center', gap: 6 },
   legendDot: { width: 11, height: 11, borderRadius: '50%', display: 'inline-block' },
   updated: { color: '#94a3b8', fontSize: 12, marginTop: 10 },
+  ridesList: { display: 'grid', gap: 8, marginTop: 16 },
+  rideRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff', padding: '10px 14px' },
+  rideInfo: { fontSize: 13, color: '#334155' },
+  rideCancel: { border: '1px solid #fca5a5', background: '#fef2f2', color: '#b91c1c', borderRadius: 8, padding: '6px 12px', fontWeight: 800, cursor: 'pointer' },
 }
 
 export default AdminSrDispatchPage

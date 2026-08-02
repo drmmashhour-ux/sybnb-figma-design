@@ -728,12 +728,15 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           onAddFiles={addHostDocumentFiles}
           title={hostDocumentsCopy.title}
         />
+        {/* This dashboard panel is a preparation checklist only — it does not transmit files. Documents
+            are actually uploaded and submitted to admin as part of the listing flow, so route the host
+            there instead of falsely showing "sent". (Was: onClick set a local 'sent' flag that moved no
+            data.) */}
         <button
-          disabled={!hostDocumentFiles.length}
-          style={hostDocumentsSent ? styles.primaryButton : styles.secondaryButton}
-          onClick={() => setHostDocumentsSent(true)}
+          style={styles.secondaryButton}
+          onClick={() => (window.location.hash = '/sell/listing-wizard')}
         >
-          {hostDocumentsSent ? hostDocumentsCopy.sent : hostDocumentsCopy.send}
+          {hostDocumentsCopy.cta}
         </button>
       </section>
 
@@ -1018,10 +1021,13 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
 
       <section style={styles.hostQuickLinks}>
         {[
-          [t.paymentState, '/finance', '▰'],
-          [t.profitLog, '/finance', '↗'],
+          // These must point at HOST pages — /finance and /operations are ADMIN-only (a host clicking
+          // them hit an access-denied screen). A host's money view is /host/earnings; payouts are
+          // /host/payout; support is the host inbox.
+          [t.paymentState, '/host/earnings', '▰'],
+          [t.profitLog, '/host/earnings', '↗'],
           [t.trustCenter, '/trust-center', '♢'],
-          [t.opsSupport, '/operations', '?'],
+          [t.opsSupport, '/host/inquiries', '?'],
           [t.clientMessages, '/host/inquiries', '✉'],
         ].map(([label, route, icon]) => (
           <button key={label} style={styles.quickLink} onClick={() => (window.location.hash = String(route))}>

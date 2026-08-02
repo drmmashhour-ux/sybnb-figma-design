@@ -153,17 +153,27 @@ export async function checkRateLimitDb({ bucketKey, name, defaultMax, defaultWin
   // (reset_at is a naive `timestamp`; comparing/subtracting via now()::timestamp keeps both operands
   // in the same frame). resetAt is then derived in JS as an offset from local now, so both fields are
   // correct regardless of the server's / database's timezone.
-  const rows = await client.$queryRaw`
-    INSERT INTO rate_limit_hits ("key", "count", "reset_at")
-    VALUES (${key}, 1, now() + (${windowMs}::int * interval '1 millisecond'))
-    ON CONFLICT ("key") DO UPDATE SET
-      "count" = CASE WHEN rate_limit_hits."reset_at" <= now() THEN 1 ELSE rate_limit_hits."count" + 1 END,
-      "reset_at" = CASE WHEN rate_limit_hits."reset_at" <= now()
-                        THEN now() + (${windowMs}::int * interval '1 millisecond')
-                        ELSE rate_limit_hits."reset_at" END
-    RETURNING "count" AS "count",
-              CEIL(EXTRACT(EPOCH FROM ("reset_at" - now()::timestamp)))::int AS "secondsToReset"
-  `
+  let rows
+  try {
+    rows = await client.$queryRaw`
+      INSERT INTO rate_limit_hits ("key", "count", "reset_at")
+      VALUES (${key}, 1, now() + (${windowMs}::int * interval '1 millisecond'))
+      ON CONFLICT ("key") DO UPDATE SET
+        "count" = CASE WHEN rate_limit_hits."reset_at" <= now() THEN 1 ELSE rate_limit_hits."count" + 1 END,
+        "reset_at" = CASE WHEN rate_limit_hits."reset_at" <= now()
+                          THEN now() + (${windowMs}::int * interval '1 millisecond')
+                          ELSE rate_limit_hits."reset_at" END
+      RETURNING "count" AS "count",
+                CEIL(EXTRACT(EPOCH FROM ("reset_at" - now()::timestamp)))::int AS "secondsToReset"
+    `
+  } catch (error) {
+    // FAIL OPEN. The rate limiter runs before every route, so if its store is unavailable (missing
+    // rate_limit_hits table on a fresh DB, or a transient DB error) it must ALLOW the request rather than
+    // 500 the entire API. Log once so ops can restore the store; limiting resumes automatically once it's
+    // healthy. (Availability > rate-limiting when the two conflict.)
+    console.error('[rate-limit] store unavailable — failing open:', error?.message || error)
+    return { allowed: true, remaining: Infinity, resetAt: 0, retryAfterSeconds: 0 }
+  }
   const row = rows[0]
   const count = Number(row.count)
   const secondsToReset = Math.max(0, Number(row.secondsToReset) || 0)

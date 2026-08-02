@@ -33,9 +33,27 @@ export function methodNotAllowed(res, allowed) {
   )
 }
 
+// Cap request bodies so a few large (or malicious) uploads can't pin function memory. 20MB comfortably
+// covers the biggest legit payload: an 8–12MB image/document sent as base64 (~16MB) plus JSON overhead.
+const MAX_JSON_BODY_BYTES = 20 * 1024 * 1024
+
+function payloadTooLargeError() {
+  const error = new Error('Request body is too large.')
+  error.statusCode = 413
+  error.code = 'PAYLOAD_TOO_LARGE'
+  error.expose = true
+  return error
+}
+
 export async function readJson(req) {
+  const declaredLength = Number(req.headers?.['content-length'])
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_JSON_BODY_BYTES) throw payloadTooLargeError()
+
   const chunks = []
+  let total = 0
   for await (const chunk of req) {
+    total += chunk.length
+    if (total > MAX_JSON_BODY_BYTES) throw payloadTooLargeError()
     chunks.push(chunk)
   }
 

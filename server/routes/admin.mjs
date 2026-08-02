@@ -1170,6 +1170,35 @@ export async function handleAdmin(req, res, url, context) {
     })
   }
 
+  // SR admin force-cancel — recover a STUCK ride (unresponsive driver mid-trip, ghosted match) that
+  // neither rider nor driver can clear. Flips any in-flight ride to CANCELLED, which drops it out of the
+  // held-status set so the rider's state-derived fund reservation releases automatically (no completion,
+  // so nothing was ever charged). ADMIN only, audited.
+  const srRideCancelMatch = url.pathname.match(/^\/api\/admin\/sr\/rides\/([^/]+)\/cancel$/)
+  if (srRideCancelMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const rideId = srRideCancelMatch[1]
+    const body = await readJson(req).catch(() => ({}))
+    const reason = String(body.reason || 'Admin force-cancelled a stuck ride').slice(0, 500)
+    const updated = await db().rideRequest.updateMany({
+      where: { id: rideId, status: { in: ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'] } },
+      data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByRole: 'ADMIN', cancelReason: reason, offeredDriverId: null, offerExpiresAt: null },
+    })
+    if (updated.count === 0) {
+      const error = new Error('This ride is not found or is already in a terminal state.')
+      error.statusCode = 409
+      error.code = 'SR_RIDE_NOT_CANCELLABLE'
+      error.expose = true
+      throw error
+    }
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'ADMIN_SR_RIDE_CANCELLED', entityType: 'ride_requests', entityId: rideId, after: { reason } },
+    })
+    const ride = await db().rideRequest.findUnique({ where: { id: rideId } })
+    return json(res, 200, { ok: true, ride })
+  }
+
   if (url.pathname === '/api/admin/platform-metrics') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
@@ -1221,15 +1250,13 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
 
-    // Platform revenue today is exactly three real wallet-entry kinds: the STR admin commission
-    // share, the (non-refundable) cancellation-protection fee, and the seller/dealer/developer
-    // plan fee — all recorded as CREDIT entries by approvePaymentProof() in finance-ledger.mjs.
-    // SR rides currently record zero platform commission (the full fare is a driver-side figure
-    // only, never credited to an admin wallet) — that's surfaced explicitly below rather than
-    // silently folded into "revenue".
+    // Platform revenue = the real admin-credited wallet-entry kinds: the STR admin commission share,
+    // the (non-refundable) cancellation-protection fee, the seller/dealer/developer plan fee, the STR
+    // host-plan fee, AND the SR ride commission (15% of each completed ride's fare, credited to the admin
+    // wallet by chargeCompletedRide() as sr_admin_commission). All are CREDIT entries.
     const [commissionEntries, completedSrRides] = await Promise.all([
       db().walletEntry.findMany({
-        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee'] } },
+        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission'] } },
         select: { amountMinor: true, currency: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
       }),

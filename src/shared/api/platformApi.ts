@@ -2269,6 +2269,17 @@ export async function fetchSrDispatch() {
   return runAdminRequest((token) => apiRequest<{ ok: true } & SrDispatchBoard>('/api/admin/sr/dispatch', { token }))
 }
 
+// Admin force-cancel a stuck SR ride (releases the rider's reserved funds). ADMIN only.
+export async function adminCancelSrRide(rideId: string, reason?: string) {
+  return runAdminRequest((token) =>
+    apiRequest<{ ok: true; ride: { id: string; status: string } }>(`/api/admin/sr/rides/${rideId}/cancel`, {
+      method: 'POST',
+      token,
+      body: reason ? { reason } : {},
+    }),
+  )
+}
+
 export type PlatformRevenueByCurrency = {
   currency: string
   totalRevenueMinor: number

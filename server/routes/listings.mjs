@@ -61,10 +61,11 @@ export async function handleListings(req, res, url, context) {
       throw error
     }
     const quote = await computeStayTotalMinor(listing, checkIn, checkOut)
-    // The listing's own price is SYP; a guest who chooses to pay in USD instead gets that SYP
-    // total (and each night's own price) converted at the platform's fixed rate and rounded up to
-    // the nearest $5 — same change-avoidance rule applied to SR fares and wallet gifts.
-    const wantsUsd = url.searchParams.get('currency') === 'USD'
+    // A SYP-priced listing can be quoted in USD (convert at the fixed rate, round up to the nearest $5 —
+    // same change-avoidance rule as SR fares / wallet gifts). But STR (STAYS) listings are already
+    // USD-native, so converting them AGAIN would divide a real dollar total by 15,000 and collapse every
+    // stay to ~$5. Only convert when the listing is NOT already in USD.
+    const wantsUsd = url.searchParams.get('currency') === 'USD' && listing.currency !== 'USD'
     const totalMinor = wantsUsd ? sypMinorToRoundedUsdMinor(quote.totalMinor) : quote.totalMinor
     const perNight = wantsUsd
       ? quote.perNight.map((night) => ({ ...night, priceMinor: sypMinorToRoundedUsdMinor(night.priceMinor) }))
@@ -80,8 +81,8 @@ export async function handleListings(req, res, url, context) {
 
   if (url.pathname === '/api/listings') {
     if (req.method === 'GET') {
-      await expireOldListings()
-      await expireOpenAuctions()
+      // Expiry sweeps moved OFF this hot public-search path to the /api/cron/maintenance cron (they were
+      // unscoped full-table updateMany's running on EVERY search). Search stays read-only now.
       const params = url.searchParams
       // Validate the division enum before it reaches Prisma, else an invalid ?division= raises a raw 500.
       const divisionParam = params.get('division')
@@ -145,21 +146,26 @@ export async function handleListings(req, res, url, context) {
       if (minPrice !== undefined) priceMinor.gte = minPrice
       if (maxPrice !== undefined) priceMinor.lte = maxPrice
 
+      // Keyset pagination + bounded scan. The metadata-JSON filters (city/amenities/vehicle/…) can't be
+      // expressed in SQL, so they're applied in JS — but instead of the old hard "newest 200 then filter"
+      // window (which made every listing older than the newest 200 INVISIBLE to search once a division
+      // grew past 200), we page through the APPROVED set by a stable keyset (orderBy + id tiebreaker,
+      // Prisma cursor on the unique id). Each request scans at most SCAN_BUDGET rows and returns up to
+      // PAGE_SIZE matches plus a `nextCursor` the client uses to load more — so ALL listings are reachable
+      // and DB cost stays bounded regardless of catalogue size.
+      const PAGE_SIZE = 50
+      const FETCH_BATCH = 120
+      const SCAN_BUDGET = 600
+      const requestCursor = url.searchParams.get('cursor') || null
+
       const orderBy =
-        sort === 'priceAsc' ? { priceMinor: 'asc' } : sort === 'priceDesc' ? { priceMinor: 'desc' } : { createdAt: 'desc' }
+        sort === 'priceAsc'
+          ? [{ priceMinor: 'asc' }, { id: 'desc' }]
+          : sort === 'priceDesc'
+            ? [{ priceMinor: 'desc' }, { id: 'desc' }]
+            : [{ createdAt: 'desc' }, { id: 'desc' }]
 
-      const candidates = await db().listing.findMany({
-        where: {
-          status: 'APPROVED',
-          division,
-          ...(Object.keys(priceMinor).length ? { priceMinor } : {}),
-        },
-        include: { location: true, media: true },
-        orderBy,
-        take: 200,
-      })
-
-      let listings = candidates.filter((listing) => {
+      const matchesFilters = (listing) => {
         const meta = listing.metadata || {}
         const visual = meta.visualFilters || {}
         if (governorate && meta.governorate !== governorate) return false
@@ -217,7 +223,43 @@ export async function handleListings(req, res, url, context) {
           if (!amenities.every((amenity) => have.has(amenity))) return false
         }
         return true
-      })
+      }
+
+      const matched = []
+      let scanned = 0
+      let cursor = requestCursor
+      let exhausted = false
+      while (matched.length < PAGE_SIZE && scanned < SCAN_BUDGET) {
+        const batch = await db().listing.findMany({
+          where: {
+            status: 'APPROVED',
+            division,
+            ...(Object.keys(priceMinor).length ? { priceMinor } : {}),
+          },
+          include: { location: true, media: true },
+          orderBy,
+          take: FETCH_BATCH,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        })
+        if (!batch.length) {
+          exhausted = true
+          break
+        }
+        scanned += batch.length
+        for (const listing of batch) {
+          cursor = listing.id // advance the keyset to the LAST row we actually processed (never skip rows)
+          if (matchesFilters(listing)) matched.push(listing)
+          if (matched.length >= PAGE_SIZE) break
+        }
+        if (matched.length >= PAGE_SIZE) break
+        if (batch.length < FETCH_BATCH) {
+          exhausted = true
+          break
+        }
+      }
+      // More rows may exist beyond this scan → hand the client a cursor to load the next page.
+      const nextCursor = exhausted ? null : cursor
+      let listings = matched
 
       if (checkIn && checkOut && checkOut > checkIn && listings.length) {
         const ids = listings.map((listing) => listing.id)
@@ -261,7 +303,7 @@ export async function handleListings(req, res, url, context) {
         }))
       }
 
-      let results = listings.slice(0, 50)
+      let results = listings // already bounded to PAGE_SIZE by the keyset loop above
       // Deal Rating (025/Carcad Phase E): CarGurus-style Great/Good/Fair/High price badge, computed
       // against the pool of currently-live comparable CARS listings. One pool fetch per request.
       if (division === 'CARS' && results.length) {
@@ -297,7 +339,7 @@ export async function handleListings(req, res, url, context) {
         })
       }
 
-      return json(res, 200, { ok: true, listings: results })
+      return json(res, 200, { ok: true, listings: results, nextCursor })
     }
 
     if (req.method === 'POST') {
@@ -360,7 +402,7 @@ export async function handleListings(req, res, url, context) {
     await expireOldListings({ id: detailMatch[1] })
     await expireOpenAuctions({ listing: { id: detailMatch[1] } })
     const listing = await db().listing.findFirst({
-      where: { id: detailMatch[1], status: 'APPROVED' },
+      where: { id: detailMatch[1] },
       include: {
         location: true,
         media: true,
@@ -382,6 +424,21 @@ export async function handleListings(req, res, url, context) {
       error.code = 'LISTING_NOT_FOUND'
       error.expose = true
       throw error
+    }
+    // The public detail is APPROVED-only. A not-yet-approved listing (e.g. PENDING_REVIEW) is visible ONLY
+    // to its owner or an admin/support reviewer — so an admin can open a pending listing from the review
+    // queue and actually SEE its photos/details before approving. Anyone else gets a 404 (never leak that
+    // an unapproved listing exists). context is pre-populated from the token (or null for anonymous).
+    if (listing.status !== 'APPROVED') {
+      const isOwner = Boolean(context?.user) && listing.ownerId === context.user.id
+      const isStaff = Boolean(context?.roles?.includes('ADMIN') || context?.roles?.includes('SUPPORT'))
+      if (!isOwner && !isStaff) {
+        const error = new Error('Listing not found.')
+        error.statusCode = 404
+        error.code = 'LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
     }
     // Verification badge: the listing owner's identity document has been admin-approved. Surfaced on
     // the public detail so a buyer can see "verified seller" before contacting them.
@@ -551,9 +608,9 @@ export async function handleListings(req, res, url, context) {
         throw error
       }
       const body = await readJson(req)
-      const { storageKey } = await saveListingMedia(body.fileBase64, body.mimeType)
+      const saved = await saveListingMedia(body.fileBase64, body.mimeType, listingId)
       const media = await db().listingMedia.create({
-        data: { listingId, url: mediaServeUrl(listingId, storageKey), kind: 'photo', sortOrder: count },
+        data: { listingId, url: saved.url, kind: 'photo', sortOrder: count },
       })
       return json(res, 201, { ok: true, media })
     }
@@ -595,7 +652,7 @@ export async function handleListings(req, res, url, context) {
       throw error
     }
     await db().listingMedia.delete({ where: { id: mediaId } })
-    await deleteListingMedia(String(media.url || '').split('/').pop())
+    await deleteListingMedia(media.url) // full url: blob→CDN delete, dev→local file delete
     return json(res, 200, { ok: true, deleted: true })
   }
 

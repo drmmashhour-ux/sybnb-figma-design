@@ -10,7 +10,7 @@ import {
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
-import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
+import { guestFeeSummary } from './guestFeeSummary'
 
 type Props = {
   listingId: string
@@ -37,6 +37,8 @@ const copy = {
     nights: (n: number) => `${n} ${n === 1 ? 'ليلة' : 'ليالٍ'}`,
     priceBreakdown: 'تفاصيل السعر',
     stayAmount: 'قيمة الحجز',
+    cleaning: 'رسوم التنظيف',
+    tax: 'الضريبة',
     cancellationProtection: 'حماية الإلغاء',
     totalDue: 'الإجمالي المستحق',
     agreementTitle: 'اتفاقية الإيجار اليومي',
@@ -61,6 +63,8 @@ const copy = {
     nights: (n: number) => `${n} ${n === 1 ? 'night' : 'nights'}`,
     priceBreakdown: 'Price breakdown',
     stayAmount: 'Booking amount',
+    cleaning: 'Cleaning fee',
+    tax: 'Tax',
     cancellationProtection: 'Cancellation protection',
     totalDue: 'Total due',
     agreementTitle: 'Short-Term Rental Agreement',
@@ -90,7 +94,8 @@ export function BookingReviewPage({ listingId, lang }: Props) {
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number } | null>(null)
   const dateRange: DateRange = draft.dateRange || { checkIn: '', checkOut: '' }
   const cancellationProtection = draft.cancellationProtection ?? false
-  const payCurrency = draft.payCurrency ?? 'SYP'
+  // USD-only platform: stays are priced and charged in USD. (Syrian-pound pricing/conversion removed.)
+  const payCurrency = 'USD'
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -127,12 +132,19 @@ export function BookingReviewPage({ listingId, lang }: Props) {
 
   const nights = stayQuote?.nights ?? (isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut) ? nightsBetween(dateRange.checkIn, dateRange.checkOut) : 0)
   const billableNights = Math.max(nights, 1)
-  const fallbackNightlyMinor = payCurrency === 'USD' && listing?.currency === 'SYP'
-    ? sypMinorToRoundedUsdMinor(listing.priceMinor)
-    : listing?.priceMinor ?? 0
+  const fallbackNightlyMinor = listing?.priceMinor ?? 0
   const stayAmountMinor = stayQuote?.totalMinor ?? fallbackNightlyMinor * billableNights
   const protectionFeeMinor = cancellationProtection ? Math.round(stayAmountMinor * 0.03) : 0
-  const totalDueMinor = stayAmountMinor + protectionFeeMinor
+  // The FULL total the guest will actually be charged (stay + cleaning + tax + protection), computed the
+  // same way the server does at pay time — so the reserve page never shows a total lower than the charge.
+  const feePreview = guestFeeSummary({
+    amountMinor: stayAmountMinor,
+    listing: listing ? { division: listing.division, metadata: listing.metadata } : undefined,
+    metadata: { cancellationProtectionPurchased: cancellationProtection, cancellationProtectionFeeMinor: protectionFeeMinor },
+  })
+  const cleaningFeeMinor = feePreview.cleaningFeeMinor
+  const taxesMinor = feePreview.taxesMinor
+  const totalDueMinor = feePreview.totalMinor
 
   async function confirmBooking() {
     if (!listing) return
@@ -214,6 +226,8 @@ export function BookingReviewPage({ listingId, lang }: Props) {
           <section style={styles.card}>
             <h2 style={styles.sectionTitle}>{t.priceBreakdown}</h2>
             <Info label={t.stayAmount} value={moneyText(stayAmountMinor, payCurrency, lang)} />
+            {cleaningFeeMinor > 0 && <Info label={t.cleaning} value={moneyText(cleaningFeeMinor, payCurrency, lang)} />}
+            {taxesMinor > 0 && <Info label={t.tax} value={moneyText(taxesMinor, payCurrency, lang)} />}
             {protectionFeeMinor > 0 && <Info label={t.cancellationProtection} value={moneyText(protectionFeeMinor, payCurrency, lang)} />}
             <Info label={t.totalDue} value={moneyText(totalDueMinor, payCurrency, lang)} strong />
           </section>

@@ -131,8 +131,61 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
     link.click()
     URL.revokeObjectURL(url)
   }
+  // Print a CLEAN, white, printer-friendly receipt. The old handler called window.print() on the whole
+  // dark app page (nav, buttons, no print stylesheet) → an unusable/blank printout. Instead we render a
+  // self-contained receipt document in a new window and print that. Falls back to window.print() only if
+  // the popup is blocked.
   const printReceipt = () => {
-    window.print()
+    if (!proof) return
+    const esc = (value: unknown) =>
+      String(value ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+    const payerName = proof.user?.displayName || proof.booking?.guest?.displayName || proof.userId.slice(0, 8).toUpperCase()
+    const hostName = listing?.owner?.displayName || listing?.ownerId?.slice(0, 8).toUpperCase() || '-'
+    const rows: Array<[string, string, boolean]> = [
+      [t.booking, proof.bookingId || '-', false],
+      [t.invoice, `INV-${proof.id.slice(0, 8).toUpperCase()}`, false],
+      [t.listing, listingTitle, false],
+      [t.status, proof.status === 'PENDING_ADMIN_REVIEW' ? t.pending : statusText(proof.status, lang), false],
+      [t.payer, payerName, false],
+      [t.host, hostName, false],
+      [t.provider, providerText(proof.provider, lang), false],
+      [t.reference, proof.providerRef || '-', false],
+      [t.reviewed, proof.reviewedAt ? new Date(proof.reviewedAt).toLocaleString() : '-', false],
+      [t.paidTotal, moneyText(proof.amountMinor, proof.currency, lang), true],
+    ]
+    const body = rows
+      .map(
+        ([k, v, total]) =>
+          `<tr class="${total ? 'total' : ''}"><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`,
+      )
+      .join('')
+    const html = `<!doctype html><html dir="${isAr ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><title>SYBNB — ${esc(t.title)}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;margin:36px;max-width:640px}
+h1{font-size:20px;margin:0 0 2px}
+.sub{color:#666;font-size:12px;margin:0 0 22px}
+table{width:100%;border-collapse:collapse}
+td{padding:10px 4px;border-bottom:1px solid #e5e7eb;font-size:14px;vertical-align:top}
+td.k{color:#666;width:38%}
+td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-break:break-all}
+tr.total td{font-size:18px;border-top:2px solid #111;border-bottom:none;padding-top:16px}
+.foot{margin-top:24px;color:#888;font-size:11px;line-height:1.5}
+</style></head><body>
+<h1>SYBNB — ${esc(t.title)}</h1>
+<p class="sub">${esc(t.letterhead)}</p>
+<table>${body}</table>
+<p class="foot">${esc(t.warning || '')}</p>
+</body></html>`
+    const win = window.open('', '_blank', 'width=720,height=900')
+    if (!win) {
+      window.print() // popup blocked — fall back to printing the page
+      return
+    }
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 300) // let the new document render before printing
   }
 
   return (

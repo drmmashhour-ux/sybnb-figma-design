@@ -48,6 +48,8 @@ const T = {
     resetCta: 'تحديث كلمة المرور',
     resetDone: 'تم تحديث كلمة المرور. سجّل الدخول الآن.',
     backToSignIn: 'العودة لتسجيل الدخول',
+    show: 'إظهار',
+    hide: 'إخفاء',
   },
   en: {
     welcome: 'Welcome to SYBNB',
@@ -79,7 +81,38 @@ const T = {
     resetCta: 'Update password',
     resetDone: 'Password updated. Sign in now.',
     backToSignIn: 'Back to sign in',
+    show: 'Show',
+    hide: 'Hide',
   },
+}
+
+// Password field with a Show/Hide toggle so the guest can confirm the password is typed correctly
+// before continuing (Airbnb-style). Each field manages its own reveal state.
+function PasswordInput({ value, onValueChange, placeholder, autoComplete, wide, showLabel, hideLabel }: {
+  value: string
+  onValueChange: (value: string) => void
+  placeholder: string
+  autoComplete: string
+  wide?: boolean
+  showLabel: string
+  hideLabel: string
+}) {
+  const [visible, setVisible] = useState(false)
+  return (
+    <div style={styles.pwWrap}>
+      <input
+        style={{ ...(wide ? styles.inputWide : styles.input), paddingInlineEnd: 62, width: '100%' }}
+        type={visible ? 'text' : 'password'}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onValueChange(event.target.value)}
+        autoComplete={autoComplete}
+      />
+      <button type="button" style={styles.pwToggle} onClick={() => setVisible((v) => !v)} aria-label={visible ? hideLabel : showLabel} tabIndex={-1}>
+        {visible ? hideLabel : showLabel}
+      </button>
+    </div>
+  )
 }
 
 export function AuthPanel({ lang, onClose, onAuthed }: Props) {
@@ -234,7 +267,7 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
         {mode === 'signIn' ? (
           <form style={styles.form} onSubmit={handleSignIn}>
             <input style={styles.inputWide} type="email" dir="ltr" placeholder={t.email} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
-            <input style={styles.input} type="password" placeholder={t.password} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" />
+            <PasswordInput wide value={password} onValueChange={setPassword} placeholder={t.password} autoComplete="current-password" showLabel={t.show} hideLabel={t.hide} />
             {message && <p style={styles.message}>{message}</p>}
             {error && <p style={styles.error}>{error}</p>}
             <button style={styles.primary} disabled={busy} type="submit">{busy ? '…' : t.doSignIn}</button>
@@ -249,8 +282,8 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
               <>
                 <input style={styles.inputWide} inputMode="numeric" dir="ltr" placeholder={t.code} value={code} onChange={(event) => setCode(event.target.value)} />
                 <div style={styles.row2}>
-                  <input style={styles.input} type="password" placeholder={t.newPassword} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
-                  <input style={styles.input} type="password" placeholder={t.confirmPassword} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+                  <PasswordInput value={password} onValueChange={setPassword} placeholder={t.newPassword} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
+                  <PasswordInput value={confirmPassword} onValueChange={setConfirmPassword} placeholder={t.confirmPassword} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
                 </div>
               </>
             )}
@@ -275,8 +308,8 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
             <input style={styles.inputWide} type="email" dir="ltr" placeholder={t.email} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
             <input style={styles.inputWide} type="email" dir="ltr" placeholder={t.repeatEmail} value={repeatEmail} onChange={(event) => setRepeatEmail(event.target.value)} />
             <div style={styles.row2}>
-              <input style={styles.input} type="password" placeholder={t.password} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
-              <input style={styles.input} type="password" placeholder={t.confirmPassword} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+              <PasswordInput value={password} onValueChange={setPassword} placeholder={t.password} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
+              <PasswordInput value={confirmPassword} onValueChange={setConfirmPassword} placeholder={t.confirmPassword} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
             </div>
             {codeSent && (
               <input style={styles.inputWide} inputMode="numeric" dir="ltr" placeholder={t.code} value={code} onChange={(event) => setCode(event.target.value)} />
@@ -313,6 +346,8 @@ const styles: Record<string, CSSProperties> = {
   input: { minHeight: 52, border: '1px solid #30384d', borderRadius: 12, background: '#0d1320', color: '#fff', padding: '0 14px', fontSize: 15, fontWeight: 600 },
   inputWide: { minHeight: 56, border: '1px solid #30384d', borderRadius: 12, background: '#0d1320', color: '#fff', padding: '0 16px', fontSize: 16, fontWeight: 700, letterSpacing: '.3px', width: '100%' },
   primary: { minHeight: 54, border: 0, borderRadius: 12, background: '#20d29b', color: '#06110e', fontWeight: 950, fontSize: 17, cursor: 'pointer' },
+  pwWrap: { position: 'relative', display: 'block', width: '100%' },
+  pwToggle: { position: 'absolute', insetInlineEnd: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'transparent', color: '#8ea0ff', fontWeight: 800, fontSize: 13, cursor: 'pointer', padding: '8px 8px', lineHeight: 1 },
   link: { border: 0, background: 'transparent', color: '#8ea0ff', fontWeight: 800, cursor: 'pointer', fontSize: 14 },
   error: { margin: 0, color: '#ffabab', fontSize: 14, fontWeight: 700 },
   message: { margin: 0, color: '#9fffe1', fontSize: 14, fontWeight: 700 },

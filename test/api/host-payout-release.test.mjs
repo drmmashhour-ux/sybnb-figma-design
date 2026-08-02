@@ -152,4 +152,75 @@ describe('Host payout release (disbursement) + ADMIN-only account reveal', () =>
     expect(ok.body.account.type).toBe('legacy')
     expect(ok.body.account.number).toBe('0912000111')
   })
+
+  // A manual admin hold must ACTUALLY stop the disbursement (it used to be a UI-only note).
+  it('refuses release while a payout is on manual hold, then allows it once the hold is removed', async () => {
+    const number = '0955000111'
+    await setHostPayout({
+      type: 'sham_cash',
+      accountHolder: 'Host Owner',
+      last4: payoutAccountLast4(number),
+      ...encryptPayoutAccount(number),
+      updatedAt: new Date().toISOString(),
+    })
+    const booking = await makeEligibleBooking()
+
+    const hold = await request(app)
+      .post(`/api/admin/bookings/${booking.id}/payout-hold`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ held: true })
+    expect(hold.status).toBe(200)
+    expect(hold.body.payoutHeld).toBe(true)
+
+    const blocked = await request(app)
+      .patch(`/api/admin/payouts/${booking.id}/release`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ payoutRef: 'SHAM-REF-HELD' })
+    expect(blocked.status).toBe(409)
+    expect(blocked.body.error.code).toBe('PAYOUT_ON_MANUAL_HOLD')
+    const noRelease = await db().walletEntry.findFirst({
+      where: { referenceType: 'booking_payout', referenceId: booking.id, type: 'RELEASE' },
+    })
+    expect(noRelease).toBeNull() // money did NOT move
+
+    const unhold = await request(app)
+      .post(`/api/admin/bookings/${booking.id}/payout-hold`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ held: false })
+    expect(unhold.body.payoutHeld).toBe(false)
+
+    const ok = await request(app)
+      .patch(`/api/admin/payouts/${booking.id}/release`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ payoutRef: 'SHAM-REF-UNHELD' })
+    expect(ok.status).toBe(200)
+  })
+
+  // An admin note is really delivered into the booking's message thread (was a local-only outbox before).
+  it('delivers an admin note into the booking message thread as an ADMIN message', async () => {
+    const booking = await makeEligibleBooking()
+    const res = await request(app)
+      .post(`/api/admin/bookings/${booking.id}/message`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ target: 'guest', body: 'SYBNB team note: your booking is under review.' })
+    expect(res.status).toBe(201)
+    expect(res.body.message.senderRole).toBe('ADMIN')
+
+    const thread = await db().messageThread.findFirst({
+      where: { OR: [{ bookingId: booking.id }, { listingId: listing.id, guestId: guest.id }] },
+      include: { messages: true },
+    })
+    expect(thread).not.toBeNull()
+    expect(thread.messages.some((m) => m.senderRole === 'ADMIN' && m.body.includes('under review'))).toBe(true)
+  })
+
+  it('rejects an empty admin note', async () => {
+    const booking = await makeEligibleBooking()
+    const res = await request(app)
+      .post(`/api/admin/bookings/${booking.id}/message`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ target: 'guest', body: '   ' })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('MESSAGE_BODY_REQUIRED')
+  })
 })
