@@ -8,6 +8,8 @@ import { fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMe
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
+import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
+import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 
 type Props = {
   lang: Lang
@@ -120,6 +122,8 @@ const copy = {
     locationLabel: 'الموقع',
     amenitiesLabel: 'المزايا',
     sqm: 'م²',
+    mapTitle: 'الموقع على الخريطة',
+    getDirections: 'الاتجاهات · GPS',
     empty: 'لا توجد عقارات شهرية منشورة بعد.',
     loading: 'جار التحميل',
     error: 'تعذر تحميل عقارات الإيجار الشهري',
@@ -197,6 +201,8 @@ const copy = {
     locationLabel: 'Location',
     amenitiesLabel: 'Amenities',
     sqm: 'm²',
+    mapTitle: 'Location on map',
+    getDirections: 'Directions · GPS',
     empty: 'No published monthly rentals yet.',
     loading: 'Loading',
     error: 'Could not load monthly rentals',
@@ -687,6 +693,29 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 </div>
               </section>
 
+              {/* Maps (Synitres module): the free OSM/Leaflet capsule shows the property pin + GPS directions. */}
+              {(() => {
+                const mapTarget = listingMapTarget(selectedListing, listingTitleText(selectedListing, lang), lang)
+                if (!mapTarget.hasCoordinates) return null
+                const [mlat, mlng] = mapTarget.query.split(',').map(Number)
+                if (!Number.isFinite(mlat) || !Number.isFinite(mlng)) return null
+                return (
+                  <section style={styles.mapSection}>
+                    <strong>{t.mapTitle}</strong>
+                    <LocationMap
+                      lat={mlat}
+                      lng={mlng}
+                      style={{ height: 220, borderRadius: 12, overflow: 'hidden', border: `1px solid ${colors.line}` }}
+                      popupHtml={mapTarget.label ? `<div style="color:#111;font-weight:700;max-width:220px">${mapTarget.label}</div>` : undefined}
+                    />
+                    <div style={styles.mapRow}>
+                      <span style={styles.mapAddress}>⌖ {mapTarget.label}</span>
+                      <a href={directionsUrl(mlat, mlng)} target="_blank" rel="noreferrer" style={styles.directionsLink}>{t.getDirections}</a>
+                    </div>
+                  </section>
+                )
+              })()}
+
               <section style={styles.detailPanel}>
                 <strong>{t.detailTitle}</strong>
                 <div style={styles.trustGrid}>
@@ -858,6 +887,10 @@ const styles: Record<string, CSSProperties> = {
   amenityLabel: { color: colors.muted, fontSize: 13 },
   amenityChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   amenityChip: { fontSize: 12, fontWeight: 600, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '3px 10px' },
+  mapSection: { border: `1px solid ${colors.line}`, borderRadius: 16, background: colors.bg2, padding: 14, display: 'grid', gap: 10 },
+  mapRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  mapAddress: { color: colors.muted, fontSize: 13 },
+  directionsLink: { color: colors.green, fontWeight: 800, fontSize: 13, textDecoration: 'none', border: `1px solid ${withAlpha(colors.green, 0.5)}`, borderRadius: 8, padding: '6px 12px' },
   selectedCard: { border: `1px solid ${withAlpha(colors.green, 0.42)}`, borderRadius: 18, background: withAlpha(colors.green, 0.08), padding: 14, display: 'grid', gap: 14 },
   selectedImage: { width: '100%', aspectRatio: '16 / 10', borderRadius: 14, objectFit: 'cover', background: colors.bg2 },
   selectedContent: { display: 'grid', gap: 10 },
