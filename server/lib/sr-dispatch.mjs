@@ -14,10 +14,11 @@ const LOCATION_FRESH_MINUTES = Number(process.env.SR_LOCATION_FRESH_MIN ?? 5)
 
 const ACTIVE_RIDE_STATUSES = "('DRIVER_ASSIGNED','DRIVER_ARRIVING','IN_PROGRESS')"
 
-// Nearest ONLINE driver with a fresh location within range of the pickup, who isn't already on a ride.
-// Returns { driverId, distanceKm } or null. Never throws — dispatch is best-effort; if it can't find a
-// driver the ride simply stays in the open pool for anyone to claim.
-export async function findNearestOnlineDriver(pickup, client = db()) {
+// Nearest ONLINE driver with a fresh location within range of the pickup, who isn't already on a ride
+// and isn't in excludeDriverIds (drivers who already declined this ride). Returns { driverId, distanceKm }
+// or null. Never throws — dispatch is best-effort; if it can't find a driver the ride stays in the open
+// pool for anyone to claim.
+export async function findNearestOnlineDriver(pickup, { excludeDriverIds = [], client = db() } = {}) {
   if (!pickup || typeof pickup.lat !== 'number' || typeof pickup.lng !== 'number') return null
   try {
     const rows = await client.$queryRawUnsafe(
@@ -33,6 +34,7 @@ export async function findNearestOnlineDriver(pickup, client = db()) {
         AND dp.last_location_geo IS NOT NULL
         AND dp.last_location_at IS NOT NULL
         AND dp.last_location_at > now() - ($3 * interval '1 minute')
+        AND dp.user_id::text <> ALL($4::text[])
         AND NOT EXISTS (
           SELECT 1 FROM ride_requests r
           WHERE r.driver_id = dp.user_id AND r.status IN ${ACTIVE_RIDE_STATUSES}
@@ -43,6 +45,7 @@ export async function findNearestOnlineDriver(pickup, client = db()) {
       pickup.lat,
       pickup.lng,
       LOCATION_FRESH_MINUTES,
+      excludeDriverIds,
     )
     const row = rows[0]
     if (!row) return null
@@ -55,10 +58,25 @@ export async function findNearestOnlineDriver(pickup, client = db()) {
   }
 }
 
-// Offer a freshly-created ride to the nearest online driver (best-effort). Sets offeredDriverId +
-// offerExpiresAt so that driver gets an exclusive window; on no driver found, leaves it open.
-export async function offerRideToNearestDriver(rideId, pickup, client = db()) {
-  const nearest = await findNearestOnlineDriver(pickup, client)
+// The stored pickup coordinates of a ride (from its PostGIS geometry), for re-offering on decline.
+export async function ridePickupCoords(rideId, client = db()) {
+  try {
+    const rows = await client.$queryRaw`
+      SELECT ST_Y(pickup_geo) AS lat, ST_X(pickup_geo) AS lng
+      FROM ride_requests WHERE id::text = ${rideId} AND pickup_geo IS NOT NULL LIMIT 1
+    `
+    const row = rows[0]
+    return row ? { lat: Number(row.lat), lng: Number(row.lng) } : null
+  } catch {
+    return null
+  }
+}
+
+// Offer a ride to the nearest online driver (best-effort), excluding any who've declined. Sets
+// offeredDriverId + offerExpiresAt so that driver gets an exclusive window; on no driver found, leaves
+// it open.
+export async function offerRideToNearestDriver(rideId, pickup, { excludeDriverIds = [], client = db() } = {}) {
+  const nearest = await findNearestOnlineDriver(pickup, { excludeDriverIds, client })
   if (!nearest) return null
   await client.rideRequest.update({
     where: { id: rideId },

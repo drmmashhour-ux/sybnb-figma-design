@@ -126,6 +126,8 @@ export async function handleDriver(req, res, url, context) {
           OR r.offer_expires_at <= now()
           OR r.offered_driver_id::text = ${context.user.id}
         )
+        -- Never show a driver a ride they've already declined (auto-dispatch).
+        AND NOT COALESCE(jsonb_exists(r.metadata->'declinedBy', ${context.user.id}), false)
       ORDER BY "offeredToMe" DESC, "pickupDistanceKm" ASC NULLS LAST, r.requested_at ASC
       LIMIT 20
     `

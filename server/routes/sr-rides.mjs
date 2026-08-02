@@ -4,7 +4,7 @@ import { requireAuth, requireVerifiedDriver, requireRoadReadyDriver } from '../l
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRide, assertSyriaCoords, haversineKm } from '../lib/sr-geocoding.mjs'
 import { routeRoad } from '../lib/sr-routing.mjs'
-import { offerRideToNearestDriver } from '../lib/sr-dispatch.mjs'
+import { offerRideToNearestDriver, ridePickupCoords } from '../lib/sr-dispatch.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { assertRiderCanAfford, chargeRiderCancellationFee, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
@@ -341,6 +341,18 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    // A driver who declined this ride cannot then claim it (auto-dispatch). Checked BEFORE the
+    // offered-to-other guard so a decliner always gets the clearer "you declined" message even after the
+    // ride has been re-offered to someone else.
+    const declinedBy = Array.isArray(existing.metadata?.declinedBy) ? existing.metadata.declinedBy : []
+    if (declinedBy.includes(context.user.id)) {
+      const error = new Error('You declined this ride and cannot pick it up.')
+      error.statusCode = 409
+      error.code = 'DRIVER_DECLINED_RIDE'
+      error.expose = true
+      throw error
+    }
+
     // AUTO-DISPATCH exclusive window: during a ride's offer window it can be claimed ONLY by the driver
     // it was offered to. It opens to everyone once the window lapses (the atomic WHERE below is the
     // race-safe backstop; this pre-check just returns a clearer message).
@@ -430,6 +442,42 @@ export async function handleSrRides(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, ride })
+  }
+
+  // AUTO-DISPATCH decline: the offered driver passes on the ride → record the decline so they're never
+  // re-offered it, clear their offer, and immediately re-offer to the NEXT nearest online driver.
+  const declineMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/decline$/)
+  if (declineMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    await requireRoadReadyDriver(context)
+    const rideId = declineMatch[1]
+    const existing = await db().rideRequest.findUnique({ where: { id: rideId } })
+    if (!existing || existing.driverId || !['REQUESTED', 'MATCHING'].includes(existing.status)) {
+      const error = new Error('This ride is no longer available to decline.')
+      error.statusCode = 409
+      error.code = 'RIDE_NOT_DECLINABLE'
+      error.expose = true
+      throw error
+    }
+    if (existing.offeredDriverId !== context.user.id) {
+      const error = new Error('This ride is not currently offered to you.')
+      error.statusCode = 409
+      error.code = 'RIDE_NOT_YOUR_OFFER'
+      error.expose = true
+      throw error
+    }
+
+    const declinedBy = Array.isArray(existing.metadata?.declinedBy) ? existing.metadata.declinedBy : []
+    const nextDeclined = declinedBy.includes(context.user.id) ? declinedBy : [...declinedBy, context.user.id]
+    // Clear the offer + remember the decline (so neither the pool nor a re-offer surfaces it to them).
+    await db().rideRequest.update({
+      where: { id: rideId },
+      data: { offeredDriverId: null, offerExpiresAt: null, metadata: { ...existing.metadata, declinedBy: nextDeclined } },
+    })
+    // Re-offer to the next nearest online driver, skipping everyone who has declined (best-effort).
+    const pickup = await ridePickupCoords(rideId)
+    const next = pickup ? await offerRideToNearestDriver(rideId, pickup, { excludeDriverIds: nextDeclined }) : null
+    return json(res, 200, { ok: true, reoffered: Boolean(next) })
   }
 
   // ---- SR SAFETY (014): SOS ----

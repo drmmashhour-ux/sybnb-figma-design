@@ -11,6 +11,9 @@ const CITIES = {
   damascus: { pickup: { lat: 33.51, lng: 36.29 }, near: { lat: 33.512, lng: 36.292 }, far: { lat: 33.6, lng: 36.42 }, dropoff: { lat: 33.52, lng: 36.28 } },
   aleppo: { pickup: { lat: 36.2, lng: 37.16 }, near: { lat: 36.202, lng: 37.162 }, far: { lat: 36.28, lng: 37.29 }, dropoff: { lat: 36.19, lng: 37.14 } },
   homs: { pickup: { lat: 34.73, lng: 36.72 }, near: { lat: 34.732, lng: 36.722 }, far: { lat: 34.81, lng: 36.86 }, dropoff: { lat: 34.72, lng: 36.7 } },
+  // Deir ez-Zor — far from the others (no cross-contamination); here `far` is within offer radius so a
+  // declined offer can re-dispatch to it.
+  deir: { pickup: { lat: 35.33, lng: 40.14 }, near: { lat: 35.332, lng: 40.142 }, far: { lat: 35.37, lng: 40.18 }, dropoff: { lat: 35.34, lng: 40.13 } },
 }
 
 describe('SR auto-dispatch: nearest driver gets an exclusive offer window', () => {
@@ -95,6 +98,29 @@ describe('SR auto-dispatch: nearest driver gets an exclusive offer window', () =
     const farPool = await pending(far.token)
     expect(farPool.body.rides.some((r) => r.id === ride.id)).toBe(true)
 
+    const farClaim = await claim(far.token, ride.id)
+    expect(farClaim.status).toBe(200)
+    expect(farClaim.body.ride.driverId).toBe(far.user.id)
+  })
+
+  it('a declined offer re-dispatches to the next nearest driver; the decliner cannot claim', async () => {
+    const { near, far, ride } = await setupTrip('deir')
+
+    // The offered (near) driver declines.
+    const decline = await request(app).patch(`/api/sr/rides/${ride.id}/decline`).set('Authorization', `Bearer ${near.token}`)
+    expect(decline.status).toBe(200)
+    expect(decline.body.reoffered).toBe(true)
+
+    // The ride is now offered to the next nearest (far).
+    const row = await db().rideRequest.findUnique({ where: { id: ride.id }, select: { offeredDriverId: true } })
+    expect(row.offeredDriverId).toBe(far.user.id)
+
+    // The decliner can no longer claim it...
+    const nearClaim = await claim(near.token, ride.id)
+    expect(nearClaim.status).toBe(409)
+    expect(nearClaim.body.error.code).toBe('DRIVER_DECLINED_RIDE')
+
+    // ...but the re-offered driver can.
     const farClaim = await claim(far.token, ride.id)
     expect(farClaim.status).toBe(200)
     expect(farClaim.body.ride.driverId).toBe(far.user.id)
