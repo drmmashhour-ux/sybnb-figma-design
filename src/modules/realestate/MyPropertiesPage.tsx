@@ -4,7 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { fetchMyProperties, type MyProperty } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
-import { SYNITRES_INQUIRY_FOCUS_LISTING_KEY } from '../../shared/nav/synitresHandoff'
+import { SYNITRES_INQUIRY_FOCUS_LISTING_KEY, SYNITRES_EDIT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 import { realEstateAttrs } from './propertyAttrs'
 
 type Props = { lang: Lang }
@@ -90,7 +90,12 @@ export function MyPropertiesPage({ lang }: Props) {
                 </div>
                 <div style={styles.rowActions}>
                   {p.status === 'APPROVED' ? <a style={styles.actionLink} href={`#/property/${p.id}`}>{t.viewPage}</a> : null}
-                  {isDraft ? <button style={styles.actionBtn} onClick={() => go('/sell')}>{t.edit}</button> : null}
+                  {isDraft ? (
+                    <button
+                      style={styles.actionBtn}
+                      onClick={() => { sessionStorage.setItem(SYNITRES_EDIT_LISTING_KEY, p.id); go('/sell/listing-wizard') }}
+                    >{t.edit}</button>
+                  ) : null}
                 </div>
               </article>
             )

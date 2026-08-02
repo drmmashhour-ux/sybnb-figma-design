@@ -181,6 +181,40 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
     expect((await request(app).get('/api/me/properties')).status).toBe(401)
   })
 
+  it('PATCH /api/listings/:id lets the owner edit a REJECTED property (title/price/metadata), scoped to the owner', async () => {
+    const rejected = await createProperty('BUY', 9_000_000, { propertyType: 'apartment', governorate: 'damascus', city: 'damascus-city', sizeSqm: 80 })
+    await db().listing.update({ where: { id: rejected.id }, data: { status: 'REJECTED' } })
+
+    // Owner edits title, price, and searchable metadata.
+    const edit = await request(app)
+      .patch(`/api/listings/${rejected.id}`)
+      .set('Authorization', `Bearer ${sellerToken}`)
+      .send({ titleAr: 'شقة مُعدّلة', priceMinor: 12_500_000, metadata: { propertyType: 'villa', governorate: 'aleppo', city: 'aleppo-city', bedrooms: 4, bathrooms: 2, sizeSqm: 150 } })
+    expect(edit.status).toBe(200)
+    expect(edit.body.listing.titleAr).toBe('شقة مُعدّلة')
+    expect(edit.body.listing.priceMinor).toBe(12_500_000)
+    expect(edit.body.listing.metadata.city).toBe('aleppo-city')
+    // Edit does not publish — it stays REJECTED until the seller explicitly resubmits for review.
+    expect(edit.body.listing.status).toBe('REJECTED')
+
+    // A non-owner cannot edit it (scoped to ownerId → 404, never leaks existence).
+    const otherEmail = uniqueTestEmail('re-other-seller')
+    await verifyEmailForTest(app, otherEmail, 'staff-login')
+    const other = await request(app).post('/api/auth/register').send({ role: 'SELLER', email: otherEmail, password: 'correct-horse-battery' })
+    trackTestUser(other.body.user.id)
+    expect((await request(app).patch(`/api/listings/${rejected.id}`).set('Authorization', `Bearer ${other.body.token}`).send({ titleAr: 'hijack attempt' })).status).toBe(404)
+
+    // Anonymous is rejected.
+    expect((await request(app).patch(`/api/listings/${rejected.id}`).send({ titleAr: 'anon' })).status).toBe(401)
+  })
+
+  it('PATCH /api/listings/:id refuses to edit an APPROVED (live) listing', async () => {
+    const live = await createProperty('BUY', 7_000_000, { propertyType: 'apartment', governorate: 'homs', city: 'homs-city' })
+    const res = await request(app).patch(`/api/listings/${live.id}`).set('Authorization', `Bearer ${sellerToken}`).send({ priceMinor: 1 })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('LISTING_NOT_EDITABLE')
+  })
+
   it('never returns a non-APPROVED property in public search', async () => {
     const draft = await createProperty('BUY', 500_000, { propertyType: 'apartment', governorate: 'damascus', city: 'damascus-city' })
     await db().listing.update({ where: { id: draft.id }, data: { status: 'PENDING_REVIEW' } })

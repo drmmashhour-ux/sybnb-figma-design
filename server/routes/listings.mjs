@@ -416,7 +416,59 @@ export async function handleListings(req, res, url, context) {
 
   const detailMatch = url.pathname.match(/^\/api\/listings\/([^/]+)$/)
   if (detailMatch) {
-    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    // Owner edit of a not-yet-live listing: the seller fixes a rejected (or still-draft) listing's
+    // content before (re)submitting it for review. Scoped to the caller's own listing, and only while
+    // it is DRAFT or REJECTED — an APPROVED/PENDING listing is never mutated through here. `division`
+    // is intentionally immutable (changing platform on an existing listing is out of scope).
+    if (req.method === 'PATCH') {
+      requireAuth(context, ['SELLER', 'HOST'])
+      const existing = await db().listing.findFirst({ where: { id: detailMatch[1], ownerId: context.user.id } })
+      if (!existing) {
+        const error = new Error('Listing not found for this account.')
+        error.statusCode = 404
+        error.code = 'LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      if (!['DRAFT', 'REJECTED'].includes(existing.status)) {
+        const error = new Error('Only draft or rejected listings can be edited.')
+        error.statusCode = 400
+        error.code = 'LISTING_NOT_EDITABLE'
+        error.expose = true
+        throw error
+      }
+      const body = await readJson(req)
+      const data = {}
+      if (body.titleAr !== undefined) {
+        if (!body.titleAr || String(body.titleAr).trim().length < 3) {
+          const error = new Error('Listing title is required.')
+          error.statusCode = 400
+          error.code = 'LISTING_TITLE_REQUIRED'
+          error.expose = true
+          throw error
+        }
+        data.titleAr = String(body.titleAr).trim()
+      }
+      if (body.titleEn !== undefined) data.titleEn = body.titleEn || null
+      if (body.description !== undefined) data.description = body.description || null
+      if (body.priceMinor !== undefined) {
+        const priceMinor = Number(body.priceMinor)
+        if (!Number.isInteger(priceMinor) || priceMinor <= 0 || priceMinor > 2147483647) {
+          const error = new Error('Listing price must be a whole number greater than zero.')
+          error.statusCode = 400
+          error.code = 'LISTING_PRICE_INVALID'
+          error.expose = true
+          throw error
+        }
+        data.priceMinor = priceMinor
+      }
+      if (body.currency !== undefined) data.currency = body.currency || existing.currency
+      if (body.instantBookEnabled !== undefined) data.instantBookEnabled = Boolean(body.instantBookEnabled)
+      if (body.metadata !== undefined) data.metadata = body.metadata || {}
+      const listing = await db().listing.update({ where: { id: existing.id }, data })
+      return json(res, 200, { ok: true, listing })
+    }
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET', 'PATCH'])
     await expireOldListings({ id: detailMatch[1] })
     await expireOpenAuctions({ listing: { id: detailMatch[1] } })
     const listing = await db().listing.findFirst({

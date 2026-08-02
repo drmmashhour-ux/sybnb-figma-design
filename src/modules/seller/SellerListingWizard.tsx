@@ -14,6 +14,7 @@ import {
   confirmStrPlanPayment,
   correctListingText,
   enhanceHostPhoto,
+  fetchOwnedListing,
   createStrPlanCheckoutSession,
   fetchStrPlanStatus,
   submitStrPlanShamProof,
@@ -31,6 +32,7 @@ import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../eng
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { writeListingDescription } from '../../shared/ai/listingDescription'
+import { SYNITRES_EDIT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 import { enhanceImageFile } from '../../shared/photo/enhanceImage'
 import { PhotoEditorModal } from '../../shared/photo/PhotoEditorModal'
 
@@ -393,6 +395,14 @@ export function SellerListingWizard({ lang }: Props) {
   const isAr = lang === 'ar'
   const isAdvertisingFlow = useMemo(() => {
     if (typeof window === 'undefined') return false
+    // An edit/resubmit hand-off ("My properties" → Edit) is always a normal listing edit — never the
+    // advertising flow, whatever stale flow flag a prior session left behind. Read at mount, before the
+    // prefill effect consumes the key.
+    try {
+      if (window.sessionStorage.getItem(SYNITRES_EDIT_LISTING_KEY)) return false
+    } catch {
+      /* storage disabled — fall through to the normal flow check */
+    }
     return window.localStorage.getItem(FLOW_STORAGE_KEY) === 'advertising'
   }, [])
   const adPlan = useMemo(() => {
@@ -416,6 +426,10 @@ export function SellerListingWizard({ lang }: Props) {
         ]
   const draft = useMemo(() => loadDraft(), [])
   const [stepIndex, setStepIndex] = useState(0)
+  // EDIT MODE (Synitres "My properties" → Edit/resubmit): when set, submit updates THIS existing
+  // DRAFT/REJECTED listing in place and resubmits it, instead of creating a new one. Populated by the
+  // prefill effect below from the SYNITRES_EDIT_LISTING_KEY hand-off.
+  const [editingListingId, setEditingListingId] = useState<string | null>(null)
   const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
   const [listingPlan, setListingPlan] = useState(draft.listingPlan || 'plus')
   const [listingPlanPaymentMethod, setListingPlanPaymentMethod] = useState(draft.listingPlanPaymentMethod || 'shamCash')
@@ -544,6 +558,50 @@ export function SellerListingWizard({ lang }: Props) {
   const docsWordAr = isHostListing ? 'المضيف' : 'البائع'
   const docsWordEn = isHostListing ? 'host' : 'seller'
   const DocsWordEn = isHostListing ? 'Host' : 'Seller'
+
+  // EDIT MODE prefill: if "My properties" routed us here to fix a listing (SYNITRES_EDIT_LISTING_KEY),
+  // load it owner-scoped and populate the BUY/RENTALS fields from its stored content. Submit then PATCHes
+  // and resubmits THIS listing instead of creating a duplicate. One-shot — the key is consumed on arrival.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    let editId: string | null = null
+    try {
+      editId = sessionStorage.getItem(SYNITRES_EDIT_LISTING_KEY)
+      if (editId) sessionStorage.removeItem(SYNITRES_EDIT_LISTING_KEY)
+    } catch {
+      /* storage disabled — no edit mode */
+    }
+    if (!editId) return
+    void fetchOwnedListing(editId)
+      .then((listing) => {
+        const m = (listing.metadata || {}) as Record<string, unknown>
+        const has = (v: unknown) => v !== undefined && v !== null && v !== ''
+        setEditingListingId(listing.id)
+        if (listing.division === 'BUY' || listing.division === 'RENTALS') setDivision(listing.division)
+        if (has(m.propertyType)) setSelectedType(String(m.propertyType))
+        setTitle(listing.titleEn || listing.titleAr || '')
+        if (has(listing.description)) setDescription(String(listing.description))
+        if (has(m.governorate)) setGovernorate(String(m.governorate))
+        if (has(m.city)) setCity(String(m.city))
+        if (has(m.area)) setArea(String(m.area))
+        if (has(m.address)) setAddress(String(m.address))
+        const map = (m.mapLocation && typeof m.mapLocation === 'object' ? m.mapLocation : {}) as Record<string, unknown>
+        if (has(map.latitude)) setLatitude(String(map.latitude))
+        if (has(map.longitude)) setLongitude(String(map.longitude))
+        if (map.pinConfirmed) setMapPinConfirmed(true)
+        if (listing.priceMinor) setPrice(String(listing.priceMinor))
+        if (has(m.sizeSqm)) setSize(String(m.sizeSqm))
+        if (has(m.bedrooms)) setBedrooms(String(m.bedrooms))
+        if (has(m.bathrooms)) setBathrooms(String(m.bathrooms))
+        if (typeof m.taxRate === 'number') setTaxFee(String(Math.round(m.taxRate * 100)))
+        if (has(m.weekendPriceMinor)) setWeekendPrice(String(m.weekendPriceMinor))
+        if (has(m.cleaningFeeMinor)) setCleaningFee(String(m.cleaningFeeMinor))
+        if (m.visualFilters && typeof m.visualFilters === 'object') setVisualFilters(m.visualFilters as VisualFilterSelection)
+      })
+      .catch(() => {
+        /* couldn't load the listing — leave the wizard in its normal fresh state */
+      })
+  }, [])
 
   // One-way prefill only, never overwrite: the carBrand chip's ~30-item closed vocabulary and
   // the condition chip's new/used-only options are coarser than the real make/condition fields,
@@ -1320,6 +1378,9 @@ export function SellerListingWizard({ lang }: Props) {
         }
 
         await createAndSubmitPrototypeListing({
+          // EDIT MODE: resubmit this same DRAFT/REJECTED listing in place (no duplicate) when we arrived
+          // via "My properties" → Edit/resubmit; otherwise undefined → normal create path.
+          existingListingId: editingListingId ?? undefined,
           division,
           titleAr: title || 'إعلان SYBNB جديد',
           titleEn: title,

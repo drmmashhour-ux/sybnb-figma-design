@@ -700,14 +700,76 @@ export async function aiParsePropertySearch(query: string) {
   return response.filters
 }
 
+// Owner-authenticated fetch of one of the caller's OWN listings, including a not-yet-live DRAFT/REJECTED
+// one the public detail hides (GET /api/listings/:id returns it to the owner when the token is sent).
+// Used by the seller wizard's edit mode to prefill from an existing listing.
+export async function fetchOwnedListing(listingId: string) {
+  const session = getStoredSellerSession() || getStoredStaffSession()
+  if (!session) throw new Error('Sign in as a seller first.')
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`, { token: session.token })
+  return response.listing
+}
+
+// Edit a not-yet-live listing's content in place (owner-only, DRAFT/REJECTED only, server-enforced). The
+// seller then resubmits it for review via the normal submit path — see createAndSubmitPrototypeListing's
+// existingListingId branch, which routes through here.
+export async function updateListingDraft(listingId: string, input: Partial<CreateListingInput>) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`, {
+    method: 'PATCH',
+    token: session.token,
+    body: input,
+  })
+  return response.listing
+}
+
 export async function createAndSubmitPrototypeListing(
   input: CreateListingInput & {
     photos?: File[]
     availability?: Array<{ date: string; status: 'BLOCKED' | 'AVAILABLE'; priceOverrideMinor?: number | null }>
+    // EDIT MODE: when set, this is a resubmit of an existing DRAFT/REJECTED listing — its content is
+    // PATCHed in place (no new draft is created) and then resubmitted, so no duplicate is produced.
+    existingListingId?: string
   },
 ) {
-  const { photos, availability, ...listingInput } = input
+  const { photos, availability, existingListingId, ...listingInput } = input
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+
+  // Edit mode: update the existing listing's content in place, then resubmit it. Its own small tail
+  // (append new photos → availability → submit) is kept separate from the create path below so that the
+  // battle-tested idempotent-create/resume logic stays untouched. No new draft is created → no duplicate.
+  if (existingListingId) {
+    await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${existingListingId}`, {
+      method: 'PATCH',
+      token: session.token,
+      body: listingInput,
+    })
+    // Only NEWLY added photos are uploaded here (appended after any existing media); an edit that keeps
+    // the current photos passes an empty list and leaves them in place.
+    if (photos && photos.length) {
+      for (let i = 0; i < photos.length; i += 1) {
+        const fileBase64 = await readFileAsBase64(photos[i])
+        await apiRequest<{ ok: true }>(`/api/listings/${existingListingId}/media`, {
+          method: 'POST',
+          token: session.token,
+          body: { fileBase64, mimeType: photos[i].type },
+        })
+      }
+    }
+    if (availability && availability.length) {
+      await apiRequest<{ ok: true }>(`/api/host/listings/${existingListingId}/availability`, {
+        method: 'PATCH',
+        token: session.token,
+        body: { dates: availability },
+      })
+    }
+    const resubmitted = await apiRequest<{ ok: true; listing: PlatformListing }>(
+      `/api/listings/${existingListingId}/submit`,
+      { method: 'PATCH', token: session.token },
+    )
+    sessionStorage.setItem(LAST_SUBMITTED_LISTING_KEY, JSON.stringify(resubmitted.listing))
+    return resubmitted.listing
+  }
 
   // IDEMPOTENT DRAFT REUSE (Option A): the create → upload photos → set availability → submit sequence
   // used to create a brand-new draft on EVERY call. So if any photo upload or the availability PATCH

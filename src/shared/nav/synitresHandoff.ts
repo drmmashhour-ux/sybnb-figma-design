@@ -9,3 +9,7 @@ export const SYNITRES_PRESELECT_LISTING_KEY = 'sybnb.v6.synitresPreselectListing
 // "My properties" inquiry count → /host/inquiries: open the owner inbox focused on that property
 // (written by MyPropertiesPage, read by HostInquiriesPage).
 export const SYNITRES_INQUIRY_FOCUS_LISTING_KEY = 'sybnb.v6.synitresInquiryFocusListing'
+
+// "My properties" Edit/resubmit → /sell/listing-wizard: open the seller wizard in edit mode, prefilled
+// from that draft/rejected listing (written by MyPropertiesPage, read by SellerListingWizard).
+export const SYNITRES_EDIT_LISTING_KEY = 'sybnb.v6.synitresEditListing'
