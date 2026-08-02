@@ -43,7 +43,6 @@ const copy = {
     walletProcessing: 'جار تأكيد شام كاش...',
     cardUnavailable: 'الدفع بالبطاقة غير متاح الآن. استخدم شام كاش أو جرّب لاحقاً.',
     recipient: 'معلومات شام كاش',
-    receiverName: 'اسم مستلم المال',
     maskedAccount: 'الحساب',
     amountDue: 'المبلغ المستحق',
     currency: 'العملة',
@@ -71,7 +70,6 @@ const copy = {
     walletProcessing: 'Confirming Sham Cash...',
     cardUnavailable: 'Card payment is not available right now. Use Sham Cash or try again later.',
     recipient: 'Sham Cash information',
-    receiverName: 'Money receiver name',
     maskedAccount: 'Account',
     amountDue: 'Amount due',
     currency: 'Currency',
@@ -336,10 +334,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
 
             <article className="wallet-card">
               <h2>{t.recipient}</h2>
-              <div className="wallet-stat">
-                <span>{t.receiverName}</span>
-                <strong>{syrianLocalWalletRecipient.name[lang]}</strong>
-              </div>
+              {/* Recipient name intentionally omitted — the QR + account number are the only identifiers shown. */}
               <div className="wallet-stat">
                 <span>{t.maskedAccount}</span>
                 <strong dir="ltr">{syrianLocalWalletRecipient.maskedAccount}</strong>
