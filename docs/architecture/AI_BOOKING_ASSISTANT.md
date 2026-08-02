@@ -15,7 +15,7 @@ Booking drafts are inert, short-lived prepared summaries. They do not reserve in
 | Threat | Control |
 | --- | --- |
 | Prompt injection or arbitrary SQL/URL execution | Fixed system policy, fixed function allowlist, strict schemas, server validators, no SQL or URL tool |
-| Fabricated listing facts or totals | Client cards and consequential summaries are built only from tool results; unknown stored fields are omitted; totals use the existing pricing engine |
+| Fabricated listing facts or totals | Client cards and sensitive narrative summaries are built deterministically from tool results; tool-free model claims about prices, availability, ratings, fees, taxes, policies, hosts, or completed actions fail to a safe template; unknown stored fields are omitted; totals use the existing pricing engine |
 | Cross-user access/IDOR | Authentication is mandatory; booking status is scoped to `guestId`; unpublished listings are never returned; no host private fields are selected |
 | Consequential action without consent | No payment/refund/cancel/message execution tools; draft creation is inert and requires explicit confirmation in existing flows |
 | Secret or personal-data exposure | `OPENAI_API_KEY` is server-only; prompts contain pseudonymous actor role and bounded criteria; prompt/log redaction removes common email, phone, bearer-token, and card patterns |

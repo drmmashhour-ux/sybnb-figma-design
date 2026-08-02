@@ -11,13 +11,14 @@ Status: implemented for staging validation; disabled by default; not deployed.
 - Added English, French, and Arabic assistant copy, correct Arabic RTL, responsive layout, keyboard-operable controls, accessible dialog naming, live response announcements, property cards, selection and comparison up to three, and inert booking-draft confirmation.
 - Kept reservation, payment, refund, cancellation, and message execution outside the tool allowlist. Existing application screens retain final confirmation authority.
 - Added prompt redaction, bounded session-only history, no provider storage, provider timeout/retry, safe fallback responses, tool-round/result limits, and plain-text treatment of model output.
+- Added a deterministic narrative boundary: sensitive listing and booking facts are summarized from approved tool records, while a tool-free model response that claims a price, availability, rating, fee, tax, policy, host fact, or completed consequential action is discarded in favor of a safe localized template.
 
 ## Verification
 
 - TypeScript: passed.
 - Production-style Vite build: passed.
 - Prisma schema validation: passed.
-- Full unit regression: 11 files, 102 tests passed. The assistant-focused subset contains 8 passing tests.
+- Full unit regression baseline: 11 files, 102 tests passed. After narrative hardening, the assistant-focused subset contains 10 passing tests, including a malicious-model fabricated-price/availability test.
 - Full API regression: 83 files, 503 tests passed in one clean serial run.
 - Full security regression: 3 files, 19 tests passed.
 - Assistant database/API tests: 5 passed, covering authentication, request validation, French fallback, minimized audit events, cross-user denial, server-verified confirmation, fabricated-price rejection, verified pricing, and per-user rate limiting.

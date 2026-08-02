@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { redactAssistantText } from '../../server/lib/ai-assistant.mjs'
+import { answerAssistant, redactAssistantText } from '../../server/lib/ai-assistant.mjs'
 import { createBookingDraft, searchListings } from '../../server/lib/assistant-tools.mjs'
 import { createOpenAiResponse } from '../../server/lib/openai-responses.mjs'
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  delete process.env.AI_BOOKING_ASSISTANT_ENABLED
+  delete process.env.SYBNB_DEPLOY_ENV
+  delete process.env.OPENAI_API_KEY
+})
 
 describe('assistant safety boundaries', () => {
   it('redacts personal, payment, and bearer data before prompting', () => {
@@ -34,5 +39,30 @@ describe('assistant safety boundaries', () => {
     expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer server-secret')
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).store).toBe(false)
     delete process.env.OPENAI_API_KEY
+  })
+
+  it('fails closed when a tool-free model fabricates a price and availability', async () => {
+    process.env.SYBNB_DEPLOY_ENV = 'staging'
+    process.env.AI_BOOKING_ASSISTANT_ENABLED = '1'
+    process.env.OPENAI_API_KEY = 'test-only'
+    const request = vi.fn().mockResolvedValue({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'Villa Dream is available for $99 with a 5-star rating.' }] }],
+    })
+    const result = await answerAssistant({ question: 'Find a villa', locale: 'en', context: { user: { id: 'user-1' } }, request })
+    expect(result.records).toEqual([])
+    expect(result.answer).not.toContain('$99')
+    expect(result.answer).not.toContain('Villa Dream')
+    expect(result.answer).toContain('Tell me the destination')
+  })
+
+  it('allows non-sensitive tool-free guidance after sanitizing markup', async () => {
+    process.env.SYBNB_DEPLOY_ENV = 'staging'
+    process.env.AI_BOOKING_ASSISTANT_ENABLED = '1'
+    process.env.OPENAI_API_KEY = 'test-only'
+    const request = vi.fn().mockResolvedValue({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: '<b>Please share your destination and travel dates.</b>' }] }],
+    })
+    const result = await answerAssistant({ question: 'What do you need?', locale: 'en', context: { user: { id: 'user-1' } }, request })
+    expect(result.answer).toBe('Please share your destination and travel dates.')
   })
 })

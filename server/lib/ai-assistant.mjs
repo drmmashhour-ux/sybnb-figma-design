@@ -56,7 +56,12 @@ export async function answerAssistant({ role = 'guest', locale = 'en', question 
     const response = await request({ input, tools: ASSISTANT_TOOL_DEFINITIONS, tool_choice: 'auto', parallel_tool_calls: false, max_output_tokens: 700, safety_identifier: safetyIdentifier })
     const calls = (response.output || []).filter((item) => item.type === 'function_call')
     input.push(...(response.output || []))
-    if (!calls.length) return { answer: stripUntrusted(outputText(response)) || fallback(locale), source: 'openai', records }
+    if (!calls.length) {
+      const answer = records.length
+        ? groundedToolAnswer(records, locale)
+        : safeToolFreeAnswer(outputText(response), locale)
+      return { answer, source: records.length ? 'openai_grounded' : 'openai', records }
+    }
     for (const call of calls) {
       let args
       try { args = JSON.parse(call.arguments || '{}') } catch { args = {} }
@@ -75,6 +80,70 @@ export async function answerAssistant({ role = 'guest', locale = 'en', question 
 
 function stripUntrusted(text) {
   return String(text || '').replace(/<[^>]*>/g, '').replace(/[`*_#]/g, '').trim().slice(0, 4000)
+}
+
+const SENSITIVE_UNGROUNDED_CLAIM = /(?:\b(?:usd|syp|eur|price|cost|fee|tax|available|availability|rating|rated|host|policy|cancelled|canceled|booked|reserved|refunded|paid|sent)\b|[$€£]|السعر|رسوم|ضريبة|متاح|التقييم|المضيف|سياسة|تم الحجز|تم الدفع|تم الإلغاء|استرداد|prix|co[uû]t|frais|taxe|disponible|note|h[oô]te|politique|r[ée]serv[ée]|pay[ée]|annul[ée]|rembours[ée])/iu
+
+function safeToolFreeAnswer(raw, locale) {
+  const answer = stripUntrusted(raw)
+  if (!answer || SENSITIVE_UNGROUNDED_CLAIM.test(answer)) return fallback(locale)
+  return answer
+}
+
+function groundedToolAnswer(records, locale) {
+  const lines = records.flatMap(({ tool, result }) => summarizeRecord(tool, result, locale))
+  return lines.filter(Boolean).join('\n').slice(0, 4000) || fallback(locale)
+}
+
+function summarizeRecord(tool, result, locale) {
+  if (tool === 'searchListings') {
+    const count = result?.listings?.length || 0
+    const missing = Array.isArray(result?.missing) ? result.missing.join(', ') : ''
+    if (locale === 'ar') return [`تم العثور على ${count} إقامة مطابقة من بيانات SYBNB.${missing ? ` المعلومات المطلوبة: ${missing}.` : ''}`]
+    if (locale === 'fr') return [`${count} hébergement(s) correspondant(s) trouvé(s) dans les données SYBNB.${missing ? ` Informations manquantes : ${missing}.` : ''}`]
+    return [`Found ${count} matching stay(s) from SYBNB data.${missing ? ` Missing information: ${missing}.` : ''}`]
+  }
+  if (tool === 'getListingDetails') {
+    const listing = result?.listing
+    if (!listing) return []
+    const title = listing.title?.[locale] || listing.title?.en || listing.id
+    const facts = [
+      storedFact(locale, 'Amenities', 'Équipements', 'المرافق', result.amenities ?? listing.amenities),
+      storedFact(locale, 'House rules', 'Règles du logement', 'قواعد المنزل', result.houseRules),
+      storedFact(locale, 'Cancellation policy', "Politique d'annulation", 'سياسة الإلغاء', result.cancellationPolicy),
+      storedFact(locale, 'Fees', 'Frais', 'الرسوم', result.fees),
+      storedFact(locale, 'Taxes', 'Taxes', 'الضرائب', result.taxes),
+    ].filter(Boolean)
+    return [`${title}: ${facts.length ? facts.join('; ') : unavailable(locale)}`]
+  }
+  if (tool === 'checkAvailability') {
+    const state = result?.available === true
+      ? (locale === 'ar' ? 'متاح' : locale === 'fr' ? 'disponible' : 'available')
+      : (locale === 'ar' ? 'غير متاح' : locale === 'fr' ? 'indisponible' : 'unavailable')
+    return [`${result.checkIn} → ${result.checkOut}: ${state}.`]
+  }
+  if (tool === 'calculateBookingTotal') {
+    if (!result?.available || !result?.total) return [locale === 'ar' ? 'الإقامة غير متاحة لهذه التواريخ.' : locale === 'fr' ? "L'hébergement n'est pas disponible à ces dates." : 'The stay is unavailable for those dates.']
+    return [`${locale === 'ar' ? 'الإجمالي الموثق' : locale === 'fr' ? 'Total vérifié' : 'Verified total'}: ${result.total.amountMinor} ${result.total.currency} (${result.nights} ${locale === 'fr' ? 'nuits' : locale === 'ar' ? 'ليالٍ' : 'nights'}).`]
+  }
+  if (tool === 'createBookingDraft') {
+    if (!result?.draft) return [locale === 'ar' ? 'لم يتم تجهيز المسودة لأن الإقامة غير متاحة.' : locale === 'fr' ? "Le brouillon n'a pas été préparé car le logement est indisponible." : 'The draft was not prepared because the stay is unavailable.']
+    return [locale === 'ar' ? 'تم تجهيز مسودة فقط. لم يتم حجز الإقامة أو تنفيذ أي دفعة.' : locale === 'fr' ? "Seul un brouillon a été préparé. Aucune réservation ni aucun paiement n'a été effectué." : 'Only a draft was prepared. No reservation or payment was made.']
+  }
+  if (tool === 'getBookingStatus' && result?.booking) return [`${locale === 'ar' ? 'حالة الحجز' : locale === 'fr' ? 'Statut de la réservation' : 'Booking status'}: ${result.booking.status}.`]
+  if (tool === 'createSupportHandoff') return [locale === 'ar' ? `تم تجهيز إحالة للدعم: ${SUPPORT_EMAIL}.` : locale === 'fr' ? `Transmission au support préparée : ${SUPPORT_EMAIL}.` : `Support handoff prepared: ${SUPPORT_EMAIL}.`]
+  return []
+}
+
+function storedFact(locale, en, fr, ar, value) {
+  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return ''
+  const label = locale === 'ar' ? ar : locale === 'fr' ? fr : en
+  const rendered = Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value)
+  return `${label}: ${stripUntrusted(rendered).slice(0, 500)}`
+}
+
+function unavailable(locale) {
+  return locale === 'ar' ? 'هذه التفاصيل غير مخزنة؛ تواصل مع الدعم.' : locale === 'fr' ? 'Ces informations ne sont pas enregistrées ; contactez le support.' : 'These details are not stored; contact support.'
 }
 
 export function fallbackAnswer(role, locale) {
