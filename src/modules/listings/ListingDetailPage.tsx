@@ -14,7 +14,7 @@ import {
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
-import { PhotoGallery, listingPhotoUrls } from '../../shared/gallery/PhotoGallery'
+import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGallery'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
@@ -464,7 +464,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             variant="hero"
             lang={lang}
             heroStyle={styles.detailHero}
-            photos={listingPhotoUrls(listing, listingImage(listing))}
+            photos={listingGalleryPhotos(listing, listingImage(listing), lang)}
             fallback={DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'}
             overlay={
               <>

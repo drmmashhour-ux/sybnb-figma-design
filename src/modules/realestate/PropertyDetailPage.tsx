@@ -7,7 +7,7 @@ import { colors, withAlpha } from '../../shared/theme/tokens'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from './MortgageCalculator'
-import { PhotoGallery, listingPhotoUrls } from '../../shared/gallery/PhotoGallery'
+import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGallery'
 import { realEstateAttrs, valuationTone } from './propertyAttrs'
 import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 
@@ -78,7 +78,7 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
 
   const [mlat, mlng] = mapTarget?.hasCoordinates ? mapTarget.query.split(',').map(Number) : [NaN, NaN]
   const est = listing.valuation?.estimatedValueMinor
-  const photos = listingPhotoUrls(listing, isBuy ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp')
+  const photos = listingGalleryPhotos(listing, isBuy ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp', lang)
 
   return (
     <main style={styles.page} dir={isAr ? 'rtl' : 'ltr'}>
