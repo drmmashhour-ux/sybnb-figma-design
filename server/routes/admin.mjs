@@ -1669,7 +1669,29 @@ export async function handleAdmin(req, res, url, context) {
       // mutually exclude on their shared wallet and can't both pass a balance check on the same balance.
       await lockWalletForSpend(tx, driverId, currency)
       const wallet = await tx.wallet.findUnique({ where: { userId_currency: { userId: driverId, currency } } })
-      const accruedMinor = wallet?.cachedBalanceMinor || 0
+      // RELEASABLE SR EARNINGS ONLY — never the raw wallet balance. A user can be BOTH rider + driver, so
+      // cachedBalanceMinor commingles their SR earnings with their own rider top-ups, gifts, referral
+      // rewards, etc. Paying out the raw balance would cash out rider credit as "earnings" and could drain
+      // funds reserved for the user's own in-flight ride. Releasable = (earnings + tips + cancellation
+      // payouts credited) − (already paid out), then floored at the wallet's actual balance so we never
+      // overdraw if the driver already spent earnings on their own rides.
+      // WalletEntry belongs to a Wallet (walletId → Wallet.userId), so scope the ledger sums by the
+      // driver's wallet id. No wallet yet ⇒ nothing releasable.
+      let releasableMinor = 0
+      if (wallet) {
+        const [earnedAgg, paidAgg] = await Promise.all([
+          tx.walletEntry.aggregate({
+            _sum: { amountMinor: true },
+            where: { walletId: wallet.id, type: 'CREDIT', referenceType: { in: ['sr_driver_earning', 'sr_driver_tip', 'sr_cancellation_payout'] } },
+          }),
+          tx.walletEntry.aggregate({
+            _sum: { amountMinor: true },
+            where: { walletId: wallet.id, type: 'DEBIT', referenceType: 'sr_driver_payout' },
+          }),
+        ])
+        releasableMinor = Math.max(0, (earnedAgg._sum.amountMinor || 0) - (paidAgg._sum.amountMinor || 0))
+      }
+      const accruedMinor = Math.min(releasableMinor, wallet?.cachedBalanceMinor || 0)
       const requestedMinor = body.amountMinor != null ? Math.max(0, Math.round(Number(body.amountMinor) || 0)) : accruedMinor
       if (requestedMinor <= 0) {
         const error = new Error('This driver has no accrued SR earnings to pay out.')

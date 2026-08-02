@@ -44,8 +44,11 @@ describe('SR Rule 2: one driver can have only one active ride', () => {
   })
 
   it('rejects a second self-claim while the driver already has an active ride', async () => {
+    // Two different riders — one rider can't hold two active rides (RIDER_HAS_ACTIVE_RIDE), so the two
+    // rides this driver tries to claim must come from separate riders.
+    const rider2 = await registerUser(app, 'GUEST', 'rule2-rider-2')
     const firstRide = await requestRide(app, rider.token, 'active-1')
-    const secondRide = await requestRide(app, rider.token, 'active-2')
+    const secondRide = await requestRide(app, rider2.token, 'active-2')
 
     const firstClaim = await request(app).patch(`/api/sr/rides/${firstRide.id}/claim`).set('Authorization', `Bearer ${driver.token}`)
     const secondClaim = await request(app).patch(`/api/sr/rides/${secondRide.id}/claim`).set('Authorization', `Bearer ${driver.token}`)

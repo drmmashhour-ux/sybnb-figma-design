@@ -168,6 +168,26 @@ export async function handleSrRides(req, res, url, context) {
     }
     if (req.method !== 'POST') return methodNotAllowed(res, ['GET', 'POST'])
     requireAuth(context, ['GUEST'])
+
+    // ONE ACTIVE RIDE PER RIDER: without this a rider can post many REQUESTED rides at once (none of
+    // which reserve funds), and two drivers accepting two of them concurrently would each pass the
+    // affordability gate and reserve 2× the fare — an over-commit the wallet can't settle. Reject a new
+    // request while any non-terminal ride is in flight.
+    const activeRiderRide = await db().rideRequest.findFirst({
+      where: {
+        riderId: context.user.id,
+        status: { in: ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'] },
+      },
+      select: { id: true },
+    })
+    if (activeRiderRide) {
+      const error = new Error('You already have an active ride. Complete or cancel it before requesting another.')
+      error.statusCode = 409
+      error.code = 'RIDER_HAS_ACTIVE_RIDE'
+      error.expose = true
+      throw error
+    }
+
     const body = await readJson(req)
     // SR-INPUT: reject unknown fields and bound the free-text so a rider can't persist arbitrary/oversized data.
     assertNoUnknownFields(

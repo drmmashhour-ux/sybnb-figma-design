@@ -150,9 +150,12 @@ describe('SR TRUST layer', () => {
     // the completed ride below.
     const earlyDriver = await registerUser(app, 'DRIVER', 'rate-early-driver')
     await makeRoadReady(earlyDriver.user.id)
-    const activeRide = await requestRide(app, rider.token, 'rate-active')
+    // A SEPARATE rider owns the early active ride — the main `rider` can't hold two active rides
+    // (RIDER_HAS_ACTIVE_RIDE), and needs to be free to own the completed ride below.
+    const earlyRider = await registerUser(app, 'GUEST', 'rate-early-rider')
+    const activeRide = await requestRide(app, earlyRider.token, 'rate-active')
     await request(app).patch(`/api/sr/rides/${activeRide.id}/claim`).set('Authorization', `Bearer ${earlyDriver.token}`)
-    const early = await request(app).post(`/api/sr/rides/${activeRide.id}/rate`).set('Authorization', `Bearer ${rider.token}`).send({ stars: 5 })
+    const early = await request(app).post(`/api/sr/rides/${activeRide.id}/rate`).set('Authorization', `Bearer ${earlyRider.token}`).send({ stars: 5 })
     expect(early.status).toBe(400)
     expect(early.body.error.code).toBe('RIDE_NOT_COMPLETED')
     const ride = await completeRideBetween(app, rider, driver, 'rate-done')

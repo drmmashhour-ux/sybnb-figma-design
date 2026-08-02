@@ -26,6 +26,7 @@ import { handleReviews } from './routes/reviews.mjs'
 import { handleSellers } from './routes/sellers.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleWallet } from './routes/wallet.mjs'
+import { handleCron } from './routes/cron.mjs'
 
 loadEnv()
 
@@ -88,6 +89,8 @@ const RATE_LIMIT_RULES = [
   { name: 'AI_DESCRIPTION', method: 'POST', pattern: /^\/api\/host\/(listing-description|listing-correct)$/, max: 20, windowMs: 60 * 1000, byUser: true },
   // AI vision truth-check — larger + costlier per call, so a tighter cap per host.
   { name: 'AI_TRUTH_CHECK', method: 'POST', pattern: /^\/api\/host\/listing-truth-check$/, max: 10, windowMs: 60 * 1000, byUser: true },
+  // Premium photo enhancement costs real provider money per call — cap per host so spend can't run away.
+  { name: 'PREMIUM_PHOTO_ENHANCE', method: 'POST', pattern: /^\/api\/host\/photos\/enhance$/, max: 40, windowMs: 60 * 1000, byUser: true },
   // "Ask SYBNB AI" assistant — can spend AI money, so cap per user account.
   { name: 'ASSISTANT_ASK', method: 'POST', pattern: /^\/api\/assistant\/ask$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'MESSAGING', method: 'POST', pattern: /^\/api\/(listings|bookings)\/[^/]+\/thread\/messages$/, max: 20, windowMs: 60 * 1000, byUser: true },
@@ -97,9 +100,20 @@ const RATE_LIMIT_RULES = [
   // enumeration across many different gift ids, which the per-gift counter alone can't see.
   { name: 'GIFT_CLAIM', method: 'POST', pattern: /^\/api\/wallet\/gifts\/[^/]+\/claim$/, max: 20, windowMs: 15 * 60 * 1000, byUser: true },
   { name: 'ADMIN_DECISION', method: 'PATCH', pattern: /^\/api\/admin\/review-queue\/[^/]+\/[^/]+$/, max: 60, windowMs: 60 * 1000, byUser: true },
+  { name: 'ADMIN_BOOKING_ACTION', method: 'POST', pattern: /^\/api\/admin\/bookings\/[^/]+\/(payout-hold|message|cancel)$/, max: 60, windowMs: 60 * 1000, byUser: true },
   { name: 'DOCUMENT_ACCESS', method: 'GET', pattern: /^\/api\/(admin\/id-document|me\/id-document)\/[^/]+(\/file)?$/, max: 30, windowMs: 60 * 1000, byUser: true },
   { name: 'GEOCODING', method: 'POST', pattern: /^\/api\/sr\/(quote|rides)$/, max: 20, windowMs: 60 * 1000, byUser: true },
   { name: 'DRIVER_STATUS', method: 'PATCH', pattern: /^\/api\/(driver\/rides\/[^/]+\/status|sr\/rides\/[^/]+\/claim)$/, max: 30, windowMs: 60 * 1000, byUser: true },
+  // SR live-location broadcast (driver idle heartbeat + in-ride) does a raw geo UPDATE per call — cap it
+  // per driver so a token can't spam unbounded DB writes (the client heartbeat is ~20s → 60/min is ample).
+  { name: 'SR_LOCATION', method: 'POST', pattern: /^\/api\/(driver\/location|sr\/rides\/[^/]+\/location)$/, max: 60, windowMs: 60 * 1000, byUser: true },
+  // Go online/offline toggle — bounded so it can't be flapped to churn the presence/dispatch state.
+  { name: 'SR_PRESENCE', method: 'PATCH', pattern: /^\/api\/driver\/availability$/, max: 30, windowMs: 60 * 1000, byUser: true },
+  // Routing endpoint may call an external OSRM — cap per user.
+  { name: 'SR_ROUTE', method: 'POST', pattern: /^\/api\/sr\/route$/, max: 40, windowMs: 60 * 1000, byUser: true },
+  // Decline re-runs the nearest-driver dispatch scan; tip/cancel are money/state actions.
+  { name: 'SR_RIDE_ACTION', method: 'PATCH', pattern: /^\/api\/sr\/rides\/[^/]+\/(decline|cancel)$/, max: 30, windowMs: 60 * 1000, byUser: true },
+  { name: 'SR_TIP', method: 'POST', pattern: /^\/api\/sr\/rides\/[^/]+\/tip$/, max: 15, windowMs: 60 * 1000, byUser: true },
 ]
 
 function matchRateLimitRule(req, url) {
@@ -173,6 +187,7 @@ const server = createServer(handleRequest)
 
 async function dispatch(req, res, url, context) {
   for (const handler of [
+    handleCron,
     handleAuth,
     handleAccommodations,
     handleAuctions,
