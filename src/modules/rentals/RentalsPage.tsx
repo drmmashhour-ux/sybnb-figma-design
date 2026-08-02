@@ -10,6 +10,7 @@ import { colors, withAlpha } from '../../shared/theme/tokens'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
+import { MortgageCalculator } from '../realestate/MortgageCalculator'
 
 type Props = {
   lang: Lang
@@ -715,6 +716,9 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   </section>
                 )
               })()}
+
+              {/* Synitres module — mortgage calculator, buy flow only (mortgages are for purchases). */}
+              {isBuyMode ? <MortgageCalculator priceMinor={selectedListing.priceMinor} currency={selectedListing.currency} lang={lang} /> : null}
 
               <section style={styles.detailPanel}>
                 <strong>{t.detailTitle}</strong>
