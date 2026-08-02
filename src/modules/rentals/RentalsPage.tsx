@@ -4,7 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
@@ -28,6 +28,14 @@ type SortMode = 'newest' | 'lowest'
 
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const GUEST_TOKEN_KEY = 'sybnb-v6-guest-token'
+
+// Price-band → SYP range, mirroring the STR search (src/modules/search/SearchPreviewPage.tsx) so the
+// shared visual-filter capsule means the same thing across stays and real-estate.
+const PRICE_BANDS: Record<string, { minPrice?: number; maxPrice?: number }> = {
+  low: { maxPrice: 150000 },
+  mid: { minPrice: 150000, maxPrice: 300000 },
+  high: { minPrice: 300000 },
+}
 
 const dateOptions = ['هذا الأسبوع', 'هذا الشهر', '3 أشهر', 'تاريخ مفتوح']
 const mainGroupOptions = [
@@ -316,11 +324,31 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     void loadRentals()
   }, [mode])
 
-  async function loadRentals() {
+  // Translate the location capsule + the STR visual-filter selection into the real server-side query
+  // (GET /api/listings applies these division-agnostically). Without this the Centris-style filters were
+  // purely cosmetic — the page fetched every approved listing and only re-sorted on the client.
+  function currentFilters(): ListingSearchFilters {
+    // VisualFilterSelection is a generic Record<string, string | string[]>, so coerce each field.
+    const priceBand = typeof visualFilters.priceBand === 'string' ? visualFilters.priceBand : ''
+    const propertyType = typeof visualFilters.propertyType === 'string' ? visualFilters.propertyType : ''
+    const amenities = Array.isArray(visualFilters.amenities) ? visualFilters.amenities : []
+    const band = priceBand && priceBand !== 'any' ? PRICE_BANDS[priceBand] : undefined
+    return {
+      governorate: selectedGovernorate || undefined,
+      city: selectedCity || undefined,
+      area: selectedStreet || undefined,
+      propertyType: propertyType && propertyType !== 'any' ? propertyType : undefined,
+      amenities: amenities.length ? amenities : undefined,
+      sort: sortMode === 'lowest' ? 'priceAsc' : undefined,
+      ...band,
+    }
+  }
+
+  async function loadRentals(filters?: ListingSearchFilters) {
     setStatus('loading')
     setMessage('')
     try {
-      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS')
+      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS', filters || {})
       setListings(nextListings)
       setSelectedId(nextListings[0]?.id || '')
       setStatus('ready')
@@ -371,6 +399,8 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setActiveSearchPanel(null)
     setHasSearched(true)
     setShowFilters(false)
+    // Actually run the search against the chosen location + filters (previously this only closed the panel).
+    void loadRentals(currentFilters())
   }
 
   function chooseMainGroup(value: string) {
