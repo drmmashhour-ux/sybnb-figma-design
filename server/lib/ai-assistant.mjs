@@ -53,14 +53,19 @@ export async function answerAssistant({ role = 'guest', locale = 'en', question 
   const records = []
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     const safetyIdentifier = createHash('sha256').update(`${process.env.AUTH_SECRET || 'sybnb'}:${context.user.id}`).digest('hex').slice(0, 32)
-    const response = await request({ input, tools: ASSISTANT_TOOL_DEFINITIONS, tool_choice: 'auto', parallel_tool_calls: false, max_output_tokens: 700, safety_identifier: safetyIdentifier })
-    const calls = (response.output || []).filter((item) => item.type === 'function_call')
-    input.push(...(response.output || []))
+    let response
+    try { response = await request({ input, tools: ASSISTANT_TOOL_DEFINITIONS, tool_choice: 'auto', parallel_tool_calls: false, max_output_tokens: 700, safety_identifier: safetyIdentifier }) }
+    catch (error) {
+      await auditFallback(context, providerFailureReason(error))
+      return { answer: records.length ? groundedToolAnswer(records, locale) : fallback(locale), source: records.length ? 'openai_grounded_fallback' : 'template', records }
+    }
+    const calls = (response?.output || []).filter((item) => item.type === 'function_call')
+    input.push(...(response?.output || []))
     if (!calls.length) {
-      const answer = records.length
-        ? groundedToolAnswer(records, locale)
-        : safeToolFreeAnswer(outputText(response), locale)
-      return { answer, source: records.length ? 'openai_grounded' : 'openai', records }
+      const safe = records.length ? { answer: groundedToolAnswer(records, locale), blocked: false } : safeToolFreeAnswer(outputText(response), locale)
+      if (safe.blocked) await auditFallback(context, 'MODEL_OUTPUT_BLOCKED')
+      const answer = safe.answer
+      return { answer, source: records.length ? 'openai_grounded' : safe.blocked ? 'template' : 'openai', records }
     }
     for (const call of calls) {
       let args
@@ -70,7 +75,7 @@ export async function answerAssistant({ role = 'guest', locale = 'en', question 
         records.push({ tool: call.name, result })
         input.push({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result) })
       } catch (error) {
-        await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_ASSISTANT_ATTEMPT_BLOCKED', entityType: 'ai_assistant', entityId: context.user.id, after: { tool: call.name, code: error.code || 'TOOL_DENIED' } } }).catch(() => {})
+        await auditBestEffort(context, 'AI_ASSISTANT_ATTEMPT_BLOCKED', { tool: call.name, code: error.code || 'TOOL_DENIED' })
         input.push({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ error: error.code || 'TOOL_DENIED', message: error.expose ? error.message : 'Tool request denied.' }) })
       }
     }
@@ -79,7 +84,22 @@ export async function answerAssistant({ role = 'guest', locale = 'en', question 
   return { answer: fallback(locale), source: 'template', records }
 }
 
-async function auditFallback(context, reason) { if (context?.user?.id) await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_ASSISTANT_SAFE_FALLBACK', entityType: 'ai_assistant', entityId: context.user.id, after: { reason } } }).catch(() => {}) }
+async function auditFallback(context, reason) {
+  await auditBestEffort(context, 'AI_ASSISTANT_SAFE_FALLBACK', { reason })
+}
+
+async function auditBestEffort(context, action, after) {
+  if (!context?.user?.id) return
+  try { await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action, entityType: 'ai_assistant', entityId: context.user.id, after } }) }
+  catch { /* Audit persistence must not turn a safe user fallback into a server failure. */ }
+}
+
+function providerFailureReason(error) {
+  if (error?.name === 'AbortError') return 'PROVIDER_TIMEOUT'
+  if (error?.statusCode === 429) return 'PROVIDER_RATE_LIMITED'
+  if (Number(error?.statusCode) >= 500) return 'PROVIDER_UNAVAILABLE'
+  return 'PROVIDER_ERROR'
+}
 
 function stripUntrusted(text) {
   return String(text || '').replace(/<[^>]*>/g, '').replace(/[`*_#]/g, '').trim().slice(0, 4000)
@@ -89,8 +109,8 @@ const SENSITIVE_UNGROUNDED_CLAIM = /(?:\b(?:usd|syp|eur|price|cost|fee|tax|avail
 
 function safeToolFreeAnswer(raw, locale) {
   const answer = stripUntrusted(raw)
-  if (!answer || SENSITIVE_UNGROUNDED_CLAIM.test(answer)) return fallback(locale)
-  return answer
+  if (!answer || SENSITIVE_UNGROUNDED_CLAIM.test(answer)) return { answer: fallback(locale), blocked: true }
+  return { answer, blocked: false }
 }
 
 function groundedToolAnswer(records, locale) {

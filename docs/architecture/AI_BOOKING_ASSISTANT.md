@@ -20,6 +20,7 @@ Consequential actions use the existing assistant route namespace with a two-step
 | Consequential action without consent or replay | Actor-bound, expiring, one-time confirmation records; exact payload and fact hashes; atomic claim; existing mutation flows remain authoritative |
 | Secret or personal-data exposure | `OPENAI_API_KEY` is server-only; prompts contain pseudonymous actor role and bounded criteria; prompt/log redaction removes common email, phone, bearer-token, and card patterns |
 | Cost/abuse amplification | Existing per-user `ASSISTANT_ASK` limiter, bounded history/tool rounds/results, provider timeout, one retry for transient failures, request/body limits |
+| Provider timeout/outage or malformed response | Localized deterministic fallback, fixed-category audit event, no upstream error disclosure; already retrieved tool facts may be returned deterministically; audit-write failure cannot break the fallback |
 | Feature accidentally enabled in production | Server requires both `AI_BOOKING_ASSISTANT_ENABLED=1` and `SYBNB_DEPLOY_ENV=staging`; startup fails for any other enabled environment |
 | Model output rendered as code/markup | Output is treated as untrusted plain text; structured UI uses server-owned tool records and React escaping |
 | Stale or changed material facts | Confirmation rechecks and hashes availability, dates, guests, pricing breakdown, fees, currency, status, and update time; mismatches invalidate consent |

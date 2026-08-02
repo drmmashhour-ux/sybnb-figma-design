@@ -1,5 +1,5 @@
 import request from 'supertest'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { executeAssistantTool, getBookingStatus } from '../../server/lib/assistant-tools.mjs'
 import { proposeAssistantAction, purgeAssistantConfirmations } from '../../server/lib/assistant-confirmations.mjs'
@@ -33,6 +33,8 @@ describe('AI booking assistant authorization and audit', () => {
   })
 
   afterAll(async () => {
+    vi.unstubAllGlobals()
+    delete process.env.OPENAI_API_KEY
     delete process.env.AI_BOOKING_ASSISTANT_ENABLED
     delete process.env.SYBNB_DEPLOY_ENV
     delete process.env.RATE_LIMIT_ASSISTANT_ASK_MAX
@@ -56,6 +58,19 @@ describe('AI booking assistant authorization and audit', () => {
     const audit = await db().adminAuditLog.findFirst({ where: { actorUserId: guest.user.id, action: 'AI_ASSISTANT_REQUEST_COMPLETED' }, orderBy: { createdAt: 'desc' } })
     expect(audit.after).toMatchObject({ locale: 'fr', source: 'template' })
     expect(JSON.stringify(audit)).not.toContain('Je cherche')
+  })
+
+  it('returns and audits a localized safe fallback when the provider fails', async () => {
+    process.env.OPENAI_API_KEY = 'test-only'
+    const failure = new Error('provider secret 4111111111111111'); failure.name = 'AbortError'
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure))
+    const response = await request(app).post('/api/assistant/ask').set('Authorization', `Bearer ${guest.token}`).send({ question: 'Aidez-moi', locale: 'fr' })
+    vi.unstubAllGlobals(); delete process.env.OPENAI_API_KEY
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ source: 'template', answer: expect.stringContaining('Je peux') })
+    expect(JSON.stringify(response.body)).not.toContain('4111111111111111')
+    const audit = await db().adminAuditLog.findFirst({ where: { actorUserId: guest.user.id, action: 'AI_ASSISTANT_SAFE_FALLBACK' }, orderBy: { createdAt: 'desc' } })
+    expect(audit.after).toEqual({ reason: 'PROVIDER_TIMEOUT' })
   })
 
   it('fails closed for cross-user booking status', async () => {
