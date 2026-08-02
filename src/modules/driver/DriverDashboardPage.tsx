@@ -511,8 +511,13 @@ function RideCard({
   const [pin, setPin] = useState('')
   const [pinState, setPinState] = useState<'idle' | 'verifying'>('idle')
   const [pinError, setPinError] = useState('')
-  // The pickup code is entered once the driver is at the rider (assigned / arriving) to start the trip.
-  const atPickup = ride.status === 'DRIVER_ASSIGNED' || ride.status === 'DRIVER_ARRIVING'
+  // Buttons mirror the server's state machine (driver.mjs assertDriverRideTransition) so the driver is
+  // never offered a transition the API will 400: ASSIGNED→ARRIVING, ARRIVING→IN_PROGRESS (via the pickup
+  // PIN), IN_PROGRESS→COMPLETED; CANCELLED is allowed from any active state.
+  const canArrive = ride.status === 'DRIVER_ASSIGNED'
+  const atPickup = ride.status === 'DRIVER_ARRIVING' // the PIN starts the trip only after "Arriving"
+  const canComplete = ride.status === 'IN_PROGRESS'
+  const canCancel = ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED'
 
   async function submitPin() {
     if (pin.trim().length !== 4) return
@@ -555,14 +560,18 @@ function RideCard({
           {pinError && <span style={styles.pinError} role="alert">{pinError}</span>}
         </div>
       )}
-      {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
+      {canCancel && (
         <div style={styles.actions}>
-          <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
-            {labels.arriving}
-          </button>
-          <button disabled={disabled} style={styles.primaryButton} onClick={() => onUpdate('COMPLETED')}>
-            {labels.complete}
-          </button>
+          {canArrive && (
+            <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
+              {labels.arriving}
+            </button>
+          )}
+          {canComplete && (
+            <button disabled={disabled} style={styles.primaryButton} onClick={() => onUpdate('COMPLETED')}>
+              {labels.complete}
+            </button>
+          )}
           <button disabled={disabled} style={styles.dangerButton} onClick={() => onUpdate('CANCELLED')}>
             {labels.cancel}
           </button>

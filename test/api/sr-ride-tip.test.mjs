@@ -76,6 +76,19 @@ describe('SR ride tip: 100% to driver, one per ride, wallet-gated', () => {
     expect(second.body.error.code).toBe('RIDE_ALREADY_TIPPED')
   })
 
+  it('an absurdly large tip is rejected before it can touch the wallet (400)', async () => {
+    const rider = await registerUser(app, 'GUEST', 'tip-rider-big')
+    const driver = await makeRoadReadyDriver(app, 'tip-driver-big')
+    await fundRider(rider.user.id, 2_000_000_000) // funded far beyond the ceiling, to prove the cap — not the balance — rejects
+    const ride = await completeRide(app, rider, driver, 'tip-big')
+    const res = await request(app).post(`/api/sr/rides/${ride.id}/tip`).set('Authorization', `Bearer ${rider.token}`).send({ amountMinor: 1_900_000_000 })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('TIP_AMOUNT_TOO_LARGE')
+    // no tip entry was recorded
+    const driverTip = await db().walletEntry.findFirst({ where: { referenceType: 'sr_driver_tip', referenceId: ride.id } })
+    expect(driverTip).toBeNull()
+  })
+
   it('a non-rider cannot tip (403)', async () => {
     const rider = await registerUser(app, 'GUEST', 'tip-rider2')
     const driver = await makeRoadReadyDriver(app, 'tip-driver2')

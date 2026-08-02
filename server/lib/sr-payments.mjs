@@ -198,6 +198,17 @@ export async function tipCompletedRide(tx, ride, tipMinor) {
     error.expose = true
     throw error
   }
+  // Sanity ceiling so a malformed/fat-finger amountMinor from a direct API call can't record an absurd
+  // tip: at most 5× the fare, with a floor so tiny fares still allow a normal tip. (The wallet-balance
+  // gate below already prevents an overdraw; this is a defence-in-depth bound on intent.)
+  const tipCeiling = Math.max((ride.fareMinor || 0) * 5, 500_000)
+  if (amount > tipCeiling) {
+    const error = new Error('That tip is unusually large. Please enter a smaller amount.')
+    error.statusCode = 400
+    error.code = 'TIP_AMOUNT_TOO_LARGE'
+    error.expose = true
+    throw error
+  }
 
   // Serialize concurrent spends on this rider's wallet before the balance re-check below.
   await lockWalletForSpend(tx, ride.riderId, ride.currency)
