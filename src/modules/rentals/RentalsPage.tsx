@@ -41,13 +41,18 @@ const PRICE_BANDS: Record<string, { minPrice?: number; maxPrice?: number }> = {
 }
 
 const dateOptions = ['هذا الأسبوع', 'هذا الشهر', '3 أشهر', 'تاريخ مفتوح']
+// The buyer property-type chips MUST match the seller wizard's taxonomy (SellerListingWizard
+// PROPERTY_TYPES, stored verbatim as metadata.propertyType), else a filter finds nothing. The ids are the
+// lowercased English label the wizard writes, so the server's case-insensitive compare matches. "Any"
+// (default) sends no property-type filter so the search isn't silently narrowed to apartments.
 const mainGroupOptions = [
+  { id: 'any', ar: 'الكل', en: 'Any' },
   { id: 'apartment', ar: 'شقة', en: 'Apartment' },
+  { id: 'family house', ar: 'منزل عائلي', en: 'Family house' },
   { id: 'villa', ar: 'فيلا', en: 'Villa' },
-  { id: 'room', ar: 'غرفة', en: 'Room' },
-  { id: 'office', ar: 'مكتب', en: 'Office' },
-  { id: 'shop', ar: 'محل', en: 'Shop' },
+  { id: 'commercial', ar: 'محل تجاري', en: 'Commercial' },
   { id: 'land', ar: 'أرض', en: 'Land' },
+  { id: 'new project', ar: 'مشروع جديد', en: 'New project' },
 ]
 
 const copy = {
@@ -304,12 +309,12 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [activeSearchPanel, setActiveSearchPanel] = useState<SearchPanel>(null)
   const [selectedGovernorate, setSelectedGovernorate] = useState('damascus')
   const [selectedCity, setSelectedCity] = useState('damascus-city')
-  const [selectedStreet, setSelectedStreet] = useState('old-city')
+  const [selectedStreet, setSelectedStreet] = useState('') // '' = any area (don't over-narrow the search)
   const [selectedDate, setSelectedDate] = useState('')
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>({
     sort: 'newest',
     priceBand: 'any',
-    propertyType: 'apartment',
+    propertyType: 'any',
     roomType: 'any',
     bedType: 'any',
     amenities: ['wifi', 'parking'],
@@ -327,14 +332,14 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const selectedAreaData = selectedCityData?.areas.find((area) => area.key === selectedStreet)
   const selectedGovernorateLabel = labelFor(lang, selectedGovernorateData)
   const selectedCityLabel = labelFor(lang, selectedCityData)
-  const selectedStreetLabel = labelFor(lang, selectedAreaData)
+  const selectedStreetLabel = selectedStreet ? labelFor(lang, selectedAreaData) : (isAr ? 'كل الأحياء' : 'Any area')
   const currentPanelOptions = (
     activeSearchPanel === 'governorate'
       ? SYRIA_GOVERNORATES.map((item) => ({ key: item.key, label: labelFor(lang, item) }))
       : activeSearchPanel === 'city'
         ? (selectedGovernorateData?.cities || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
         : activeSearchPanel === 'street'
-          ? (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
+          ? [{ key: '', label: isAr ? 'كل الأحياء' : 'Any area' }, ...(selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))]
           : dateOptions.map((item) => ({ key: item, label: item }))
   )
   const visibleListings = useMemo(() => {
@@ -412,14 +417,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     const nextCity = nextGovernorate?.cities[0]
     setSelectedGovernorate(value)
     setSelectedCity(nextCity?.key || '')
-    setSelectedStreet(nextCity?.areas[0]?.key || '')
+    setSelectedStreet('') // reset to "any area" rather than auto-narrowing to the first area
     setActiveSearchPanel('city')
   }
 
   function chooseCity(value: string) {
-    const nextCity = getCity(selectedGovernorate, value)
     setSelectedCity(value)
-    setSelectedStreet(nextCity?.areas[0]?.key || '')
+    setSelectedStreet('') // reset to "any area" so the city-wide results show
     setActiveSearchPanel('street')
   }
 
@@ -446,6 +450,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     if (!hasGuestAccount || !selectedListing || documentFiles.length === 0 || !acceptedAgreement) {
       setMessage(t.required)
       if (!hasGuestAccount) openAccount()
+      return
+    }
+    // Sample/fallback listings (shown when the API is unreachable) have non-UUID ids the server rejects —
+    // don't let a buyer complete the whole request against one only to hit a confusing 404.
+    if (selectedListing.id.startsWith('fallback')) {
+      setSendState('error')
+      setMessage(t.error)
       return
     }
 

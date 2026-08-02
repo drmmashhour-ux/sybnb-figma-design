@@ -10,6 +10,7 @@ import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailF
 describe('Buy/Sale/Rent listing search + metadata filters', () => {
   let app
   let seller
+  let sellerToken
 
   beforeAll(async () => {
     app = testApp()
@@ -18,6 +19,7 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
     const res = await request(app).post('/api/auth/register').send({ role: 'SELLER', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     seller = res.body.user
+    sellerToken = res.body.token
   })
 
   afterAll(async () => {
@@ -111,6 +113,32 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
     // The single-listing detail carries it too.
     const detail = await request(app).get(`/api/listings/${cheap.id}`)
     expect(detail.body.listing.valuation.tier).toBe('BELOW_MARKET')
+  })
+
+  it('a BUY listing created with sizeSqm (as the wizard writes it) passes the submit gate', async () => {
+    // Regression for the launch blocker: propertyRules() required metadata.areaSqm but the seller wizard
+    // writes sizeSqm, so no property could ever be submitted. The gate now accepts sizeSqm.
+    const draft = await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${sellerToken}`)
+      .send({
+        division: 'BUY',
+        titleAr: 'شقة اختبار الإرسال',
+        priceMinor: 25_000_000,
+        currency: 'SYP',
+        metadata: { propertyType: 'apartment', governorate: 'damascus', city: 'damascus-city', bedrooms: 2, bathrooms: 1, sizeSqm: 110 },
+      })
+    expect(draft.status).toBe(201)
+    // Real-estate requires ≥1 photo before submit (same as the wizard uploads); a 1×1 PNG suffices.
+    const onePxPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    const media = await request(app)
+      .post(`/api/listings/${draft.body.listing.id}/media`)
+      .set('Authorization', `Bearer ${sellerToken}`)
+      .send({ fileBase64: onePxPng, mimeType: 'image/png' })
+    expect(media.status).toBe(201)
+    const submit = await request(app).patch(`/api/listings/${draft.body.listing.id}/submit`).set('Authorization', `Bearer ${sellerToken}`)
+    expect(submit.status).toBe(200) // sizeSqm now satisfies the attribute gate (was the launch blocker)
+    expect(submit.body.listing.status).toBe('PENDING_REVIEW')
   })
 
   it('never returns a non-APPROVED property in public search', async () => {
