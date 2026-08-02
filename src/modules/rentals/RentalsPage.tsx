@@ -125,6 +125,10 @@ const copy = {
     sqm: 'م²',
     mapTitle: 'الموقع على الخريطة',
     getDirections: 'الاتجاهات · GPS',
+    belowMarket: 'أقل من سعر السوق',
+    atMarket: 'ضمن سعر السوق',
+    aboveMarket: 'أعلى من سعر السوق',
+    estValue: 'القيمة التقديرية',
     empty: 'لا توجد عقارات شهرية منشورة بعد.',
     loading: 'جار التحميل',
     error: 'تعذر تحميل عقارات الإيجار الشهري',
@@ -204,6 +208,10 @@ const copy = {
     sqm: 'm²',
     mapTitle: 'Location on map',
     getDirections: 'Directions · GPS',
+    belowMarket: 'Below market',
+    atMarket: 'At market',
+    aboveMarket: 'Above market',
+    estValue: 'Estimated value',
     empty: 'No published monthly rentals yet.',
     loading: 'Loading',
     error: 'Could not load monthly rentals',
@@ -604,7 +612,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               <article key={listing.id} style={selectedListing?.id === listing.id ? styles.resultCardActive : styles.resultCard}>
                 <img src={listingImage(listing, isBuyMode)} alt="" style={styles.resultImage} />
                 <div style={styles.resultBody}>
-                  <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
+                  <div style={styles.pillRow}>
+                    <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
+                    {(() => {
+                      const badge = valuationBadge(listing, t)
+                      return badge ? <span style={{ ...styles.valuationPill, color: badge.color, borderColor: withAlpha(badge.color, 0.5) }}>{badge.label}</span> : null
+                    })()}
+                  </div>
                   <h2 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h2>
                   {(() => {
                     const a = realEstateAttrs(listing)
@@ -669,6 +683,17 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(selectedListing, lang)}</p>
                   <Info label={t.price} value={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)} />
+                  {(() => {
+                    const badge = valuationBadge(selectedListing, t)
+                    const est = selectedListing.valuation?.estimatedValueMinor
+                    if (!badge) return null
+                    return (
+                      <div style={styles.valuationRow}>
+                        <span style={{ ...styles.valuationPill, color: badge.color, borderColor: withAlpha(badge.color, 0.5) }}>{badge.label}</span>
+                        {typeof est === 'number' ? <span style={styles.estValue}>{t.estValue}: <strong dir="ltr">{moneyText(est, selectedListing.currency, lang)}</strong></span> : null}
+                      </div>
+                    )
+                  })()}
                   {(() => {
                     const a = realEstateAttrs(selectedListing)
                     return (
@@ -819,6 +844,16 @@ function realEstateAttrs(listing: PlatformListing) {
   }
 }
 
+// Property-valuation badge (Synitres) — maps the server-computed tier to a label + colour. Returns null
+// when there weren't enough comparables to classify (tier null) or the division carries no valuation.
+function valuationBadge(listing: PlatformListing, t: typeof copy.en) {
+  const tier = listing.valuation?.tier
+  if (!tier) return null
+  if (tier === 'BELOW_MARKET') return { label: t.belowMarket, color: '#20d29b' }
+  if (tier === 'AT_MARKET') return { label: t.atMarket, color: '#38bdf8' }
+  return { label: t.aboveMarket, color: '#f7c05b' }
+}
+
 function listingImage(listing: PlatformListing, isBuyMode = false) {
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   return typeof mediaUrl === 'string' ? mediaUrl : isBuyMode ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp'
@@ -891,6 +926,10 @@ const styles: Record<string, CSSProperties> = {
   amenityLabel: { color: colors.muted, fontSize: 13 },
   amenityChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   amenityChip: { fontSize: 12, fontWeight: 600, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '3px 10px' },
+  pillRow: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
+  valuationPill: { fontSize: 11, fontWeight: 800, border: '1px solid', borderRadius: 999, padding: '2px 9px', background: 'transparent' },
+  valuationRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', borderTop: `1px solid ${colors.line}`, paddingTop: 10 },
+  estValue: { color: colors.muted, fontSize: 13 },
   mapSection: { border: `1px solid ${colors.line}`, borderRadius: 16, background: colors.bg2, padding: 14, display: 'grid', gap: 10 },
   mapRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
   mapAddress: { color: colors.muted, fontSize: 13 },

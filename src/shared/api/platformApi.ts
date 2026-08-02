@@ -86,6 +86,15 @@ export type PlatformListing = {
     medianPriceMinor: number | null
     priceDeltaMinor?: number
   } | null
+  // Property valuation (Synitres module) -- BUY/RENTALS only, computed server-side against comparable
+  // live listings' median price-per-m² (same city + type + size band). Absent for other divisions.
+  valuation?: {
+    tier: 'BELOW_MARKET' | 'AT_MARKET' | 'ABOVE_MARKET' | null
+    comparableCount: number
+    medianPricePerSqmMinor: number | null
+    subjectPricePerSqmMinor?: number
+    estimatedValueMinor?: number
+  } | null
   // Online auctions (026) -- CARS listings only, a card-safe public summary. The full
   // context-aware state (youAreHighestBidder, reservePriceMinor for the owner, winnerBidderId for
   // the winner) is fetched separately via fetchAuctionState(), never bundled into search/detail.

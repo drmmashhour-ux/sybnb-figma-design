@@ -7,6 +7,7 @@ import { expireOldListings, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle
 import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
 import { assertListingAttributes, PHOTO_REQUIRED_DIVISIONS } from '../lib/listing-attributes.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
+import { computePropertyValuation, loadPropertyComparablePool } from '../lib/property-valuation.mjs'
 import { haversineKm, isValidCoords } from '../lib/sr-geocoding.mjs'
 import { expireStalePaymentPendingBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
@@ -310,6 +311,12 @@ export async function handleListings(req, res, url, context) {
         const pool = await loadCarsComparablePool()
         results = results.map((listing) => ({ ...listing, dealRating: computeDealRating(listing, pool) }))
       }
+      // Property valuation (Synitres module): a Below/At/Above-market badge for BUY/RENTALS, computed
+      // against the median price-per-m² of comparable live listings (same city + type + size band).
+      if ((division === 'BUY' || division === 'RENTALS') && results.length) {
+        const pool = await loadPropertyComparablePool(division)
+        results = results.map((listing) => ({ ...listing, valuation: computePropertyValuation(listing, pool) }))
+      }
       // Auctions (026): attach a public, card-safe auction summary to any CARS listing running one.
       if (division === 'CARS' && results.length) {
         const summaries = await loadAuctionSummaries(results.map((listing) => listing.id))
@@ -457,6 +464,11 @@ export async function handleListings(req, res, url, context) {
       // reservePriceMinor for the owner, winnerBidderId for the winner).
       const summaries = await loadAuctionSummaries([listing.id])
       if (summaries.size) listingWithDealRating.auction = summaries.get(listing.id)
+    }
+    // Property valuation (Synitres): attach the Below/At/Above-market estimate to a BUY/RENTALS detail.
+    if (listing.division === 'BUY' || listing.division === 'RENTALS') {
+      const pool = await loadPropertyComparablePool(listing.division)
+      listingWithDealRating = { ...listing, valuation: computePropertyValuation(listing, pool) }
     }
     return json(res, 200, { ok: true, listing: listingWithDealRating, sellerVerified, hostTier })
   }

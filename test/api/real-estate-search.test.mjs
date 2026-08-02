@@ -87,6 +87,32 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
     expect(buy.body.listings.map((l) => l.id)).not.toContain(rental.id)
   })
 
+  it('attaches a property valuation (Below/At/Above market) from comparable price-per-m²', async () => {
+    // A cluster of comparable apartments in one city + type + size band sets the market per-m².
+    // Base: 100 m² at 20,000,000 SYP → 200,000/m².
+    const city = 'latakia-city'
+    for (const price of [20_000_000, 20_500_000, 19_500_000, 21_000_000]) {
+      await createProperty('BUY', price, { propertyType: 'apartment', governorate: 'latakia', city, sizeSqm: 100 })
+    }
+    // A clearly under-priced comparable (100 m² at 14,000,000 → 140,000/m², ~30% under the ~200k median).
+    const cheap = await createProperty('BUY', 14_000_000, { propertyType: 'apartment', governorate: 'latakia', city, sizeSqm: 100 })
+    // A clearly over-priced one (100 m² at 30,000,000 → 300,000/m²).
+    const pricey = await createProperty('BUY', 30_000_000, { propertyType: 'apartment', governorate: 'latakia', city, sizeSqm: 100 })
+
+    const res = await get('division=BUY&city=' + city)
+    expect(res.status).toBe(200)
+    const cheapRow = res.body.listings.find((l) => l.id === cheap.id)
+    const priceyRow = res.body.listings.find((l) => l.id === pricey.id)
+    expect(cheapRow.valuation.tier).toBe('BELOW_MARKET')
+    expect(priceyRow.valuation.tier).toBe('ABOVE_MARKET')
+    expect(cheapRow.valuation.comparableCount).toBeGreaterThanOrEqual(3)
+    expect(typeof cheapRow.valuation.estimatedValueMinor).toBe('number')
+
+    // The single-listing detail carries it too.
+    const detail = await request(app).get(`/api/listings/${cheap.id}`)
+    expect(detail.body.listing.valuation.tier).toBe('BELOW_MARKET')
+  })
+
   it('never returns a non-APPROVED property in public search', async () => {
     const draft = await createProperty('BUY', 500_000, { propertyType: 'apartment', governorate: 'damascus', city: 'damascus-city' })
     await db().listing.update({ where: { id: draft.id }, data: { status: 'PENDING_REVIEW' } })
