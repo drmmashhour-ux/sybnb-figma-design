@@ -7,6 +7,8 @@ import {
   fetchDriverVehicles,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
+  postDriverLocation,
+  setDriverAvailability,
   updatePrototypeDriverRideStatus,
   verifyDriverPickupPin,
   type PlatformDriverDocument,
@@ -25,6 +27,13 @@ const copy = {
     back: 'العودة للرئيسية',
     title: 'لوحة سائق SR',
     subtitle: 'الرحلات المسندة للسائق وحالات التنفيذ مباشرة من قاعدة البيانات.',
+    goOnline: 'ابدأ الاستلام (متصل)',
+    goOffline: 'إيقاف الاستلام (غير متصل)',
+    online: 'متصل — تصلك أقرب الطلبات',
+    offline: 'غير متصل — لن تصلك طلبات',
+    locating: 'جارٍ تحديد موقعك…',
+    locationDenied: 'تعذّر الوصول للموقع — فعّل خدمة الموقع (GPS) لتظهر لك أقرب الطلبات.',
+    kmAway: 'كم للانطلاق',
     refresh: 'تحديث',
     loading: 'جار التحميل',
     saving: 'جار الحفظ',
@@ -89,6 +98,13 @@ const copy = {
     back: 'Back to landing',
     title: 'SR Driver Dashboard',
     subtitle: 'Assigned driver rides and live execution states directly from PostgreSQL.',
+    goOnline: 'Go online (start receiving)',
+    goOffline: 'Go offline (stop receiving)',
+    online: 'Online — you get the nearest requests',
+    offline: 'Offline — no requests will reach you',
+    locating: 'Getting your location…',
+    locationDenied: 'Location unavailable — enable GPS so the nearest requests reach you.',
+    kmAway: 'km to pickup',
     refresh: 'Refresh',
     loading: 'Loading',
     saving: 'Saving',
@@ -164,6 +180,10 @@ export function DriverDashboardPage({ lang }: Props) {
   const [pendingStatus, setPendingStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [claimingRideId, setClaimingRideId] = useState('')
   const [claimError, setClaimError] = useState('')
+  // SR presence (Phase 1): the driver's own online/offline switch + GPS.
+  const [online, setOnline] = useState(false)
+  const [presenceBusy, setPresenceBusy] = useState(false)
+  const [presenceMsg, setPresenceMsg] = useState('')
 
   useEffect(() => {
     void loadOverview()
@@ -172,12 +192,55 @@ export function DriverDashboardPage({ lang }: Props) {
     return () => window.clearInterval(interval)
   }, [])
 
+  // While online, send a GPS heartbeat so the driver keeps appearing in nearby riders' nearest-first
+  // pool as they move. Stops the moment they go offline.
+  useEffect(() => {
+    if (!online) return
+    const beat = window.setInterval(() => {
+      getBrowserLocation()
+        .then((coords) => coords && postDriverLocation(coords))
+        .catch(() => {})
+    }, 20000)
+    return () => window.clearInterval(beat)
+  }, [online])
+
   async function loadPendingRides() {
     try {
-      setPendingRides(await fetchPendingSrRides())
+      const { online: serverOnline, rides } = await fetchPendingSrRides()
+      setPendingRides(rides)
+      setOnline(serverOnline)
       setPendingStatus('ready')
     } catch {
       setPendingStatus('error')
+    }
+  }
+
+  // Best-effort browser GPS. Resolves null (never rejects) if the device has no geolocation or the
+  // driver declines — the caller then goes online without a fix and shows a "enable GPS" hint.
+  function getBrowserLocation(): Promise<{ lat: number; lng: number } | null> {
+    return new Promise((resolve) => {
+      if (!('geolocation' in navigator)) return resolve(null)
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 },
+      )
+    })
+  }
+
+  async function toggleOnline(next: boolean) {
+    setPresenceBusy(true)
+    setPresenceMsg(next ? t.locating : '')
+    try {
+      const coords = next ? await getBrowserLocation() : null
+      const res = await setDriverAvailability({ online: next, ...(coords || {}) })
+      setOnline(res.online)
+      setPresenceMsg(next && !coords ? t.locationDenied : '')
+      await loadPendingRides()
+    } catch (error) {
+      setPresenceMsg(error instanceof Error ? error.message : t.error)
+    } finally {
+      setPresenceBusy(false)
     }
   }
 
@@ -260,10 +323,20 @@ export function DriverDashboardPage({ lang }: Props) {
       </button>
 
       <section style={styles.driverTop}>
-        {/* Availability toggle removed: it was a fake control (no online/offline state exists).
-            A real go-online/offline switch needs a driver-availability field + endpoint in the
-            SR division, which is frozen under the STR-first plan — flagged separately. */}
         <h1 style={styles.driverTitle}>{t.title}</h1>
+        {/* SR presence (Phase 1): real go-online/offline switch backed by DriverProfile.active + GPS. */}
+        <div style={styles.presenceRow}>
+          <button
+            style={{ ...styles.onlineToggle, ...(online ? styles.onlineToggleOn : styles.onlineToggleOff) }}
+            disabled={presenceBusy}
+            onClick={() => void toggleOnline(!online)}
+          >
+            <span style={{ ...styles.onlineDot, background: online ? '#22c55e' : '#94a3b8' }} />
+            {presenceBusy ? t.locating : online ? t.goOffline : t.goOnline}
+          </button>
+          <span style={styles.presenceState}>{online ? t.online : t.offline}</span>
+        </div>
+        {presenceMsg ? <p style={styles.presenceMsg}>{presenceMsg}</p> : null}
       </section>
 
       <section style={styles.hero}>
@@ -303,6 +376,11 @@ export function DriverDashboardPage({ lang }: Props) {
                 <article key={pendingRide.id} style={styles.offerCard}>
                   <span>{String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
+                  {typeof pendingRide.pickupDistanceKm === 'number' ? (
+                    <em dir="ltr" style={styles.pickupDistance}>
+                      📍 {pendingRide.pickupDistanceKm} {t.kmAway}
+                    </em>
+                  ) : null}
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
@@ -492,7 +570,15 @@ function DispatchItem({ label, value, tone }: { label: string; value: string; to
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#08090f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 22, maxWidth: 1120, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #263651', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  driverTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
+  driverTop: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 },
+  presenceRow: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  onlineToggle: { border: 0, borderRadius: 999, minHeight: 52, padding: '0 24px', fontWeight: 950, fontSize: 15, display: 'inline-flex', alignItems: 'center', gap: 10, cursor: 'pointer' },
+  onlineToggleOn: { background: '#20d29b', color: '#04100d' },
+  onlineToggleOff: { background: '#1b2436', color: '#e6ebf4' },
+  onlineDot: { width: 11, height: 11, borderRadius: '50%', display: 'inline-block' },
+  presenceState: { color: '#9aa6ba', fontWeight: 700, fontSize: 13 },
+  presenceMsg: { color: '#f7c05b', margin: '4px 0 0', fontSize: 13 },
+  pickupDistance: { color: '#20d29b', fontWeight: 800, fontStyle: 'normal', fontSize: 13 },
   availability: { border: '1px solid #1d2433', borderRadius: 999, background: '#11131c', display: 'flex', padding: 5 },
   availableButton: { border: 0, borderRadius: 999, background: '#20d29b', color: '#04100d', fontWeight: 950, minHeight: 48, padding: '0 22px' },
   offlineButton: { border: 0, borderRadius: 999, background: 'transparent', color: '#8f96a8', fontWeight: 900, minHeight: 48, padding: '0 22px' },

@@ -145,6 +145,8 @@ export type PlatformRideRequest = {
   updatedAt: string
   // 4-digit pickup code — returned by the API to the RIDER only (the driver's copy is stripped server-side).
   pickupPin?: string | null
+  // Great-circle km from the online driver's last location to this ride's pickup (nearest-first pool).
+  pickupDistanceKm?: number | null
   rider?: {
     id: string
     displayName: string
@@ -2611,10 +2613,37 @@ export async function fetchPrototypeDriverOverview() {
 
 export async function fetchPendingSrRides() {
   const session = await ensurePrototypeDriverSession()
-  const response = await apiRequest<{ ok: true; rides: PlatformRideRequest[] }>('/api/driver/rides/pending', {
+  const response = await apiRequest<{ ok: true; online?: boolean; rides: PlatformRideRequest[] }>('/api/driver/rides/pending', {
     token: session.token,
   })
-  return response.rides
+  // The pool is now online-gated + nearest-first. `online` tells the dashboard whether the driver is
+  // receiving offers; older responses without the field are treated as online for back-compat.
+  return { online: response.online ?? true, rides: response.rides }
+}
+
+// SR driver presence (Phase 1): go online/offline. `lat`/`lng` (from the browser's GPS) pin the driver's
+// position so they immediately appear in nearby riders' nearest-first pool.
+export async function setDriverAvailability(input: { online: boolean; lat?: number; lng?: number }) {
+  const session = await ensurePrototypeDriverSession()
+  const body: Record<string, unknown> = { online: input.online }
+  if (input.lat != null && input.lng != null) {
+    body.lat = input.lat
+    body.lng = input.lng
+  }
+  return apiRequest<{ ok: true; online: boolean; location: { lat: number; lng: number } | null }>(
+    '/api/driver/availability',
+    { method: 'PATCH', token: session.token, body },
+  )
+}
+
+// Idle GPS heartbeat while online (rejected 409 DRIVER_OFFLINE when offline).
+export async function postDriverLocation(input: { lat: number; lng: number }) {
+  const session = await ensurePrototypeDriverSession()
+  return apiRequest<{ ok: true; location: { lat: number; lng: number; at: string } }>('/api/driver/location', {
+    method: 'POST',
+    token: session.token,
+    body: { lat: input.lat, lng: input.lng },
+  })
 }
 
 export async function claimPrototypeSrRide(rideId: string) {
