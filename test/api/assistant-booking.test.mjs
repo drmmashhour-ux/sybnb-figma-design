@@ -2,7 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { executeAssistantTool, getBookingStatus } from '../../server/lib/assistant-tools.mjs'
-import { proposeAssistantAction } from '../../server/lib/assistant-confirmations.mjs'
+import { proposeAssistantAction, purgeAssistantConfirmations } from '../../server/lib/assistant-confirmations.mjs'
 import { testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode, verifyEmailForTest } from '../support/testServer.mjs'
 
 describe('AI booking assistant authorization and audit', () => {
@@ -134,6 +134,20 @@ describe('AI booking assistant authorization and audit', () => {
     expect(serialized).not.toContain('private guest message')
     expect(serialized).not.toContain('4111111111111111')
     expect(serialized).not.toContain('private refund reason')
+  })
+
+  it('purges only expired or consumed confirmation records beyond retention', async () => {
+    const now = new Date('2026-12-15T12:00:00.000Z')
+    const common = { actorUserId: guest.user.id, action: 'CREATE_BOOKING_DRAFT', payloadHash: 'payload-hash', factHash: 'fact-hash', entityType: 'listing', entityId: listing.id }
+    const [consumed, expired, recent] = await Promise.all([
+      db().assistantConfirmation.create({ data: { ...common, status: 'ACCEPTED', expiresAt: new Date('2026-12-13T10:00:00.000Z'), consumedAt: new Date('2026-12-13T10:00:00.000Z') } }),
+      db().assistantConfirmation.create({ data: { ...common, status: 'PENDING', expiresAt: new Date('2026-12-13T10:00:00.000Z') } }),
+      db().assistantConfirmation.create({ data: { ...common, status: 'PENDING', expiresAt: new Date('2026-12-15T11:55:00.000Z') } }),
+    ])
+    expect(await purgeAssistantConfirmations({ now, retentionHours: 24 })).toBeGreaterThanOrEqual(2)
+    expect(await db().assistantConfirmation.findUnique({ where: { id: consumed.id } })).toBeNull()
+    expect(await db().assistantConfirmation.findUnique({ where: { id: expired.id } })).toBeNull()
+    expect(await db().assistantConfirmation.findUnique({ where: { id: recent.id } })).not.toBeNull()
   })
 
   it('enforces the existing per-user assistant rate limit', async () => {

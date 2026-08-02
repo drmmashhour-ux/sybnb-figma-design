@@ -4,6 +4,7 @@ import { calculateBookingTotal, createBookingDraft } from './assistant-tools.mjs
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const TTL_MS = 10 * 60_000
+const DEFAULT_RETENTION_HOURS = 24
 export const ASSISTANT_ACTIONS = Object.freeze([
   'CREATE_BOOKING_DRAFT', 'SEND_MESSAGE', 'CANCEL_BOOKING', 'REQUEST_REFUND',
   'CHANGE_DATES', 'CHANGE_GUEST_COUNT', 'INITIATE_PAYMENT',
@@ -41,6 +42,18 @@ export function assistantDraftMatchesConfirmedFacts(result, confirmedFacts) {
   const actual = result?.draft && { available: true, total: result.draft.total, guests: result.draft.guests, nights: result.draft.nights }
   const expected = { available: confirmedFacts.available, total: confirmedFacts.total, guests: confirmedFacts.guests, nights: confirmedFacts.nights }
   return Boolean(actual) && hash(actual) === hash(expected)
+}
+
+export function assistantConfirmationRetentionHours(value = process.env.ASSISTANT_CONFIRMATION_RETENTION_HOURS) {
+  if (value == null || value === '') return DEFAULT_RETENTION_HOURS
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 720 ? parsed : DEFAULT_RETENTION_HOURS
+}
+
+export async function purgeAssistantConfirmations({ now = new Date(), retentionHours = assistantConfirmationRetentionHours() } = {}) {
+  const cutoff = new Date(now.getTime() - retentionHours * 60 * 60 * 1000)
+  const purged = await db().assistantConfirmation.deleteMany({ where: { OR: [{ consumedAt: { lt: cutoff } }, { consumedAt: null, expiresAt: { lt: cutoff } }] } })
+  return purged.count
 }
 
 export function normalizeAssistantAction(action, raw) {

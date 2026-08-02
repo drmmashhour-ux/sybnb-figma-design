@@ -29,3 +29,5 @@ Consequential actions use the existing assistant route namespace with a two-step
 Only the last bounded session messages, locale, role, and non-sensitive search criteria are sent to the model. Listing tool results contain public listing fields. Host IDs, guest IDs, emails, phones, payment proof data, internal notes, and cross-tenant records are excluded.
 
 Confirmation rows store identifiers and SHA-256 hashes, not action payloads. Audit events use fixed action/result categories and identifiers; they do not store raw prompts, responses, message bodies, refund reasons, secrets, or payment data.
+
+The existing authenticated maintenance cron deletes consumed or expired confirmation rows after 24 hours by default (`ASSISTANT_CONFIRMATION_RETENTION_HOURS`, bounded to 1–720). Pending, unexpired confirmations are retained only while operationally usable. Audit events follow the platform's separate audit-log retention policy.

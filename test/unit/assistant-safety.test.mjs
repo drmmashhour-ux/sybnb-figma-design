@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { answerAssistant, redactAssistantText } from '../../server/lib/ai-assistant.mjs'
 import { createBookingDraft, searchListings } from '../../server/lib/assistant-tools.mjs'
-import { assistantDraftMatchesConfirmedFacts } from '../../server/lib/assistant-confirmations.mjs'
+import { assistantConfirmationRetentionHours, assistantDraftMatchesConfirmedFacts } from '../../server/lib/assistant-confirmations.mjs'
 import { createOpenAiResponse } from '../../server/lib/openai-responses.mjs'
 
 afterEach(() => {
@@ -36,6 +36,15 @@ describe('assistant safety boundaries', () => {
     expect(assistantDraftMatchesConfirmedFacts({ draft: { ...result.draft, total: { amountMinor: 10_001, currency: 'SYP' } } }, facts)).toBe(false)
     expect(assistantDraftMatchesConfirmedFacts({ draft: { ...result.draft, guests: 3 } }, facts)).toBe(false)
     expect(assistantDraftMatchesConfirmedFacts(null, facts)).toBe(false)
+  })
+
+  it('bounds confirmation retention configuration to a privacy-minimized window', () => {
+    expect(assistantConfirmationRetentionHours()).toBe(24)
+    expect(assistantConfirmationRetentionHours('1')).toBe(1)
+    expect(assistantConfirmationRetentionHours('720')).toBe(720)
+    expect(assistantConfirmationRetentionHours('0')).toBe(24)
+    expect(assistantConfirmationRetentionHours('721')).toBe(24)
+    expect(assistantConfirmationRetentionHours('not-a-number')).toBe(24)
   })
 
   it('retries one transient OpenAI failure and keeps the key in the authorization header', async () => {

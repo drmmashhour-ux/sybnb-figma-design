@@ -16,9 +16,10 @@ RATE_LIMIT_ASSISTANT_ASK_MAX=20
 RATE_LIMIT_ASSISTANT_ASK_WINDOW_MS=60000
 RATE_LIMIT_ASSISTANT_ACTION_MAX=20
 RATE_LIMIT_ASSISTANT_ACTION_WINDOW_MS=60000
+ASSISTANT_CONFIRMATION_RETENTION_HOURS=24
 ```
 
-Keep `OPENAI_API_KEY` out of all `VITE_*` variables. Preserve the existing required `RATE_LIMIT_STORE=db` setting for multi-instance staging. Before starting the staging application, apply `20260802120000_add_assistant_confirmations` with the existing migration deployment command. Run the repository validation and isolated browser suite, deploy to the existing staging target, and verify the server health endpoint before a limited internal test.
+Keep `OPENAI_API_KEY` out of all `VITE_*` variables. Preserve the existing required `RATE_LIMIT_STORE=db` setting for multi-instance staging. Before starting the staging application, apply `20260802120000_add_assistant_confirmations` with the existing migration deployment command. Keep the existing `CRON_SECRET` configured so `/api/cron/maintenance` can purge expired/consumed confirmation rows; the endpoint fails closed without that secret. Run the repository validation and isolated browser suite, deploy to the existing staging target, and verify the server health endpoint before a limited internal test.
 
 ## Production guard
 

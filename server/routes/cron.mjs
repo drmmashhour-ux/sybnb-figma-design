@@ -3,6 +3,7 @@ import { json } from '../lib/responses.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings, purgeStaleListingMedia } from '../lib/listing-lifecycle.mjs'
 import { expireOpenAuctions } from '../lib/auction-lifecycle.mjs'
+import { purgeAssistantConfirmations } from '../lib/assistant-confirmations.mjs'
 
 // Scheduled maintenance (Vercel Cron → vercel.json `crons`). Runs the periodic sweeps that USED to run
 // lazily on hot read paths (search / overview / wallet), so those reads stay read-only and fast at scale.
@@ -49,6 +50,7 @@ export async function handleCron(req, res, url) {
     await purgeStaleListingMedia()
     return 'ok'
   })
+  await runStep('purgedAssistantConfirmations', () => purgeAssistantConfirmations())
 
   if (AUDIT_LOG_RETENTION_DAYS > 0) {
     await runStep('auditLogPurged', async () => {
