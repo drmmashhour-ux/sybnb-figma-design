@@ -40,6 +40,7 @@ const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'L
 const SrLandingPage = lazyNamed(() => import('../modules/sr/SrLandingPage'), 'SrLandingPage')
 const RealEstateLandingPage = lazyNamed(() => import('../modules/realestate/RealEstateLandingPage'), 'RealEstateLandingPage')
 const PropertyDetailPage = lazyNamed(() => import('../modules/realestate/PropertyDetailPage'), 'PropertyDetailPage')
+const MyPropertiesPage = lazyNamed(() => import('../modules/realestate/MyPropertiesPage'), 'MyPropertiesPage')
 const LegalPlaceholderPage = lazyNamed(() => import('../modules/legal/LegalPlaceholderPage'), 'LegalPlaceholderPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
 const CarBrowsePage = lazyNamed(() => import('../modules/cars/CarBrowsePage'), 'CarBrowsePage')
@@ -181,6 +182,8 @@ export function App() {
           <BookingReviewPage listingId={bookingReviewMatch[1]} lang={lang} />
         ) : bookingMatch ? (
           <BookingDetailPage bookingId={bookingMatch[1]} lang={lang} />
+        ) : path === '/my-properties' ? (
+          <MyPropertiesPage lang={lang} />
         ) : propertyMatch ? (
           <PropertyDetailPage listingId={propertyMatch[1]} lang={lang} />
         ) : listingMatch ? (

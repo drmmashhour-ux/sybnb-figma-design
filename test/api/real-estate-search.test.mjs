@@ -150,6 +150,37 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
     expect(res.body.filters.amenities).toContain('elevator')
   })
 
+  it('GET /api/me/properties returns only the caller\'s BUY/RENTALS listings with an inquiry count', async () => {
+    // A fresh seller so the portfolio + inquiry count are isolated from the shared `seller`.
+    const email = uniqueTestEmail('me-props-seller')
+    await verifyEmailForTest(app, email, 'staff-login')
+    const reg = await request(app).post('/api/auth/register').send({ role: 'SELLER', email, password: 'correct-horse-battery' })
+    trackTestUser(reg.body.user.id)
+    const token = reg.body.token
+    const ownerId = reg.body.user.id
+
+    const buy = await db().listing.create({ data: { ownerId, division: 'BUY', status: 'APPROVED', titleAr: 'شقتي', priceMinor: 10_000_000, currency: 'SYP', metadata: { propertyType: 'apartment', city: 'homs-city', sizeSqm: 90 } } })
+    await db().listing.create({ data: { ownerId, division: 'RENTALS', status: 'DRAFT', titleAr: 'إيجاري', priceMinor: 400_000, currency: 'SYP', metadata: { propertyType: 'apartment', city: 'homs-city' } } })
+    // A STAYS listing must NOT appear in the real-estate portfolio.
+    await db().listing.create({ data: { ownerId, division: 'STAYS', status: 'APPROVED', titleAr: 'إقامة', priceMinor: 5000, currency: 'USD', metadata: {} } })
+
+    // An inquiry thread on the BUY listing from some guest → inquiryCount 1.
+    const guestEmail = uniqueTestEmail('me-props-guest')
+    await verifyEmailForTest(app, guestEmail)
+    const guest = await request(app).post('/api/auth/register').send({ role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
+    trackTestUser(guest.body.user.id)
+    await db().messageThread.create({ data: { listingId: buy.id, guestId: guest.body.user.id } })
+
+    const res = await request(app).get('/api/me/properties').set('Authorization', `Bearer ${token}`)
+    expect(res.status).toBe(200)
+    const divisions = res.body.properties.map((p) => p.division).sort()
+    expect(divisions).toEqual(['BUY', 'RENTALS']) // STAYS excluded
+    const buyRow = res.body.properties.find((p) => p.id === buy.id)
+    expect(buyRow.inquiryCount).toBe(1)
+    // Anonymous request is rejected.
+    expect((await request(app).get('/api/me/properties')).status).toBe(401)
+  })
+
   it('never returns a non-APPROVED property in public search', async () => {
     const draft = await createProperty('BUY', 500_000, { propertyType: 'apartment', governorate: 'damascus', city: 'damascus-city' })
     await db().listing.update({ where: { id: draft.id }, data: { status: 'PENDING_REVIEW' } })

@@ -3200,6 +3200,16 @@ export async function fetchPrototypeOverview() {
   return response.overview
 }
 
+export type MyProperty = PlatformListing & { inquiryCount: number }
+
+// The seller's own BUY/RENTALS portfolio + a live inquiry count per listing (Synitres management view).
+export async function fetchMyProperties() {
+  const session = getStoredSellerSession() || getStoredStaffSession() || getStoredGuestSession()
+  if (!session) throw new Error('Sign in first.')
+  const response = await apiRequest<{ ok: true; properties: MyProperty[] }>('/api/me/properties', { token: session.token })
+  return response.properties
+}
+
 export async function fetchSellerOverview() {
   const session = getStoredSellerSession()
   if (!session) throw new Error('Sign in as a seller first.')

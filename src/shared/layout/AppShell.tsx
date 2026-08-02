@@ -26,7 +26,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   // Synitres (synitres.com) browse routes: the same shared shell, but wearing the Synitres brand instead
   // of SYBNB so the sale/buy/rent + marketplace platform reads as its own product (the /sell tunnel and
   // the /synitres landing already carry Synitres branding of their own).
-  const isSynitresBrowse = path === '/buy' || path === '/rentals' || path === '/marketplace' || path.startsWith('/property/')
+  const isSynitresBrowse = path === '/buy' || path === '/rentals' || path === '/marketplace' || path === '/my-properties' || path.startsWith('/property/')
   // A direct/shared link into /listing/:id has no return-path in sessionStorage yet -- the listing
   // page writes the correct one once its fetch resolves and fires this event so the breadcrumb
   // (otherwise computed once at mount, before that write lands) picks it up without a full reload.

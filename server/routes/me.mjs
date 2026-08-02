@@ -199,6 +199,27 @@ export async function handleMe(req, res, url, context) {
     return true
   }
 
+  // Synitres — the seller's own property portfolio (BUY/RENTALS) with a live inquiry count per listing,
+  // for the "My properties" management view. Scoped to the caller's own listings only.
+  if (url.pathname === '/api/me/properties') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    const properties = await db().listing.findMany({
+      where: { ownerId: context.user.id, division: { in: ['BUY', 'RENTALS'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    })
+    const ids = properties.map((p) => p.id)
+    const inquiryRows = ids.length
+      ? await db().messageThread.groupBy({ by: ['listingId'], where: { listingId: { in: ids } }, _count: { _all: true } })
+      : []
+    const inquiryByListing = new Map(inquiryRows.map((row) => [row.listingId, row._count._all]))
+    return json(res, 200, {
+      ok: true,
+      properties: properties.map((p) => ({ ...p, inquiryCount: inquiryByListing.get(p.id) || 0 })),
+    })
+  }
+
   if (url.pathname !== '/api/me/overview') return false
   if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
 

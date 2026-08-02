@@ -35,6 +35,7 @@ const copy = {
     marketCta: 'تصفح السوق',
     trust: 'عقارات موثّقة · بحث بالخريطة · تواصل محميّ',
     back: 'الرئيسية',
+    myProps: 'عقاراتي',
   },
   en: {
     brand: 'Synitres',
@@ -57,6 +58,7 @@ const copy = {
     marketCta: 'Browse marketplace',
     trust: 'Verified listings · Map search · Protected contact',
     back: 'Home',
+    myProps: 'My properties',
   },
 }
 
@@ -75,9 +77,12 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
             Syn<span style={{ color: '#D4AF6A' }}>itres</span>
           </span>
         </button>
-        <div style={styles.langRow}>
-          <button style={{ ...styles.langBtn, ...(isAr ? styles.langOn : null) }} onClick={() => onLanguageChange?.('ar')}>AR</button>
-          <button style={{ ...styles.langBtn, ...(!isAr ? styles.langOn : null) }} onClick={() => onLanguageChange?.('en')}>EN</button>
+        <div style={styles.headerRight}>
+          <button style={styles.myPropsLink} onClick={() => go('/my-properties')}>{t.myProps}</button>
+          <div style={styles.langRow}>
+            <button style={{ ...styles.langBtn, ...(isAr ? styles.langOn : null) }} onClick={() => onLanguageChange?.('ar')}>AR</button>
+            <button style={{ ...styles.langBtn, ...(!isAr ? styles.langOn : null) }} onClick={() => onLanguageChange?.('en')}>EN</button>
+          </div>
         </div>
       </header>
 
@@ -127,6 +132,8 @@ const styles: Record<string, CSSProperties> = {
   brandBtn: { display: 'inline-flex', alignItems: 'center', gap: 10, background: 'transparent', border: 'none', cursor: 'pointer' },
   brandMark: { fontSize: 26 },
   brandText: { fontWeight: 900, fontSize: 20, color: '#2DD4BF', letterSpacing: '.02em' },
+  headerRight: { display: 'flex', alignItems: 'center', gap: 12 },
+  myPropsLink: { background: 'transparent', border: '1px solid #1c2938', color: '#aeb7c6', fontWeight: 800, borderRadius: 999, padding: '7px 14px', cursor: 'pointer', fontSize: 13 },
   langRow: { display: 'flex', gap: 6, background: '#0f1a24', borderRadius: 999, padding: 4 },
   langBtn: { border: 'none', background: 'transparent', color: '#8f96a8', fontWeight: 800, borderRadius: 999, padding: '6px 14px', cursor: 'pointer' },
   langOn: { background: '#D4AF6A', color: '#1a1204' },
