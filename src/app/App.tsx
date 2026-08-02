@@ -39,6 +39,7 @@ const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/Immoconta
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
 const SrLandingPage = lazyNamed(() => import('../modules/sr/SrLandingPage'), 'SrLandingPage')
 const RealEstateLandingPage = lazyNamed(() => import('../modules/realestate/RealEstateLandingPage'), 'RealEstateLandingPage')
+const PropertyDetailPage = lazyNamed(() => import('../modules/realestate/PropertyDetailPage'), 'PropertyDetailPage')
 const LegalPlaceholderPage = lazyNamed(() => import('../modules/legal/LegalPlaceholderPage'), 'LegalPlaceholderPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
 const CarBrowsePage = lazyNamed(() => import('../modules/cars/CarBrowsePage'), 'CarBrowsePage')
@@ -88,6 +89,7 @@ export function App() {
   const bookingMatch = path.match(/^\/booking\/([^/]+)$/)
   const bookingReviewMatch = path.match(/^\/booking\/review\/([^/]+)$/)
   const listingMatch = path.match(/^\/listing\/([^/]+)$/)
+  const propertyMatch = path.match(/^\/property\/([^/]+)$/)
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
@@ -179,6 +181,8 @@ export function App() {
           <BookingReviewPage listingId={bookingReviewMatch[1]} lang={lang} />
         ) : bookingMatch ? (
           <BookingDetailPage bookingId={bookingMatch[1]} lang={lang} />
+        ) : propertyMatch ? (
+          <PropertyDetailPage listingId={propertyMatch[1]} lang={lang} />
         ) : listingMatch ? (
           <ListingDetailPage listingId={listingMatch[1]} lang={lang} />
         ) : path === '/sr' || path === '/rides-home' ? (

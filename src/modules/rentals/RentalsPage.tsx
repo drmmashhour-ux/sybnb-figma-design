@@ -11,6 +11,7 @@ import { PaymentCapsule } from '../payments/PaymentCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from '../realestate/MortgageCalculator'
+import { realEstateAttrs, valuationTone } from '../realestate/propertyAttrs'
 
 type Props = {
   lang: Lang
@@ -83,6 +84,7 @@ const copy = {
     availableResults: 'النتائج المتاحة',
     sendRequest: 'إرسال طلب',
     viewDetails: 'عرض التفاصيل',
+    openPage: 'فتح صفحة العقار',
     chooseAfterAccount: 'افتح الحساب أولاً',
     eyebrow: 'الإيجار الشهري',
     title: 'مسار المستأجر',
@@ -169,6 +171,7 @@ const copy = {
     availableResults: 'Available results',
     sendRequest: 'Send request',
     viewDetails: 'View details',
+    openPage: 'Open property page',
     chooseAfterAccount: 'Open account first',
     eyebrow: 'Monthly rentals',
     title: 'Renter tunnel',
@@ -717,9 +720,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                     <span>{t.price}</span>
                     <strong>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
                   </div>
-                  <button style={styles.primaryButton} onClick={() => chooseListing(listing.id)}>
-                    {t.viewDetails}
-                  </button>
+                  <div style={styles.cardActions}>
+                    <button style={{ ...styles.primaryButton, flex: 1 }} onClick={() => chooseListing(listing.id)}>
+                      {t.viewDetails}
+                    </button>
+                    {/* Shareable standalone property page (its own URL). */}
+                    <a style={styles.openPageLink} href={`#/property/${listing.id}`} title={t.openPage}>🔗</a>
+                  </div>
                 </div>
               </article>
             )) : status !== 'loading' ? <p style={styles.empty}>{t.empty}</p> : null}
@@ -899,37 +906,14 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   )
 }
 
-// Pull the Centris-style property attributes out of a listing's metadata (written by the seller wizard),
-// coercing loosely-typed JSON. Location prefers area → city → governorate, joined for display.
-function realEstateAttrs(listing: PlatformListing) {
-  const m = listing.metadata || {}
-  const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v)) ? Number(v) : undefined)
-  const str = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined)
-  const mr = m as Record<string, unknown>
-  // The seller wizard stores the visual-filter selection (incl. amenities) under metadata.visualFilters —
-  // the same shape the server search reads. Fall back to a flat metadata.amenities just in case.
-  const visual = (mr.visualFilters && typeof mr.visualFilters === 'object' ? mr.visualFilters : {}) as Record<string, unknown>
-  const rawAmenities = Array.isArray(visual.amenities) ? visual.amenities : Array.isArray(mr.amenities) ? mr.amenities : []
-  const amenities = (rawAmenities as unknown[]).filter((a): a is string => typeof a === 'string')
-  const location = [str(mr.area), str(mr.city), str(mr.governorate)].filter(Boolean).join(' · ')
-  return {
-    bedrooms: num(mr.bedrooms),
-    bathrooms: num(mr.bathrooms),
-    sizeSqm: num(mr.sizeSqm) ?? num(mr.areaSqm),
-    propertyType: str(mr.propertyType),
-    location: location || undefined,
-    amenities,
-  }
-}
-
 // Property-valuation badge (Synitres) — maps the server-computed tier to a label + colour. Returns null
 // when there weren't enough comparables to classify (tier null) or the division carries no valuation.
 function valuationBadge(listing: PlatformListing, t: typeof copy.en) {
   const tier = listing.valuation?.tier
-  if (!tier) return null
-  if (tier === 'BELOW_MARKET') return { label: t.belowMarket, color: '#20d29b' }
-  if (tier === 'AT_MARKET') return { label: t.atMarket, color: '#38bdf8' }
-  return { label: t.aboveMarket, color: '#f7c05b' }
+  const color = valuationTone(tier)
+  if (!color) return null
+  const label = tier === 'BELOW_MARKET' ? t.belowMarket : tier === 'AT_MARKET' ? t.atMarket : t.aboveMarket
+  return { label, color }
 }
 
 function listingImage(listing: PlatformListing, isBuyMode = false) {
@@ -1004,6 +988,8 @@ const styles: Record<string, CSSProperties> = {
   amenityLabel: { color: colors.muted, fontSize: 13 },
   amenityChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   amenityChip: { fontSize: 12, fontWeight: 600, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '3px 10px' },
+  cardActions: { display: 'flex', gap: 8, alignItems: 'stretch' },
+  openPageLink: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 44, borderRadius: 10, border: `1px solid ${colors.line}`, background: colors.bg2, textDecoration: 'none', fontSize: 16 },
   aiRow: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' },
   aiInput: { flex: 1, minWidth: 220, minHeight: 44, borderRadius: 10, border: `1px solid ${colors.line}`, background: colors.bg2, color: colors.ink, padding: '0 14px', fontSize: 14 },
   aiButton: { minHeight: 44, borderRadius: 10, border: 'none', background: colors.green, color: '#04211d', fontWeight: 900, padding: '0 18px', cursor: 'pointer', whiteSpace: 'nowrap' },
