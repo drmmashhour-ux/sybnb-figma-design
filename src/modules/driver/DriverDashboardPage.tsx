@@ -34,6 +34,7 @@ const copy = {
     locating: 'جارٍ تحديد موقعك…',
     locationDenied: 'تعذّر الوصول للموقع — فعّل خدمة الموقع (GPS) لتظهر لك أقرب الطلبات.',
     kmAway: 'كم للانطلاق',
+    offeredToYou: '🔔 عرض لك — اقبل الآن',
     refresh: 'تحديث',
     loading: 'جار التحميل',
     saving: 'جار الحفظ',
@@ -105,6 +106,7 @@ const copy = {
     locating: 'Getting your location…',
     locationDenied: 'Location unavailable — enable GPS so the nearest requests reach you.',
     kmAway: 'km to pickup',
+    offeredToYou: '🔔 Offered to you — accept now',
     refresh: 'Refresh',
     loading: 'Loading',
     saving: 'Saving',
@@ -373,7 +375,8 @@ export function DriverDashboardPage({ lang }: Props) {
               <p style={{ color: '#9aa6ba' }}>{pendingStatus === 'loading' ? t.pendingLoading : t.pendingEmpty}</p>
             ) : (
               pendingRides.map((pendingRide) => (
-                <article key={pendingRide.id} style={styles.offerCard}>
+                <article key={pendingRide.id} style={{ ...styles.offerCard, ...(pendingRide.offeredToMe ? styles.offerCardMine : null) }}>
+                  {pendingRide.offeredToMe ? <strong style={styles.offerBadge}>{t.offeredToYou}</strong> : null}
                   <span>{String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
                   {typeof pendingRide.pickupDistanceKm === 'number' ? (
@@ -594,6 +597,8 @@ const styles: Record<string, CSSProperties> = {
   dispatchHero: { border: '1px solid rgba(82,108,255,.9)', borderRadius: 14, background: '#101119', padding: 28, display: 'grid', gap: 24 },
   offerGrid: { display: 'grid', gap: 18, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
+  offerCardMine: { border: '2px solid #20d29b', background: '#0a1712', boxShadow: '0 0 0 3px rgba(32,210,155,.15)' },
+  offerBadge: { color: '#20d29b', fontWeight: 950, fontSize: 13, letterSpacing: '.02em' },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },

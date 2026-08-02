@@ -147,6 +147,8 @@ export type PlatformRideRequest = {
   pickupPin?: string | null
   // Great-circle km from the online driver's last location to this ride's pickup (nearest-first pool).
   pickupDistanceKm?: number | null
+  // Auto-dispatch: this ride is currently offered EXCLUSIVELY to the requesting driver (accept-now).
+  offeredToMe?: boolean
   rider?: {
     id: string
     displayName: string
