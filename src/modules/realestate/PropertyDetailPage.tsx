@@ -37,9 +37,12 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
   const [listing, setListing] = useState<PlatformListing | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [copied, setCopied] = useState(false)
+  // Photo gallery: which of the listing's photos is shown large. Reset whenever the listing changes.
+  const [activePhoto, setActivePhoto] = useState(0)
 
   useEffect(() => {
     setState('loading')
+    setActivePhoto(0)
     fetchPrototypeListing(listingId)
       .then((l) => { setListing(l); setState('ready') })
       .catch(() => setState('error'))
@@ -77,6 +80,9 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
 
   const [mlat, mlng] = mapTarget?.hasCoordinates ? mapTarget.query.split(',').map(Number) : [NaN, NaN]
   const est = listing.valuation?.estimatedValueMinor
+  const photos = listingImageUrls(listing, isBuy)
+  const activeIndex = Math.min(activePhoto, photos.length - 1)
+  const stepPhoto = (delta: number) => setActivePhoto((current) => (current + delta + photos.length) % photos.length)
 
   return (
     <main style={styles.page} dir={isAr ? 'rtl' : 'ltr'}>
@@ -85,7 +91,32 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
         <button style={styles.copyBtn} onClick={copyLink}>{copied ? t.copied : `🔗 ${t.copy}`}</button>
       </div>
 
-      <img src={listingImage(listing, isBuy)} alt="" style={styles.hero} />
+      <div style={styles.gallery}>
+        <div style={styles.heroWrap}>
+          <img src={photos[activeIndex]} alt="" style={styles.hero} />
+          {photos.length > 1 ? (
+            <>
+              <button style={{ ...styles.navBtn, insetInlineStart: 10 }} onClick={() => stepPhoto(-1)} aria-label="Previous photo">{isAr ? '›' : '‹'}</button>
+              <button style={{ ...styles.navBtn, insetInlineEnd: 10 }} onClick={() => stepPhoto(1)} aria-label="Next photo">{isAr ? '‹' : '›'}</button>
+              <span style={styles.counter} dir="ltr">{activeIndex + 1} / {photos.length}</span>
+            </>
+          ) : null}
+        </div>
+        {photos.length > 1 ? (
+          <div style={styles.thumbStrip}>
+            {photos.map((url, i) => (
+              <button
+                key={url}
+                style={{ ...styles.thumb, ...(i === activeIndex ? styles.thumbActive : null) }}
+                onClick={() => setActivePhoto(i)}
+                aria-label={`Photo ${i + 1}`}
+              >
+                <img src={url} alt="" style={styles.thumbImg} />
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
 
       <div style={styles.pillRow}>
         <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
@@ -138,9 +169,15 @@ function Info({ label, value }: { label: string; value: string }) {
   )
 }
 
-function listingImage(listing: PlatformListing, isBuy: boolean) {
-  const url = listing.media?.map((m) => (m as Record<string, unknown>).url || (m as Record<string, unknown>).src || (m as Record<string, unknown>).assetUrl).find((v) => typeof v === 'string')
-  return typeof url === 'string' ? url : isBuy ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp'
+// Every guest-facing photo URL on the listing, in upload order. Falls back to the division placeholder
+// when the listing has no real media yet, so the gallery always has at least one image to show.
+function listingImageUrls(listing: PlatformListing, isBuy: boolean): string[] {
+  const urls = (listing.media || [])
+    .map((m) => (m as Record<string, unknown>).url || (m as Record<string, unknown>).src || (m as Record<string, unknown>).assetUrl)
+    .filter((v): v is string => typeof v === 'string' && v.length > 0)
+  const deduped = Array.from(new Set(urls))
+  if (deduped.length) return deduped
+  return [isBuy ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp']
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -148,7 +185,15 @@ const styles: Record<string, CSSProperties> = {
   topRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   back: { background: 'transparent', border: 'none', color: colors.green, fontWeight: 800, cursor: 'pointer', fontSize: 15, padding: 0 },
   copyBtn: { border: `1px solid ${colors.line}`, background: colors.bg2, color: colors.ink, borderRadius: 8, padding: '7px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 13 },
-  hero: { width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 16, background: colors.bg2 },
+  gallery: { display: 'grid', gap: 8 },
+  heroWrap: { position: 'relative' },
+  hero: { width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 16, background: colors.bg2, display: 'block' },
+  navBtn: { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 38, height: 38, borderRadius: '50%', border: 'none', background: 'rgba(6,12,20,.62)', color: '#fff', fontSize: 22, fontWeight: 800, lineHeight: 1, cursor: 'pointer', display: 'grid', placeItems: 'center' },
+  counter: { position: 'absolute', insetInlineEnd: 12, bottom: 12, background: 'rgba(6,12,20,.62)', color: '#fff', fontSize: 12, fontWeight: 800, borderRadius: 999, padding: '3px 10px' },
+  thumbStrip: { display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 },
+  thumb: { flex: '0 0 auto', width: 84, height: 60, padding: 0, border: `2px solid transparent`, borderRadius: 10, background: colors.bg2, cursor: 'pointer', overflow: 'hidden' },
+  thumbActive: { borderColor: colors.green },
+  thumbImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
   pillRow: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' },
   statusPill: { fontSize: 12, fontWeight: 800, color: colors.muted, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '2px 10px' },
   pill: { fontSize: 12, fontWeight: 800, border: '1px solid', borderRadius: 999, padding: '2px 10px', background: 'transparent' },
