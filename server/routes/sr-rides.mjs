@@ -3,6 +3,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth, requireVerifiedDriver, requireRoadReadyDriver } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRide, assertSyriaCoords, haversineKm } from '../lib/sr-geocoding.mjs'
+import { routeRoad } from '../lib/sr-routing.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { assertRiderCanAfford, chargeRiderCancellationFee, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
@@ -134,6 +135,20 @@ export async function handleSrRides(req, res, url, context) {
       currency: body.currency,
     })
     return json(res, 200, { ok: true, quote })
+  }
+
+  // SR routing (Phase 2): real road route + ETA between two points, for drawing the trip on the map.
+  // Uses OSRM when configured, else falls back to straight-line (never fails). Additive — does NOT
+  // change the fare/quote flow. Both coords are required and must be inside Syria.
+  if (url.pathname === '/api/sr/route') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['pickupCoords', 'dropoffCoords'], 'route body')
+    const pickup = assertSyriaCoords(body.pickupCoords?.lat, body.pickupCoords?.lng, { fieldName: 'pickup' })
+    const dropoff = assertSyriaCoords(body.dropoffCoords?.lat, body.dropoffCoords?.lng, { fieldName: 'dropoff' })
+    const route = await routeRoad(pickup, dropoff)
+    return json(res, 200, { ok: true, route })
   }
 
   if (url.pathname === '/api/sr/rides') {
