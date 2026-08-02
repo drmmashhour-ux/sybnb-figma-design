@@ -5,6 +5,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   createPrototypeSrRide,
   fetchPrototypeSrRide,
+  fetchPrototypeWallet,
   fetchSrQuote,
   fetchSrRideHistory,
   fetchSrRideLocation,
@@ -52,6 +53,9 @@ const copy = {
     approx: 'تقديري',
     myRides: 'رحلاتي',
     noRides: 'لا رحلات بعد',
+    walletBalance: 'رصيد المحفظة',
+    needTopUp: 'رصيدك لا يكفي هذه الرحلة — اشحن محفظتك للمتابعة.',
+    topUp: 'اشحن المحفظة',
     accuracy: 'دقة الموقع',
     saved: 'تم حفظ الرحلة',
     error: 'تعذر تنفيذ طلب SR',
@@ -89,6 +93,9 @@ const copy = {
     approx: 'approx.',
     myRides: 'My rides',
     noRides: 'No rides yet',
+    walletBalance: 'Wallet balance',
+    needTopUp: 'Your balance is not enough for this ride — top up to continue.',
+    topUp: 'Top up wallet',
     accuracy: 'Accuracy',
     saved: 'Ride saved',
     error: 'Could not complete SR request',
@@ -117,7 +124,8 @@ export function SrRidePage({ lang }: Props) {
   const [pickup, setPickup] = useState(isAr ? 'دمشق، المالكي' : 'Damascus, Malki')
   const [dropoff, setDropoff] = useState(isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh')
   const [category, setCategory] = useState(categories[0])
-  const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>('SYP')
+  // SR is SYP-only for riders (guests only ever get a SYP wallet) — the fare/charge currency is fixed.
+  const [payCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [lowDataMode, setLowDataMode] = useState(true)
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
@@ -126,6 +134,7 @@ export function SrRidePage({ lang }: Props) {
   const [route, setRoute] = useState<PlatformSrRoute | null>(null)
   const [driverLoc, setDriverLoc] = useState<{ lat: number; lng: number } | null>(null)
   const [history, setHistory] = useState<PlatformRideRequest[]>([])
+  const [balanceMinor, setBalanceMinor] = useState<number | null>(null)
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
@@ -136,13 +145,18 @@ export function SrRidePage({ lang }: Props) {
   const [message, setMessage] = useState('')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
+  // Placeholder fare shown before the real quote resolves — derived from the SERVER rate table
+  // (base + perKm·~5km) so it's in the right ballpark, not the old ~3× overstatement.
   const fallbackFareSypMinor = useMemo(() => {
-    const base = category === 'SR XXL' ? 78000 : category === 'SR SUV' ? 58000 : category === 'SR Comfort' ? 46000 : 35000
+    const base = category === 'SR XXL' ? 36000 : category === 'SR SUV' ? 27000 : category === 'SR Comfort' ? 18500 : 12500
     return lowDataMode ? base : base + 2500
   }, [category, lowDataMode])
   const fallbackFareMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(fallbackFareSypMinor) : fallbackFareSypMinor
 
   const fareMinor = quote?.fareMinor ?? fallbackFareMinor
+  // SR is a cashless-wallet flow: a rider can only be charged from their (SYP) wallet, so the request is
+  // gated on funds. Guests get a SYP wallet only, so SR pricing/paying is SYP (the USD toggle is hidden).
+  const underfunded = balanceMinor != null && fareMinor > balanceMinor
 
   useEffect(() => {
     if (ride) return
@@ -202,6 +216,13 @@ export function SrRidePage({ lang }: Props) {
     fetchSrRideHistory()
       .then(setHistory)
       .catch(() => {})
+  }, [ride?.status])
+
+  // Rider's SYP wallet balance — for the fund gate + a top-up prompt (refreshed when a ride settles).
+  useEffect(() => {
+    fetchPrototypeWallet()
+      .then((wallets) => setBalanceMinor(wallets.find((w) => w.currency === 'SYP')?.cachedBalanceMinor ?? 0))
+      .catch(() => setBalanceMinor(null))
   }, [ride?.status])
 
   // Poll the driver's live GPS position for the moving marker, once a driver is assigned and en route.
@@ -369,27 +390,6 @@ export function SrRidePage({ lang }: Props) {
             <span>{t.mode}</span>
           </label>
 
-          <section style={styles.categoryCapsule}>
-            <span style={styles.categoryTitle}>{t.payCurrency}</span>
-            <div style={styles.categoryStrip}>
-              <button
-                style={payCurrency === 'SYP' ? styles.categoryActive : styles.categoryButton}
-                onClick={() => setPayCurrency('SYP')}
-                type="button"
-              >
-                {t.payCash}
-              </button>
-              <button
-                style={payCurrency === 'USD' ? styles.categoryActive : styles.categoryButton}
-                onClick={() => setPayCurrency('USD')}
-                type="button"
-              >
-                {t.payUsd}
-              </button>
-            </div>
-            {payCurrency === 'USD' && <small>{t.usdRoundingNote}</small>}
-          </section>
-
           <div style={styles.stat}>
             <span>{t.distance}</span>
             <strong dir="ltr">
@@ -402,9 +402,25 @@ export function SrRidePage({ lang }: Props) {
             <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, payCurrency, lang)}</strong>
           </div>
 
-          <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>
-            {status === 'saving' ? t.saving : t.request}
-          </button>
+          {/* Cashless: SR is paid from the rider's SYBNB (SYP) wallet — show the balance + gate the
+              request on funds so we never dead-end on a 402. */}
+          <div style={{ ...styles.stat, ...(underfunded ? styles.statLow : null) }}>
+            <span>{t.walletBalance}</span>
+            <strong dir="ltr">{balanceMinor != null ? moneyText(balanceMinor, 'SYP', lang) : '—'}</strong>
+          </div>
+
+          {underfunded ? (
+            <>
+              <p style={styles.underfundedNote}>{t.needTopUp}</p>
+              <button style={styles.topupButton} type="button" onClick={() => (window.location.hash = '/wallet')}>
+                {t.topUp}
+              </button>
+            </>
+          ) : (
+            <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>
+              {status === 'saving' ? t.saving : t.request}
+            </button>
+          )}
         </article>
 
         <article style={styles.card}>
@@ -526,6 +542,9 @@ const styles: Record<string, CSSProperties> = {
   toggle: { minHeight: 52, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', fontWeight: 900 },
   stat: { border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#9aa6ba', display: 'flex', justifyContent: 'space-between', gap: 12, padding: 12 },
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#19d7ff', color: '#051014', fontWeight: 950, padding: '0 14px' },
+  statLow: { borderColor: '#f7c05b', background: '#1a1204' },
+  underfundedNote: { color: '#f7c05b', fontSize: 13, margin: '4px 0 0' },
+  topupButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#f59e0b', color: '#1a1204', fontWeight: 950, padding: '0 14px', cursor: 'pointer' },
   secondaryButton: { minHeight: 48, border: '1px solid #263651', borderRadius: 8, background: '#131e2e', color: '#fff', fontWeight: 900, padding: '0 14px' },
   actions: { display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' },
   message: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#b7ffe8', padding: 12, fontWeight: 900 },
