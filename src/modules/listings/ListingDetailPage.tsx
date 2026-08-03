@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAccommodation,
+  fetchApprovedListings,
   fetchListingAvailability,
   fetchListingQuote,
   fetchListingReviews,
@@ -93,6 +94,8 @@ const copy = {
     location: 'الموقع',
     host: 'المضيف',
     terms: 'الشروط',
+    nearbyStays: 'إقامات قريبة',
+    perNight: '/ ليلة',
     reviews: 'التقييمات',
     noReviewsYet: 'لا توجد تقييمات بعد',
     reviewsCount: (count: number) => `${count} ${count === 1 ? 'تقييم' : 'تقييمات'}`,
@@ -172,6 +175,8 @@ const copy = {
     location: 'Location',
     host: 'Host',
     terms: 'Terms',
+    nearbyStays: 'More stays nearby',
+    perNight: '/ night',
     reviews: 'Reviews',
     noReviewsYet: 'No reviews yet',
     reviewsCount: (count: number) => `${count} ${count === 1 ? 'review' : 'reviews'}`,
@@ -228,6 +233,17 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     average: null,
     count: 0,
   })
+  const [nearbyStays, setNearbyStays] = useState<PlatformListing[]>([])
+
+  // "More stays nearby": other approved STAYS in the same city (the seller-written metadata.city),
+  // this listing excluded, capped at 4. Best-effort — a failure or empty result just hides the strip.
+  useEffect(() => {
+    if (!listing || listing.division !== 'STAYS') { setNearbyStays([]); return }
+    const city = typeof (listing.metadata as Record<string, unknown> | null)?.city === 'string' ? String((listing.metadata as Record<string, unknown>).city) : undefined
+    fetchApprovedListings('STAYS', city ? { city } : {})
+      .then((rows) => setNearbyStays(rows.filter((r) => r.id !== listing.id).slice(0, 4)))
+      .catch(() => setNearbyStays([]))
+  }, [listing])
 
   const title = listing ? listingTitleText(listing, lang) : ''
   const actionLabel = useMemo(() => actionForDivision(listing?.division || 'STAYS', lang), [lang, listing?.division])
@@ -798,6 +814,32 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             )}
           </section>
 
+          {nearbyStays.length > 0 && (
+            <section style={styles.nearbyWrap}>
+              <strong style={styles.nearbyTitle}>{t.nearbyStays}</strong>
+              <div style={styles.nearbyGrid}>
+                {nearbyStays.map((r) => (
+                  <a key={r.id} href={`#/listing/${r.id}`} style={styles.nearbyCard}>
+                    <img
+                      src={listingImage(r)}
+                      alt=""
+                      style={styles.nearbyImg}
+                      onError={(event) => {
+                        const fallback = DIVISION_IMAGES[r.division] || '/assets/divisions/daily-rental.webp'
+                        if (event.currentTarget.src.endsWith(fallback)) return
+                        event.currentTarget.src = fallback
+                      }}
+                    />
+                    <div style={styles.nearbyBody}>
+                      <strong style={styles.nearbyName}>{listingTitleText(r, lang)}</strong>
+                      <span style={styles.nearbyPrice} dir="ltr">{moneyText(r.priceMinor, r.currency, lang)} {t.perNight}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', marginTop: 8 }}>
             <ReportForm lang={lang} subjectType="LISTING" subjectId={listing.id} />
             <BlockButton lang={lang} userId={listing.ownerId} />
@@ -993,6 +1035,14 @@ const styles: Record<string, CSSProperties> = {
   cancellationCutoff: { color: '#20d29b', fontStyle: 'normal', fontWeight: 800, fontSize: 13 },
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14, display: 'grid', gap: 12 },
+  nearbyWrap: { display: 'grid', gap: 10, marginTop: 8 },
+  nearbyTitle: { fontSize: 18, color: '#fff' },
+  nearbyGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' },
+  nearbyCard: { border: '1px solid #30384d', borderRadius: 12, background: '#111118', overflow: 'hidden', textDecoration: 'none', color: 'inherit', display: 'grid' },
+  nearbyImg: { width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', background: '#0b1120', display: 'block' },
+  nearbyBody: { display: 'grid', gap: 3, padding: '9px 11px' },
+  nearbyName: { fontSize: 14, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  nearbyPrice: { fontSize: 13, fontWeight: 800, color: '#20d29b' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', alignItems: 'center' },
   reserveBarPrice: { display: 'grid', gap: 2, alignContent: 'center', color: '#fff' },
