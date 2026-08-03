@@ -10,6 +10,7 @@ import { MortgageCalculator } from './MortgageCalculator'
 import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGallery'
 import { realEstateAttrs, valuationTone } from './propertyAttrs'
 import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
+import { shareLink } from '../../shared/share/shareLink'
 
 type Props = { listingId: string; lang: Lang }
 
@@ -73,11 +74,13 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
   })()
 
   function copyLink() {
-    try {
-      void navigator.clipboard?.writeText(window.location.href)
+    // Native share sheet on mobile (WhatsApp, etc.), clipboard copy on desktop — this is THE page
+    // people share, so offer the real share affordance and confirm only when we actually copied.
+    void shareLink({ url: window.location.href, title: listing ? listingTitleText(listing, lang) : undefined }).then((result) => {
+      if (result !== 'copied') return
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
-    } catch { /* clipboard blocked — non-fatal */ }
+    })
   }
 
   function contact() {

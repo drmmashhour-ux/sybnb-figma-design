@@ -16,6 +16,7 @@ import { divisionText, listingDescriptionText, listingTitleText, moneyText, stat
 import { googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGallery'
+import { shareLink } from '../../shared/share/shareLink'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
@@ -445,13 +446,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
   function shareListing() {
     if (typeof window === 'undefined') return
-    const url = window.location.href
-    if (navigator.share) {
-      void navigator.share({ title, url }).catch(() => undefined)
-      return
-    }
-    void navigator.clipboard?.writeText(url)
-    setMessage(isAr ? 'تم نسخ رابط الإعلان.' : 'Listing link copied.')
+    void shareLink({ url: window.location.href, title }).then((result) => {
+      if (result === 'copied') setMessage(isAr ? 'تم نسخ رابط الإعلان.' : 'Listing link copied.')
+    })
   }
 
   return (
