@@ -787,7 +787,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           {selectedListing ? (
             <>
               <section style={styles.selectedCard}>
-                <PhotoGallery photos={listingGalleryPhotos(selectedListing, listingImage(selectedListing, isBuyMode), lang)} lang={lang} aspectRatio="16 / 10" />
+                <PhotoGallery photos={listingGalleryPhotos(selectedListing, listingImage(selectedListing, isBuyMode), lang)} lang={lang} aspectRatio="16 / 10" fallback={isBuyMode ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp'} />
                 <div style={styles.selectedContent}>
                   <span style={styles.statusPill}>{t.protected}</span>
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>

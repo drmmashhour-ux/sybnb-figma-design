@@ -104,7 +104,7 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
         <button style={styles.copyBtn} onClick={copyLink}>{copied ? t.copied : `🔗 ${t.copy}`}</button>
       </div>
 
-      <PhotoGallery photos={photos} lang={lang} />
+      <PhotoGallery photos={photos} lang={lang} fallback={isBuy ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp'} />
 
       <div style={styles.pillRow}>
         <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
