@@ -11,6 +11,7 @@ import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGa
 import { realEstateAttrs, valuationTone } from './propertyAttrs'
 import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 import { shareLink } from '../../shared/share/shareLink'
+import { recordViewed } from '../../shared/recentlyViewed/recentlyViewed'
 
 type Props = { listingId: string; lang: Lang }
 
@@ -50,6 +51,14 @@ export function PropertyDetailPage({ listingId, lang }: Props) {
       .then((l) => { setListing(l); setState('ready') })
       .catch(() => setState('error'))
   }, [listingId])
+
+  // Record this property in the shared "recently viewed" store so it can resurface on the landing.
+  useEffect(() => {
+    if (!listing) return
+    const placeholder = listing.division === 'BUY' ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp'
+    const image = listingGalleryPhotos(listing, placeholder, lang)[0].url
+    recordViewed({ id: listing.id, division: listing.division, title: listingTitleText(listing, lang), priceMinor: listing.priceMinor, currency: listing.currency, image })
+  }, [listing, lang])
 
   // "Similar properties": other approved listings in the same division + city (the seller-written
   // metadata.city), current one excluded, capped at 4. Best-effort — a failure just hides the strip.

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { RecentlyViewedStrip } from '../../shared/recentlyViewed/RecentlyViewedStrip'
 
 // Synitres (synitres.com) — the STANDALONE sale/buy/rent + marketplace platform for Syria (the "Centris
 // of Syria"), isolated from the STR stays landing and the SR ride landing per the owner's "each division
@@ -111,6 +112,10 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
         <Card icon="🔑" title={t.rentTitle} desc={t.rentDesc} cta={t.tabRent} onClick={() => go('/rentals')} accent="#38bdf8" />
         <Card icon="➕" title={t.sellTitle} desc={t.sellDesc} cta={t.sellCta} onClick={() => go('/sell')} accent="#D4AF6A" />
       </section>
+
+      <section style={styles.recent}>
+        <RecentlyViewedStrip lang={lang} divisions={['BUY', 'RENTALS']} />
+      </section>
     </main>
   )
 }
@@ -147,6 +152,7 @@ const styles: Record<string, CSSProperties> = {
   primaryCta: { display: 'block', margin: '16px auto 0', background: '#2DD4BF', color: '#04211d', border: 'none', borderRadius: 12, padding: '14px 28px', fontWeight: 900, fontSize: 16, cursor: 'pointer' },
   trust: { color: '#7d879a', fontSize: 13, marginTop: 20 },
   cards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, maxWidth: 1120, margin: '18px auto 0', padding: '0 22px' },
+  recent: { maxWidth: 1120, margin: '26px auto 0', padding: '0 22px' },
   card: { background: '#0e1622', border: '1px solid #1c2938', borderRadius: 16, padding: 22, display: 'grid', gap: 8, alignContent: 'start' },
   cardIcon: { fontSize: 30 },
   cardTitle: { margin: 0, fontSize: 20 },

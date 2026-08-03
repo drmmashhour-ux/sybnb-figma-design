@@ -17,6 +17,7 @@ import { googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapSt
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGallery'
 import { shareLink } from '../../shared/share/shareLink'
+import { recordViewed } from '../../shared/recentlyViewed/recentlyViewed'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
@@ -235,6 +236,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     count: 0,
   })
   const [nearbyStays, setNearbyStays] = useState<PlatformListing[]>([])
+
+  // Record this listing in the shared "recently viewed" store so it can resurface for the visitor later.
+  useEffect(() => {
+    if (!listing) return
+    recordViewed({ id: listing.id, division: listing.division, title: listingTitleText(listing, lang), priceMinor: listing.priceMinor, currency: listing.currency, image: listingImage(listing) })
+  }, [listing, lang])
 
   // "More stays nearby": other approved STAYS in the same city (the seller-written metadata.city),
   // this listing excluded, capped at 4. Best-effort — a failure or empty result just hides the strip.
