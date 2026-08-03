@@ -146,6 +146,7 @@ model DriverProfile {
   user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   quebec_driver_onboarding quebec_driver_onboarding?
 
+  @@index([active, lastLocationAt], map: "driver_profiles_active_last_location_at_idx")
   @@map("driver_profiles")
 }
 
@@ -699,6 +700,7 @@ model RideRequest {
 
   @@index([status, requestedAt])
   @@index([driverId, status])
+  @@index([offeredDriverId, offerExpiresAt], map: "ride_requests_offered_driver_idx")
   @@map("ride_requests")
 }
 
