@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { moneyText } from '../i18n/display'
 import { colors } from '../theme/tokens'
-import { getRecentlyViewed } from './recentlyViewed'
+import { getRecentlyViewed, detailHrefFor } from './recentlyViewed'
 
 type Props = {
   lang: Lang
@@ -13,11 +13,8 @@ type Props = {
   limit?: number
 }
 
-// Route a viewed listing back to the right detail page: real-estate to /property/:id, everything else
-// (stays, cars, marketplace) to the shared /listing/:id detail.
-function hrefFor(division: string, id: string) {
-  return division === 'BUY' || division === 'RENTALS' ? `#/property/${id}` : `#/listing/${id}`
-}
+// Placeholder shown when a snapshot has no (or an unsafe) image, and as the <img> onError fallback.
+const FALLBACK_IMAGE = '/assets/divisions/daily-rental.webp'
 
 // A horizontal "recently viewed" strip built from the shared client-side store. Renders nothing when the
 // visitor has no matching history, so it's a safe drop-in on any landing/search surface.
@@ -33,15 +30,14 @@ export function RecentlyViewedStrip({ lang, divisions, excludeId, limit = 8 }: P
       <strong style={styles.title}>{isAr ? 'شوهدت مؤخراً' : 'Recently viewed'}</strong>
       <div style={styles.row}>
         {rows.map((v) => (
-          <a key={v.id} href={hrefFor(v.division, v.id)} style={styles.card}>
+          <a key={v.id} href={detailHrefFor(v.division, v.id)} style={styles.card}>
             <img
-              src={v.image}
+              src={v.image || FALLBACK_IMAGE}
               alt=""
               style={styles.img}
               onError={(event) => {
-                const fallback = '/assets/divisions/daily-rental.webp'
-                if (event.currentTarget.src.endsWith(fallback)) return
-                event.currentTarget.src = fallback
+                if (event.currentTarget.src.endsWith(FALLBACK_IMAGE)) return
+                event.currentTarget.src = FALLBACK_IMAGE
               }}
             />
             <div style={styles.body}>
