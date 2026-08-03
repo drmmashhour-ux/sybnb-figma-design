@@ -89,11 +89,20 @@ so point it at the direct URL just for the migrate command:
 DATABASE_URL="<neon-staging-DIRECT-url>" npx prisma migrate deploy
 ```
 
-- **Fresh prod DB (recommended):** same command with the prod direct URL → clean apply.
-- **Existing prod DB (the current sybnb.app DB was built by `db push`):** it needs a **one-time
-  baseline** before `migrate deploy` will work — follow **`docs/ops/DB_BASELINE_RUNBOOK.md`** exactly
-  first, then run the migrate. Do **not** run a bare `migrate deploy` against the existing prod DB
-  without that step.
+- **Fresh DB (recommended for staging, and for prod if it has no real data yet):** same command with
+  the target's direct URL → clean apply of the baseline + increments, zero drift.
+- **Existing DB whose schema fully matches the baseline (built by `db push` from the *current*
+  schema):** it needs a **one-time baseline mark** before `migrate deploy` works — follow
+  **`docs/ops/DB_BASELINE_RUNBOOK.md`** exactly, then migrate.
+- **Stale / partial existing DB (built by `db push` from an *older* schema — e.g. missing baseline
+  tables like `auctions`/`bids`, no migration history):** do **NOT** run a bare `migrate deploy` (it
+  fails on the tables that already exist) and do **NOT** falsely mark the baseline applied (the
+  missing tables would never be created → broken at runtime). For **staging**, throw it away and use a
+  **fresh DB**. For **production**, snapshot/branch first, then reconcile the schema to the baseline
+  (create the genuinely-missing tables, verify with `prisma migrate diff` = no difference) *before*
+  baseline-marking — an explicit, backed-up reconciliation, never the shortcut.
+- Sanity-check before trusting any existing DB: `DATABASE_URL="<direct>" npx prisma migrate status`
+  and `npx prisma migrate diff --from-url "<direct>" --to-schema-datamodel prisma/schema.prisma`.
 
 ---
 
