@@ -127,7 +127,9 @@ const styles: Record<string, CSSProperties> = {
   counterHero: { position: 'absolute', insetInlineEnd: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', color: '#fff', padding: '6px 12px', fontSize: 13, fontWeight: 700, zIndex: 2 },
   // Thumbnail strip (shared).
   thumbStrip: { display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 },
-  thumb: { flex: '0 0 auto', width: 84, height: 60, padding: 0, border: '2px solid transparent', borderRadius: 10, background: colors.bg2, cursor: 'pointer', overflow: 'hidden' },
+  // Longhand border props (not the `border` shorthand) so the active-state borderColor override doesn't
+  // mix shorthand + longhand for the same property — which React warns about on rerender.
+  thumb: { flex: '0 0 auto', width: 84, height: 60, padding: 0, borderWidth: 2, borderStyle: 'solid', borderColor: 'transparent', borderRadius: 10, background: colors.bg2, cursor: 'pointer', overflow: 'hidden' },
   thumbActive: { borderColor: colors.green },
   thumbImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
 }
