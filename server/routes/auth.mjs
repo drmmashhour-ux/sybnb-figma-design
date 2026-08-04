@@ -23,6 +23,7 @@ const ALLOWED_EMAIL_CODE_PURPOSES = new Set(['guest-signup', 'staff-login', 'pas
 // same real email-OTP gate as HOST/DRIVER at sign-up and sign-in — not the lighter guest flow.
 const STAFF_ROLES_REQUIRING_OTP = new Set(['ADMIN', 'HOST', 'DRIVER', 'SELLER'])
 const PARTNER_TYPES = new Set(['HOST', 'SELLER', 'RENTER', 'BUILDER', 'DEALER'])
+const RECENT_PASSWORD_RESET_LOGIN_MINUTES = 10
 
 function resolveEmailCodePurpose(value) {
   return ALLOWED_EMAIL_CODE_PURPOSES.has(value) ? value : 'guest-signup'
@@ -567,12 +568,26 @@ export async function handleAuth(req, res, url, context) {
     // timing/response-shape. Replaces the old client-side-only code box that the server never
     // verified at all (StaffAccessPage.tsx / verificationCodeEngine.ts).
     const needsStaffOtp = user.roles.some((entry) => STAFF_ROLES_REQUIRING_OTP.has(entry.role))
+    // The password-reset challenge already proved control of the same email/phone and atomically
+    // consumed its grant. Do not immediately demand a second code after the user returns to sign-in.
+    // This narrow continuity window applies only after the new password was successfully stored;
+    // ordinary staff logins outside it still require their normal OTP.
+    const recentResetSince = new Date(Date.now() - RECENT_PASSWORD_RESET_LOGIN_MINUTES * 60 * 1000)
+    const recentlyResetPassword = validEmail
+      ? Boolean(await db().emailVerificationCode.findFirst({
+          where: { email: validEmail, purpose: 'password-reset', claimedAt: { gt: recentResetSince } },
+          select: { id: true },
+        }))
+      : Boolean(await db().phoneVerificationCode.findFirst({
+          where: { phone: validPhone, purpose: 'password-reset', claimedAt: { gt: recentResetSince } },
+          select: { id: true },
+        }))
     // Explicit Preview-only convenience for synthetic demo accounts. VERCEL_ENV is supplied by
     // Vercel and equals "production" on the live deployment, so this can never bypass live OTP.
     const previewDemoLogin = process.env.VERCEL_ENV === 'preview'
       && process.env.ALLOW_PREVIEW_DEMO_LOGIN === '1'
       && user.isDemo === true
-    if (needsStaffOtp && !previewDemoLogin) {
+    if (needsStaffOtp && !previewDemoLogin && !recentlyResetPassword) {
       if (!validEmail && !validPhone) {
         const error = new Error('Sign in with the access code sent to your email or phone for this account type.')
         error.statusCode = 400

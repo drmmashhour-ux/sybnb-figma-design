@@ -459,4 +459,32 @@ describe('POST /api/auth/password-reset also revokes existing sessions (F-02)', 
     })
     expect(loginRes.status).toBe(200)
   })
+
+  it('lets staff sign in with the new password immediately after a verified reset without a second code', async () => {
+    const email = uniqueTestEmail('staff-reset-continuity')
+    const registrationGrant = await verifyEmailForTest(app, email, 'staff-login')
+    const registerRes = await request(app).post('/api/auth/register').send({
+      role: 'HOST',
+      email,
+      password: 'original-staff-password-1',
+      verificationGrant: registrationGrant,
+    })
+    expect(registerRes.status).toBe(201)
+    trackTestUser(registerRes.body.user.id)
+
+    const resetGrant = await verifyEmailForTest(app, email, 'password-reset')
+    const resetRes = await request(app).post('/api/auth/password-reset').send({
+      email,
+      newPassword: 'new-staff-password-2',
+      verificationGrant: resetGrant,
+    })
+    expect(resetRes.status).toBe(200)
+
+    const loginRes = await request(app).post('/api/auth/login').send({
+      email,
+      password: 'new-staff-password-2',
+    })
+    expect(loginRes.status).toBe(200)
+    expect(loginRes.body.user.roles).toContain('HOST')
+  })
 })
