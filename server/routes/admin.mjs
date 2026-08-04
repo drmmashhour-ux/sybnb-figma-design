@@ -22,6 +22,69 @@ import { countActiveLoginLocks } from '../lib/login-lockout.mjs'
 // (those self-register through the normal flow) — only privileged back-office roles.
 const STAFF_ROLES = ['ADMIN', 'SUPPORT']
 const STAFF_EMAIL_DOMAIN = '@sybnb.app'
+const AI_CONTROL_SECTIONS = ['str', 'hosts', 'realestate', 'commerce', 'transport', 'finance', 'trust', 'operations']
+
+async function readAiControls() {
+  const rows = await db().adminAuditLog.findMany({
+    where: { action: 'AI_SECTION_CONTROL_UPDATED', entityType: 'ai_section' },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    select: { entityId: true, after: true, createdAt: true },
+  })
+  const latest = new Map()
+  for (const row of rows) if (!latest.has(row.entityId)) latest.set(row.entityId, row)
+  return AI_CONTROL_SECTIONS.map((section) => {
+    const row = latest.get(section)
+    return { section, enabled: row?.after?.enabled === true, mode: 'MONITOR_RECOMMEND', updatedAt: row?.createdAt?.toISOString() || null }
+  })
+}
+
+export async function buildDailyExecutiveReport() {
+  const now = new Date()
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0)
+  const weekStart = new Date(dayStart); weekStart.setDate(weekStart.getDate() - 6)
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const revenueTypes = ['booking_admin_share', 'booking_protection_fee', 'booking_guest_cancel_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission', 'card_processing_fee']
+  const [controls, revenue, refunds, releases, hosts, listingsPending, bookingsByStatus, disputes, rides, securityEvents] = await Promise.all([
+    readAiControls(),
+    db().walletEntry.findMany({ where: { type: 'CREDIT', referenceType: { in: revenueTypes }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true, referenceType: true } }),
+    db().walletEntry.findMany({ where: { type: 'CREDIT', referenceType: 'booking_refund', createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }),
+    db().walletEntry.findMany({ where: { type: 'DEBIT', referenceType: { in: ['booking_payout_disbursement', 'sr_driver_payout'] }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }),
+    db().userRole.count({ where: { role: 'HOST' } }),
+    db().listing.count({ where: { status: 'PENDING_REVIEW' } }),
+    db().booking.groupBy({ by: ['status'], _count: { _all: true } }),
+    db().dispute.count({ where: { status: 'OPEN' } }),
+    db().rideRequest.groupBy({ by: ['status'], _count: { _all: true } }),
+    db().adminAuditLog.count({ where: { entityType: 'security', createdAt: { gte: weekStart } } }),
+  ])
+  const periods = { today: dayStart, last7Days: weekStart, currentMonth: monthStart }
+  const summarizeMoney = (entries) => Object.fromEntries(Object.entries(periods).map(([period, start]) => [period, Object.fromEntries(
+    Array.from(new Set(entries.map((entry) => entry.currency))).map((currency) => [currency, entries.filter((entry) => entry.currency === currency && entry.createdAt >= start).reduce((sum, entry) => sum + entry.amountMinor, 0)]),
+  )]))
+  const sourceTotals = {}
+  for (const entry of revenue) {
+    const key = `${entry.referenceType}:${entry.currency}`
+    sourceTotals[key] = (sourceTotals[key] || 0) + entry.amountMinor
+  }
+  return {
+    generatedAt: now.toISOString(), controls, revenue: summarizeMoney(revenue), refunds: summarizeMoney(refunds), releasedMoney: summarizeMoney(releases),
+    revenueSources: sourceTotals, hosts, listingsPending, bookingsByStatus: Object.fromEntries(bookingsByStatus.map((row) => [row.status, row._count._all])),
+    openDisputes: disputes, ridesByStatus: Object.fromEntries(rides.map((row) => [row.status, row._count._all])), securityEventsLast7Days: securityEvents,
+    approvalRequired: ['refunds', 'payout releases', 'account suspension or deletion', 'production deployment'],
+  }
+}
+
+export function formatDailyExecutiveReport(report) {
+  const moneyLines = (title, values) => [title, ...Object.entries(values).map(([period, currencies]) => `  ${period}: ${Object.entries(currencies).map(([currency, amount]) => `${amount} ${currency} minor units`).join(', ') || '0'}`)]
+  return [
+    `SYBNB DAILY EXECUTIVE REPORT`, `Generated: ${report.generatedAt}`, '',
+    ...moneyLines('PLATFORM INCOME', report.revenue), '', ...moneyLines('REFUNDS', report.refunds), '', ...moneyLines('RELEASED MONEY', report.releasedMoney), '',
+    `Hosts: ${report.hosts}`, `Listings awaiting review: ${report.listingsPending}`, `Open disputes: ${report.openDisputes}`, `Security events (7d): ${report.securityEventsLast7Days}`,
+    `Bookings: ${JSON.stringify(report.bookingsByStatus)}`, `SR rides: ${JSON.stringify(report.ridesByStatus)}`, '',
+    `AI sections ON: ${report.controls.filter((item) => item.enabled).map((item) => item.section).join(', ') || 'none'}`,
+    `Owner approval always required for: ${report.approvalRequired.join(', ')}.`,
+  ].join('\n')
+}
 
 // Compute one user's standing suggestion and queue it (PENDING) — but only when the AI/rule tier would
 // actually CHANGE their current tier. Replaces any prior pending suggestion for that user+kind. Shared
@@ -63,6 +126,27 @@ function payoutNotEligibleError() {
 }
 
 export async function handleAdmin(req, res, url, context) {
+  if (url.pathname === '/api/admin/ai-controls') {
+    requireAuth(context, ['ADMIN'])
+    if (req.method === 'GET') return json(res, 200, { ok: true, controls: await readAiControls() })
+    if (req.method !== 'PUT') return methodNotAllowed(res, ['GET', 'PUT'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['section', 'enabled'])
+    if (!AI_CONTROL_SECTIONS.includes(body.section) || typeof body.enabled !== 'boolean') {
+      const error = new Error('A valid AI section and boolean enabled value are required.')
+      error.statusCode = 400; error.code = 'AI_CONTROL_INVALID'; error.expose = true; throw error
+    }
+    await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_SECTION_CONTROL_UPDATED', entityType: 'ai_section', entityId: body.section, before: {}, after: { enabled: body.enabled, mode: 'MONITOR_RECOMMEND', sensitiveActionsRequireApproval: true } } })
+    return json(res, 200, { ok: true, controls: await readAiControls() })
+  }
+
+  if (url.pathname === '/api/admin/ai-daily-report') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN'])
+    const report = await buildDailyExecutiveReport()
+    return json(res, 200, { ok: true, report, text: formatDailyExecutiveReport(report) })
+  }
+
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
   if (hideReviewMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

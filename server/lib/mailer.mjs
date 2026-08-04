@@ -119,6 +119,14 @@ export async function sendPasswordChangedEmail(email) {
   })
 }
 
+export async function sendDailyAdminReportEmail(email, reportText) {
+  return deliver({
+    to: email,
+    subject: `SYBNB daily executive report — ${new Date().toISOString().slice(0, 10)}`,
+    text: reportText,
+  })
+}
+
 export async function sendVerificationCodeEmail(email, code) {
   return deliver({
     to: email,

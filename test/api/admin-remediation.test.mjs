@@ -231,4 +231,22 @@ describe('Admin remediation controls', () => {
     expect(usd).toBeTruthy()
     expect(usd.totalRevenueMinor).toBeGreaterThanOrEqual(7)
   })
+
+  it('persists audited AI section controls and builds the daily executive report', async () => {
+    const updated = await request(app)
+      .put('/api/admin/ai-controls')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ section: 'finance', enabled: true })
+    expect(updated.status).toBe(200)
+    expect(updated.body.controls.find((item) => item.section === 'finance')?.enabled).toBe(true)
+
+    const audit = await db().adminAuditLog.findFirst({ where: { action: 'AI_SECTION_CONTROL_UPDATED', entityId: 'finance' }, orderBy: { createdAt: 'desc' } })
+    expect(audit?.after).toMatchObject({ enabled: true, sensitiveActionsRequireApproval: true })
+
+    const report = await request(app).get('/api/admin/ai-daily-report').set('Authorization', `Bearer ${admin.token}`)
+    expect(report.status).toBe(200)
+    expect(report.body.report.controls.find((item) => item.section === 'finance')?.enabled).toBe(true)
+    expect(report.body.report.approvalRequired).toContain('payout releases')
+    expect(report.body.text).toContain('SYBNB DAILY EXECUTIVE REPORT')
+  })
 })

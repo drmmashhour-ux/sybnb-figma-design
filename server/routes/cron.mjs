@@ -5,6 +5,8 @@ import { expireOldListings, purgeStaleListingMedia } from '../lib/listing-lifecy
 import { expireOpenAuctions } from '../lib/auction-lifecycle.mjs'
 import { purgeAssistantConfirmations } from '../lib/assistant-confirmations.mjs'
 import { retryPendingStripeDisputeRefunds } from './disputes.mjs'
+import { buildDailyExecutiveReport, formatDailyExecutiveReport } from './admin.mjs'
+import { sendDailyAdminReportEmail } from '../lib/mailer.mjs'
 
 // Scheduled maintenance (Vercel Cron → vercel.json `crons`). Runs the periodic sweeps that USED to run
 // lazily on hot read paths (search / overview / wallet), so those reads stay read-only and fast at scale.
@@ -28,12 +30,20 @@ function unauthorized() {
 }
 
 export async function handleCron(req, res, url) {
-  if (url.pathname !== '/api/cron/maintenance') return false
+  if (!['/api/cron/maintenance', '/api/cron/daily-report'].includes(url.pathname)) return false
 
   // Fail-closed: the CRON_SECRET bearer is the ONLY accepted credential. No secret configured → the
   // endpoint is disabled (the x-vercel-cron header is client-settable and must never be trusted alone).
   const secret = process.env.CRON_SECRET
   if (!secret || req.headers['authorization'] !== `Bearer ${secret}`) throw unauthorized()
+
+  if (url.pathname === '/api/cron/daily-report') {
+    const report = await buildDailyExecutiveReport()
+    const recipient = process.env.ADMIN_DAILY_REPORT_EMAIL || 'info@sybnb.app'
+    await sendDailyAdminReportEmail(recipient, formatDailyExecutiveReport(report))
+    await db().adminAuditLog.create({ data: { action: 'AI_DAILY_REPORT_SENT', entityType: 'ai_report', entityId: report.generatedAt.slice(0, 10), before: {}, after: { recipient, generatedAt: report.generatedAt } } })
+    return json(res, 200, { ok: true, sentAt: new Date().toISOString(), recipient })
+  }
 
   const results = {}
   const runStep = async (name, fn) => {

@@ -1886,6 +1886,44 @@ export async function fetchAdminHostInsights() {
   }>('/api/admin/host-insights', { token: session.token })
 }
 
+export type AiSectionControl = {
+  section: 'str' | 'hosts' | 'realestate' | 'commerce' | 'transport' | 'finance' | 'trust' | 'operations'
+  enabled: boolean
+  mode: 'MONITOR_RECOMMEND'
+  updatedAt: string | null
+}
+
+export async function fetchAdminAiControls() {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{ ok: true; controls: AiSectionControl[] }>('/api/admin/ai-controls', { token: session.token })
+}
+
+export async function updateAdminAiControl(section: AiSectionControl['section'], enabled: boolean) {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{ ok: true; controls: AiSectionControl[] }>('/api/admin/ai-controls', { method: 'PUT', token: session.token, body: { section, enabled } })
+}
+
+export type AiDailyReport = {
+  generatedAt: string
+  controls: AiSectionControl[]
+  revenue: Record<string, Record<string, number>>
+  refunds: Record<string, Record<string, number>>
+  releasedMoney: Record<string, Record<string, number>>
+  revenueSources: Record<string, number>
+  hosts: number
+  listingsPending: number
+  bookingsByStatus: Record<string, number>
+  openDisputes: number
+  ridesByStatus: Record<string, number>
+  securityEventsLast7Days: number
+  approvalRequired: string[]
+}
+
+export async function fetchAdminAiDailyReport() {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{ ok: true; report: AiDailyReport; text: string }>('/api/admin/ai-daily-report', { token: session.token })
+}
+
 export type PlatformMessage = {
   id: string
   threadId: string
