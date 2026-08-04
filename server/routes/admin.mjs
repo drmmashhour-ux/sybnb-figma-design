@@ -1300,11 +1300,24 @@ export async function handleAdmin(req, res, url, context) {
     // the (non-refundable) cancellation-protection fee, the seller/dealer/developer plan fee, the STR
     // host-plan fee, AND the SR ride commission (15% of each completed ride's fare, credited to the admin
     // wallet by chargeCompletedRide() as sr_admin_commission). All are CREDIT entries.
-    const [commissionEntries, completedSrRides] = await Promise.all([
+    const revenueReferenceTypes = ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission', 'card_processing_fee', 'booking_guest_cancel_fee']
+    const [commissionEntries, refunds, releasedMoney, hostEarnings, completedSrRides] = await Promise.all([
       db().walletEntry.findMany({
-        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission', 'card_processing_fee'] } },
-        select: { amountMinor: true, currency: true, createdAt: true },
+        where: { type: 'CREDIT', referenceType: { in: revenueReferenceTypes } },
+        select: { amountMinor: true, currency: true, createdAt: true, referenceType: true },
         orderBy: { createdAt: 'asc' },
+      }),
+      db().walletEntry.findMany({
+        where: { type: 'CREDIT', referenceType: 'booking_refund' },
+        select: { amountMinor: true, currency: true, createdAt: true },
+      }),
+      db().walletEntry.findMany({
+        where: { type: 'DEBIT', referenceType: { in: ['booking_payout_disbursement', 'sr_driver_payout'] } },
+        select: { amountMinor: true, currency: true, createdAt: true, referenceType: true },
+      }),
+      db().walletEntry.findMany({
+        where: { type: { in: ['HOLD', 'RELEASE'] }, referenceType: 'booking_payout' },
+        select: { amountMinor: true, currency: true, createdAt: true, type: true },
       }),
       db().rideRequest.aggregate({
         where: { status: 'COMPLETED' },
@@ -1321,6 +1334,18 @@ export async function handleAdmin(req, res, url, context) {
     for (const entry of commissionEntries) {
       if (!entriesByCurrency.has(entry.currency)) entriesByCurrency.set(entry.currency, [])
       entriesByCurrency.get(entry.currency).push(entry)
+    }
+
+    const now = new Date()
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0)
+    const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - 6)
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const sumSince = (entries, start) => entries.reduce((sum, entry) => sum + (entry.createdAt >= start ? entry.amountMinor : 0), 0)
+    const sourceLabels = {
+      booking_admin_share: 'STR booking commission', booking_protection_fee: 'Cancellation protection',
+      booking_guest_cancel_fee: 'Late cancellation fees', str_host_plan_fee: 'Host subscriptions',
+      seller_plan_fee: 'Seller, dealer & developer plans', sr_admin_commission: 'SR transport commission',
+      card_processing_fee: 'Payment processing fees',
     }
 
     const byCurrency = Array.from(entriesByCurrency.entries())
@@ -1341,12 +1366,31 @@ export async function handleAdmin(req, res, url, context) {
         // +1 so a single day of data still divides by 1, not 0.
         const elapsedDays = Math.max(1, Math.ceil((lastDay.getTime() - firstDay.getTime()) / 86400000) + 1)
         const dailyAverageMinor = totalRevenueMinor / elapsedDays
+        const sameCurrencyRefunds = refunds.filter((entry) => entry.currency === currency)
+        const sameCurrencyReleased = releasedMoney.filter((entry) => entry.currency === currency)
+        const sameCurrencyHostEarnings = hostEarnings.filter((entry) => entry.currency === currency)
+        const sourceMap = new Map()
+        for (const entry of entries) sourceMap.set(entry.referenceType, (sourceMap.get(entry.referenceType) || 0) + entry.amountMinor)
 
         return {
           currency,
           totalRevenueMinor,
           sampleSize: entries.length,
           history,
+          actual: {
+            todayMinor: sumSince(entries, todayStart),
+            last7DaysMinor: sumSince(entries, weekStart),
+            currentMonthMinor: sumSince(entries, monthStart),
+            refundsTodayMinor: sumSince(sameCurrencyRefunds, todayStart),
+            refundsLast7DaysMinor: sumSince(sameCurrencyRefunds, weekStart),
+            refundsCurrentMonthMinor: sumSince(sameCurrencyRefunds, monthStart),
+            releasedTodayMinor: sumSince(sameCurrencyReleased, todayStart),
+            releasedLast7DaysMinor: sumSince(sameCurrencyReleased, weekStart),
+            releasedCurrentMonthMinor: sumSince(sameCurrencyReleased, monthStart),
+            hostEarningsHeldMinor: sameCurrencyHostEarnings.filter((entry) => entry.type === 'HOLD').reduce((sum, entry) => sum + entry.amountMinor, 0),
+            hostEarningsReleasedMinor: sameCurrencyHostEarnings.filter((entry) => entry.type === 'RELEASE').reduce((sum, entry) => sum + entry.amountMinor, 0),
+          },
+          sources: Array.from(sourceMap.entries()).map(([key, amountMinor]) => ({ key, label: sourceLabels[key] || key, amountMinor })).sort((a, b) => b.amountMinor - a.amountMinor),
           projection: {
             elapsedDays,
             dailyAverageMinor: Math.round(dailyAverageMinor),

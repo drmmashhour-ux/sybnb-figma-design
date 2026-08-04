@@ -2449,6 +2449,20 @@ export type PlatformRevenueByCurrency = {
   totalRevenueMinor: number
   sampleSize: number
   history: Array<{ day: string; amountMinor: number }>
+  actual: {
+    todayMinor: number
+    last7DaysMinor: number
+    currentMonthMinor: number
+    refundsTodayMinor: number
+    refundsLast7DaysMinor: number
+    refundsCurrentMonthMinor: number
+    releasedTodayMinor: number
+    releasedLast7DaysMinor: number
+    releasedCurrentMonthMinor: number
+    hostEarningsHeldMinor: number
+    hostEarningsReleasedMinor: number
+  }
+  sources: Array<{ key: string; label: string; amountMinor: number }>
   projection: {
     elapsedDays: number
     dailyAverageMinor: number

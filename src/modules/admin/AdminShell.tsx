@@ -6,21 +6,81 @@ import './admin-console.css'
 
 export type AdminNavKey = 'guests' | 'hosts' | 'accounting' | 'management' | 'hr' | 'operations' | 'reports' | 'office' | 'srDispatch'
 
-type NavItem = { key: AdminNavKey; hash: string; icon: string; ar: string; en: string }
+type NavItem = { key: string; hash: string; icon: string; ar: string; en: string }
+type NavGroup = { key: string; ar: string; en: string; items: NavItem[] }
 
-const WORKSPACE_NAV: NavItem[] = [
-  { key: 'guests', hash: '/admin/guests', icon: '⌂', ar: 'العملاء', en: 'Guests' },
-  { key: 'hosts', hash: '/admin/hosts', icon: '⌑', ar: 'المضيفون', en: 'Hosts' },
-  { key: 'accounting', hash: '/admin/accounting', icon: '◈', ar: 'المحاسبة', en: 'Accounting' },
-  { key: 'management', hash: '/admin/management', icon: '◎', ar: 'الإدارة', en: 'Management' },
-  { key: 'hr', hash: '/admin/hr', icon: '♙', ar: 'الموارد البشرية', en: 'HR' },
-]
-
-const OPS_NAV: NavItem[] = [
-  { key: 'operations', hash: '/admin/review', icon: '⌘', ar: 'العمليات', en: 'Operations' },
-  { key: 'reports', hash: '/admin/reports', icon: '▤', ar: 'التقارير والنزاعات', en: 'Reports & disputes' },
-  { key: 'office', hash: '/admin/office', icon: '▦', ar: 'لوحة المكتب', en: 'Office dashboard' },
-  { key: 'srDispatch', hash: '/admin/sr-dispatch', icon: '⊕', ar: 'عمليات SR', en: 'SR operations' },
+const NAV_GROUPS: NavGroup[] = [
+  {
+    key: 'str', ar: '١. الإيجار القصير (STR)', en: '1. Short-Term Rentals (STR)',
+    items: [
+      { key: 'guests', hash: '/admin/guests', icon: '⌂', ar: 'نظرة STR والعملاء', en: 'STR overview & guests' },
+      { key: 'stays', hash: '/stays', icon: '⌁', ar: 'تصفح الإقامات', en: 'Browse stays' },
+      { key: 'operations', hash: '/admin/review', icon: '⌘', ar: 'الحجوزات والمراجعات', en: 'Bookings & reviews' },
+    ],
+  },
+  {
+    key: 'hosts', ar: '٢. إدارة المضيفين', en: '2. Host Control',
+    items: [
+      { key: 'hosts', hash: '/admin/hosts', icon: '⌑', ar: 'المضيفون والعقارات', en: 'Hosts & properties' },
+      { key: 'hostBookings', hash: '/admin/review', icon: '▣', ar: 'حجوزات المضيفين', en: 'Host bookings' },
+      { key: 'hostPayouts', hash: '/finance', icon: '◈', ar: 'أرباح وتحويلات المضيفين', en: 'Host earnings & payouts' },
+      { key: 'hostAccounts', hash: '/admin/management', icon: '◎', ar: 'حسابات وتحقق المضيفين', en: 'Host accounts & verification' },
+    ],
+  },
+  {
+    key: 'realestate', ar: '٣. العقارات', en: '3. Real Estate',
+    items: [
+      { key: 'buy', hash: '/buy', icon: '⌂', ar: 'عقارات للبيع', en: 'Properties for sale' },
+      { key: 'rentals', hash: '/rentals', icon: '⌑', ar: 'الإيجار الشهري والسنوي', en: 'Monthly & yearly rentals' },
+      { key: 'construction', hash: '/new-construction', icon: '△', ar: 'المشاريع والإنشاءات', en: 'New construction' },
+      { key: 'immocontact', hash: '/immocontact', icon: '◎', ar: 'طلبات IMMOContact', en: 'IMMOContact requests' },
+    ],
+  },
+  {
+    key: 'commerce', ar: '٤. السوق والمركبات والإعلانات', en: '4. Marketplace, Cars & Ads',
+    items: [
+      { key: 'marketplace', hash: '/marketplace', icon: '◇', ar: 'السوق العام', en: 'Marketplace' },
+      { key: 'cars', hash: '/cars', icon: '◉', ar: 'السيارات والمزادات', en: 'Cars & auctions' },
+      { key: 'advertising', hash: '/advertising', icon: '▣', ar: 'الإعلانات', en: 'Advertising' },
+    ],
+  },
+  {
+    key: 'transport', ar: '٥. النقل SR', en: '5. SR Transport',
+    items: [
+      { key: 'srHome', hash: '/sr', icon: '➤', ar: 'واجهة رحلات SR', en: 'SR ride service' },
+      { key: 'srDispatch', hash: '/admin/sr-dispatch', icon: '⊕', ar: 'التوجيه والسائقون', en: 'Dispatch & drivers' },
+    ],
+  },
+  {
+    key: 'finance', ar: '٦. المالية والإيرادات', en: '6. Finance & Revenue',
+    items: [
+      { key: 'accounting', hash: '/admin/accounting', icon: '◈', ar: 'المحاسبة والمدفوعات', en: 'Accounting & payments' },
+      { key: 'financeCenter', hash: '/finance', icon: '▤', ar: 'التسوية المالية', en: 'Finance reconciliation' },
+      { key: 'dailyIncome', hash: '/finance', icon: '◷', ar: 'دخل يومي / أسبوعي / شهري', en: 'Daily / weekly / monthly income' },
+      { key: 'revenueSources', hash: '/finance', icon: '◆', ar: 'مصادر الإيرادات حسب المنصة', en: 'Revenue sources by platform' },
+      { key: 'refunds', hash: '/finance', icon: '↶', ar: 'الاستردادات والأموال المحررة', en: 'Refunds & released money' },
+      { key: 'reports', hash: '/admin/reports', icon: '⚑', ar: 'التقارير والنزاعات', en: 'Reports & disputes' },
+      { key: 'trust', hash: '/trust-center/verification', icon: '✓', ar: 'الثقة والتحقق', en: 'Trust & verification' },
+    ],
+  },
+  {
+    key: 'ai', ar: '٧. إدارة الذكاء الاصطناعي', en: '7. AI Management',
+    items: [
+      { key: 'aiBrain', hash: '/ai-brain', icon: '✦', ar: 'تشغيل وإيقاف أقسام AI', en: 'AI section controls' },
+      { key: 'aiReport', hash: '/ai-brain', icon: '▤', ar: 'التقرير الصباحي اليومي', en: 'Daily morning report' },
+      { key: 'aiApprovals', hash: '/admin/review', icon: '✓', ar: 'قرارات تنتظر موافقتك', en: 'Decisions awaiting approval' },
+    ],
+  },
+  {
+    key: 'administration', ar: '٨. الإدارة والتشغيل', en: '8. Administration & Operations',
+    items: [
+      { key: 'management', hash: '/admin/management', icon: '◎', ar: 'إدارة الحسابات', en: 'Account management' },
+      { key: 'hr', hash: '/admin/hr', icon: '♙', ar: 'الموارد البشرية', en: 'Human resources' },
+      { key: 'office', hash: '/admin/office', icon: '▦', ar: 'لوحة المكتب', en: 'Office dashboard' },
+      { key: 'competitors', hash: '/competitors', icon: '◫', ar: 'تحليل المنافسين', en: 'Competitor analysis' },
+      { key: 'status', hash: '/status', icon: '●', ar: 'حالة المنصة', en: 'Platform status' },
+    ],
+  },
 ]
 
 const CHROME = {
@@ -95,7 +155,7 @@ export function AdminShell({ lang, active, title, subtitle, children, counts, on
     >
       <span aria-hidden="true">{item.icon}</span>
       <b>{isAr ? item.ar : item.en}</b>
-      {counts?.[item.key] ? <em>{counts[item.key]}</em> : null}
+      {counts?.[item.key as AdminNavKey] ? <em>{counts[item.key as AdminNavKey]}</em> : null}
     </a>
   )
 
@@ -123,10 +183,15 @@ export function AdminShell({ lang, active, title, subtitle, children, counts, on
 
       <div className="layout">
         <aside className="sidebar" aria-label={c.workspace}>
-          <p className="eyebrow">{c.workspace}</p>
-          <nav>{WORKSPACE_NAV.map(renderNavItem)}</nav>
-          <p className="eyebrow second">{c.operationsGroup}</p>
-          <nav className="second">{OPS_NAV.map(renderNavItem)}</nav>
+          <p className="eyebrow sidebar-title">{c.workspace}</p>
+          <div className="sidebar-groups">
+            {NAV_GROUPS.map((group) => (
+              <section className="nav-group" key={group.key} aria-label={isAr ? group.ar : group.en}>
+                <p className="eyebrow">{isAr ? group.ar : group.en}</p>
+                <nav>{group.items.map(renderNavItem)}</nav>
+              </section>
+            ))}
+          </div>
           <div className="sidebar-status">
             <span className="status-icon">✓</span>
             <div><strong>{c.systems}</strong><small>{c.lastCheck}</small></div>

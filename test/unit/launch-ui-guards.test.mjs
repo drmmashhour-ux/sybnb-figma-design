@@ -106,7 +106,14 @@ describe('launch UI safety guards', () => {
     expect(shell).toContain('aria-label={isAr ? item.ar : item.en}')
     expect(css).not.toContain('.sidebar nav b, .sybnb-admin .sidebar nav em')
     expect(css).toContain('grid-template-columns: 210px 1fr')
-    expect(css).toContain('.sidebar nav.second { display: flex; }')
+    expect(css).toContain('.sidebar-groups { display: flex; gap: 8px; }')
+    expect(shell).toContain("key: 'str', ar: '١. الإيجار القصير (STR)', en: '1. Short-Term Rentals (STR)'")
+    expect(shell).toContain("key: 'hosts', ar: '٢. إدارة المضيفين', en: '2. Host Control'")
+    expect(shell).toContain("key: 'realestate', ar: '٣. العقارات', en: '3. Real Estate'")
+    expect(shell).toContain("key: 'commerce', ar: '٤. السوق والمركبات والإعلانات', en: '4. Marketplace, Cars & Ads'")
+    expect(shell).toContain("key: 'transport', ar: '٥. النقل SR', en: '5. SR Transport'")
+    expect(shell).toContain("key: 'finance', ar: '٦. المالية والإيرادات', en: '6. Finance & Revenue'")
+    expect(shell).toContain("key: 'ai', ar: '٧. إدارة الذكاء الاصطناعي', en: '7. AI Management'")
   })
 
   it('uses server email/phone OTP for seller signup and never compares a browser-generated code', () => {

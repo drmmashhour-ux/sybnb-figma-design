@@ -54,6 +54,16 @@ const copy = {
     error: 'تعذر تحميل بيانات المصالحة',
     lanes: ['استلام الإثبات', 'مراجعة الإدارة', 'تأكيد الحجز', 'تحرير المالك'],
     incomeProjection: 'توقع الإيراد',
+    actualIncome: 'الدخل الفعلي حسب الفترة',
+    today: 'اليوم',
+    last7Days: 'آخر ٧ أيام',
+    currentMonth: 'الشهر الحالي',
+    refunds: 'المبالغ المستردة',
+    releasedMoney: 'الأموال المحررة',
+    hostIncome: 'أرباح المضيفين',
+    held: 'محتجزة',
+    released: 'محررة',
+    revenueSources: 'مصادر الإيرادات حسب المنصة والخدمة',
     incomeProjectionNote: 'إيراد SYBNB الفعلي المحصّل: عمولة حجوزات الاستضافة، رسوم حماية الإلغاء (غير مستردة)، ورسوم خطط البائعين/الوكلاء/المطورين.',
     totalCollected: 'إجمالي العمولة المحصّلة',
     dailyAverage: 'متوسط يومي',
@@ -107,6 +117,16 @@ const copy = {
     error: 'Could not load reconciliation data',
     lanes: ['Proof received', 'Admin review', 'Booking confirmed', 'Owner released'],
     incomeProjection: 'Income projection',
+    actualIncome: 'Actual income by period',
+    today: 'Today',
+    last7Days: 'Last 7 days',
+    currentMonth: 'Current month',
+    refunds: 'Refunds',
+    releasedMoney: 'Released money',
+    hostIncome: 'Host earnings',
+    held: 'Held',
+    released: 'Released',
+    revenueSources: 'Revenue sources by platform and service',
     incomeProjectionNote: 'Real SYBNB revenue collected: booking host commission, non-refundable cancellation-protection fees, and seller/dealer/developer plan fees.',
     totalCollected: 'Total commission collected',
     dailyAverage: 'Daily average',
@@ -339,6 +359,44 @@ export function FinanceReconciliationPage({ lang }: Props) {
             </article>
           )) : <p style={styles.empty}>{t.empty}</p>}
         </div>
+      </section>
+
+      <section style={styles.card}>
+        <h2 style={styles.cardTitle}>{t.actualIncome}</h2>
+        {revenue && revenue.byCurrency.length ? revenue.byCurrency.map((entry) => (
+          <div key={`actual-${entry.currency}`}>
+            <p style={styles.empty}><b dir="ltr">{entry.currency}</b></p>
+            <section style={styles.stats}>
+              <FinanceStat label={t.today} value={moneyText(entry.actual.todayMinor, entry.currency, lang)} tone="#20d29b" />
+              <FinanceStat label={t.last7Days} value={moneyText(entry.actual.last7DaysMinor, entry.currency, lang)} tone="#5268ff" />
+              <FinanceStat label={t.currentMonth} value={moneyText(entry.actual.currentMonthMinor, entry.currency, lang)} tone="#e5b80b" />
+            </section>
+            <section style={styles.stats}>
+              <FinanceStat label={`${t.refunds} · ${t.currentMonth}`} value={moneyText(entry.actual.refundsCurrentMonthMinor, entry.currency, lang)} tone="#ff5f7d" />
+              <FinanceStat label={`${t.releasedMoney} · ${t.currentMonth}`} value={moneyText(entry.actual.releasedCurrentMonthMinor, entry.currency, lang)} tone="#9b8cff" />
+              <FinanceStat label={`${t.hostIncome} · ${t.held}`} value={moneyText(entry.actual.hostEarningsHeldMinor, entry.currency, lang)} tone="#e5b80b" />
+              <FinanceStat label={`${t.hostIncome} · ${t.released}`} value={moneyText(entry.actual.hostEarningsReleasedMinor, entry.currency, lang)} tone="#20d29b" />
+            </section>
+          </div>
+        )) : <p style={styles.empty}>{t.noRevenueYet}</p>}
+      </section>
+
+      <section style={styles.card}>
+        <h2 style={styles.cardTitle}>{t.revenueSources}</h2>
+        {revenue && revenue.byCurrency.length ? revenue.byCurrency.map((entry) => (
+          <div key={`sources-${entry.currency}`}>
+            <p style={styles.empty}><b dir="ltr">{entry.currency}</b></p>
+            <div style={styles.payoutTable}>
+              {entry.sources.map((source) => (
+                <article key={source.key} style={styles.financeRow}>
+                  <span style={{ ...styles.riskDot, background: '#20d29b' }} />
+                  <div><strong>{source.label}</strong><small>{source.key}</small></div>
+                  <b>{moneyText(source.amountMinor, entry.currency, lang)}</b>
+                </article>
+              ))}
+            </div>
+          </div>
+        )) : <p style={styles.empty}>{t.noRevenueYet}</p>}
       </section>
 
       <section style={styles.card}>

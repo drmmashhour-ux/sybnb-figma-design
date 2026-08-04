@@ -72,16 +72,19 @@
 
 /* ---- layout + sidebar ---- */
 .sybnb-admin .layout { display: grid; grid-template-columns: 250px 1fr; min-height: calc(100vh - 76px); position: relative; z-index: 1; }
-.sybnb-admin .sidebar { position: sticky; top: 76px; height: calc(100vh - 76px); padding: 26px 18px; border-inline-end: 1px solid var(--border); background: rgba(12,15,19,.58); }
+.sybnb-admin .sidebar { position: sticky; top: 76px; height: calc(100vh - 76px); overflow-y: auto; padding: 22px 14px 30px; border-inline-end: 1px solid var(--border); background: rgba(12,15,19,.58); }
 .sybnb-admin .eyebrow { margin: 0 10px 12px; color: #707d90; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-.sybnb-admin .eyebrow.second { margin-top: 28px; }
+.sybnb-admin .sidebar-title { color: var(--gold); font-size: 11px; }
+.sybnb-admin .sidebar-groups { display: grid; gap: 24px; }
+.sybnb-admin .nav-group { min-width: 0; }
+.sybnb-admin .nav-group .eyebrow { margin-bottom: 8px; letter-spacing: .08em; }
 .sybnb-admin nav { display: grid; gap: 5px; }
 .sybnb-admin nav a { display: grid; grid-template-columns: 25px 1fr auto; align-items: center; gap: 9px; padding: 11px 13px; border: 1px solid transparent; border-radius: 12px; color: var(--muted); text-decoration: none; font-size: 13px; cursor: pointer; }
 .sybnb-admin nav a:hover { color: var(--text); background: var(--surface); }
 .sybnb-admin nav a.active { color: #08110f; background: linear-gradient(135deg, var(--gold), #be9350); font-weight: 800; box-shadow: 0 10px 30px rgba(212,175,106,.13); }
 .sybnb-admin nav a b { font-weight: 600; }
 .sybnb-admin nav a em { min-width: 21px; padding: 2px 6px; text-align: center; border-radius: 999px; background: rgba(255,255,255,.09); font: 700 10px 'InterAdmin'; font-style: normal; }
-.sybnb-admin .sidebar-status { position: absolute; inset-inline: 18px; bottom: 20px; display: flex; align-items: center; gap: 11px; padding: 13px; border: 1px solid rgba(41,211,155,.2); border-radius: 12px; background: rgba(41,211,155,.05); }
+.sybnb-admin .sidebar-status { display: flex; align-items: center; gap: 11px; margin-top: 28px; padding: 13px; border: 1px solid rgba(41,211,155,.2); border-radius: 12px; background: rgba(41,211,155,.05); }
 .sybnb-admin .status-icon { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 8px; background: rgba(41,211,155,.16); color: var(--green); }
 .sybnb-admin .sidebar-status strong, .sybnb-admin .sidebar-status small { display: block; }
 .sybnb-admin .sidebar-status strong { font-size: 11px; }
@@ -178,7 +181,6 @@
 @media (max-width: 1000px) {
   .sybnb-admin .layout { grid-template-columns: 210px 1fr; }
   .sybnb-admin .sidebar { padding-inline: 10px; }
-  .sybnb-admin .sidebar-status { inset-inline: 10px; }
   .sybnb-admin .grid, .sybnb-admin .grid.one-three { grid-template-columns: 1fr; }
   .sybnb-admin main { padding-inline: 25px; }
 }
@@ -188,8 +190,9 @@
   .sybnb-admin .layout { display: block; }
   .sybnb-admin .sidebar { position: sticky; top: 76px; width: 100%; height: auto; z-index: 15; display: flex; overflow: auto; padding: 8px; background: #0d1014; border-bottom: 1px solid var(--border); }
   .sybnb-admin .sidebar .eyebrow, .sybnb-admin .sidebar-status { display: none; }
-  .sybnb-admin .sidebar nav { display: flex; }
-  .sybnb-admin .sidebar nav.second { display: flex; }
+  .sybnb-admin .sidebar-groups { display: flex; gap: 8px; }
+  .sybnb-admin .nav-group { display: contents; }
+  .sybnb-admin .sidebar nav { display: flex; gap: 5px; }
   .sybnb-admin .sidebar nav a { min-width: 140px; grid-template-columns: 25px 1fr auto; }
   .sybnb-admin .hero { align-items: flex-start; flex-direction: column; }
   .sybnb-admin .hero-actions { width: 100%; }
