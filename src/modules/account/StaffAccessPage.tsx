@@ -40,6 +40,7 @@ const labels = {
     signUp: 'إنشاء حساب',
     forgotPassword: 'نسيت كلمة المرور',
     resetPasswordCta: 'تحديث كلمة المرور',
+    continueToResetCode: 'متابعة إلى رمز التأكيد',
     backToSignIn: 'العودة لتسجيل الدخول',
     email: 'البريد الإلكتروني',
     emailHelp: 'اكتب البريد كاملاً. سنرسل رمز التأكيد إلى هذا البريد.',
@@ -96,6 +97,7 @@ const labels = {
     signUp: 'Create account',
     forgotPassword: 'Forgot password',
     resetPasswordCta: 'Update password',
+    continueToResetCode: 'Continue to verification code',
     backToSignIn: 'Back to sign in',
     email: 'Email address',
     emailHelp: 'Use the full email address. We send the confirmation code here.',
@@ -158,6 +160,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [passwordRepeat, setPasswordRepeat] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [showResetPasswords, setShowResetPasswords] = useState(false)
+  const [resetStep, setResetStep] = useState<1 | 2>(1)
   const [phone, setPhone] = useState('')
   const [partnerType, setPartnerType] = useState<PartnerType>('HOST')
   const [code, setCode] = useState('')
@@ -196,7 +199,31 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   function switchMode(next: 'signIn' | 'signUp' | 'forgotPassword') {
     if (next === 'signUp' && !canSignUp) return
     setMode(next)
+    setResetStep(1)
     resetCodeState()
+  }
+
+  async function beginPasswordResetVerification() {
+    const normalizedEmail = email.trim().toLowerCase()
+    const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
+    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim()) && normalizedEmail === normalizedEmailRepeat
+    if (!identifierOk || !newPassword.trim() || !passwordRepeat.trim()) {
+      setIsErrorMessage(true)
+      setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
+      return
+    }
+    if (newPassword !== passwordRepeat) {
+      setIsErrorMessage(true)
+      setMessage(t.passwordMismatch)
+      return
+    }
+    if (newPassword.length < 8) {
+      setIsErrorMessage(true)
+      setMessage(t.resetRequired)
+      return
+    }
+    setResetStep(2)
+    await sendCode()
   }
 
   async function sendCode() {
@@ -350,6 +377,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       setNewPassword('')
       setPasswordRepeat('')
       setShowResetPasswords(false)
+      setResetStep(1)
       setIsErrorMessage(false)
       setMode('signIn')
       setCodeSent(false)
@@ -418,6 +446,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               autoComplete="off"
               placeholder="name@example.com"
               onChange={(event) => updateEmail(event.target.value)}
+              disabled={mode === 'forgotPassword' && resetStep === 2}
               dir="ltr"
             />
             <small style={styles.helpText}>{t.emailHelp}</small>
@@ -433,6 +462,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 name="sybnb-staff-email-confirmation"
                 autoComplete="off"
                 placeholder="name@example.com"
+                disabled={mode === 'forgotPassword' && resetStep === 2}
                 onChange={(event) => {
                   setEmailRepeat(event.target.value)
                   setCodeConfirmed(false)
@@ -477,7 +507,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             </label>
           )}
 
-          <section style={styles.emailConfirmBox}>
+          {(mode !== 'forgotPassword' || resetStep === 2) && <section style={styles.emailConfirmBox}>
             <div style={styles.confirmHeader}>
               <strong>{usePhone ? t.verifyByPhone : t.confirmEmail}</strong>
               {codeConfirmed && <span style={styles.confirmedPill}>{usePhone ? t.phoneConfirmed : t.codeConfirmed}</span>}
@@ -517,9 +547,9 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                       : t.confirmCode}
               </button>
             </div>
-          </section>
+          </section>}
 
-          {mode === 'forgotPassword' ? (
+          {mode === 'forgotPassword' ? resetStep === 1 ? (
             <>
               <label style={styles.label}>
                 {t.newPassword}
@@ -538,7 +568,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 {showResetPasswords ? t.hidePasswords : t.showPasswords}
               </button>
             </>
-          ) : (
+          ) : null : (
             <>
               <label style={styles.label}>
                 {t.password}
@@ -577,8 +607,12 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         )}
         {message && <p style={isErrorMessage ? styles.error : styles.note}>{message}</p>}
         {mode === 'forgotPassword' ? (
-          <button style={styles.primary} onClick={() => void submitPasswordReset()} disabled={status === 'loading'}>
-            {status === 'loading' ? t.resetting : t.resetPasswordCta}
+          <button
+            style={styles.primary}
+            onClick={() => void (resetStep === 1 ? beginPasswordResetVerification() : submitPasswordReset())}
+            disabled={status === 'loading' || codeBusy !== 'idle'}
+          >
+            {status === 'loading' ? t.resetting : codeBusy === 'sending' ? t.sendingCode : resetStep === 1 ? t.continueToResetCode : t.resetPasswordCta}
           </button>
         ) : (
           <button style={styles.primary} onClick={() => void openSession()} disabled={status === 'loading'}>
