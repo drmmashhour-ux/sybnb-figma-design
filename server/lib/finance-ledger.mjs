@@ -8,11 +8,22 @@ export const CANCELLATION_ADMIN_FEE_CURRENCY = 'USD'
 export const CANCELLATION_PROTECTION_RATE = 0.03
 export const STR_ADMIN_COMMISSION_RATE = 0.1
 export const STR_CLEANING_RATE = 0.05
-export const STR_TAX_RATE = 0.02
+// P6 decision A (2026-07-27, owner): STR launches with NO automatically-charged tax. The default rate
+// is 0 so no unremitted "tax" is collected into the platform share. A registered host can still set a
+// per-listing tax via listing.metadata.taxesMinor (used verbatim by the split); the platform charges
+// none by default. See docs/product/STR_TAX_DECISION_REQUEST.md.
+export const STR_TAX_RATE = 0
 
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+// A fractional RATE (e.g. taxRate 0.13) must NOT be rounded — metadataNumber would turn 0.13 into 0 and
+// silently drop the tax from the host/platform split. Read it raw (finite, > 0).
+function metadataRate(metadata, key) {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
 }
 
 // Mirrors the split the admin finance panel has always displayed (rentMinor / cleaningFeeMinor /
@@ -44,6 +55,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
       cleaningFeeMinor: 0,
       taxesMinor: 0,
       adminCommissionMinor: 0,
+      addOnFeesMinor: 0,
       extraFeesMinor,
       cancellationProtectionFeeMinor,
       cancellationProtectionPurchased,
@@ -54,11 +66,31 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   }
 
   const divisor = 1 + STR_CLEANING_RATE + STR_TAX_RATE
-  const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
+  // Rent (the stay total, excluding cleaning/tax/protection) is authoritatively booking.amountMinor —
+  // set at booking create as the clean stay total (see bookings.mjs). Prefer it so commission is a
+  // true 10% of rent. The old `staySplitBaseMinor / divisor` back-solve assumed cleaning == 5% of
+  // rent, which under-collected commission whenever the host set a different cleaning fee. Metadata
+  // rentMinor (never written today) still wins if present; the divisor stays as a last-resort fallback.
+  const rentMinor =
+    metadataNumber(listingMetadata, 'rentMinor') ||
+    Math.max(0, Math.round(booking?.amountMinor || 0)) ||
+    Math.round(staySplitBaseMinor / divisor)
+  // Tax: a host-set rate (metadata.taxRate, e.g. 0.13) applied to rent wins; else a legacy flat
+  // metadata.taxesMinor; else the platform STR_TAX_RATE (0 today = disclosed-not-charged).
+  const listingTaxRate = metadataRate(listingMetadata, 'taxRate')
+  const taxesMinor = listingTaxRate > 0
+    ? Math.round(rentMinor * listingTaxRate)
+    : (metadataNumber(listingMetadata, 'taxesMinor') || (STR_TAX_RATE > 0 ? Math.round(rentMinor * STR_TAX_RATE) : 0))
+  // Cleaning = whatever the guest actually paid on top of rent (+ tax), derived from the real
+  // amounts so rent+cleaning+tax always reconciles to what was paid — instead of assuming a fixed
+  // 5% of rent, which invented a phantom fee when the guest paid rent only.
+  // Add-on service fees the guest was charged for THIS booking (mandatory + any optional they picked).
+  // Like cleaning, they pass through to the host with NO commission — and are carved out of the
+  // cleaning residual below so they aren't mislabelled as cleaning in the admin/host breakdown.
+  const addOnFeesMinor = metadataNumber(bookingMetadata, 'addOnFeesMinor')
+  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.max(0, staySplitBaseMinor - rentMinor - taxesMinor - addOnFeesMinor)
   const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
-  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
+  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor + addOnFeesMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 
   return {
@@ -66,6 +98,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     cleaningFeeMinor,
     taxesMinor,
     adminCommissionMinor,
+    addOnFeesMinor,
     extraFeesMinor: 0,
     cancellationProtectionFeeMinor,
     cancellationProtectionPurchased,
@@ -73,6 +106,40 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     adminShareMinor,
     paidTotalMinor,
   }
+}
+
+// CONCURRENCY: serialize all balance-gated spends on a single wallet. Every spend path (gift-send,
+// SR fare / tip / cancellation fee) reads cachedBalanceMinor, checks affordability, then writes a
+// DEBIT — a read-then-write that, under Postgres' default READ COMMITTED, lets two *different*
+// concurrent spends both pass the check on the same balance and overdraw the wallet. (Per-operation
+// idempotency keys stop the *same* op double-applying, but not two distinct ops racing.) Acquiring
+// this per-(user,currency) advisory lock at the very top of each spend transaction forces those ops
+// to run one at a time; it is transaction-scoped, so Postgres releases it automatically at commit or
+// rollback. Keyed in its own "wallet:" namespace so it never aliases the ride/driver/listing locks.
+export async function lockWalletForSpend(tx, userId, currency) {
+  if (!userId || !currency) return
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`wallet:${userId}:${currency}`}))`
+}
+
+// Serialize the check-then-create for an external payment reference. PaymentProof predates a
+// database unique(provider, providerRef) constraint, so this transaction-scoped lock closes the
+// duplicate-submission race without a risky migration over unknown historical data.
+export async function lockPaymentReference(tx, provider, providerRef) {
+  if (!provider || !providerRef) return
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`payment-proof:${provider}:${providerRef}`}))`
+}
+
+// Caps a would-be DEBIT at the wallet's current balance so a fee/reversal can never drive
+// cachedBalanceMinor negative — the same "never go negative" discipline the guest-cancel path already
+// uses by withholding rather than debiting into the red. Returns the amount that can actually be
+// debited (0..requested). IMPORTANT: when the DEBIT is one leg of a transfer (paired with a matching
+// CREDIT), the caller must use the returned amount for BOTH legs so no money is minted.
+export async function debitableMinor(tx, userId, currency, requestedMinor) {
+  const requested = Math.max(0, Math.round(requestedMinor || 0))
+  if (!requested) return 0
+  const wallet = await tx.wallet.findUnique({ where: { userId_currency: { userId, currency } } })
+  const available = Math.max(0, wallet?.cachedBalanceMinor || 0)
+  return Math.min(requested, available)
 }
 
 export async function recordWalletEntry(tx, {
@@ -130,6 +197,24 @@ export async function recordWalletEntry(tx, {
 
 // Shared by the admin manual-review path and any automatic payment confirmation (e.g. Stripe)
 // so both move a payment proof to APPROVED and progress the booking the exact same way.
+// The platform's revenue CREDITs (10% booking commission, non-refundable protection fee, seller-plan
+// fee) must NEVER be silently dropped just because the caller didn't pass an admin actor (e.g. a
+// Stripe auto-approval). Resolve a stable platform account: the given actor if any, else the first
+// ADMIN. Same resolution the SR path uses (resolvePlatformUserId). Missing platform accounting is
+// a hard configuration error: fail the surrounding transaction so a paid webhook can be retried
+// after the ADMIN role is provisioned instead of activating access while losing platform revenue.
+async function resolvePlatformActorId(tx, actorUserId) {
+  if (actorUserId) return actorUserId
+  const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
+  if (admin?.userId) return admin.userId
+
+  const error = new Error('Platform accounting account is not configured.')
+  error.statusCode = 503
+  error.code = 'PLATFORM_ACCOUNT_MISSING'
+  error.expose = true
+  throw error
+}
+
 export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
   const existing = await tx.paymentProof.findUnique({
     where: { id: proofId },
@@ -199,33 +284,33 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       keyParts: ['booking-host-hold', proof.bookingId, proof.id],
       note: 'Host payout is protected until booking confirmation and completion.',
     })
-    if (actorUserId) {
+    // Resolve a platform account so the 10% is credited even when no admin actor was passed.
+    const platformActorId = await resolvePlatformActorId(tx, actorUserId)
+    await recordWalletEntry(tx, {
+      userId: platformActorId,
+      type: 'CREDIT',
+      amountMinor: split.adminShareMinor,
+      currency: proof.currency,
+      referenceType: 'booking_admin_share',
+      referenceId: proof.bookingId,
+      keyParts: ['booking-admin-share', proof.bookingId, proof.id, platformActorId],
+      note: 'SYBNB/admin share collected after verified guest payment.',
+    })
+    // The cancellation-protection fee (if purchased) is excluded from staySplitBaseMinor above,
+    // so it never flows into adminShareMinor — record it as its own revenue entry here instead of
+    // letting it silently vanish from the ledger. It's a non-refundable protection premium, so
+    // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
+    if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
       await recordWalletEntry(tx, {
-        userId: actorUserId,
+        userId: platformActorId,
         type: 'CREDIT',
-        amountMinor: split.adminShareMinor,
+        amountMinor: split.cancellationProtectionFeeMinor,
         currency: proof.currency,
-        referenceType: 'booking_admin_share',
+        referenceType: 'booking_protection_fee',
         referenceId: proof.bookingId,
-        keyParts: ['booking-admin-share', proof.bookingId, proof.id, actorUserId],
-        note: 'SYBNB/admin share collected after verified guest payment.',
+        keyParts: ['booking-protection-fee', proof.bookingId, proof.id, platformActorId],
+        note: 'SYBNB/admin collected the non-refundable cancellation-protection fee.',
       })
-      // The cancellation-protection fee (if purchased) is excluded from staySplitBaseMinor above,
-      // so it never flows into adminShareMinor — record it as its own revenue entry here instead of
-      // letting it silently vanish from the ledger. It's a non-refundable protection premium, so
-      // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
-      if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
-        await recordWalletEntry(tx, {
-          userId: actorUserId,
-          type: 'CREDIT',
-          amountMinor: split.cancellationProtectionFeeMinor,
-          currency: proof.currency,
-          referenceType: 'booking_protection_fee',
-          referenceId: proof.bookingId,
-          keyParts: ['booking-protection-fee', proof.bookingId, proof.id, actorUserId],
-          note: 'SYBNB/admin collected the non-refundable cancellation-protection fee.',
-        })
-      }
     }
 
     // Referral reward (double-sided referral program, server/lib/referrals.mjs): only pays the
@@ -246,22 +331,39 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // real, collected seller-plan revenue was invisible everywhere: admin finance totals, the
     // income projection, all of it. Recorded the same way booking commission is: a CREDIT to the
     // approving admin's own wallet, which is what the revenue-summary rollup reads from.
-    if (actorUserId) {
-      await recordWalletEntry(tx, {
-        userId: actorUserId,
-        type: 'CREDIT',
-        amountMinor: proof.amountMinor,
-        currency: proof.currency,
-        referenceType: 'seller_plan_fee',
-        referenceId: proof.id,
-        keyParts: ['seller-plan-fee', proof.id, actorUserId],
-        note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
-      })
-    }
+    const platformActorId = await resolvePlatformActorId(tx, actorUserId)
+    await recordWalletEntry(tx, {
+      userId: platformActorId,
+      type: 'CREDIT',
+      amountMinor: proof.amountMinor,
+      currency: proof.currency,
+      referenceType: 'seller_plan_fee',
+      referenceId: proof.id,
+      keyParts: ['seller-plan-fee', proof.id, platformActorId],
+      note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
+    })
 
     // A referee who converts as a paying seller/dealer/developer is exactly as real a referral
     // outcome as one who converts as a paying guest -- see the booking branch above for the full
     // farming-prevention rationale, identical here.
+    await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.id })
+  } else if (proof.provider === 'str_host_plan') {
+    // STR daily-stay host LISTING plan fee (basic/plus/premium/hotel), paid by card. DISTINCT from the
+    // `seller_plan` branch above: it is NOT a marketplace/dealer/developer plan, so it must NOT flip
+    // sellerProfile.documentStatus (that would wrongly unlock cars/marketplace selling for an STR host).
+    // It is 100% platform revenue and is recorded the same way booking commission / seller-plan fees are
+    // — a CREDIT to the platform actor — so STR host-plan income is visible in the finance rollups.
+    const platformActorId = await resolvePlatformActorId(tx, actorUserId)
+    await recordWalletEntry(tx, {
+      userId: platformActorId,
+      type: 'CREDIT',
+      amountMinor: proof.amountMinor,
+      currency: proof.currency,
+      referenceType: 'str_host_plan_fee',
+      referenceId: proof.id,
+      keyParts: ['str-host-plan-fee', proof.id, platformActorId],
+      note: 'SYBNB collected an STR host listing-plan fee (card).',
+    })
     await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.id })
   } else if (proof.provider === 'wallet_topup_sham_cash') {
     // SR cashless (016): an admin-approved Sham Cash top-up credits the rider's OWN wallet 1:1, no fee.
@@ -312,6 +414,7 @@ export function buildPayoutRow(booking, releasedBookingIds) {
     hostGrossMinor: split.hostGrossMinor,
     adminCommissionMinor: split.adminCommissionMinor,
     cleaningFeeMinor: split.cleaningFeeMinor,
+    addOnFeesMinor: split.addOnFeesMinor,
     taxesMinor: split.taxesMinor,
     currency: booking.currency,
     payoutStatus: released ? 'RELEASED' : isPayoutEligible(booking) ? 'ELIGIBLE' : 'PENDING_HOLD',

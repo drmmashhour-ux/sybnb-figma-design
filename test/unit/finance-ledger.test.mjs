@@ -27,6 +27,21 @@ describe('bookingFinanceSplit: STAYS division invariant (rent + cleaning + tax r
     expect(split.paidTotalMinor).toBe(100000)
   })
 
+  // Regression: a host-set tax is a FRACTIONAL rate (metadata.taxRate, e.g. 0.13). It must be read raw,
+  // NOT via a rounding helper that turns 0.13 into 0 and silently drops all tax from the money split.
+  it('applies a fractional host taxRate (0.13) instead of rounding the rate to zero', () => {
+    const rent = 100000
+    const expectedTax = Math.round(rent * 0.13) // 13000 — 13% of the stay, NOT 0
+    const paid = rent + expectedTax // the guest pays stay + tax (no cleaning here)
+    const taxed = strBooking({ amountMinor: rent, listing: { division: 'STAYS', metadata: { taxRate: 0.13 } } })
+    const split = bookingFinanceSplit(taxed, paid)
+    expect(split.taxesMinor).toBe(expectedTax)
+    // Control: with no taxRate set, STR tax stays 0 (disclosed-not-charged).
+    expect(bookingFinanceSplit(strBooking(), 100000).taxesMinor).toBe(0)
+    // The reconstruct invariant must still hold with tax applied.
+    expect(split.stayAmountMinor + split.cleaningFeeMinor + split.taxesMinor).toBe(split.paidTotalMinor)
+  })
+
   it('host gross + admin share reconstructs the paid amount (nothing silently vanishes)', () => {
     const booking = strBooking()
     const split = bookingFinanceSplit(booking, booking.amountMinor)
@@ -53,6 +68,41 @@ describe('bookingFinanceSplit: STAYS division invariant (rent + cleaning + tax r
     expect(split.cancellationProtectionPurchased).toBe(true)
     expect(split.cancellationProtectionFeeMinor).toBe(protectionFeeMinor)
     expect(split.stayAmountMinor + split.cleaningFeeMinor + split.taxesMinor).toBe(paid - protectionFeeMinor)
+  })
+
+  it('routes add-on service fees to the host with NO commission, kept separate from cleaning', () => {
+    const rent = 100000
+    const cleaning = 5000
+    const addOns = 8000
+    const booking = strBooking({
+      amountMinor: rent,
+      metadata: { addOnFeesMinor: addOns },
+      listing: { division: 'STAYS', metadata: { cleaningFeeMinor: cleaning } },
+    })
+    const paid = rent + cleaning + addOns
+    const split = bookingFinanceSplit(booking, paid)
+
+    expect(split.addOnFeesMinor).toBe(addOns)
+    expect(split.cleaningFeeMinor).toBe(cleaning) // add-ons are NOT lumped into cleaning
+    // commission is 10% of RENT only — never on cleaning or add-ons
+    expect(split.adminCommissionMinor).toBe(Math.round(rent * STR_ADMIN_COMMISSION_RATE))
+    expect(split.hostGrossMinor).toBe(rent + cleaning + addOns - split.adminCommissionMinor)
+    // nothing vanishes; everything reconciles to what the guest paid
+    expect(split.hostGrossMinor + split.adminShareMinor).toBe(paid)
+    expect(split.stayAmountMinor + split.cleaningFeeMinor + split.taxesMinor + split.addOnFeesMinor).toBe(paid)
+  })
+
+  it('carves add-on fees out of the cleaning residual when cleaning is not set explicitly', () => {
+    const rent = 100000
+    const addOns = 12000
+    const booking = strBooking({ amountMinor: rent, metadata: { addOnFeesMinor: addOns } })
+    const paid = rent + addOns
+    const split = bookingFinanceSplit(booking, paid)
+
+    expect(split.addOnFeesMinor).toBe(addOns)
+    expect(split.cleaningFeeMinor).toBe(0) // the whole residual was add-ons, so cleaning is 0
+    expect(split.adminCommissionMinor).toBe(Math.round(rent * STR_ADMIN_COMMISSION_RATE))
+    expect(split.hostGrossMinor + split.adminShareMinor).toBe(paid)
   })
 
   it('never produces a negative host gross or admin share regardless of a tiny paid amount', () => {

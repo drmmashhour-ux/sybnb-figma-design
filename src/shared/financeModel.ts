@@ -3,7 +3,8 @@
 // commission math, not an invented flat percentage. Kept read-only/pure — this file only ever
 // computes numbers from user-entered assumptions, it never touches the database.
 export const STR_CLEANING_RATE = 0.05
-export const STR_TAX_RATE = 0.02
+// P6 decision A (owner): no automatically-charged tax at launch. Mirror of server/lib/finance-ledger.mjs.
+export const STR_TAX_RATE = 0
 export const STR_ADMIN_COMMISSION_RATE = 0.1
 export const CANCELLATION_PROTECTION_RATE = 0.03
 

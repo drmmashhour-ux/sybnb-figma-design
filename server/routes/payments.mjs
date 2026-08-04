@@ -1,10 +1,14 @@
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, recordWalletEntry, lockPaymentReference, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { savePaymentProofFile, readPaymentProofFile } from '../lib/payment-proof-storage.mjs'
 
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
+// timeout/maxNetworkRetries bound how long a Stripe call can block the request: the Stripe SDK default
+// (~80s) exceeds the Vercel function maxDuration (30s), so a slow Stripe response would run the whole
+// budget then 504. 8s + one retry fails fast and cheap instead of burning function time.
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY, { timeout: 8000, maxNetworkRetries: 1 }) : null
 
 function requireStripe() {
   if (!stripe) {
@@ -17,25 +21,24 @@ function requireStripe() {
   return stripe
 }
 
-// Mirrors the client-side gate in BookingDetailPage.tsx (`hasIdDocument =
-// Boolean(booking?.guest?.idDocumentRef)`) -- that gate only hid the payment buttons in the UI,
-// it was never actually checked here, so any authenticated guest could pay for a booking via a
-// direct API call without ever uploading an ID document. Only requires the document to have been
-// uploaded (idDocumentRef set), not yet reviewed/approved -- review happens asynchronously via the
-// admin queue, same as the client-side condition.
-function requireIdDocumentUploaded(user) {
-  if (!user.idDocumentRef) {
-    const error = new Error('Upload an ID document before paying for this booking.')
-    error.statusCode = 403
-    error.code = 'ID_VERIFICATION_REQUIRED'
-    error.expose = true
-    throw error
-  }
+// Guests are NO LONGER required to upload an ID document to book or pay — same as Airbnb/Booking,
+// which never ask a guest for identity documents to make a reservation. (Identity/ownership
+// verification still applies to HOSTS during listing, which is a separate flow.) Kept as a no-op so
+// existing call sites stay in place and the policy can be re-enabled centrally if ever needed.
+function requireIdDocumentUploaded(_user) {
+  // intentionally no-op: guest ID is not required to pay
 }
 
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+// A fractional RATE (e.g. taxRate 0.13) must NOT be rounded — metadataNumber would turn 0.13 into 0 and
+// silently drop the tax. Read it raw (finite, > 0).
+function metadataRate(metadata, key) {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
 }
 
 // Mirrors src/modules/bookings/guestFeeSummary.ts so the Stripe charge matches what the guest saw.
@@ -46,7 +49,12 @@ function expectedTotalMinor(booking) {
   const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
 
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
+  // Tax: a host-set rate (metadata.taxRate, e.g. 0.13 for 13%) applied to the stay total wins; else a
+  // legacy flat metadata.taxesMinor; else the platform STR_TAX_RATE. Must mirror finance-ledger.mjs.
+  const listingTaxRate = metadataRate(listingMetadata, 'taxRate')
+  const taxesMinor = listingTaxRate > 0
+    ? Math.round(stayAmountMinor * listingTaxRate)
+    : (metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0))
   const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
   const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
   const cancellationProtectionFeeMinor = cancellationProtectionPurchased
@@ -56,10 +64,18 @@ function expectedTotalMinor(booking) {
   return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
 }
 
-// SYP is not a Stripe-supported settlement currency, so test-mode charges run in STRIPE_CURRENCY
-// (USD by default) using a configurable placeholder rate. Swap SYP_PER_USD for a live FX feed
-// before this ever handles real money.
-function stripeChargeAmount(totalMinor) {
+// Convert a booking's SYBNB total into the Stripe charge (currency + unit_amount in the smallest unit).
+// CRITICAL — STR stays are USD-native: `totalMinor` is already in WHOLE USD units ($1 = 1). Those must
+// be charged as `totalMinor * 100` cents. The old code always ran the SYP→USD FX conversion, so a $1
+// stay became (1 / 15000) * 100 ≈ 0 → floored to Stripe's $0.50 minimum — i.e. every USD stay was
+// charged $0.50. Only a genuinely SYP-priced booking goes through the FX conversion.
+export function stripeChargeAmount(totalMinor, bookingCurrency) {
+  if (String(bookingCurrency || '').toUpperCase() === 'USD') {
+    // Whole USD units → cents. Stripe's minimum charge is 50 cents ($0.50).
+    return { currency: 'usd', unitAmount: Math.max(50, Math.round(totalMinor * 100)) }
+  }
+  // SYP is not a Stripe-supported settlement currency, so charges run in STRIPE_CURRENCY (USD by
+  // default) using a configurable placeholder rate. Swap SYP_PER_USD for a live FX feed for real money.
   const currency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
   if (currency === 'syp') return { currency, unitAmount: Math.max(100, Math.round(totalMinor)) }
   const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
@@ -67,9 +83,65 @@ function stripeChargeAmount(totalMinor) {
   return { currency, unitAmount }
 }
 
+export function isStripeConfigured() {
+  return Boolean(stripe)
+}
+
+// finalizeStripeSession stores the captured PaymentIntent as `stripe://payment_intents/<id>` on the
+// proof's proofAssetUrl. Pull the id back out so we can refund against it.
+export function extractStripePaymentIntentId(reference) {
+  const match = String(reference || '').match(/^stripe:\/\/payment_intents\/(.+)$/)
+  return match ? match[1] : null
+}
+
+// Smallest-unit amount to refund for a SYBNB amount. USD bookings are whole-USD units → *100. Unlike a
+// CHARGE, a refund has NO 50-cent floor — a partial refund of any positive amount is valid.
+export function stripeRefundCents(amountMinor, bookingCurrency) {
+  if (String(bookingCurrency || '').toUpperCase() === 'USD') return Math.max(0, Math.round(amountMinor * 100))
+  const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
+  return Math.max(0, Math.round((amountMinor / sypPerUsd) * 100))
+}
+
+// Issue a REAL card refund against the original PaymentIntent. Throws when Stripe isn't configured or the
+// intent is missing so the caller can fall back to an internal wallet credit (guest is always made whole).
+export async function createStripeCardRefund({ paymentIntentId, amountMinor, bookingCurrency }) {
+  if (!stripe) {
+    const error = new Error('Stripe is not configured.')
+    error.code = 'STRIPE_NOT_CONFIGURED'
+    throw error
+  }
+  if (!paymentIntentId) {
+    const error = new Error('No Stripe payment intent to refund.')
+    error.code = 'STRIPE_REFUND_NO_INTENT'
+    throw error
+  }
+  const amountCents = stripeRefundCents(amountMinor, bookingCurrency)
+  if (amountCents <= 0) return { refunded: false, amountCents: 0 }
+  // Deterministic idempotency key so a network timeout AFTER Stripe already committed the refund can't
+  // create a SECOND refund on retry (and can't trigger the caller's wallet-credit fallback on top of a
+  // real card refund). Each PaymentIntent is refunded at most once across every cancel/dispute path
+  // (the atomic booking status-claim guarantees single cancellation), so the amount is identical on any
+  // retry and Stripe safely returns the original refund object instead of erroring or double-charging us.
+  const refund = await stripe.refunds.create(
+    { payment_intent: paymentIntentId, amount: amountCents },
+    { idempotencyKey: `sybnb-refund:${paymentIntentId}:${amountCents}` },
+  )
+  return { refunded: true, refundId: refund.id, amountCents }
+}
+
 async function firstAdminId(tx) {
   const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
   return admin?.userId
+}
+
+async function requirePlatformUserId(tx) {
+  const platformUserId = await firstAdminId(tx)
+  if (platformUserId) return platformUserId
+  const error = new Error('Platform accounting account is not configured.')
+  error.statusCode = 503
+  error.code = 'PLATFORM_ACCOUNT_MISSING'
+  error.expose = true
+  throw error
 }
 
 // SR cashless card top-up (016): the 2.35% card fee is ADDED ON TOP, computed server-side (never client).
@@ -96,20 +168,20 @@ export async function creditWalletTopupSession(session) {
   if (!userId || !Number.isInteger(baseMinor) || baseMinor <= 0) return null
   const feeMinor = cardTopupFeeMinor(baseMinor)
   return db().$transaction(async (tx) => {
+    // Resolve before crediting the rider so the paid event remains retryable if accounting is not
+    // provisioned. This prevents a partial ledger where the base exists but platform fee does not.
+    const platformUserId = feeMinor > 0 ? await requirePlatformUserId(tx) : null
     const credit = await recordWalletEntry(tx, {
       userId, type: 'CREDIT', amountMinor: baseMinor, currency,
       referenceType: 'wallet_topup', referenceId: session.id, keyParts: ['wallet-topup-stripe', session.id],
       note: 'Card wallet top-up: base credit added after Stripe confirmed the charge was captured.',
     })
     if (feeMinor > 0) {
-      const platformUserId = await firstAdminId(tx)
-      if (platformUserId) {
-        await recordWalletEntry(tx, {
-          userId: platformUserId, type: 'CREDIT', amountMinor: feeMinor, currency,
-          referenceType: 'card_processing_fee', referenceId: session.id, keyParts: ['wallet-topup-stripe-fee', session.id],
-          note: 'SYBNB/platform collected the 2.35% card-processing fee on a wallet top-up.',
-        })
-      }
+      await recordWalletEntry(tx, {
+        userId: platformUserId, type: 'CREDIT', amountMinor: feeMinor, currency,
+        referenceType: 'card_processing_fee', referenceId: session.id, keyParts: ['wallet-topup-stripe-fee', session.id],
+        note: 'SYBNB/platform collected the 2.35% card-processing fee on a wallet top-up.',
+      })
     }
     return credit
   })
@@ -118,10 +190,13 @@ export async function creditWalletTopupSession(session) {
 export async function finalizeStripeSession(session) {
   // A wallet top-up is credited exclusively by creditWalletTopupSession() from the webhook — never here.
   if (session.metadata?.kind === 'wallet_topup') return null
+  // STR host listing-plan card payments finalize through their own path (isolated from bookings).
+  if (session.metadata?.purpose === 'str_host_plan') return finalizeStripeStrPlanSession(session)
   const bookingId = session.metadata?.bookingId
   if (!bookingId || session.payment_status !== 'paid') return null
 
   return db().$transaction(async (tx) => {
+    await lockPaymentReference(tx, 'stripe', session.id)
     const existingProof = await tx.paymentProof.findFirst({
       where: { provider: 'stripe', providerRef: session.id },
     })
@@ -130,8 +205,10 @@ export async function finalizeStripeSession(session) {
     const booking = await tx.booking.findUnique({ where: { id: bookingId } })
     if (!booking || booking.status !== 'PAYMENT_PENDING') return null
 
-    const created = await tx.paymentProof.create({
-      data: {
+    const checkoutPlaceholder = await tx.paymentProof.findFirst({
+      where: { bookingId: booking.id, provider: 'stripe_checkout', providerRef: session.id, status: 'PENDING_PROOF' },
+    })
+    const proofData = {
         bookingId: booking.id,
         userId: booking.guestId,
         provider: 'stripe',
@@ -140,7 +217,15 @@ export async function finalizeStripeSession(session) {
         currency: booking.currency,
         providerRef: session.id,
         proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
-      },
+    }
+    const created = checkoutPlaceholder
+      ? await tx.paymentProof.update({ where: { id: checkoutPlaceholder.id }, data: proofData })
+      : await tx.paymentProof.create({ data: proofData })
+
+    // Multiple checkout attempts are allowed, but once one payment succeeds no abandoned placeholder
+    // may remain attached to the now-paid booking.
+    await tx.paymentProof.deleteMany({
+      where: { bookingId: booking.id, provider: 'stripe_checkout', id: { not: created.id } },
     })
 
     const actorUserId = await firstAdminId(tx)
@@ -169,6 +254,65 @@ export async function finalizeStripeSession(session) {
           bookingId: approved.bookingId,
           stripeSessionId: session.id,
         },
+      },
+    })
+
+    return approved
+  })
+}
+
+// STR daily-stay host listing-plan prices (USD whole units). SERVER-SIDE source of truth — the Stripe
+// plan charge is keyed by planCode and NEVER taken from the client (S6). Mirrors the wizard's displayed
+// prices (HOST_LISTING_PLANS in src/modules/seller/SellerListingWizard.tsx). Isolated from the
+// marketplace SELLER_PLAN_PRICE_MINOR table used by /api/payments/seller-plan-proof.
+export const STR_HOST_PLAN_PRICE_MINOR = { basic: 9, plus: 19, premium: 49, hotel: 100 }
+
+// Finalize an STR host listing-plan CARD payment. Acts only on a captured ('paid') session whose
+// metadata.purpose is 'str_host_plan'. Idempotent on the Stripe session id, so a retried / out-of-order
+// webhook (or a confirm racing the webhook) records the plan fee exactly once. Revenue is booked by
+// approvePaymentProof's `str_host_plan` branch — 100% platform, and deliberately WITHOUT any
+// sellerProfile write, so it never unlocks marketplace/dealer selling the way `seller_plan` does.
+export async function finalizeStripeStrPlanSession(session) {
+  if (session.metadata?.purpose !== 'str_host_plan' || session.payment_status !== 'paid') return null
+  const userId = session.metadata?.userId
+  const planCode = session.metadata?.planCode
+  const amountMinor = Number(session.metadata?.planPriceUsdMinor)
+  if (!userId || !planCode || !Number.isFinite(amountMinor) || amountMinor <= 0) return null
+
+  return db().$transaction(async (tx) => {
+    await lockPaymentReference(tx, 'str_host_plan', session.id)
+    const existingProof = await tx.paymentProof.findFirst({
+      where: { provider: 'str_host_plan', providerRef: session.id },
+    })
+    if (existingProof) return existingProof
+
+    const created = await tx.paymentProof.create({
+      data: {
+        userId,
+        provider: 'str_host_plan',
+        status: 'PENDING_ADMIN_REVIEW',
+        amountMinor,
+        currency: 'USD',
+        providerRef: session.id,
+        proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
+      },
+    })
+
+    const actorUserId = await firstAdminId(tx)
+    const approved = await approvePaymentProof(tx, {
+      proofId: created.id,
+      actorUserId,
+      note: 'Auto-approved: Stripe confirmed the STR host plan fee was captured.',
+    })
+
+    await tx.adminAuditLog.create({
+      data: {
+        actorUserId: actorUserId || null,
+        action: 'STRIPE_STR_PLAN_AUTO_APPROVED',
+        entityType: 'payment_proofs',
+        entityId: approved.id,
+        before: { status: created.status, provider: created.provider, providerRef: created.providerRef },
+        after: { status: approved.status, provider: approved.provider, providerRef: approved.providerRef, planCode, stripeSessionId: session.id },
       },
     })
 
@@ -216,11 +360,14 @@ export async function handlePayments(req, res, url, context) {
     requireStripe()
 
     const totalMinor = expectedTotalMinor(booking)
-    const { currency, unitAmount } = stripeChargeAmount(totalMinor)
+    const { currency, unitAmount } = stripeChargeAmount(totalMinor, booking.currency)
     const listingTitle = booking.listing?.titleEn || booking.listing?.titleAr || 'SYBNB stay'
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      // Stripe's minimum custom expiry is 30 minutes. The booking reaper defaults to 60 minutes, so
+      // Checkout closes before its placeholder can be removed and a delayed webhook has a grace window.
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
       payment_method_types: ['card'],
       line_items: [
         {
@@ -239,6 +386,22 @@ export async function handlePayments(req, res, url, context) {
       },
       success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}#/booking/${booking.id}`,
       cancel_url: `${origin}/#/booking/${booking.id}`,
+    })
+
+    // Persist the open Checkout session before returning its URL. The reaper treats only this exact
+    // PENDING_PROOF/provider combination as an expirable hold; it never mistakes a submitted payment
+    // proof for an abandoned checkout.
+    await db().paymentProof.create({
+      data: {
+        bookingId: booking.id,
+        userId: booking.guestId,
+        provider: 'stripe_checkout',
+        status: 'PENDING_PROOF',
+        amountMinor: totalMinor,
+        currency: booking.currency,
+        providerRef: session.id,
+        adminNote: 'Open Stripe Checkout session; not yet paid.',
+      },
     })
 
     return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
@@ -287,6 +450,195 @@ export async function handlePayments(req, res, url, context) {
     return json(res, 200, { ok: true, proof })
   }
 
+  // STR host listing-plan CARD checkout (host pays the plan fee mid-wizard). Isolated from the
+  // marketplace /seller-plan-proof flow; charges the server-side price for the plan code in USD.
+  if (url.pathname === '/api/payments/stripe/create-str-plan-checkout-session') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    requireStripe()
+
+    const body = await readJson(req)
+    const planCode = body.planCode ? String(body.planCode).trim() : ''
+    const origin = String(body.origin || '').replace(/\/$/, '')
+    if (!origin) {
+      const error = new Error('origin is required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_SESSION_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    if (!Object.prototype.hasOwnProperty.call(STR_HOST_PLAN_PRICE_MINOR, planCode)) {
+      const error = new Error('A valid plan must be selected.')
+      error.statusCode = 400
+      error.code = 'PLAN_CODE_INVALID'
+      error.expose = true
+      throw error
+    }
+    // SECURITY (S6): amount is looked up by planCode server-side, never taken from the request.
+    const amountMinor = STR_HOST_PLAN_PRICE_MINOR[planCode]
+    if (amountMinor <= 0) {
+      const error = new Error('This plan has no card fee.')
+      error.statusCode = 400
+      error.code = 'PLAN_NOT_PAYABLE'
+      error.expose = true
+      throw error
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'usd', // STR host plans are priced in USD whole units — charge USD directly (not SYP).
+          unit_amount: amountMinor * 100,
+          product_data: { name: `SYBNB host plan (${planCode})` },
+        },
+        quantity: 1,
+      }],
+      metadata: {
+        purpose: 'str_host_plan',
+        userId: context.user.id,
+        planCode,
+        planPriceUsdMinor: String(amountMinor),
+      },
+      success_url: `${origin}/?str_plan_session_id={CHECKOUT_SESSION_ID}#/sell/listing-wizard`,
+      cancel_url: `${origin}/#/sell/listing-wizard`,
+    })
+
+    return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
+  }
+
+  if (url.pathname === '/api/payments/stripe/confirm-str-plan') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    requireStripe()
+
+    const body = await readJson(req)
+    const sessionId = String(body.sessionId || '')
+    if (!sessionId) {
+      const error = new Error('sessionId is required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_CONFIRM_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId)
+    if (session.metadata?.purpose !== 'str_host_plan' || session.metadata?.userId !== context.user.id) {
+      const error = new Error('This payment session does not belong to this account.')
+      error.statusCode = 403
+      error.code = 'STRIPE_SESSION_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+    if (session.payment_status !== 'paid') {
+      const error = new Error('This card payment has not been captured yet.')
+      error.statusCode = 409
+      error.code = 'STRIPE_PAYMENT_NOT_CAPTURED'
+      error.expose = true
+      throw error
+    }
+
+    const proof = await finalizeStripeStrPlanSession(session)
+    if (!proof) {
+      const error = new Error('Could not confirm this plan payment.')
+      error.statusCode = 409
+      error.code = 'STRIPE_CONFIRM_FAILED'
+      error.expose = true
+      throw error
+    }
+
+    return json(res, 200, { ok: true, proof, planCode: session.metadata?.planCode })
+  }
+
+  // Sham Cash STR host-plan payment proof: the host uploads a receipt of the manual transfer. UNLIKE
+  // the card path (auto-approved because Stripe already captured the charge), this creates a PENDING
+  // proof the admin verifies against the uploaded file, then approves — which records the plan revenue
+  // via the str_host_plan branch in approvePaymentProof (finance-ledger.mjs).
+  if (url.pathname === '/api/payments/str-plan-sham-proof') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+
+    const body = await readJson(req)
+    const planCode = body.planCode ? String(body.planCode).trim() : ''
+    const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+
+    if (!Object.prototype.hasOwnProperty.call(STR_HOST_PLAN_PRICE_MINOR, planCode)) {
+      const error = new Error('A valid plan must be selected.')
+      error.statusCode = 400
+      error.code = 'PLAN_CODE_INVALID'
+      error.expose = true
+      throw error
+    }
+    if (!providerRef) {
+      const error = new Error('Transaction reference is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_REFERENCE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (!fileBase64 || !mimeType) {
+      const error = new Error('A payment proof file is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_PROOF_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    // SECURITY (S6): amount is the server-table price for the plan code, never taken from the request.
+    const amountMinor = STR_HOST_PLAN_PRICE_MINOR[planCode]
+
+    const proof = await db().$transaction(async (tx) => {
+      await lockPaymentReference(tx, 'str_host_plan', providerRef)
+      const duplicate = await tx.paymentProof.findFirst({ where: { provider: 'str_host_plan', providerRef } })
+      if (duplicate) {
+        const error = new Error('This transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
+      const created = await tx.paymentProof.create({
+        data: {
+          userId: context.user.id,
+          provider: 'str_host_plan',
+          status: 'PENDING_ADMIN_REVIEW',
+          amountMinor,
+          currency: 'USD',
+          providerRef,
+        },
+      })
+      // Persist the receipt bytes in the DB (validated for type/size), then point proofAssetUrl at the
+      // admin-only file endpoint now that we have the proof id.
+      await savePaymentProofFile(tx, created.id, fileBase64, mimeType)
+      return tx.paymentProof.update({
+        where: { id: created.id },
+        data: { proofAssetUrl: `/api/payments/str-plan-sham-proof/${created.id}/file` },
+      })
+    })
+
+    return json(res, 201, { ok: true, proof })
+  }
+
+  // Admin-only: stream the stored receipt bytes for a plan-payment proof so an admin can verify it.
+  const strPlanProofFileMatch = url.pathname.match(/^\/api\/payments\/str-plan-sham-proof\/([^/]+)\/file$/)
+  if (strPlanProofFileMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN'])
+    const file = await readPaymentProofFile(strPlanProofFileMatch[1])
+    if (!file) {
+      const error = new Error('No payment proof file found.')
+      error.statusCode = 404
+      error.code = 'PAYMENT_PROOF_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    res.writeHead(200, { 'content-type': file.mimeType || 'application/octet-stream', 'cache-control': 'private, no-store' })
+    res.end(file.data)
+    return true
+  }
+
   if (url.pathname === '/api/payments/stripe/webhook') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireStripe()
@@ -318,7 +670,16 @@ export async function handlePayments(req, res, url, context) {
       if (completed.metadata?.kind === 'wallet_topup') {
         await creditWalletTopupSession(completed) // SR cashless (016): credit rider wallet only on verified paid
       } else {
-        await finalizeStripeSession(completed)
+        const finalized = await finalizeStripeSession(completed)
+        // Never acknowledge a captured booking payment that could not be recorded. A non-2xx response
+        // keeps the event in Stripe's retry queue for operational recovery instead of silently losing it.
+        if (completed.metadata?.bookingId && completed.payment_status === 'paid' && !finalized) {
+          const error = new Error('Captured Stripe booking payment could not be finalized; retry required.')
+          error.statusCode = 503
+          error.code = 'STRIPE_BOOKING_FINALIZE_RETRY'
+          error.expose = true
+          throw error
+        }
       }
     }
 
@@ -418,38 +779,49 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const duplicate = await db().paymentProof.findFirst({
-      where: { provider: 'seller_plan', providerRef },
-    })
-    if (duplicate) {
-      const error = new Error('This transaction reference was already submitted.')
-      error.statusCode = 409
-      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+    const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
+    const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+    if (amountMinor > 0 && (!fileBase64 || !mimeType)) {
+      const error = new Error('A real payment proof file is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_PROOF_REQUIRED'
       error.expose = true
       throw error
     }
 
-    const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
-    const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
-
-    const [proof] = await db().$transaction([
-      db().paymentProof.create({
+    const proof = await db().$transaction(async (tx) => {
+      await lockPaymentReference(tx, 'seller_plan', providerRef)
+      const duplicate = await tx.paymentProof.findFirst({ where: { provider: 'seller_plan', providerRef } })
+      if (duplicate) {
+        const error = new Error('This transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
+      const created = await tx.paymentProof.create({
         data: {
           userId: context.user.id,
           provider: 'seller_plan',
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
           currency: 'USD', // MKT-4: plan prices are a USD server table; never take the currency from the client
-          proofAssetUrl: body.proofAssetUrl || undefined,
           providerRef,
         },
-      }),
-      db().sellerProfile.upsert({
+      })
+      if (amountMinor > 0) {
+        await savePaymentProofFile(tx, created.id, fileBase64, mimeType)
+        await tx.paymentProof.update({ where: { id: created.id }, data: { proofAssetUrl: `/api/payments/str-plan-sham-proof/${created.id}/file` } })
+      }
+      await tx.sellerProfile.upsert({
         where: { userId: context.user.id },
         create: { userId: context.user.id, legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
         update: { legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
-      }),
-    ])
+      })
+      return tx.paymentProof.findUnique({ where: { id: created.id } })
+    })
 
     return json(res, 201, { ok: true, proof })
   }
@@ -519,23 +891,17 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const duplicate = await db().paymentProof.findFirst({
-      where: {
-        provider: 'syrian_local_wallet',
-        providerRef,
-      },
-    })
-
-    if (duplicate) {
-      const error = new Error('This wallet transaction reference was already submitted.')
-      error.statusCode = 409
-      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
-      error.expose = true
-      throw error
-    }
-
-    const proof = await db().paymentProof.create({
-      data: {
+    const proof = await db().$transaction(async (tx) => {
+      await lockPaymentReference(tx, 'syrian_local_wallet', providerRef)
+      const duplicate = await tx.paymentProof.findFirst({ where: { provider: 'syrian_local_wallet', providerRef } })
+      if (duplicate) {
+        const error = new Error('This wallet transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
+      return tx.paymentProof.create({ data: {
         bookingId: booking?.id || undefined,
         userId: context.user.id,
         provider: 'syrian_local_wallet',
@@ -544,7 +910,7 @@ export async function handlePayments(req, res, url, context) {
         currency: booking?.currency || body.currency || 'SYP',
         proofAssetUrl: body.proofAssetUrl || undefined,
         providerRef,
-      },
+      } })
     })
 
     return json(res, 201, { ok: true, proof })

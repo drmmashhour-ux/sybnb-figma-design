@@ -46,6 +46,8 @@ async function deliver({ to, subject, text }) {
   if (isResendConfigured()) {
     const response = await fetch(RESEND_API_URL, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000), // fail fast; a hung provider must not burn the 30s function budget
+
       headers: {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
@@ -99,6 +101,32 @@ export async function sendAuctionWonEmail(user, auction, listing) {
 // targets. Throws EMAIL_NOT_CONFIGURED (503) when neither provider is set up -- the caller
 // (email-verification.mjs) still creates and stores the real code either way, and surfaces a
 // dev-only fallback so local/QA testing keeps working without a real mailbox.
+// Security confirmation after a successful password change. Not a code — a heads-up so the account
+// owner knows it happened and can act if it wasn't them.
+export async function sendPasswordChangedEmail(email) {
+  const when = new Date().toISOString()
+  return deliver({
+    to: email,
+    subject: 'SYBNB — تم تحديث كلمة المرور / Your password was updated',
+    text:
+      `تم تحديث كلمة مرور حسابك في SYBNB.\n` +
+      `إذا كنت أنت من قام بذلك، فلا حاجة لأي إجراء.\n` +
+      `إذا لم تكن أنت، فأعد تعيين كلمة المرور فوراً وتواصل مع الدعم: info@sybnb.app\n\n` +
+      `Your SYBNB account password was just updated.\n` +
+      `If this was you, no action is needed.\n` +
+      `If this wasn't you, reset your password immediately and contact support: info@sybnb.app\n\n` +
+      `${when}`,
+  })
+}
+
+export async function sendDailyAdminReportEmail(email, reportText) {
+  return deliver({
+    to: email,
+    subject: `SYBNB daily executive report — ${new Date().toISOString().slice(0, 10)}`,
+    text: reportText,
+  })
+}
+
 export async function sendVerificationCodeEmail(email, code) {
   return deliver({
     to: email,

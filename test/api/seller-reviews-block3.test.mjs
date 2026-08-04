@@ -11,24 +11,24 @@ import {
 
 async function registerSeller(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role: 'SELLER', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant1 = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'SELLER', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
 
 async function registerHost(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role: 'HOST', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant2 = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant2, role: 'HOST', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
 
 async function registerBuyer(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email)
-  const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant3 = await verifyEmailForTest(app, email)
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant3, role: 'GUEST', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
@@ -40,7 +40,7 @@ async function makeListing(ownerId, division = 'CARS') {
 }
 
 async function confirmSale(app, sellerToken, listingId, buyerId) {
-  return request(app).post('/api/sellers/confirm-sale').set('Authorization', `Bearer ${sellerToken}`).send({ listingId, buyerId })
+  return request(app).post('/api/sellers/confirm-sale').set('Authorization', `Bearer ${sellerToken}`).send({ listingId, buyerId, evidenceRef: `test-sale-${listingId}-${buyerId}` })
 }
 
 describe('Seller trust Block 3: confirmed-sale reviews + verification badge', () => {
@@ -53,6 +53,24 @@ describe('Seller trust Block 3: confirmed-sale reviews + verification badge', ()
   })
 
   describe('seller confirms a sale (the review grant)', () => {
+    it('requires a sale evidence reference', async () => {
+      const seller = await registerSeller(app, 'cs-evidence-seller')
+      const buyer = await registerBuyer(app, 'cs-evidence-buyer')
+      const listing = await makeListing(seller.user.id, 'CARS')
+      const res = await request(app).post('/api/sellers/confirm-sale').set('Authorization', `Bearer ${seller.token}`).send({ listingId: listing.id, buyerId: buyer.user.id })
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('SALE_EVIDENCE_REQUIRED')
+    })
+
+    it('keeps inquiry-only property listings out of the unsupported close workflow', async () => {
+      const seller = await registerSeller(app, 'cs-settlement-seller')
+      const buyer = await registerBuyer(app, 'cs-settlement-buyer')
+      const listing = await makeListing(seller.user.id, 'BUY')
+      const res = await confirmSale(app, seller.token, listing.id, buyer.user.id)
+      expect(res.status).toBe(409)
+      expect(res.body.error.code).toBe('PROPERTY_CLOSE_NOT_AVAILABLE')
+    })
+
     it('the listing owner confirms a sale to a buyer', async () => {
       const seller = await registerSeller(app, 'cs-seller')
       const buyer = await registerBuyer(app, 'cs-buyer')
@@ -61,6 +79,8 @@ describe('Seller trust Block 3: confirmed-sale reviews + verification badge', ()
       expect(res.status).toBe(201)
       expect(res.body.sale.buyerId).toBe(buyer.user.id)
       expect(res.body.sale.sellerId).toBe(seller.user.id)
+      const audit = await db().adminAuditLog.findFirst({ where: { action: 'SELLER_SALE_CONFIRMED', entityId: res.body.sale.id } })
+      expect(audit?.after.evidenceRef).toBeTruthy()
     })
 
     it('is idempotent — confirming the same buyer twice returns the same sale', async () => {

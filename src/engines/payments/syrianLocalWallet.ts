@@ -39,11 +39,8 @@ const PHONE_PATTERN = /^\+?[0-9][0-9\s-]{7,18}$/
 const SAFE_TEXT_PATTERN = /^[\p{L}\p{N}\s._@+\-:/()]+$/u
 
 export const syrianLocalWalletRecipient = {
-  name: {
-    ar: 'ناظم كرمان',
-    en: 'Nazem Karman',
-    fr: 'Nazem Karman',
-  },
+  // Recipient personal name intentionally removed — only the QR and the account number identify the
+  // Sham Cash destination to payers (STR + SR both render this via SyrianLocalWalletPaymentPage).
   maskedAccount: '•••• 3188',
   currency: 'SYP',
 }

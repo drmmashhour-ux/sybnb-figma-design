@@ -19,8 +19,9 @@ only from the `DEMO_ACCOUNT_PASSWORD` env var.
 | Account | Email | Password | Notes |
 |---|---|---|---|
 | Customer | `demo-customer@sybnb.app` | value of `DEMO_ACCOUNT_PASSWORD` | Guest; logs in with email + password directly. |
-| Driver | `demo-driver@sybnb.app` | value of `DEMO_ACCOUNT_PASSWORD` | Road-ready (ID + licence + registration APPROVED). Staff sign-in requires the one-time access code sent to the account (dev/staging returns it as `devCode`). |
-| Host | `demo-host@sybnb.app` | value of `DEMO_ACCOUNT_PASSWORD` | Owns one APPROVED demo listing. Staff sign-in access code as above. |
+| Driver | `demo-driver@sybnb.app` | value of `DEMO_ACCOUNT_PASSWORD` | Road-ready (ID + licence + registration APPROVED). Staff sign-in requires the one-time access code sent by the configured provider. Only local development/tests may return `devCode`; hosted Preview never does. |
+| Host | `demo-host@sybnb.app` | value of `DEMO_ACCOUNT_PASSWORD` | Owns one APPROVED demo listing. Staff sign-in requires the provider-delivered access code. |
+| Preview QA | `qa@sybnb.app` | value of `DEMO_ACCOUNT_PASSWORD` | Preview-only convenience account with guest, host, driver and seller access; never admin. Password-only login requires `ALLOW_PREVIEW_DEMO_LOGIN=1` in Preview only. |
 
 Paste the customer credentials as the primary reviewer login. If the reviewer needs the driver/host side,
 include the note about the access code (and provide it, or point them at the code returned on sign-in in the

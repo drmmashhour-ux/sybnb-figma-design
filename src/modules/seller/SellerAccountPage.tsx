@@ -6,7 +6,11 @@ import {
   createSellerAccountSession,
   fetchSellerOverview,
   getStoredSellerSession,
+  sendEmailVerificationCode,
+  sendPhoneVerificationCode,
   submitSellerPlanProof,
+  verifyEmailVerificationCode,
+  verifyPhoneVerificationCode,
 } from '../../shared/api/platformApi'
 import { SELLER_PLANS, pickSellerRole } from './sellerData'
 import type { SellerPlanId } from './sellerData'
@@ -116,10 +120,6 @@ function createAdminFollowCode() {
   return `ADV-${suffix}`
 }
 
-function createMobileVerificationCode() {
-  return `${Math.floor(100000 + Math.random() * 900000)}`
-}
-
 function readStoredFollowCode() {
   const stored = window.sessionStorage.getItem(AD_FOLLOW_CODE_STORAGE_KEY)
   return stored || createAdminFollowCode()
@@ -148,10 +148,14 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
+  const [showPasswords, setShowPasswords] = useState(false)
+  const [verificationMethod, setVerificationMethod] = useState<'email' | 'phone'>('email')
   const [mobileCodeSent, setMobileCodeSent] = useState(false)
   const [sentMobileCode, setSentMobileCode] = useState('')
   const [mobileCode, setMobileCode] = useState('')
   const [mobileCodeConfirmed, setMobileCodeConfirmed] = useState(false)
+  const [verificationGrant, setVerificationGrant] = useState('')
+  const [mobileCodeStatus, setMobileCodeStatus] = useState<'idle' | 'sending' | 'verifying'>('idle')
   const [accountDocumentCount, setAccountDocumentCount] = useState(() => readStoredUploadedFiles().length)
   const [accountUploadedFiles, setAccountUploadedFiles] = useState<string[]>(() => readStoredUploadedFiles())
   const [accountFileReviewed, setAccountFileReviewed] = useState(false)
@@ -162,6 +166,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentProofAdded, setPaymentProofAdded] = useState(false)
   const [paymentProofFiles, setPaymentProofFiles] = useState<string[]>([])
+  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null)
   const [paymentAmountConfirmed, setPaymentAmountConfirmed] = useState(false)
   const [paymentStarted, setPaymentStarted] = useState(false)
   const [cardNumber, setCardNumber] = useState('')
@@ -178,6 +183,47 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [submitError, setSubmitError] = useState('')
   const [businessType, setBusinessType] = useState<AdvertisingBusinessTypeId>(() => pickAdvertisingBusinessType(window.localStorage.getItem(AD_BUSINESS_TYPE_STORAGE_KEY)).id)
+
+  async function sendMobileCode() {
+    setMobileCodeStatus('sending')
+    setSubmitState('idle')
+    setSubmitError('')
+    try {
+      const result = verificationMethod === 'email'
+        ? await sendEmailVerificationCode(email.trim(), 'staff-login')
+        : await sendPhoneVerificationCode(phone.trim(), 'staff-login')
+      setSentMobileCode(result.devCode || '')
+      setMobileCodeSent(true)
+      setMobileCode('')
+      setMobileCodeConfirmed(false)
+      setAccountSentToAdmin(false)
+    } catch (error) {
+      setSubmitState('error')
+      setSubmitError(error instanceof Error ? error.message : isAr ? 'تعذر إرسال رمز الهاتف.' : 'Could not send the mobile code.')
+    } finally {
+      setMobileCodeStatus('idle')
+    }
+  }
+
+  async function confirmMobileCode() {
+    setMobileCodeStatus('verifying')
+    setSubmitState('idle')
+    setSubmitError('')
+    try {
+      const result = verificationMethod === 'email'
+        ? await verifyEmailVerificationCode(email.trim(), mobileCode.trim(), 'staff-login')
+        : await verifyPhoneVerificationCode(phone.trim(), mobileCode.trim(), 'staff-login')
+      setVerificationGrant(result.verificationGrant)
+      setMobileCodeConfirmed(true)
+      setAccountSentToAdmin(false)
+    } catch (error) {
+      setMobileCodeConfirmed(false)
+      setSubmitState('error')
+      setSubmitError(error instanceof Error ? error.message : isAr ? 'رمز الهاتف غير صحيح أو منتهي.' : 'The mobile code is invalid or expired.')
+    } finally {
+      setMobileCodeStatus('idle')
+    }
+  }
   const visiblePlans = SELLER_PLANS
   const plan = visiblePlans.find((item) => item.id === selectedPlan) ?? visiblePlans[0]
   const selectedBusinessType = pickAdvertisingBusinessType(businessType)
@@ -209,7 +255,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
             password.length >= 8 &&
             password === repeatPassword,
         )
-      : Boolean(email.trim() && phone.trim() && password.length >= 8)
+      : Boolean((verificationMethod === 'email' ? email.trim() : phone.trim()) && password.length >= 8)
   // Every flow now requires a real, backend-approved plan/review proof before it counts as
   // ready — advertising and platform-sale used to skip this via client-only "admin lane" flags.
   const accountReadyForNext =
@@ -266,11 +312,13 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   }
 
   function addPaymentProofFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
+    const selected = Array.from(fileList || [])
+    const names = selected.map((file) => file.name).filter(Boolean)
     if (!names.length) return
 
     setPaymentProofFiles((current) => Array.from(new Set([...current, ...names])))
     setPaymentProofAdded(true)
+    setPaymentProofFile(selected[0] || null)
     setSubmitState('idle')
     setSubmitError('')
   }
@@ -298,6 +346,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
         planCode: plan.id,
         legalName: `${firstName.trim()} ${lastName.trim()}`.trim() || undefined,
         sellerType: role.id,
+        proofFile: paymentProofFile || undefined,
       })
       await refreshSellerPlanStatus()
       setPlanSubmitState('idle')
@@ -363,13 +412,14 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
     }
     void createSellerAccountSession({
       displayName: `${firstName.trim()} ${lastName.trim()}`.trim() || email.trim(),
-      email: email.trim(),
+      email: verificationMethod === 'email' ? email.trim() : '',
       password,
-      phone: phone.trim(),
+      phone: verificationMethod === 'phone' ? phone.trim() : '',
       sellerRole: role.id,
       planCode: isPlatformSaleFlow ? 'platform-sale' : isAdvertisingFlow ? 'advertising' : plan.id,
+      verificationGrant,
     }).then(() => refreshSellerPlanStatus())
-  }, [accountIdentityReady, mobileCodeConfirmed])
+  }, [accountIdentityReady, mobileCodeConfirmed, verificationMethod, verificationGrant])
 
   const submitAccount = async () => {
     const trimmedFirstName = firstName.trim()
@@ -446,11 +496,12 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
       window.localStorage.setItem(AD_PLAN_STORAGE_KEY, isPlatformSaleFlow ? 'platform-sale' : plan.id)
       await createSellerAccountSession({
         displayName: trimmedName || (isAr ? 'حساب بائع' : 'Seller account'),
-        email: trimmedEmail,
+        email: verificationMethod === 'email' ? trimmedEmail : '',
         password,
-        phone: trimmedPhone || undefined,
+        phone: verificationMethod === 'phone' ? trimmedPhone || undefined : undefined,
         sellerRole: role.id,
         planCode: isPlatformSaleFlow ? 'platform-sale' : plan.id,
+        verificationGrant,
       })
       navigate(isPlatformSaleFlow ? '/sell/submitted' : '/sell/listing-wizard')
     } catch (error) {
@@ -635,7 +686,15 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               <input
                 autoComplete="email"
                 dir="ltr"
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  setEmail(event.target.value)
+                  if (verificationMethod === 'email') {
+                    setMobileCodeSent(false)
+                    setSentMobileCode('')
+                    setMobileCode('')
+                    setMobileCodeConfirmed(false)
+                  }
+                }}
                 placeholder="seller@example.com"
                 type="email"
                 value={email}
@@ -666,7 +725,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   autoComplete={accountMode === 'signup' ? 'new-password' : 'current-password'}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder={accountMode === 'signup' ? (isAr ? 'إنشاء كلمة مرور' : 'Create password') : isAr ? 'كلمة مرور الحساب' : 'Account password'}
-                  type="password"
+                  type={showPasswords ? 'text' : 'password'}
                   value={password}
                 />
               </label>
@@ -677,20 +736,45 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                     autoComplete="new-password"
                     onChange={(event) => setRepeatPassword(event.target.value)}
                     placeholder={isAr ? 'أعد كتابة كلمة المرور' : 'Repeat password'}
-                    type="password"
+                    type={showPasswords ? 'text' : 'password'}
                     value={repeatPassword}
                   />
                 </label>
               )}
             </div>
+            <button className="seller-password-visibility" type="button" aria-pressed={showPasswords} onClick={() => setShowPasswords((visible) => !visible)}>
+              {showPasswords ? (isAr ? 'إخفاء كلمة المرور' : 'Hide password') : (isAr ? 'إظهار كلمة المرور' : 'Show password')}
+            </button>
             <div className="seller-verification-box">
+              <div className="seller-account-mode-switch" role="tablist" aria-label={isAr ? 'طريقة التحقق' : 'Verification method'}>
+                <button
+                  className={verificationMethod === 'email' ? 'active' : ''}
+                  type="button"
+                  onClick={() => {
+                    setVerificationMethod('email')
+                    setMobileCodeSent(false)
+                    setMobileCode('')
+                    setMobileCodeConfirmed(false)
+                  }}
+                >{isAr ? 'البريد الإلكتروني' : 'Email'}</button>
+                <button
+                  className={verificationMethod === 'phone' ? 'active' : ''}
+                  type="button"
+                  onClick={() => {
+                    setVerificationMethod('phone')
+                    setMobileCodeSent(false)
+                    setMobileCode('')
+                    setMobileCodeConfirmed(false)
+                  }}
+                >{isAr ? 'رقم الهاتف' : 'Phone'}</button>
+              </div>
               <div>
-                <strong>{isAr ? 'توثيق رقم الهاتف' : 'Mobile verification'}</strong>
+                <strong>{verificationMethod === 'email' ? (isAr ? 'توثيق البريد الإلكتروني' : 'Email verification') : (isAr ? 'توثيق رقم الهاتف' : 'Mobile verification')}</strong>
                 <span>
                   {mobileCodeSent
                     ? isAr
-                      ? `تم إرسال رمز التحقق إلى ${phone.trim()}. أدخل الرمز المستلم.`
-                      : `Verification code sent to ${phone.trim()}. Enter the received code.`
+                      ? `تم إرسال رمز التحقق. أدخل الرمز المستلم.`
+                      : `Verification code sent. Enter the received code.`
                     : isAr
                       ? 'أرسل رمز تحقق قبل إنشاء الحساب.'
                       : 'Send a verification code before creating the account.'}
@@ -703,50 +787,38 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               </div>
               <button
                 type="button"
-                disabled={!phone.trim()}
-                onClick={() => {
-                  setSentMobileCode(createMobileVerificationCode())
-                  setMobileCodeSent(true)
-                  setMobileCode('')
-                  setMobileCodeConfirmed(false)
-                  setAccountSentToAdmin(false)
-                  setSubmitState('idle')
-                  setSubmitError('')
-                }}
+                disabled={!(verificationMethod === 'email' ? email.trim() : phone.trim()) || mobileCodeStatus !== 'idle'}
+                onClick={() => void sendMobileCode()}
               >
-                {mobileCodeSent ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isAr ? 'إرسال الرمز' : 'Send code'}
+                {mobileCodeStatus === 'sending'
+                  ? isAr ? 'جارٍ الإرسال...' : 'Sending...'
+                  : mobileCodeSent ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isAr ? 'إرسال الرمز' : 'Send code'}
               </button>
-              <label>
+              {mobileCodeSent && <label>
                 <small>{isAr ? 'رمز التحقق' : 'Verification code'}</small>
                 <input
                   dir="ltr"
                   inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
                   onChange={(event) => {
-                    setMobileCode(event.target.value)
+                    setMobileCode(event.target.value.replace(/\D/g, ''))
                     setMobileCodeConfirmed(false)
                     setAccountSentToAdmin(false)
                   }}
                   placeholder="123456"
                   value={mobileCode}
                 />
-              </label>
-              <button
+              </label>}
+              {mobileCodeSent && <button
                 type="button"
-                disabled={!mobileCodeSent || mobileCode.trim().length !== 6}
-                onClick={() => {
-                  if (mobileCode.trim() !== sentMobileCode) {
-                    setSubmitState('error')
-                    setSubmitError(isAr ? 'رمز الهاتف غير صحيح. اكتب الرمز المرسل إلى رقم الهاتف.' : 'Incorrect mobile code. Enter the code sent to the phone number.')
-                    return
-                  }
-                  setSubmitState('idle')
-                  setSubmitError('')
-                  setMobileCodeConfirmed(true)
-                  setAccountSentToAdmin(false)
-                }}
+                disabled={!mobileCodeSent || mobileCode.trim().length !== 6 || mobileCodeStatus !== 'idle'}
+                onClick={() => void confirmMobileCode()}
               >
-                {mobileCodeConfirmed ? (isAr ? 'تم تأكيد الرمز' : 'Code confirmed') : isAr ? 'تأكيد الرمز' : 'Confirm code'}
-              </button>
+                {mobileCodeStatus === 'verifying'
+                  ? isAr ? 'جارٍ التحقق...' : 'Verifying...'
+                  : mobileCodeConfirmed ? (isAr ? 'تم تأكيد الرمز' : 'Code confirmed') : isAr ? 'تأكيد الرمز' : 'Confirm code'}
+              </button>}
             </div>
             <div className={`seller-account-file-box ${accountFileConfirmed ? 'confirmed' : ''}`}>
               <div>
@@ -976,6 +1048,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                       setPaymentReference('')
                       setPaymentProofAdded(false)
                       setPaymentProofFiles([])
+                      setPaymentProofFile(null)
                       setPaymentAmountConfirmed(false)
                       setPaymentStarted(false)
                       setCardNumber('')

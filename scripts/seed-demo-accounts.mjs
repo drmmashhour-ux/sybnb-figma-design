@@ -9,8 +9,9 @@ import { hashPassword } from '../server/lib/security.mjs'
 export const DEMO_CUSTOMER_EMAIL = 'demo-customer@sybnb.app'
 export const DEMO_DRIVER_EMAIL = 'demo-driver@sybnb.app'
 export const DEMO_HOST_EMAIL = 'demo-host@sybnb.app'
+export const DEMO_QA_EMAIL = 'qa@sybnb.app'
 
-async function upsertDemoUser({ email, displayName, referralCode, roles, passwordHash }) {
+async function upsertDemoUser({ email, displayName, referralCode, roles, passwordHash, partnerType = null }) {
   const existing = await db().user.findUnique({ where: { email }, include: { roles: true } })
   if (existing) {
     // Re-run: refresh password + verification, guarantee exactly the intended (non-admin) roles.
@@ -22,6 +23,7 @@ async function upsertDemoUser({ email, displayName, referralCode, roles, passwor
         passwordHash,
         status: 'ACTIVE',
         isDemo: true,
+        partnerType,
         idDocumentStatus: 'APPROVED',
         idDocumentSubmittedAt: new Date(),
         roles: { create: roles.map((role) => ({ role })) },
@@ -37,6 +39,7 @@ async function upsertDemoUser({ email, displayName, referralCode, roles, passwor
       referralCode,
       status: 'ACTIVE',
       isDemo: true,
+      partnerType,
       idDocumentStatus: 'APPROVED',
       idDocumentSubmittedAt: new Date(),
       roles: { create: roles.map((role) => ({ role })) },
@@ -83,7 +86,42 @@ export async function seedDemoAccounts({ password }) {
     })
   }
 
-  return { customerId: customer.id, driverId: driver.id, hostId: host.id }
+  // One Preview-only convenience identity for broad manual QA. It deliberately has no ADMIN role;
+  // the role-specific accounts above remain the source of truth for authorization testing.
+  const qa = await upsertDemoUser({
+    email: DEMO_QA_EMAIL,
+    displayName: 'SYBNB QA',
+    referralCode: 'SYBNBQA01',
+    roles: ['GUEST', 'HOST', 'DRIVER'],
+    passwordHash,
+    partnerType: 'SELLER',
+  })
+  await db().driverProfile.upsert({
+    where: { userId: qa.id },
+    create: { userId: qa.id, active: true, vehicleMake: 'Toyota', vehicleModel: 'Corolla', vehiclePlate: 'QA-001' },
+    update: { active: true },
+  })
+  for (const type of ['LICENSE', 'VEHICLE_REGISTRATION']) {
+    await db().driverDocument.upsert({
+      where: { driverUserId_type: { driverUserId: qa.id, type } },
+      create: { driverUserId: qa.id, type, assetUrl: `qa-${type}.pdf`, status: 'APPROVED' },
+      update: { status: 'APPROVED' },
+    })
+  }
+  const qaVehicle = await db().driverVehicle.findFirst({ where: { driverId: qa.id, plate: 'QA-001' } })
+  if (!qaVehicle) {
+    await db().driverVehicle.create({
+      data: { driverId: qa.id, make: 'Toyota', model: 'Corolla', year: 2022, plate: 'QA-001', color: 'White', category: 'SR Economy', status: 'APPROVED' },
+    })
+  }
+  const qaListing = await db().listing.findFirst({ where: { ownerId: qa.id } })
+  if (!qaListing) {
+    await db().listing.create({
+      data: { ownerId: qa.id, division: 'STAYS', status: 'APPROVED', titleAr: 'إقامة اختبار SYBNB', titleEn: 'SYBNB QA Stay', description: 'Preview-only QA listing.', priceMinor: 40, currency: 'USD', instantBookEnabled: true },
+    })
+  }
+
+  return { customerId: customer.id, driverId: driver.id, hostId: host.id, qaId: qa.id }
 }
 
 // CLI entrypoint: `DEMO_ACCOUNT_PASSWORD=... node scripts/seed-demo-accounts.mjs`
@@ -94,6 +132,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(`  customer: ${DEMO_CUSTOMER_EMAIL}`)
       console.log(`  driver:   ${DEMO_DRIVER_EMAIL}`)
       console.log(`  host:     ${DEMO_HOST_EMAIL}`)
+      console.log(`  qa:       ${DEMO_QA_EMAIL}`)
       process.exit(0)
     })
     .catch((err) => {

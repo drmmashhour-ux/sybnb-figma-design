@@ -1,0 +1,206 @@
+/* =====================================================================
+   SYBNB Admin Console — design system (from the approved Figma prototype)
+   Teal-primary / gold-accent, dark canvas, RTL-first. Self-hosted fonts.
+   EVERYTHING is scoped under `.sybnb-admin` so it never leaks into the
+   guest app. Font files live in /public/fonts (served at /fonts/*).
+   ===================================================================== */
+
+/* ---- self-hosted fonts (variable, wght axis) ---- */
+@font-face {
+  font-family: 'Cairo'; font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url('/fonts/cairo-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+200C-200E, U+2010-2011, U+FB50-FDFF, U+FE70-FEFC;
+}
+@font-face {
+  font-family: 'Cairo'; font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url('/fonts/cairo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2122, U+2212;
+}
+@font-face {
+  font-family: 'Cairo'; font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url('/fonts/cairo-latinext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+1E00-1E9F, U+2020, U+20A0-20AB, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'InterAdmin'; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: url('/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2122, U+2212;
+}
+@font-face {
+  font-family: 'InterAdmin'; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: url('/fonts/inter-latinext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+1E00-1E9F, U+2020, U+20A0-20AB, U+2C60-2C7F, U+A720-A7FF;
+}
+
+.sybnb-admin {
+  --canvas: #0b0d10; --surface: #12151a; --surface-2: #171b22; --border: #242a33;
+  --teal: #2dd4bf; --gold: #d4af6a; --green: #29d39b; --blue: #5b8cff;
+  --red: #ff5c7a; --text: #f5f7fb; --muted: #9aa6ba; --radius: 14px;
+  position: relative;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: 'Cairo', 'InterAdmin', sans-serif;
+  background: linear-gradient(135deg, #0b0d10 0%, #0d1116 55%, #0b0d10 100%);
+  overflow-x: hidden;
+}
+.sybnb-admin *,
+.sybnb-admin *::before,
+.sybnb-admin *::after { box-sizing: border-box; }
+.sybnb-admin button, .sybnb-admin input, .sybnb-admin select { font: inherit; }
+.sybnb-admin button, .sybnb-admin a { transition: .2s ease; }
+.sybnb-admin h1, .sybnb-admin h2 { margin: 0; }
+
+/* ---- ambient glow ---- */
+.sybnb-admin .ambient { position: fixed; width: 420px; height: 420px; border-radius: 50%; filter: blur(120px); opacity: .08; pointer-events: none; z-index: 0; }
+.sybnb-admin .ambient-one { background: var(--teal); top: -170px; inset-inline-end: 18%; }
+.sybnb-admin .ambient-two { background: var(--gold); bottom: -250px; inset-inline-start: 15%; }
+
+/* ---- topbar ---- */
+.sybnb-admin .topbar { height: 76px; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 0 34px; border-bottom: 1px solid var(--border); background: rgba(11,13,16,.86); backdrop-filter: blur(18px); }
+.sybnb-admin .brand { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; direction: ltr; background: transparent; border: 0; cursor: pointer; }
+.sybnb-admin .brand-mark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; background: linear-gradient(135deg, var(--teal), #168f84); color: #08110f; font: 900 22px 'InterAdmin'; box-shadow: 0 0 30px rgba(45,212,191,.2); }
+.sybnb-admin .brand strong { display: block; letter-spacing: .18em; font: 800 17px 'InterAdmin'; }
+.sybnb-admin .brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+.sybnb-admin .top-actions { display: flex; align-items: center; gap: 10px; }
+.sybnb-admin .environment { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 7px 11px; }
+.sybnb-admin .environment i, .sybnb-admin .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); flex: 0 0 auto; }
+.sybnb-admin .language, .sybnb-admin .icon-button { height: 38px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 10px; cursor: pointer; }
+.sybnb-admin .language { padding: 0 13px; color: var(--gold); font: 800 12px 'InterAdmin'; }
+.sybnb-admin .icon-button { width: 38px; position: relative; }
+.sybnb-admin .notification-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--red); top: 7px; inset-inline-end: 7px; }
+.sybnb-admin .avatar { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: linear-gradient(135deg, #3b4758, #20252d); border: 1px solid #566173; font: 700 11px 'InterAdmin'; }
+
+/* ---- layout + sidebar ---- */
+.sybnb-admin .layout { display: grid; grid-template-columns: 250px 1fr; min-height: calc(100vh - 76px); position: relative; z-index: 1; }
+.sybnb-admin .sidebar { position: sticky; top: 76px; height: calc(100vh - 76px); overflow-y: auto; padding: 22px 14px 30px; border-inline-end: 1px solid var(--border); background: rgba(12,15,19,.58); }
+.sybnb-admin .eyebrow { margin: 0 10px 12px; color: #707d90; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.sybnb-admin .sidebar-title { color: var(--gold); font-size: 11px; }
+.sybnb-admin .sidebar-groups { display: grid; gap: 24px; }
+.sybnb-admin .nav-group { min-width: 0; }
+.sybnb-admin .nav-group .eyebrow { margin-bottom: 8px; letter-spacing: .08em; }
+.sybnb-admin nav { display: grid; gap: 5px; }
+.sybnb-admin nav a { display: grid; grid-template-columns: 25px 1fr auto; align-items: center; gap: 9px; padding: 11px 13px; border: 1px solid transparent; border-radius: 12px; color: var(--muted); text-decoration: none; font-size: 13px; cursor: pointer; }
+.sybnb-admin nav a:hover { color: var(--text); background: var(--surface); }
+.sybnb-admin nav a.active { color: #08110f; background: linear-gradient(135deg, var(--gold), #be9350); font-weight: 800; box-shadow: 0 10px 30px rgba(212,175,106,.13); }
+.sybnb-admin nav a b { font-weight: 600; }
+.sybnb-admin nav a em { min-width: 21px; padding: 2px 6px; text-align: center; border-radius: 999px; background: rgba(255,255,255,.09); font: 700 10px 'InterAdmin'; font-style: normal; }
+.sybnb-admin .sidebar-status { display: flex; align-items: center; gap: 11px; margin-top: 28px; padding: 13px; border: 1px solid rgba(41,211,155,.2); border-radius: 12px; background: rgba(41,211,155,.05); }
+.sybnb-admin .status-icon { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 8px; background: rgba(41,211,155,.16); color: var(--green); }
+.sybnb-admin .sidebar-status strong, .sybnb-admin .sidebar-status small { display: block; }
+.sybnb-admin .sidebar-status strong { font-size: 11px; }
+.sybnb-admin .sidebar-status small { color: var(--muted); font-size: 9px; }
+
+/* ---- main + hero ---- */
+.sybnb-admin main { width: 100%; max-width: 1420px; margin: 0 auto; padding: 42px 46px 70px; }
+.sybnb-admin .hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 30px; }
+.sybnb-admin .hero .eyebrow { margin: 0 0 10px; display: flex; align-items: center; gap: 8px; color: var(--teal); }
+.sybnb-admin h1 { font-size: 32px; line-height: 1.25; margin: 0 0 8px; font-weight: 800; }
+.sybnb-admin .hero p { margin: 0; color: var(--muted); font-size: 14px; }
+.sybnb-admin .hero-actions { display: flex; gap: 10px; }
+
+/* ---- buttons ---- */
+.sybnb-admin .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 17px; border-radius: 11px; border: 1px solid var(--border); cursor: pointer; font-weight: 700; font-size: 12px; color: var(--text); background: transparent; }
+.sybnb-admin .button:hover { transform: translateY(-1px); }
+.sybnb-admin .button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.sybnb-admin .button.primary { border-color: var(--teal); background: var(--teal); color: #07110f; }
+.sybnb-admin .button.ghost { background: var(--surface); color: var(--text); }
+.sybnb-admin .button.danger { color: var(--red); background: rgba(255,92,122,.08); border-color: rgba(255,92,122,.24); }
+.sybnb-admin .button.small { min-height: 32px; padding: 0 12px; font-size: 11px; }
+
+/* ---- metrics ---- */
+.sybnb-admin .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.sybnb-admin .metric { position: relative; overflow: hidden; padding: 19px 19px 17px; background: linear-gradient(145deg, var(--surface), #0f1216); border: 1px solid var(--border); border-radius: var(--radius); }
+.sybnb-admin .metric::before { content: ""; position: absolute; inset-inline-start: 0; top: 0; width: 3px; height: 100%; background: var(--tone, var(--blue)); }
+.sybnb-admin .metric-label { color: var(--muted); font-size: 11px; font-weight: 700; }
+.sybnb-admin .metric-value { display: block; margin: 8px 0 3px; color: var(--tone, var(--blue)); font: 900 27px 'InterAdmin'; direction: ltr; text-align: start; }
+.sybnb-admin .metric small { color: #717d8e; font-size: 10px; }
+.sybnb-admin .metric.clickable { cursor: pointer; }
+.sybnb-admin .metric.clickable:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--tone, var(--teal)) 55%, var(--border)); }
+.sybnb-admin .metric.clickable:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.sybnb-admin .metric-go { position: absolute; top: 16px; inset-inline-end: 16px; color: var(--muted); font-size: 15px; opacity: 0; transform: translateX(-4px); transition: .18s ease; }
+.sybnb-admin [dir="rtl"] .metric-go, .sybnb-admin .metric-go { }
+.sybnb-admin .metric.clickable:hover .metric-go { opacity: .8; transform: translateX(0); }
+
+/* ---- cards + rows ---- */
+.sybnb-admin .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.sybnb-admin .grid.one-three { grid-template-columns: minmax(300px, .82fr) minmax(0, 1.5fr); }
+.sybnb-admin .card { background: linear-gradient(145deg, rgba(18,21,26,.98), rgba(14,17,21,.98)); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.sybnb-admin .card-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.sybnb-admin .card-header h2 { font-size: 15px; margin: 0; }
+.sybnb-admin .card-header p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.sybnb-admin .count { padding: 4px 8px; border-radius: 999px; background: rgba(212,175,106,.12); color: var(--gold); font: 800 10px 'InterAdmin'; }
+.sybnb-admin .rows { padding: 4px 0; }
+.sybnb-admin .row { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 14px 20px; border-bottom: 1px solid rgba(36,42,51,.65); }
+.sybnb-admin .row:last-child { border-bottom: 0; }
+.sybnb-admin .row:hover { background: rgba(255,255,255,.015); }
+.sybnb-admin .identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.sybnb-admin .mini-avatar { flex: 0 0 34px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; color: var(--teal); background: rgba(45,212,191,.1); font: 800 10px 'InterAdmin'; }
+.sybnb-admin .identity strong, .sybnb-admin .identity small { display: block; }
+.sybnb-admin .identity strong { font-size: 12px; }
+.sybnb-admin .identity small { max-width: 270px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px 'InterAdmin'; direction: ltr; text-align: start; }
+.sybnb-admin .row-meta { display: flex; align-items: center; gap: 9px; }
+
+/* ---- pills / money ---- */
+.sybnb-admin .pill { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 999px; font-size: 9px; font-weight: 800; white-space: nowrap; }
+.sybnb-admin .pill.green { color: var(--green); background: rgba(41,211,155,.1); }
+.sybnb-admin .pill.gold { color: var(--gold); background: rgba(212,175,106,.1); }
+.sybnb-admin .pill.red { color: var(--red); background: rgba(255,92,122,.1); }
+.sybnb-admin .pill.blue { color: #8badff; background: rgba(91,140,255,.1); }
+.sybnb-admin .pill.grey { color: var(--muted); background: rgba(154,166,186,.08); }
+.sybnb-admin .card-footer { padding: 13px 20px; border-top: 1px solid var(--border); color: var(--teal); font-size: 11px; font-weight: 700; background: transparent; border-inline: 0; border-bottom: 0; width: 100%; text-align: start; cursor: pointer; }
+.sybnb-admin .card-footer:hover { background: rgba(45,212,191,.06); }
+.sybnb-admin .card-footer-note { padding: 13px 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; font-weight: 600; }
+.sybnb-admin .money, .sybnb-admin .mono { font-family: 'InterAdmin'; direction: ltr; unicode-bidi: isolate; }
+.sybnb-admin .money { font-weight: 800; }
+
+/* ---- toolbar / forms ---- */
+.sybnb-admin .toolbar { display: flex; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.sybnb-admin .search, .sybnb-admin input, .sybnb-admin select { height: 39px; border: 1px solid var(--border); border-radius: 10px; background: #0d1014; color: var(--text); padding: 0 12px; font-size: 11px; outline: none; }
+.sybnb-admin .search { flex: 1; }
+.sybnb-admin .search:focus, .sybnb-admin input:focus, .sybnb-admin select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(45,212,191,.08); }
+.sybnb-admin .form { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; padding: 20px; }
+.sybnb-admin .field { display: grid; gap: 7px; }
+.sybnb-admin .field.full { grid-column: 1 / -1; }
+.sybnb-admin .field label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.sybnb-admin .note { padding: 13px; border-radius: 10px; border: 1px solid rgba(212,175,106,.2); background: rgba(212,175,106,.06); color: #c5b38d; font-size: 10px; }
+
+/* ---- operations: signal bar + command bar ---- */
+.sybnb-admin .signal-bar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+.sybnb-admin .signal { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--muted); font-size: 11px; }
+.sybnb-admin .signal b { color: var(--text); font: 800 15px 'InterAdmin'; }
+.sybnb-admin .command-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px; margin: 18px 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* ---- empty + toast ---- */
+.sybnb-admin .empty { display: grid; place-items: center; min-height: 220px; color: var(--muted); text-align: center; padding: 24px; }
+.sybnb-admin .empty span { display: block; margin: 0 auto 12px; width: 44px; height: 44px; line-height: 44px; border-radius: 12px; background: var(--surface-2); color: var(--teal); }
+.sybnb-admin .toast { position: fixed; bottom: 26px; left: 50%; z-index: 50; transform: translate(-50%, 20px); padding: 12px 18px; border: 1px solid rgba(45,212,191,.28); border-radius: 11px; background: #111920; color: var(--text); box-shadow: 0 15px 50px rgba(0,0,0,.45); font-size: 12px; opacity: 0; pointer-events: none; }
+.sybnb-admin .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.sybnb-admin .alert { margin-bottom: 18px; padding: 14px 18px; border: 1px solid rgba(255,92,122,.3); border-radius: 12px; background: rgba(255,92,122,.06); color: #ffb3c0; font-size: 13px; }
+
+/* ---- responsive ---- */
+@media (max-width: 1000px) {
+  .sybnb-admin .layout { grid-template-columns: 210px 1fr; }
+  .sybnb-admin .sidebar { padding-inline: 10px; }
+  .sybnb-admin .grid, .sybnb-admin .grid.one-three { grid-template-columns: 1fr; }
+  .sybnb-admin main { padding-inline: 25px; }
+}
+@media (max-width: 760px) {
+  .sybnb-admin .topbar { padding: 0 15px; }
+  .sybnb-admin .environment { display: none; }
+  .sybnb-admin .layout { display: block; }
+  .sybnb-admin .sidebar { position: sticky; top: 76px; width: 100%; height: auto; z-index: 15; display: flex; overflow: auto; padding: 8px; background: #0d1014; border-bottom: 1px solid var(--border); }
+  .sybnb-admin .sidebar .eyebrow, .sybnb-admin .sidebar-status { display: none; }
+  .sybnb-admin .sidebar-groups { display: flex; gap: 8px; }
+  .sybnb-admin .nav-group { display: contents; }
+  .sybnb-admin .sidebar nav { display: flex; gap: 5px; }
+  .sybnb-admin .sidebar nav a { min-width: 140px; grid-template-columns: 25px 1fr auto; }
+  .sybnb-admin .hero { align-items: flex-start; flex-direction: column; }
+  .sybnb-admin .hero-actions { width: 100%; }
+  .sybnb-admin .hero-actions .button { flex: 1; }
+  .sybnb-admin main { padding: 28px 16px; }
+  .sybnb-admin .metrics { grid-template-columns: repeat(2, 1fr); }
+  .sybnb-admin .signal-bar { grid-template-columns: 1fr; }
+  .sybnb-admin .toolbar { flex-direction: column; }
+  .sybnb-admin .form { grid-template-columns: 1fr; }
+  .sybnb-admin .field.full { grid-column: auto; }
+}

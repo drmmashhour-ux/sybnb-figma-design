@@ -23,27 +23,44 @@ export async function handleSellers(req, res, url, context) {
     const body = await readJson(req)
     const listingId = String(body.listingId || '')
     const buyerId = String(body.buyerId || '')
+    const evidenceRef = typeof body.evidenceRef === 'string' ? body.evidenceRef.trim().slice(0, 200) : ''
     if (!UUID_RE.test(listingId) || !UUID_RE.test(buyerId)) {
       fail('A valid listingId and buyerId are required.', 400, 'SALE_INPUT_INVALID')
     }
     if (buyerId === context.user.id) {
       fail('You cannot confirm a sale to yourself.', 400, 'SALE_SELF_FORBIDDEN')
     }
-    const listing = await db().listing.findFirst({ where: { id: listingId, ownerId: context.user.id }, select: { id: true, division: true } })
+    if (!evidenceRef) fail('A sale evidence reference is required.', 400, 'SALE_EVIDENCE_REQUIRED')
+    const listing = await db().listing.findFirst({ where: { id: listingId, ownerId: context.user.id }, select: { id: true, division: true, status: true } })
     if (!listing) fail('Listing not found for this account.', 404, 'LISTING_NOT_FOUND')
     // STAYS uses stay reviews (off a completed Booking) — seller sale confirmations are for the
     // contact-based marketplace/property/car divisions only.
     if (listing.division === 'STAYS') {
       fail('STAYS listings use stay reviews, not seller sale confirmations.', 400, 'SALE_DIVISION_UNSUPPORTED')
     }
+    // RENTALS/BUY launch as inquiry/document-exchange products. On-platform closing and settlement are
+    // intentionally unavailable until the commission contract, payment evidence, and ledger are built.
+    if (listing.division === 'RENTALS' || listing.division === 'BUY') {
+      fail('On-platform property closing is not available. Continue through the listing inquiry and document-review flow.', 409, 'PROPERTY_CLOSE_NOT_AVAILABLE')
+    }
+    if (listing.status !== 'APPROVED') fail('Only a live approved listing can be confirmed sold.', 409, 'SALE_LISTING_NOT_LIVE')
     const buyer = await db().user.findUnique({ where: { id: buyerId }, select: { id: true } })
     if (!buyer) fail('Buyer not found.', 404, 'BUYER_NOT_FOUND')
 
     // Idempotent per (listing, buyer): a repeat confirm returns the existing sale, never stacks grants.
-    const sale = await db().sellerSale.upsert({
-      where: { listingId_buyerId: { listingId, buyerId } },
-      create: { listingId, sellerId: context.user.id, buyerId },
-      update: {},
+    const sale = await db().$transaction(async (tx) => {
+      const created = await tx.sellerSale.upsert({
+        where: { listingId_buyerId: { listingId, buyerId } },
+        create: { listingId, sellerId: context.user.id, buyerId },
+        update: {},
+      })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id, action: 'SELLER_SALE_CONFIRMED', entityType: 'seller_sales', entityId: created.id,
+          after: { listingId, buyerId, evidenceRef, settlement: 'OFF_PLATFORM', commissionCollected: false },
+        },
+      })
+      return created
     })
     return json(res, 201, { ok: true, sale })
   }

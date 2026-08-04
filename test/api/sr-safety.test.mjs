@@ -16,9 +16,10 @@ const DAMASCUS = { lat: 33.5169, lng: 36.287 }
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant, role, email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
@@ -113,7 +114,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
     expect(res.body.sosEvent.status).toBe('OPEN')
     expect(res.body.sosEvent.raisedByRole).toBe('RIDER')
     const listed = await request(app).get('/api/admin/sos').set('Authorization', `Bearer ${adminBearer}`)
-    expect(listed.status).toBe(200)
+    expect(listed.status, JSON.stringify(listed.body)).toBe(200)
     expect(listed.body.sos.some((e) => e.id === res.body.sosEvent.id)).toBe(true)
   })
 
@@ -241,5 +242,74 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
   it('an unknown share token is 404', async () => {
     const res = await request(app).get('/api/sr/rides/shared/not-a-real-token')
     expect(res.status).toBe(404)
+  })
+
+  it('the rider can revoke a share link — the token stops resolving (404)', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'share-revoke')
+    await claim(app, driver.token, ride.id)
+    const share = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    const token = share.body.share.token
+    expect((await request(app).get(`/api/sr/rides/shared/${token}`)).status).toBe(200)
+
+    const revoke = await request(app).delete(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    expect(revoke.status).toBe(200)
+    expect(revoke.body.revoked).toBe(true)
+    // the old link no longer resolves
+    expect((await request(app).get(`/api/sr/rides/shared/${token}`)).status).toBe(404)
+  })
+
+  it('a non-rider cannot revoke a share link (403)', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'share-revoke-forbidden')
+    await claim(app, driver.token, ride.id)
+    await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    const res = await request(app).delete(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${driver.token}`)
+    expect(res.status).toBe(403)
+  })
+
+  it('the rider gets a PII-safe driver card once assigned — first name, car, rating; NO contact PII', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'driver-card')
+    await db().user.update({ where: { id: driver.user.id }, data: { displayName: 'Kareem Al-Halabi' } })
+    await db().driverVehicle.create({
+      data: { driverId: driver.user.id, make: 'Toyota', model: 'Corolla', year: 2019, plate: 'DAM-4412', color: 'Silver', category: 'SR Economy', status: 'APPROVED' },
+    })
+    await claim(app, driver.token, ride.id)
+
+    const res = await request(app).get(`/api/sr/rides/${ride.id}/driver`).set('Authorization', `Bearer ${rider.token}`)
+    expect(res.status).toBe(200)
+    expect(res.body.driver.firstName).toBe('Kareem') // first name only, never the full legal identity
+    expect(res.body.driver.vehicle.plate).toBe('DAM-4412')
+    expect(res.body.driver.vehicle.make).toBe('Toyota')
+    expect(res.body.driver.rating).toHaveProperty('average')
+    // no contact PII anywhere in the payload
+    const blob = JSON.stringify(res.body)
+    expect(blob).not.toContain('@')
+    expect(blob).not.toMatch(/email|phone|Al-Halabi|driverId|"id"/)
+  })
+
+  it('the driver card is null before a driver is assigned, and a non-party is 403', async () => {
+    const { rider, ride } = await setupRide(app, 'driver-card-unassigned')
+    const unassigned = await request(app).get(`/api/sr/rides/${ride.id}/driver`).set('Authorization', `Bearer ${rider.token}`)
+    expect(unassigned.status).toBe(200)
+    expect(unassigned.body.driver).toBeNull()
+
+    const stranger = await registerUser(app, 'GUEST', 'driver-card-stranger')
+    const forbidden = await request(app).get(`/api/sr/rides/${ride.id}/driver`).set('Authorization', `Bearer ${stranger.token}`)
+    expect(forbidden.status).toBe(403)
+  })
+
+  it('a share link past its TTL stops resolving (410 SHARE_EXPIRED)', async () => {
+    const { rider, driver, ride } = await setupRide(app, 'share-ttl')
+    await claim(app, driver.token, ride.id)
+    const share = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    const token = share.body.share.token
+    // Age the token past the 12h TTL.
+    await db().rideRequest.update({ where: { id: ride.id }, data: { shareTokenCreatedAt: new Date(Date.now() - 13 * 3600_000) } })
+    const watch = await request(app).get(`/api/sr/rides/shared/${token}`)
+    expect(watch.status).toBe(410)
+    expect(watch.body.error.code).toBe('SHARE_EXPIRED')
+    // Re-sharing mints a fresh, working token.
+    const reshare = await request(app).post(`/api/sr/rides/${ride.id}/share`).set('Authorization', `Bearer ${rider.token}`)
+    expect(reshare.body.share.token).not.toBe(token)
+    expect((await request(app).get(`/api/sr/rides/shared/${reshare.body.share.token}`)).status).toBe(200)
   })
 })

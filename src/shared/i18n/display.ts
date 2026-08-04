@@ -126,7 +126,7 @@ export function divisionText(division: string | null | undefined, lang: Lang) {
   return divisionLabels[lang][division] || division.replace(/_/g, ' ')
 }
 
-export function moneyText(amountMinor: number | null | undefined, currency = 'SYP', lang: Lang) {
+export function moneyText(amountMinor: number | null | undefined, currency = 'USD', lang: Lang) {
   const amount = Number(amountMinor || 0).toLocaleString(lang === 'ar' ? 'ar-SY' : 'en-US')
   const currencyText = lang === 'ar' && currency === 'SYP' ? 'ل.س' : currency
   return `${amount} ${currencyText}`

@@ -1,5 +1,5 @@
 import { idempotencyKey } from './security.mjs'
-import { recordWalletEntry } from './finance-ledger.mjs'
+import { recordWalletEntry, lockWalletForSpend } from './finance-ledger.mjs'
 
 // Platform keeps 15% of every SR ride; the driver keeps 85%. The commission is a finance/admin
 // figure only — it is derived here and recorded to the ledger, and never placed on any rider-facing
@@ -102,6 +102,9 @@ export async function chargeCompletedRide(tx, ride) {
   const fareMinor = Math.max(0, Math.round(ride?.fareMinor || 0))
   if (!ride || !fareMinor) return { charged: false, reason: 'no_fare' }
 
+  // Serialize concurrent spends on this rider's wallet before the balance re-check below.
+  await lockWalletForSpend(tx, ride.riderId, ride.currency)
+
   const chargeKey = idempotencyKey(['sr-ride-fare', ride.id])
   const already = await tx.walletEntry.findUnique({ where: { idempotencyKey: chargeKey } })
   if (already) return { charged: false, reason: 'already_charged' }
@@ -118,6 +121,18 @@ export async function chargeCompletedRide(tx, ride) {
   }
 
   const split = srRideFinanceSplit(fareMinor)
+
+  // Resolve accounting before moving any money. If the platform account is missing, completing
+  // the ride would otherwise debit 100% from the rider and credit only 85% to the driver, leaving
+  // the commission unaccounted for. Throwing rolls back the surrounding status transition too.
+  const platformUserId = await resolvePlatformUserId(tx)
+  if (!platformUserId) {
+    const error = new Error('Platform accounting account is not configured.')
+    error.statusCode = 503
+    error.code = 'PLATFORM_ACCOUNT_MISSING'
+    error.expose = true
+    throw error
+  }
 
   // 1. DEBIT the rider the full fare. This is also what settles (releases) the match-time hold:
   //    the reservation drops out of riderReservedMinor once the ride leaves the held window, so
@@ -150,19 +165,16 @@ export async function chargeCompletedRide(tx, ride) {
   // 3. Record the 15% platform commission as a CREDIT to the platform admin wallet (same shape as
   //    STR booking_admin_share). In production an ADMIN always exists; if none does, the commission
   //    simply isn't recorded (matching approvePaymentProof's conditional admin credit).
-  const platformUserId = await resolvePlatformUserId(tx)
-  if (platformUserId) {
-    await recordWalletEntry(tx, {
-      userId: platformUserId,
-      type: 'CREDIT',
-      amountMinor: split.adminCommissionMinor,
-      currency: ride.currency,
-      referenceType: 'sr_admin_commission',
-      referenceId: ride.id,
-      keyParts: ['sr-admin-commission', ride.id],
-      note: 'SYBNB SR platform commission (15%) collected on ride completion.',
-    })
-  }
+  await recordWalletEntry(tx, {
+    userId: platformUserId,
+    type: 'CREDIT',
+    amountMinor: split.adminCommissionMinor,
+    currency: ride.currency,
+    referenceType: 'sr_admin_commission',
+    referenceId: ride.id,
+    keyParts: ['sr-admin-commission', ride.id],
+    note: 'SYBNB SR platform commission (15%) collected on ride completion.',
+  })
 
   return { charged: true, ...split, platformUserId }
 }
@@ -195,6 +207,20 @@ export async function tipCompletedRide(tx, ride, tipMinor) {
     error.expose = true
     throw error
   }
+  // Sanity ceiling so a malformed/fat-finger amountMinor from a direct API call can't record an absurd
+  // tip: at most 5× the fare, with a floor so tiny fares still allow a normal tip. (The wallet-balance
+  // gate below already prevents an overdraw; this is a defence-in-depth bound on intent.)
+  const tipCeiling = Math.max((ride.fareMinor || 0) * 5, 500_000)
+  if (amount > tipCeiling) {
+    const error = new Error('That tip is unusually large. Please enter a smaller amount.')
+    error.statusCode = 400
+    error.code = 'TIP_AMOUNT_TOO_LARGE'
+    error.expose = true
+    throw error
+  }
+
+  // Serialize concurrent spends on this rider's wallet before the balance re-check below.
+  await lockWalletForSpend(tx, ride.riderId, ride.currency)
 
   // one tip per ride
   const tipKey = idempotencyKey(['sr-ride-tip', ride.id])
@@ -251,6 +277,9 @@ export async function tipCompletedRide(tx, ride, tipMinor) {
 export async function chargeRiderCancellationFee(tx, ride, feeMinor) {
   const amount = Math.max(0, Math.round(feeMinor || 0))
   if (!ride || !ride.driverId || amount <= 0) return { charged: false, reason: 'no_fee' }
+
+  // Serialize concurrent spends on this rider's wallet before the balance re-check below.
+  await lockWalletForSpend(tx, ride.riderId, ride.currency)
 
   const key = idempotencyKey(['sr-cancel-fee', ride.id])
   const already = await tx.walletEntry.findUnique({ where: { idempotencyKey: key } })

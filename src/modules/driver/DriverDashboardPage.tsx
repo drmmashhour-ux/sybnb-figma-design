@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   claimPrototypeSrRide,
+  declinePrototypeSrRide,
   fetchDriverDocuments,
   fetchDriverVehicles,
   fetchPendingSrRides,
+  fetchDriverPayout,
   fetchPrototypeDriverOverview,
+  postDriverLocation,
+  setDriverAvailability,
+  saveDriverPayout,
   updatePrototypeDriverRideStatus,
   verifyDriverPickupPin,
   type PlatformDriverDocument,
@@ -25,6 +30,14 @@ const copy = {
     back: 'العودة للرئيسية',
     title: 'لوحة سائق SR',
     subtitle: 'الرحلات المسندة للسائق وحالات التنفيذ مباشرة من قاعدة البيانات.',
+    goOnline: 'ابدأ الاستلام (متصل)',
+    goOffline: 'إيقاف الاستلام (غير متصل)',
+    online: 'متصل — تصلك أقرب الطلبات',
+    offline: 'غير متصل — لن تصلك طلبات',
+    locating: 'جارٍ تحديد موقعك…',
+    locationDenied: 'تعذّر الوصول للموقع — فعّل خدمة الموقع (GPS) لتظهر لك أقرب الطلبات.',
+    kmAway: 'كم للانطلاق',
+    offeredToYou: '🔔 عرض لك — اقبل الآن',
     refresh: 'تحديث',
     loading: 'جار التحميل',
     saving: 'جار الحفظ',
@@ -54,12 +67,13 @@ const copy = {
     payout: 'صرف السائق',
     nextBest: 'أفضل إجراء',
     nextBestText: 'ابدأ بالرحلات النشطة، ثم حدّث الحالة فور الوصول لتفعيل ثقة العميل.',
-    openOperations: 'فتح العمليات',
-    openFinance: 'فتح المالية',
+    openOperations: 'إدارة المركبات والوثائق',
+    openFinance: 'فتح محفظتي',
     connected: 'متصل',
     disconnected: 'غير متصل',
     available: 'متاح',
     accept: 'قبول',
+    decline: 'رفض',
     pendingEmpty: 'لا توجد طلبات رحلات بانتظار سائق الآن.',
     pendingLoading: 'جار البحث عن طلبات قريبة...',
     claiming: 'جار القبول...',
@@ -84,11 +98,20 @@ const copy = {
     todayRidesCount: 'رحلة مكتملة اليوم',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
+    payoutAccount: 'حساب صرف الأرباح', payoutHolder: 'اسم صاحب الحساب', payoutNumber: 'رقم Sham Cash', payoutSave: 'حفظ حساب الصرف', payoutSaved: 'محفوظ وينتهي بـ', payoutSecure: 'الرقم الكامل مشفر ولا يظهر بعد الحفظ.',
   },
   en: {
     back: 'Back to landing',
     title: 'SR Driver Dashboard',
     subtitle: 'Assigned driver rides and live execution states directly from PostgreSQL.',
+    goOnline: 'Go online (start receiving)',
+    goOffline: 'Go offline (stop receiving)',
+    online: 'Online — you get the nearest requests',
+    offline: 'Offline — no requests will reach you',
+    locating: 'Getting your location…',
+    locationDenied: 'Location unavailable — enable GPS so the nearest requests reach you.',
+    kmAway: 'km to pickup',
+    offeredToYou: '🔔 Offered to you — accept now',
     refresh: 'Refresh',
     loading: 'Loading',
     saving: 'Saving',
@@ -118,12 +141,13 @@ const copy = {
     payout: 'Driver payout',
     nextBest: 'Best next action',
     nextBestText: 'Start with active rides, then update arrival state immediately to increase rider confidence.',
-    openOperations: 'Open operations',
-    openFinance: 'Open finance',
+    openOperations: 'Manage vehicles & documents',
+    openFinance: 'Open my wallet',
     connected: 'Connected',
     disconnected: 'Offline',
     available: 'Available',
     accept: 'Accept',
+    decline: 'Decline',
     pendingEmpty: 'No ride requests waiting for a driver right now.',
     pendingLoading: 'Looking for nearby requests...',
     claiming: 'Claiming...',
@@ -148,6 +172,7 @@ const copy = {
     todayRidesCount: 'completed rides today',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
+    payoutAccount: 'Earnings payout account', payoutHolder: 'Account holder', payoutNumber: 'Sham Cash number', payoutSave: 'Save payout account', payoutSaved: 'Saved ending in', payoutSecure: 'The full number is encrypted and is not shown after saving.',
   },
 }
 
@@ -164,20 +189,72 @@ export function DriverDashboardPage({ lang }: Props) {
   const [pendingStatus, setPendingStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [claimingRideId, setClaimingRideId] = useState('')
   const [claimError, setClaimError] = useState('')
+  // SR presence (Phase 1): the driver's own online/offline switch + GPS.
+  const [online, setOnline] = useState(false)
+  const [presenceBusy, setPresenceBusy] = useState(false)
+  const [presenceMsg, setPresenceMsg] = useState('')
+  const [payoutHolder, setPayoutHolder] = useState('')
+  const [payoutNumber, setPayoutNumber] = useState('')
+  const [payoutLast4, setPayoutLast4] = useState('')
+  const [payoutMessage, setPayoutMessage] = useState('')
 
   useEffect(() => {
     void loadOverview()
     void loadPendingRides()
+    void fetchDriverPayout().then((payout) => { if (payout) { setPayoutHolder(payout.accountHolder); setPayoutLast4(payout.last4) } }).catch(() => {})
     const interval = window.setInterval(() => void loadPendingRides(), 6000)
     return () => window.clearInterval(interval)
   }, [])
 
+  // While online, send a GPS heartbeat so the driver keeps appearing in nearby riders' nearest-first
+  // pool as they move. Stops the moment they go offline.
+  useEffect(() => {
+    if (!online) return
+    const beat = window.setInterval(() => {
+      getBrowserLocation()
+        .then((coords) => coords && postDriverLocation(coords))
+        .catch(() => {})
+    }, 20000)
+    return () => window.clearInterval(beat)
+  }, [online])
+
   async function loadPendingRides() {
     try {
-      setPendingRides(await fetchPendingSrRides())
+      const { online: serverOnline, rides } = await fetchPendingSrRides()
+      setPendingRides(rides)
+      setOnline(serverOnline)
       setPendingStatus('ready')
     } catch {
       setPendingStatus('error')
+    }
+  }
+
+  // Best-effort browser GPS. Resolves null (never rejects) if the device has no geolocation or the
+  // driver declines — the caller then goes online without a fix and shows a "enable GPS" hint.
+  function getBrowserLocation(): Promise<{ lat: number; lng: number } | null> {
+    return new Promise((resolve) => {
+      if (!('geolocation' in navigator)) return resolve(null)
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 },
+      )
+    })
+  }
+
+  async function toggleOnline(next: boolean) {
+    setPresenceBusy(true)
+    setPresenceMsg(next ? t.locating : '')
+    try {
+      const coords = next ? await getBrowserLocation() : null
+      const res = await setDriverAvailability({ online: next, ...(coords || {}) })
+      setOnline(res.online)
+      setPresenceMsg(next && !coords ? t.locationDenied : '')
+      await loadPendingRides()
+    } catch (error) {
+      setPresenceMsg(error instanceof Error ? error.message : t.error)
+    } finally {
+      setPresenceBusy(false)
     }
   }
 
@@ -188,6 +265,21 @@ export function DriverDashboardPage({ lang }: Props) {
     try {
       await claimPrototypeSrRide(rideId)
       await Promise.all([loadOverview(), loadPendingRides()])
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+      await loadPendingRides()
+    } finally {
+      setClaimingRideId('')
+    }
+  }
+
+  // Decline an exclusive offer → the server re-dispatches it to the next nearest driver.
+  async function declineRide(rideId: string) {
+    setClaimingRideId(rideId)
+    setClaimError('')
+    try {
+      await declinePrototypeSrRide(rideId)
+      await loadPendingRides()
     } catch (error) {
       setClaimError(error instanceof Error ? error.message : t.claimError)
       await loadPendingRides()
@@ -253,6 +345,19 @@ export function DriverDashboardPage({ lang }: Props) {
     }
   }
 
+  async function submitPayoutAccount(event: FormEvent) {
+    event.preventDefault()
+    setPayoutMessage('')
+    try {
+      const payout = await saveDriverPayout({ accountHolder: payoutHolder, shamCashNumber: payoutNumber })
+      setPayoutLast4(payout.last4)
+      setPayoutNumber('')
+      setPayoutMessage(`${t.payoutSaved} ${payout.last4}`)
+    } catch (error) {
+      setPayoutMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <button style={styles.back} onClick={() => (window.location.hash = '/')}>
@@ -260,11 +365,20 @@ export function DriverDashboardPage({ lang }: Props) {
       </button>
 
       <section style={styles.driverTop}>
-        <div style={styles.availability}>
-          <button style={styles.availableButton} onClick={() => void loadOverview()}>{t.connected}</button>
-          <button style={styles.offlineButton} onClick={() => (window.location.hash = '/status')}>{t.disconnected}</button>
-        </div>
         <h1 style={styles.driverTitle}>{t.title}</h1>
+        {/* SR presence (Phase 1): real go-online/offline switch backed by DriverProfile.active + GPS. */}
+        <div style={styles.presenceRow}>
+          <button
+            style={{ ...styles.onlineToggle, ...(online ? styles.onlineToggleOn : styles.onlineToggleOff) }}
+            disabled={presenceBusy}
+            onClick={() => void toggleOnline(!online)}
+          >
+            <span style={{ ...styles.onlineDot, background: online ? '#22c55e' : '#94a3b8' }} />
+            {presenceBusy ? t.locating : online ? t.goOffline : t.goOnline}
+          </button>
+          <span style={styles.presenceState}>{online ? t.online : t.offline}</span>
+        </div>
+        {presenceMsg ? <p style={styles.presenceMsg}>{presenceMsg}</p> : null}
       </section>
 
       <section style={styles.hero}>
@@ -301,15 +415,29 @@ export function DriverDashboardPage({ lang }: Props) {
               <p style={{ color: '#9aa6ba' }}>{pendingStatus === 'loading' ? t.pendingLoading : t.pendingEmpty}</p>
             ) : (
               pendingRides.map((pendingRide) => (
-                <article key={pendingRide.id} style={styles.offerCard}>
-                  <span>{String(pendingRide.metadata.dropoff || '-')}</span>
+                <article key={pendingRide.id} style={{ ...styles.offerCard, ...(pendingRide.offeredToMe ? styles.offerCardMine : null) }}>
+                  {pendingRide.offeredToMe ? <strong style={styles.offerBadge}>{t.offeredToYou}</strong> : null}
+                  {/* Pre-accept the dropoff + rider name are withheld (privacy) — show the pickup. */}
+                  <span>{String(pendingRide.metadata.pickup || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
+                  {typeof pendingRide.pickupDistanceKm === 'number' ? (
+                    <em dir="ltr" style={styles.pickupDistance}>
+                      📍 {pendingRide.pickupDistanceKm} {t.kmAway}
+                    </em>
+                  ) : null}
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
-                  <button disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
-                    {claimingRideId === pendingRide.id ? t.claiming : t.accept}
-                  </button>
+                  <div style={styles.offerActions}>
+                    <button style={styles.acceptBtn} disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
+                      {claimingRideId === pendingRide.id ? t.claiming : t.accept}
+                    </button>
+                    {pendingRide.offeredToMe ? (
+                      <button style={styles.declineBtn} disabled={claimingRideId === pendingRide.id} onClick={() => void declineRide(pendingRide.id)}>
+                        {t.decline}
+                      </button>
+                    ) : null}
+                  </div>
                 </article>
               ))
             )}
@@ -346,12 +474,24 @@ export function DriverDashboardPage({ lang }: Props) {
           <Info label={t.todayEarnings} value={moneyText(overview?.totals.todayEarningsMinor || 0, 'SYP', lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
           <Info label={t.todayRidesCount} value={String(overview?.totals.todayCompletedCount || 0)} />
         </article>
+        <article style={styles.docsPanel}>
+          <h2>{t.payoutAccount}</h2>
+          {payoutLast4 ? <p style={styles.presenceMsg}>{t.payoutSaved} •••• {payoutLast4}</p> : null}
+          <form onSubmit={(event) => void submitPayoutAccount(event)} style={{ display: 'grid', gap: 8 }}>
+            <input value={payoutHolder} onChange={(event) => setPayoutHolder(event.target.value)} placeholder={t.payoutHolder} maxLength={120} required />
+            <input value={payoutNumber} onChange={(event) => setPayoutNumber(event.target.value)} placeholder={t.payoutNumber} inputMode="numeric" autoComplete="off" required />
+            <small>{t.payoutSecure}</small>
+            <button style={styles.primaryButton} type="submit">{t.payoutSave}</button>
+            {payoutMessage ? <p style={styles.presenceMsg} role="status">{payoutMessage}</p> : null}
+          </form>
+        </article>
       </section>
 
       <section style={styles.driverCtas}>
         <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>{t.sos}</button>
         <button style={styles.reportButton} onClick={() => (window.location.hash = '/immocontact')}>{t.reportIssue}</button>
-        <button style={styles.startButton} onClick={() => (window.location.hash = '/ride')}>{t.start}</button>
+        {/* Removed a mis-wired "Start ride" button that sent the DRIVER to the rider request page (/ride).
+            A driver starts a trip via the per-ride status controls after claiming + PIN verification. */}
       </section>
 
       <section style={styles.dispatchPanel}>
@@ -359,8 +499,8 @@ export function DriverDashboardPage({ lang }: Props) {
           <strong>{t.nextBest}</strong>
           <p>{t.nextBestText}</p>
           <div style={styles.actions}>
-            <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/operations')}>{t.openOperations}</button>
-            <button style={styles.primaryButton} onClick={() => (window.location.hash = '/finance')}>{t.openFinance}</button>
+            <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/driver/vehicles')}>{t.openOperations}</button>
+            <button style={styles.primaryButton} onClick={() => (window.location.hash = '/wallet')}>{t.openFinance}</button>
           </div>
         </article>
       </section>
@@ -404,8 +544,13 @@ function RideCard({
   const [pin, setPin] = useState('')
   const [pinState, setPinState] = useState<'idle' | 'verifying'>('idle')
   const [pinError, setPinError] = useState('')
-  // The pickup code is entered once the driver is at the rider (assigned / arriving) to start the trip.
-  const atPickup = ride.status === 'DRIVER_ASSIGNED' || ride.status === 'DRIVER_ARRIVING'
+  // Buttons mirror the server's state machine (driver.mjs assertDriverRideTransition) so the driver is
+  // never offered a transition the API will 400: ASSIGNED→ARRIVING, ARRIVING→IN_PROGRESS (via the pickup
+  // PIN), IN_PROGRESS→COMPLETED; CANCELLED is allowed from any active state.
+  const canArrive = ride.status === 'DRIVER_ASSIGNED'
+  const atPickup = ride.status === 'DRIVER_ARRIVING' // the PIN starts the trip only after "Arriving"
+  const canComplete = ride.status === 'IN_PROGRESS'
+  const canCancel = ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED'
 
   async function submitPin() {
     if (pin.trim().length !== 4) return
@@ -448,14 +593,18 @@ function RideCard({
           {pinError && <span style={styles.pinError} role="alert">{pinError}</span>}
         </div>
       )}
-      {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
+      {canCancel && (
         <div style={styles.actions}>
-          <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
-            {labels.arriving}
-          </button>
-          <button disabled={disabled} style={styles.primaryButton} onClick={() => onUpdate('COMPLETED')}>
-            {labels.complete}
-          </button>
+          {canArrive && (
+            <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
+              {labels.arriving}
+            </button>
+          )}
+          {canComplete && (
+            <button disabled={disabled} style={styles.primaryButton} onClick={() => onUpdate('COMPLETED')}>
+              {labels.complete}
+            </button>
+          )}
           <button disabled={disabled} style={styles.dangerButton} onClick={() => onUpdate('CANCELLED')}>
             {labels.cancel}
           </button>
@@ -493,7 +642,15 @@ function DispatchItem({ label, value, tone }: { label: string; value: string; to
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#08090f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 22, maxWidth: 1120, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #263651', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  driverTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
+  driverTop: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 },
+  presenceRow: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  onlineToggle: { border: 0, borderRadius: 999, minHeight: 52, padding: '0 24px', fontWeight: 950, fontSize: 15, display: 'inline-flex', alignItems: 'center', gap: 10, cursor: 'pointer' },
+  onlineToggleOn: { background: '#20d29b', color: '#04100d' },
+  onlineToggleOff: { background: '#1b2436', color: '#e6ebf4' },
+  onlineDot: { width: 11, height: 11, borderRadius: '50%', display: 'inline-block' },
+  presenceState: { color: '#9aa6ba', fontWeight: 700, fontSize: 13 },
+  presenceMsg: { color: '#f7c05b', margin: '4px 0 0', fontSize: 13 },
+  pickupDistance: { color: '#20d29b', fontWeight: 800, fontStyle: 'normal', fontSize: 13 },
   availability: { border: '1px solid #1d2433', borderRadius: 999, background: '#11131c', display: 'flex', padding: 5 },
   availableButton: { border: 0, borderRadius: 999, background: '#20d29b', color: '#04100d', fontWeight: 950, minHeight: 48, padding: '0 22px' },
   offlineButton: { border: 0, borderRadius: 999, background: 'transparent', color: '#8f96a8', fontWeight: 900, minHeight: 48, padding: '0 22px' },
@@ -509,6 +666,11 @@ const styles: Record<string, CSSProperties> = {
   dispatchHero: { border: '1px solid rgba(82,108,255,.9)', borderRadius: 14, background: '#101119', padding: 28, display: 'grid', gap: 24 },
   offerGrid: { display: 'grid', gap: 18, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
+  offerCardMine: { border: '2px solid #20d29b', background: '#0a1712', boxShadow: '0 0 0 3px rgba(32,210,155,.15)' },
+  offerBadge: { color: '#20d29b', fontWeight: 950, fontSize: 13, letterSpacing: '.02em' },
+  offerActions: { display: 'flex', gap: 8 },
+  acceptBtn: { flex: 1, minHeight: 44, border: 0, borderRadius: 10, background: '#20d29b', color: '#04100d', fontWeight: 900, cursor: 'pointer' },
+  declineBtn: { minHeight: 44, border: '1px solid #3a2530', borderRadius: 10, background: 'transparent', color: '#f08a8a', fontWeight: 800, padding: '0 16px', cursor: 'pointer' },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },

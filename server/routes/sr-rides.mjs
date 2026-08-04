@@ -3,6 +3,8 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth, requireVerifiedDriver, requireRoadReadyDriver } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRide, assertSyriaCoords, haversineKm } from '../lib/sr-geocoding.mjs'
+import { routeRoad } from '../lib/sr-routing.mjs'
+import { offerRideToNearestDriver, ridePickupCoords } from '../lib/sr-dispatch.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { assertRiderCanAfford, chargeRiderCancellationFee, placeRideHold, tipCompletedRide } from '../lib/sr-payments.mjs'
@@ -14,6 +16,10 @@ const SR_TRACKABLE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRES
 const RIDE_MESSAGING_ACTIVE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const SR_AVG_SPEED_KMH = 30
 const MAX_PIN_ATTEMPTS = 5
+// A trip-share link is a bearer token for a stranger (a friend/family member the rider chose to share
+// with). It stops leaking live location the moment the ride leaves a trackable state, and it also
+// expires on its own so a link that escapes can't be polled indefinitely.
+const SR_SHARE_TTL_HOURS = Number(process.env.SR_SHARE_TTL_HOURS || 12)
 
 async function ensureDriverHasNoActiveRide(driverId, client = db()) {
   const activeRide = await client.rideRequest.findFirst({
@@ -136,9 +142,56 @@ export async function handleSrRides(req, res, url, context) {
     return json(res, 200, { ok: true, quote })
   }
 
-  if (url.pathname === '/api/sr/rides') {
+  // SR routing (Phase 2): real road route + ETA between two points, for drawing the trip on the map.
+  // Uses OSRM when configured, else falls back to straight-line (never fails). Additive — does NOT
+  // change the fare/quote flow. Both coords are required and must be inside Syria.
+  if (url.pathname === '/api/sr/route') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['pickupCoords', 'dropoffCoords'], 'route body')
+    const pickup = assertSyriaCoords(body.pickupCoords?.lat, body.pickupCoords?.lng, { fieldName: 'pickup' })
+    const dropoff = assertSyriaCoords(body.dropoffCoords?.lat, body.dropoffCoords?.lng, { fieldName: 'dropoff' })
+    const route = await routeRoad(pickup, dropoff)
+    return json(res, 200, { ok: true, route })
+  }
+
+  if (url.pathname === '/api/sr/rides') {
+    // Rider trip history: the authenticated rider's own rides, most recent first (for the Trips list +
+    // receipts). Never exposes another rider's trips — scoped to context.user.id.
+    if (req.method === 'GET') {
+      requireAuth(context, ['GUEST'])
+      const rides = await db().rideRequest.findMany({
+        where: { riderId: context.user.id },
+        orderBy: { requestedAt: 'desc' },
+        take: 30,
+        // Only the driver's id + display name reach the rider — never the driver's email/phone.
+        include: { driver: { select: { id: true, displayName: true } } },
+      })
+      return json(res, 200, { ok: true, rides })
+    }
+    if (req.method !== 'POST') return methodNotAllowed(res, ['GET', 'POST'])
     requireAuth(context, ['GUEST'])
+
+    // ONE ACTIVE RIDE PER RIDER: without this a rider can post many REQUESTED rides at once (none of
+    // which reserve funds), and two drivers accepting two of them concurrently would each pass the
+    // affordability gate and reserve 2× the fare — an over-commit the wallet can't settle. Reject a new
+    // request while any non-terminal ride is in flight.
+    const activeRiderRide = await db().rideRequest.findFirst({
+      where: {
+        riderId: context.user.id,
+        status: { in: ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'] },
+      },
+      select: { id: true },
+    })
+    if (activeRiderRide) {
+      const error = new Error('You already have an active ride. Complete or cancel it before requesting another.')
+      error.statusCode = 409
+      error.code = 'RIDER_HAS_ACTIVE_RIDE'
+      error.expose = true
+      throw error
+    }
+
     const body = await readJson(req)
     // SR-INPUT: reject unknown fields and bound the free-text so a rider can't persist arbitrary/oversized data.
     assertNoUnknownFields(
@@ -195,6 +248,14 @@ export async function handleSrRides(req, res, url, context) {
       `
     }
 
+    // AUTO-DISPATCH (Phase 2): offer the ride to the nearest online driver for a short exclusive window.
+    // Best-effort — if no driver is nearby/online it simply stays in the open nearest-first pool.
+    if (quote.pickupCoords) {
+      await offerRideToNearestDriver(ride.id, quote.pickupCoords).catch((error) =>
+        console.error('[sr-dispatch] offer on create failed:', error?.message || error),
+      )
+    }
+
     return json(res, 201, { ok: true, ride })
   }
 
@@ -221,6 +282,43 @@ export async function handleSrRides(req, res, url, context) {
     const isRider = ride.riderId === context.user.id
     const safeRide = isRider ? ride : { ...ride, pickupPin: undefined }
     return json(res, 200, { ok: true, ride: safeRide })
+  }
+
+  // Rider#8 — a PII-SAFE driver card the rider (or ride party) can show once a driver is assigned: who is
+  // coming and in what car, with a reputation number — deliberately WITHOUT the driver's email/phone or
+  // any other contact PII (the rider reaches the driver only through masked in-ride messaging / SOS).
+  const rideDriverMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/driver$/)
+  if (rideDriverMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    const ride = loadRideOrThrow(await db().rideRequest.findUnique({ where: { id: rideDriverMatch[1] } }))
+    const isParty = context.roles.includes('ADMIN') || context.roles.includes('SUPPORT') || ride.riderId === context.user.id || ride.driverId === context.user.id
+    if (!isParty) forbidRide()
+    if (!ride.driverId) return json(res, 200, { ok: true, driver: null })
+
+    const driver = await db().user.findUnique({ where: { id: ride.driverId }, select: { displayName: true } })
+    // Prefer the approved vehicle matching the ride's category, else any approved vehicle.
+    const category = typeof ride.metadata?.category === 'string' ? ride.metadata.category : null
+    const vehicles = await db().driverVehicle.findMany({
+      where: { driverId: ride.driverId, status: 'APPROVED' },
+      select: { make: true, model: true, year: true, plate: true, color: true, category: true },
+      orderBy: { updatedAt: 'desc' },
+    })
+    const vehicle = vehicles.find((v) => category && v.category === category) || vehicles[0] || null
+    const rating = await rideRatingSummary(ride.driverId)
+    // First name only — enough for the rider to greet the driver without exposing a full legal identity.
+    const firstName = (driver?.displayName || '').trim().split(/\s+/)[0] || null
+
+    return json(res, 200, {
+      ok: true,
+      driver: {
+        firstName,
+        rating,
+        vehicle: vehicle
+          ? { make: vehicle.make, model: vehicle.model, year: vehicle.year, plate: vehicle.plate, color: vehicle.color || null }
+          : null,
+      },
+    })
   }
 
   const assignMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/assign-driver$/)
@@ -317,6 +415,34 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    // A driver who declined this ride cannot then claim it (auto-dispatch). Checked BEFORE the
+    // offered-to-other guard so a decliner always gets the clearer "you declined" message even after the
+    // ride has been re-offered to someone else.
+    const declinedBy = Array.isArray(existing.metadata?.declinedBy) ? existing.metadata.declinedBy : []
+    if (declinedBy.includes(context.user.id)) {
+      const error = new Error('You declined this ride and cannot pick it up.')
+      error.statusCode = 409
+      error.code = 'DRIVER_DECLINED_RIDE'
+      error.expose = true
+      throw error
+    }
+
+    // AUTO-DISPATCH exclusive window: during a ride's offer window it can be claimed ONLY by the driver
+    // it was offered to. It opens to everyone once the window lapses (the atomic WHERE below is the
+    // race-safe backstop; this pre-check just returns a clearer message).
+    if (
+      existing.offeredDriverId &&
+      existing.offeredDriverId !== context.user.id &&
+      existing.offerExpiresAt &&
+      existing.offerExpiresAt > new Date()
+    ) {
+      const error = new Error('This ride is reserved for the nearest driver for a few seconds — it will open shortly if not accepted.')
+      error.statusCode = 409
+      error.code = 'RIDE_OFFERED_TO_OTHER'
+      error.expose = true
+      throw error
+    }
+
     // SECURITY (one-driver-one-ride, race-safe): the active-ride check and the claim must be atomic, or a
     // driver firing two claims concurrently passes both checks and ends up holding two active rides. Wrap
     // them in one transaction and serialize this driver's concurrent claims with an advisory lock on their
@@ -342,9 +468,22 @@ export async function handleSrRides(req, res, url, context) {
         excludeRideId: existing.id, message: 'This ride cannot start: the rider wallet no longer covers the fare.',
       })
       const updated = await tx.rideRequest.updateMany({
-        where: { id: claimMatch[1], driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
+        // The OR mirrors the pre-check but ATOMICALLY: a claim only lands if the ride is open (no live
+        // offer / expired) or offered to this driver — so a concurrent claim during another driver's
+        // window can't slip through. Clearing the offer fields on success tidies the record.
+        where: {
+          id: claimMatch[1],
+          driverId: null,
+          status: { in: ['REQUESTED', 'MATCHING'] },
+          OR: [
+            { offeredDriverId: null },
+            { offerExpiresAt: null },
+            { offerExpiresAt: { lte: new Date() } },
+            { offeredDriverId: context.user.id },
+          ],
+        },
         // driverMatchedAt anchors the rider's free-cancel grace window (019).
-        data: { driverId: context.user.id, status: 'DRIVER_ASSIGNED', driverMatchedAt: new Date() },
+        data: { driverId: context.user.id, status: 'DRIVER_ASSIGNED', driverMatchedAt: new Date(), offeredDriverId: null, offerExpiresAt: null },
       })
       if (updated.count > 0) {
         await placeRideHold(tx, { id: existing.id, riderId: existing.riderId, fareMinor: existing.fareMinor, currency: existing.currency })
@@ -377,6 +516,42 @@ export async function handleSrRides(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, ride })
+  }
+
+  // AUTO-DISPATCH decline: the offered driver passes on the ride → record the decline so they're never
+  // re-offered it, clear their offer, and immediately re-offer to the NEXT nearest online driver.
+  const declineMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/decline$/)
+  if (declineMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    await requireRoadReadyDriver(context)
+    const rideId = declineMatch[1]
+    const existing = await db().rideRequest.findUnique({ where: { id: rideId } })
+    if (!existing || existing.driverId || !['REQUESTED', 'MATCHING'].includes(existing.status)) {
+      const error = new Error('This ride is no longer available to decline.')
+      error.statusCode = 409
+      error.code = 'RIDE_NOT_DECLINABLE'
+      error.expose = true
+      throw error
+    }
+    if (existing.offeredDriverId !== context.user.id) {
+      const error = new Error('This ride is not currently offered to you.')
+      error.statusCode = 409
+      error.code = 'RIDE_NOT_YOUR_OFFER'
+      error.expose = true
+      throw error
+    }
+
+    const declinedBy = Array.isArray(existing.metadata?.declinedBy) ? existing.metadata.declinedBy : []
+    const nextDeclined = declinedBy.includes(context.user.id) ? declinedBy : [...declinedBy, context.user.id]
+    // Clear the offer + remember the decline (so neither the pool nor a re-offer surfaces it to them).
+    await db().rideRequest.update({
+      where: { id: rideId },
+      data: { offeredDriverId: null, offerExpiresAt: null, metadata: { ...existing.metadata, declinedBy: nextDeclined } },
+    })
+    // Re-offer to the next nearest online driver, skipping everyone who has declined (best-effort).
+    const pickup = await ridePickupCoords(rideId)
+    const next = pickup ? await offerRideToNearestDriver(rideId, pickup, { excludeDriverIds: nextDeclined }) : null
+    return json(res, 200, { ok: true, reoffered: Boolean(next) })
   }
 
   // ---- SR SAFETY (014): SOS ----
@@ -513,17 +688,29 @@ export async function handleSrRides(req, res, url, context) {
   // ---- SR SAFETY (014): trip share ----
   const shareMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/share$/)
   if (shareMatch) {
-    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    requireAuth(context)
     const rideId = shareMatch[1]
+    // The rider can revoke a share link at any time — the token is cleared and every outstanding copy
+    // of the link stops resolving immediately.
+    if (req.method === 'DELETE') {
+      requireAuth(context)
+      const ride = loadRideOrThrow(await db().rideRequest.findUnique({ where: { id: rideId } }))
+      if (ride.riderId !== context.user.id) forbidRide()
+      await db().rideRequest.update({ where: { id: rideId }, data: { shareToken: null, shareTokenCreatedAt: null } })
+      return json(res, 200, { ok: true, revoked: true })
+    }
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST', 'DELETE'])
+    requireAuth(context)
     const ride = loadRideOrThrow(await db().rideRequest.findUnique({ where: { id: rideId } }))
     if (ride.riderId !== context.user.id) forbidRide()
     let token = ride.shareToken
-    if (!token) {
+    // Re-mint if there is no token yet, or the existing one has aged past its TTL — so re-sharing an
+    // old ride hands out a fresh link rather than resurrecting an expired one.
+    const expired = ride.shareTokenCreatedAt && Date.now() - new Date(ride.shareTokenCreatedAt).getTime() > SR_SHARE_TTL_HOURS * 3600_000
+    if (!token || expired) {
       token = crypto.randomBytes(24).toString('base64url')
       await db().rideRequest.update({ where: { id: rideId }, data: { shareToken: token, shareTokenCreatedAt: new Date() } })
     }
-    return json(res, 201, { ok: true, share: { token, path: `/sr/track/${token}`, apiPath: `/api/sr/rides/shared/${token}` } })
+    return json(res, 201, { ok: true, share: { token, path: `/sr/track/${token}`, apiPath: `/api/sr/rides/shared/${token}`, expiresInHours: SR_SHARE_TTL_HOURS } })
   }
 
   const sharedMatch = url.pathname.match(/^\/api\/sr\/rides\/shared\/([^/]+)$/)
@@ -531,7 +718,8 @@ export async function handleSrRides(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     const token = sharedMatch[1]
     const rows = await db().$queryRaw`
-      SELECT status, ST_Y(last_location_geo::geometry) AS lat, ST_X(last_location_geo::geometry) AS lng, last_location_at AS at,
+      SELECT status, share_token_created_at AS shared_at,
+             ST_Y(last_location_geo::geometry) AS lat, ST_X(last_location_geo::geometry) AS lng, last_location_at AS at,
              ST_Y(dropoff_geo::geometry) AS dropoff_lat, ST_X(dropoff_geo::geometry) AS dropoff_lng
       FROM ride_requests WHERE share_token = ${token} LIMIT 1
     `
@@ -540,6 +728,14 @@ export async function handleSrRides(req, res, url, context) {
       const error = new Error('This trip-share link is not valid.')
       error.statusCode = 404
       error.code = 'SHARE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // TTL: a link older than the window stops resolving even though the token row still exists.
+    if (row.shared_at && Date.now() - new Date(row.shared_at).getTime() > SR_SHARE_TTL_HOURS * 3600_000) {
+      const error = new Error('This trip-share link has expired.')
+      error.statusCode = 410
+      error.code = 'SHARE_EXPIRED'
       error.expose = true
       throw error
     }

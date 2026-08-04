@@ -1,239 +1,216 @@
-import { useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { text } from '../../engines/language/languageEngine'
-import { DIVISIONS } from '../../engines/navigation/divisions'
-import type { DivisionId } from '../../engines/navigation/divisions'
+import type { CSSProperties } from 'react'
 import { navigate } from '../../app/routes'
-import type { CSSVars } from '../../shared/theme/cssVars'
+import { SYRIA_GOVERNORATES } from '../../engines/search/syriaData'
+import { DIVISIONS } from '../../engines/navigation/divisions'
 
 type Props = {
   lang: Lang
 }
 
-const DIVISION_PHOTOS: Record<DivisionId, string> = {
-  stays: '/assets/divisions/daily-rental.webp',
-  rentals: '/assets/divisions/monthly-rental.webp',
-  buy: '/assets/divisions/buy-property.webp',
-  cars: '/assets/divisions/cars.webp',
-  marketplace: '/assets/divisions/marketplace.webp',
-  'new-construction': '/assets/divisions/new-construction.webp',
-  sell: '/assets/divisions/add-listing.webp',
-  ride: '/assets/divisions/sr-ride.webp',
+/* ---------------------------------------------------------------------------
+ * Centralized brand / destination config. To clone this STR platform for
+ * another country, swap this block + the destinations import (SYRIA_GOVERNORATES)
+ * — no city/country strings are hard-coded inline below.
+ * ------------------------------------------------------------------------- */
+const PLATFORM = {
+  brand: 'SYBNB',
+  suffix: 'STR',
+  country: { ar: 'سوريا', en: 'Syria' },
+  destinationCount: SYRIA_GOVERNORATES.length,
+  heroPhoto: '/assets/divisions/daily-rental.webp',
+  staySearchKey: 'sybnb_v6_stay_search',
 }
 
-const DIVISION_ICONS: Record<DivisionId, string> = {
-  stays: '⌂',
-  rentals: '▣',
-  buy: '⌁',
-  cars: '⌘',
-  marketplace: '▤',
-  'new-construction': '⊗',
-  sell: '⊕',
-  ride: '✕',
-}
-
-const ABOUT_COPY = {
+const COPY = {
   ar: {
-    eyebrow: 'SYBNB V6',
-    title: 'منصة واحدة تحفظ وقتك وحقك داخل سوريا.',
-    body: 'SYBNB تجمع البحث، الحجز، الدفع الآمن، الثقة، وخدمة ما بعد الحجز في تجربة واحدة واضحة للعميل والمضيف والإدارة.',
+    heroBadge: 'اكتشف سوريا من جديد',
+    searchStay: 'ابحث عن إقامة',
+    becomeHost: 'أصبح مضيفاً',
+    heroTitle: 'تشعر أنك في المكان الصحيح',
+    heroSub: 'إقامات موثوقة · أسعار واضحة · دعم محلي',
+    trustVerified: 'إقامات موثوقة',
+    trustVerifiedBody: 'إعلانات تُراجَع قبل نشرها.',
+    trustSecure: 'حجز آمن',
+    trustSecureBody: 'دفع محميّ ومراجعة للنزاعات.',
+    trustSupport: 'دعم محلي',
+    trustSupportBody: 'فريق حقيقي من الحجز حتى المغادرة.',
+    howTitle: 'كيف تعمل',
+    exploreTitle: 'اكتشف منصات SYBNB',
+    exploreBody: 'الإقامات والعقارات والسيارات والسوق والمشاريع الجديدة ورحلات SR — كلها من مكان واحد.',
+    openPlatform: 'فتح المنصة',
+    step1: 'ابحث واختر',
+    step1Body: 'حدّد وجهتك وتواريخك وعدد الضيوف، وتصفّح الإقامات.',
+    step2: 'احجز وادفع بأمان',
+    step2Body: 'أكمل الحجز وادفع عبر دفع محميّ قبل وصولك.',
+    step3: 'تابع رحلتك',
+    step3Body: 'تابع حجوزاتك ومدفوعاتك ورحلتك من رحلاتي.',
+    tripsTitle: 'رحلاتي',
+    tripsBody: 'حجوزاتك ومدفوعاتك ورحلاتك في مكان واحد.',
+    tripsCta: 'افتح رحلاتي',
+    aboutEyebrow: 'SYBNB · STR',
+    aboutTitle: 'إقامات سوريا، بثقة وحماية.',
+    aboutBody:
+      'SYBNB منصّة إقامات قصيرة الأمد داخل سوريا: ابحث عن مكانك، احجز، وادفع بحماية كاملة، وتابع رحلتك من مكان واحد.',
     missionTitle: 'المهمة',
-    missionBody: 'تسهيل الإيجار، الشراء، المركبات، السوق، والخدمات اليومية بطريقة موثوقة وسريعة.',
+    missionBody: 'تسهيل حجز الإقامات داخل سوريا بطريقة موثوقة وآمنة للضيف والمضيف.',
     visionTitle: 'الرؤية',
-    visionBody: 'أن تصبح SYBNB بوابة سوريا الرقمية الأولى للحجز والخدمات المحمية.',
+    visionBody: 'أن تصبح SYBNB الوجهة الأولى لحجز الإقامات المحمية في سوريا.',
     sloganTitle: 'الشعار',
     sloganBody: 'ابحث بثقة. احجز بأمان. تابع كل شيء من مكان واحد.',
-    movieTitle: 'فيلم المنصة',
-    movieBody: 'قصة قصيرة تشرح رسالة المنصة، لماذا نحمي الدفع، وكيف تتحرك رحلة العميل من البحث إلى التأكيد.',
-    movieCta: 'شاهد الفيلم',
-    moviePause: 'إيقاف الفيلم',
-    adEyebrow: 'مساحة إعلانية',
-    adTitle: 'اعرض إعلانك داخل SYBNB',
-    adBody: 'بانر مميز للشركات، المشاريع العقارية، السيارات، والخدمات التي تريد الظهور أمام عملاء المنصة.',
-    adCta: 'احجز مساحة إعلانية',
   },
   en: {
-    eyebrow: 'SYBNB V6',
-    title: 'One platform to protect your time and your rights in Syria.',
-    body: 'SYBNB brings search, booking, safe payment, trust, and post-booking support into one clear experience for guests, hosts, and operations.',
+    heroBadge: 'Discover Syria, reimagined',
+    searchStay: 'Search stay',
+    becomeHost: 'Become a host',
+    heroTitle: 'Stay somewhere that feels right',
+    heroSub: 'Verified homes · Clear prices · Local support',
+    trustVerified: 'Verified homes',
+    trustVerifiedBody: 'Listings are reviewed before they go live.',
+    trustSecure: 'Secure booking',
+    trustSecureBody: 'Protected payment and dispute review.',
+    trustSupport: 'Local support',
+    trustSupportBody: 'A real team from booking to checkout.',
+    howTitle: 'How it works',
+    exploreTitle: 'Explore SYBNB platforms',
+    exploreBody: 'Stays, real estate, cars, marketplace, new construction, and SR rides—all in one place.',
+    openPlatform: 'Open platform',
+    step1: 'Search & choose',
+    step1Body: 'Set your destination, dates, and guests, then browse stays.',
+    step2: 'Book & pay safely',
+    step2Body: 'Complete the booking and pay through protected payment before arrival.',
+    step3: 'Track your trip',
+    step3Body: 'Follow your bookings, payments, and trip from My Trips.',
+    tripsTitle: 'My Trips',
+    tripsBody: 'Your bookings, payments, and trips in one place.',
+    tripsCta: 'Open My Trips',
+    aboutEyebrow: 'SYBNB · STR',
+    aboutTitle: 'Stays in Syria, with trust and protection.',
+    aboutBody:
+      'SYBNB is a short-term stays platform inside Syria: find your place, book it, pay with full protection, and track your trip from one place.',
     missionTitle: 'Mission',
-    missionBody: 'Make rentals, buying, cars, marketplace, and daily services easier, faster, and more trusted.',
+    missionBody: 'Make booking stays inside Syria trusted and safe for both guests and hosts.',
     visionTitle: 'Vision',
-    visionBody: 'Become Syria’s first digital gateway for protected bookings and services.',
+    visionBody: 'Become the first destination for protected stay bookings in Syria.',
     sloganTitle: 'Slogan',
     sloganBody: 'Search with trust. Book safely. Track everything in one place.',
-    movieTitle: 'Platform movie',
-    movieBody: 'A short story showing the platform message, why protected payment matters, and how the client journey moves from search to confirmation.',
-    movieCta: 'Watch movie',
-    moviePause: 'Pause movie',
-    adEyebrow: 'Advertising slot',
-    adTitle: 'Promote your brand inside SYBNB',
-    adBody: 'A premium banner for companies, property projects, cars, and services that want to reach platform clients.',
-    adCta: 'Book advertising space',
   },
 }
-
-const AD_SPONSORS = [
-  { image: DIVISION_PHOTOS.stays, ar: 'إقامة مميزة في دمشق', en: 'Featured stay in Damascus' },
-  { image: DIVISION_PHOTOS.cars, ar: 'عروض سيارات موثوقة', en: 'Trusted car offers' },
-  { image: DIVISION_PHOTOS.marketplace, ar: 'متاجر وخدمات محلية', en: 'Local shops and services' },
-  { image: DIVISION_PHOTOS['new-construction'], ar: 'مشاريع عقارية جديدة', en: 'New property projects' },
-  { image: DIVISION_PHOTOS.ride, ar: 'سير SR جاهز للتنقل', en: 'SR rides ready to move' },
-]
 
 export function LandingPage({ lang }: Props) {
   const isAr = lang === 'ar'
-  const about = ABOUT_COPY[lang]
-  const movieSrc = isAr ? '/assets/videos/str-promo-ar.mp4' : '/assets/videos/str-promo-en.mp4'
-  const heroVideoSrc = isAr ? '/assets/videos/hero-highlight-ar.mp4' : '/assets/videos/hero-highlight-en.mp4'
-  const [moviePlaying, setMoviePlaying] = useState(false)
-  const showAbout = () => document.getElementById('platform-about')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const t = COPY[lang]
+  const serif = isAr ? '' : ' stay-serif'
+
+  const trust = [
+    { icon: '✓', title: t.trustVerified, body: t.trustVerifiedBody },
+    { icon: '⛨', title: t.trustSecure, body: t.trustSecureBody },
+    { icon: '☎', title: t.trustSupport, body: t.trustSupportBody },
+  ]
+
+  const steps = [
+    { n: 1, title: t.step1, body: t.step1Body },
+    { n: 2, title: t.step2, body: t.step2Body },
+    { n: 3, title: t.step3, body: t.step3Body },
+  ]
+  const platformDivisions = DIVISIONS
+    .filter((division) => ['rentals', 'buy', 'cars', 'marketplace', 'new-construction', 'ride'].includes(division.id))
+    .map((division) => ({ ...division, route: division.id === 'ride' ? '/sr' : division.route }))
 
   return (
-    <main className="landing-page">
-      <section className="landing-ad-marquee" aria-label={isAr ? 'إعلانات متحركة' : 'Moving advertising banner'}>
-        <div className="ad-marquee-heading">
-          <span>{isAr ? 'إعلانات مميزة' : 'Featured ads'}</span>
-          <button
-            type="button"
-            onClick={() => {
-              window.localStorage.setItem('sybnb_v6_sell_flow', 'advertising')
-              navigate('/sell/account')
-            }}
-          >
-            {isAr ? 'احجز إعلانك' : 'Book your ad'}
-          </button>
+    <main className="landing-page str-landing">
+      {/* 1 — STAYS HERO */}
+      <section
+        id="stay-search"
+        className="str-hero"
+        style={{ backgroundImage: `url(${PLATFORM.heroPhoto})` }}
+        aria-label={t.heroTitle}
+      >
+        <div className="str-hero-inner">
+          <span className="str-hero-badge">{t.heroBadge}</span>
+          <h1 className={`str-hero-title${serif}`}>{t.heroTitle}</h1>
+          <p className="str-hero-sub">{t.heroSub}</p>
+
+          <div className="str-hero-actions">
+            <button className="str-btn-teal" onClick={() => navigate('/search-preview')}>
+              {t.searchStay}
+            </button>
+            <button className="str-btn-outline" onClick={() => navigate('/become-host')}>
+              {t.becomeHost}
+            </button>
+          </div>
         </div>
-        <div className="ad-marquee-track" aria-hidden="true">
-          {[...AD_SPONSORS, ...AD_SPONSORS].map((item, index) => (
-            <article className="ad-marquee-card" key={`${item.en}-${index}`}>
-              <img src={item.image} alt="" />
-              <strong>{isAr ? item.ar : item.en}</strong>
+      </section>
+
+      {/* 2 — TRUST STRIP */}
+      <section className="str-trust" aria-label={t.heroSub}>
+        {trust.map((item) => (
+          <div className="str-trust-item" key={item.title}>
+            <span className="str-trust-icon" aria-hidden="true">{item.icon}</span>
+            <div>
+              <strong>{item.title}</strong>
+              <p>{item.body}</p>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section className="str-platforms" aria-label={t.exploreTitle}>
+        <div className="str-platforms-head">
+          <h2 className={`str-section-title${serif}`}>{t.exploreTitle}</h2>
+          <p>{t.exploreBody}</p>
+        </div>
+        <div className="str-platforms-grid">
+          {platformDivisions.map((division) => (
+            <button
+              key={division.id}
+              className="str-platform-card"
+              style={{ '--platform-accent': division.accent } as CSSProperties}
+              onClick={() => navigate(division.route)}
+            >
+              <span>{division.kicker[lang]}</span>
+              <strong>{division.title[lang]}</strong>
+              <p>{division.description[lang]}</p>
+              <b>{t.openPlatform} →</b>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* 3 — HOW IT WORKS */}
+      <section className="str-how" aria-label={t.howTitle}>
+        <h2 className={`str-section-title${serif}`}>{t.howTitle}</h2>
+        <div className="str-how-grid">
+          {steps.map((step) => (
+            <article className="str-step" key={step.n}>
+              <span className="str-step-num" aria-hidden="true">{step.n}</span>
+              <h3>{step.title}</h3>
+              <p>{step.body}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="landing-hero">
-        <div className="landing-hero-copy">
-          <video
-            key={heroVideoSrc}
-            className="landing-hero-mark"
-            src={heroVideoSrc}
-            controls
-            playsInline
-            preload="metadata"
-            aria-label={isAr ? 'فيديو تعريفي عن المنصة' : 'Platform introduction video'}
-          />
-          <h1>{isAr ? 'منصة سوريا الكاملة' : 'Syria Complete Platform'}</h1>
-          <p>
-            {isAr
-              ? 'كل ما تحتاجه في مكان واحد - عقارات، سيارات، خدمات، وسير.'
-              : 'Everything you need in one place: property, cars, services, and SR.'}
-          </p>
-          <div className="landing-actions">
-            <button className="landing-primary" onClick={() => navigate('/search-preview')}>
-              {isAr ? 'ابدأ الآن' : 'Start now'}
-            </button>
-            <button className="landing-secondary" onClick={showAbout}>
-              {isAr ? 'تعرف علينا' : 'Know us'}
-            </button>
-          </div>
-        </div>
-        <div className="landing-hero-visual" aria-hidden="true">
-          <img className="hero-photo hero-photo-back" src={DIVISION_PHOTOS.stays} alt="" />
-          <img className="hero-photo hero-photo-front" src={DIVISION_PHOTOS.cars} alt="" />
+      {/* 4 — ABOUT */}
+      <section id="platform-about" className="str-about" aria-label={t.aboutEyebrow}>
+        <span className="str-about-eyebrow">{t.aboutEyebrow}</span>
+        <h2 className={serif.trim()}>{t.aboutTitle}</h2>
+        <p className="str-about-lead">{t.aboutBody}</p>
+        <div className="str-about-pillars">
+          <article>
+            <b>{t.missionTitle}</b>
+            <p>{t.missionBody}</p>
+          </article>
+          <article>
+            <b>{t.visionTitle}</b>
+            <p>{t.visionBody}</p>
+          </article>
+          <article>
+            <b>{t.sloganTitle}</b>
+            <p>{t.sloganBody}</p>
+          </article>
         </div>
       </section>
-
-      <section id="platform-about" className="landing-about" aria-label={about.eyebrow}>
-        <div className="landing-about-copy">
-          <span>{about.eyebrow}</span>
-          <h2>{about.title}</h2>
-          <p>{about.body}</p>
-          <div className="landing-about-pillars">
-            <article>
-              <b>{about.missionTitle}</b>
-              <p>{about.missionBody}</p>
-            </article>
-            <article>
-              <b>{about.visionTitle}</b>
-              <p>{about.visionBody}</p>
-            </article>
-            <article>
-              <b>{about.sloganTitle}</b>
-              <p>{about.sloganBody}</p>
-            </article>
-          </div>
-        </div>
-        <div className={`landing-about-movie ${moviePlaying ? 'playing' : ''}`}>
-          <video
-            key={movieSrc}
-            className="about-movie-video"
-            src={movieSrc}
-            controls
-            playsInline
-            preload="metadata"
-            onPlay={() => setMoviePlaying(true)}
-            onPause={() => setMoviePlaying(false)}
-            onEnded={() => setMoviePlaying(false)}
-          />
-          <div className="about-movie-caption">
-            <b>{about.movieTitle}</b>
-            <p>{about.movieBody}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-ad-banner" aria-label={about.adEyebrow}>
-        <div>
-          <span>{about.adEyebrow}</span>
-          <h2>{about.adTitle}</h2>
-          <p>{about.adBody}</p>
-        </div>
-        <button
-          className="landing-primary"
-          onClick={() => {
-            window.localStorage.setItem('sybnb_v6_sell_flow', 'advertising')
-            navigate('/sell/account')
-          }}
-        >
-          {about.adCta}
-        </button>
-      </section>
-
-      <h2 className="landing-section-title">{isAr ? 'استكشف الفئات' : 'Explore categories'}</h2>
-      <section className="division-grid" aria-label={isAr ? 'أقسام المنصة' : 'Platform divisions'}>
-        {DIVISIONS.map((division, index) => {
-          const disabled = division.status === 'soon'
-          return (
-            <article
-              className={`division-card ${disabled ? 'disabled' : ''}`}
-              key={division.id}
-              style={{ '--accent': division.accent, '--delay': `${index * 80}ms` } as CSSVars}
-            >
-              <button
-                className="division-card-hit"
-                disabled={disabled}
-                onClick={() => navigate(division.route)}
-                aria-label={text(division.title, lang)}
-              />
-              <div className="division-media" aria-hidden="true">
-                <img src={DIVISION_PHOTOS[division.id]} alt="" loading="lazy" />
-              </div>
-              <div className="division-card-content">
-                <div className="division-title-row">
-                  <span className="division-icon" aria-hidden="true">{DIVISION_ICONS[division.id]}</span>
-                  <h2>{text(division.title, lang)}</h2>
-                </div>
-                <small>{lang === 'ar' ? division.title.en : division.title.ar}</small>
-                <span className="division-open">{disabled ? (isAr ? 'قريباً' : 'Soon') : (isAr ? 'افتح' : 'Open')}</span>
-              </div>
-            </article>
-          )
-        })}
-      </section>
-
     </main>
   )
 }

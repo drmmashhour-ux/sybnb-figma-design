@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
+  fetchAdminPayoutAccount,
   fetchAdminRevenueSummary,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
@@ -43,6 +44,7 @@ const copy = {
     releaseError: 'تعذر تحرير هذا التحويل.',
     ledger: 'سجل التدقيق',
     release: 'تحرير التحويل',
+    revealAccount: 'عرض حساب الصرف', payoutReference: 'مرجع تحويل Sham Cash',
     review: 'مراجعة',
     receipt: 'الإيصال',
     booking: 'الحجز',
@@ -54,14 +56,27 @@ const copy = {
     error: 'تعذر تحميل بيانات المصالحة',
     lanes: ['استلام الإثبات', 'مراجعة الإدارة', 'تأكيد الحجز', 'تحرير المالك'],
     incomeProjection: 'توقع الإيراد',
+    actualIncome: 'الدخل الفعلي حسب الفترة',
+    today: 'اليوم',
+    last7Days: 'آخر ٧ أيام',
+    currentMonth: 'الشهر الحالي',
+    refunds: 'المبالغ المستردة',
+    releasedMoney: 'الأموال المحررة',
+    hostIncome: 'أرباح المضيفين',
+    held: 'محتجزة',
+    released: 'محررة',
+    revenueSources: 'مصادر الإيرادات حسب المنصة والخدمة',
     incomeProjectionNote: 'إيراد SYBNB الفعلي المحصّل: عمولة حجوزات الاستضافة، رسوم حماية الإلغاء (غير مستردة)، ورسوم خطط البائعين/الوكلاء/المطورين.',
     totalCollected: 'إجمالي العمولة المحصّلة',
+    grossCollected: 'الإيراد الإجمالي',
+    revenueReversed: 'عكس الإيراد والاستردادات',
+    netRevenue: 'صافي إيراد المنصة',
     dailyAverage: 'متوسط يومي',
     next30Days: 'توقع ٣٠ يوماً القادمة',
     next90Days: 'توقع ٩٠ يوماً القادمة',
     basedOnDays: 'بناءً على {days} يوماً من بيانات حقيقية',
     noRevenueYet: 'لا توجد عمولة محصّلة بعد — التوقع سيظهر بعد أول دفعة يوافق عليها المدير.',
-    srNote: 'رحلات SR: {count} رحلة مكتملة بقيمة أجرة إجمالية {fare} — هذه أرباح السائقين، والمنصة لا تُحصّل عمولة من رحلات SR حالياً.',
+    srNote: 'رحلات SR: {count} رحلة مكتملة بقيمة أجرة إجمالية {fare} — تحصل المنصة على عمولة ١٥٪، ويحصل السائق على ٨٥٪.',
     projectionCaveat: 'هذا امتداد خطي بسيط لمتوسط حقيقي، وليس تنبؤاً بالذكاء الاصطناعي — كلما زادت بيانات الحجوزات الحقيقية، زادت دقته.',
     whatIf: 'حاسبة افتراضية (ماذا لو)',
     whatIfNote: 'أدخل افتراضاتك الخاصة — هذه ليست بيانات حقيقية، لكن الحساب يستخدم نفس صيغة عمولة SYBNB الفعلية (تنظيف ٥٪ + ضريبة ٢٪ + عمولة استضافة ١٠٪ من الإيجار الصافي).',
@@ -74,7 +89,7 @@ const copy = {
     srUsdSharePercent: 'نسبة الدفع بالدولار (٪)',
     monthlyRevenue: 'الإيراد الشهري المتوقع',
     annualRevenue: 'الإيراد السنوي المتوقع',
-    srDriverVolumeNote: 'أجرة رحلات SR الشهرية المفترضة: {fare} — أرباح سائقين، ليست إيراد منصة (لا عمولة على SR حالياً).',
+    srDriverVolumeNote: 'أجرة رحلات SR الشهرية المفترضة: {fare} — تتضمن الحاسبة عمولة المنصة الفعلية ١٥٪.',
   },
   en: {
     back: 'Back to admin',
@@ -96,6 +111,7 @@ const copy = {
     releaseError: 'Could not release this payout.',
     ledger: 'Audit log',
     release: 'Release payout',
+    revealAccount: 'Reveal payout account', payoutReference: 'Sham Cash transfer reference',
     review: 'Review',
     receipt: 'Receipt',
     booking: 'Booking',
@@ -107,14 +123,27 @@ const copy = {
     error: 'Could not load reconciliation data',
     lanes: ['Proof received', 'Admin review', 'Booking confirmed', 'Owner released'],
     incomeProjection: 'Income projection',
+    actualIncome: 'Actual income by period',
+    today: 'Today',
+    last7Days: 'Last 7 days',
+    currentMonth: 'Current month',
+    refunds: 'Refunds',
+    releasedMoney: 'Released money',
+    hostIncome: 'Host earnings',
+    held: 'Held',
+    released: 'Released',
+    revenueSources: 'Revenue sources by platform and service',
     incomeProjectionNote: 'Real SYBNB revenue collected: booking host commission, non-refundable cancellation-protection fees, and seller/dealer/developer plan fees.',
     totalCollected: 'Total commission collected',
+    grossCollected: 'Gross platform revenue',
+    revenueReversed: 'Revenue reversed',
+    netRevenue: 'Net platform revenue',
     dailyAverage: 'Daily average',
     next30Days: 'Next 30 days (projected)',
     next90Days: 'Next 90 days (projected)',
     basedOnDays: 'Based on {days} days of real data',
     noRevenueYet: 'No commission collected yet — a projection will appear after the first admin-approved payment.',
-    srNote: '{count} completed SR rides worth {fare} in total fares — that\'s driver earnings; the platform currently collects no commission on SR rides.',
+    srNote: '{count} completed SR rides worth {fare} in total fares — the platform receives 15% commission and the driver receives 85%.',
     projectionCaveat: 'This is a simple linear extrapolation of a real average, not an AI forecast — accuracy improves as more real booking data accumulates.',
     whatIf: 'What-if calculator',
     whatIfNote: 'Enter your own assumptions — this is not real data, but the math uses the real SYBNB commission formula (5% cleaning + 2% tax + 10% host commission on net rent).',
@@ -127,7 +156,7 @@ const copy = {
     srUsdSharePercent: 'Share paid in USD (%)',
     monthlyRevenue: 'Projected monthly revenue',
     annualRevenue: 'Projected annual revenue',
-    srDriverVolumeNote: 'Assumed monthly SR fare volume: {fare} — driver earnings, not platform revenue (no SR commission today).',
+    srDriverVolumeNote: 'Assumed monthly SR fare volume: {fare} — the calculator includes the real 15% platform commission.',
   },
 }
 
@@ -140,6 +169,8 @@ export function FinanceReconciliationPage({ lang }: Props) {
   const [payoutHoldDays, setPayoutHoldDays] = useState(14)
   const [releasingId, setReleasingId] = useState('')
   const [releaseError, setReleaseError] = useState('')
+  const [payoutRefs, setPayoutRefs] = useState<Record<string, string>>({})
+  const [revealedAccounts, setRevealedAccounts] = useState<Record<string, { accountHolder: string; number: string }>>({})
   const [revenue, setRevenue] = useState<PlatformRevenueSummary | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -170,18 +201,20 @@ export function FinanceReconciliationPage({ lang }: Props) {
     const sypProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceSyp)
     const usdProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceUsd)
 
-    const monthlySypRevenue =
-      strSypBookings * sypCommissionPerBooking +
-      strSypBookings * (strProtectionPercent / 100) * sypProtectionPerBooking
-    const monthlyUsdRevenue =
-      strUsdBookings * usdCommissionPerBooking +
-      strUsdBookings * (strProtectionPercent / 100) * usdProtectionPerBooking
-
     const srUsdRides = Math.round(srRides * (srUsdPercent / 100))
     const srSypRides = srRides - srUsdRides
     const srAvgFareUsd = sypMinorToRoundedUsdMinor(srAvgFareSyp)
     const srSypFareVolume = srSypRides * srAvgFareSyp
     const srUsdFareVolume = srUsdRides * srAvgFareUsd
+
+    const monthlySypRevenue =
+      strSypBookings * sypCommissionPerBooking +
+      strSypBookings * (strProtectionPercent / 100) * sypProtectionPerBooking +
+      srSypFareVolume * 0.15
+    const monthlyUsdRevenue =
+      strUsdBookings * usdCommissionPerBooking +
+      strUsdBookings * (strProtectionPercent / 100) * usdProtectionPerBooking +
+      srUsdFareVolume * 0.15
 
     // Annual is derived from the same rounded monthly figure shown on screen (not the unrounded
     // intermediate), so it always reads as exactly 12x the displayed monthly number.
@@ -233,10 +266,12 @@ export function FinanceReconciliationPage({ lang }: Props) {
   }
 
   async function releasePayout(bookingId: string) {
+    const payoutRef = (payoutRefs[bookingId] || '').trim()
+    if (!payoutRef) { setReleaseError(t.payoutReference); return }
     setReleasingId(bookingId)
     setReleaseError('')
     try {
-      await releaseAdminPayout(bookingId)
+      await releaseAdminPayout(bookingId, payoutRef)
       const nextPayouts = await fetchAdminPayouts()
       setPayouts(nextPayouts.payouts)
     } catch (error) {
@@ -246,14 +281,38 @@ export function FinanceReconciliationPage({ lang }: Props) {
     }
   }
 
+  async function revealPayoutAccount(bookingId: string) {
+    setReleaseError('')
+    try {
+      const account = await fetchAdminPayoutAccount(bookingId)
+      setRevealedAccounts((current) => ({ ...current, [bookingId]: account }))
+    } catch (error) {
+      setReleaseError(error instanceof Error ? error.message : t.releaseError)
+    }
+  }
+
   const payments = queue?.payments || []
   const bookings = queue?.bookings || []
-  const protectedMinor = useMemo(() => {
-    const paymentTotal = payments.reduce((sum, payment) => sum + payment.amountMinor, 0)
-    const bookingTotal = bookings.reduce((sum, booking) => sum + booking.amountMinor, 0)
-    return paymentTotal + bookingTotal
+  const protectedByCurrency = useMemo(() => {
+    const totals = new Map<string, number>()
+    const representedBookings = new Set<string>()
+    for (const payment of payments) {
+      totals.set(payment.currency, (totals.get(payment.currency) || 0) + payment.amountMinor)
+      if (payment.bookingId) representedBookings.add(payment.bookingId)
+    }
+    // REQUESTED bookings have no protected money yet. A DISPUTED booking does; add it only when a
+    // pending proof above did not already represent the same booking.
+    for (const booking of bookings) if (booking.status === 'DISPUTED' && !representedBookings.has(booking.id)) {
+      totals.set(booking.currency, (totals.get(booking.currency) || 0) + booking.amountMinor)
+    }
+    return Array.from(totals.entries()).map(([currency, amountMinor]) => ({ currency, amountMinor }))
   }, [bookings, payments])
-  const payoutHoldMinor = useMemo(() => payouts.reduce((sum, payout) => sum + payout.hostPayoutMinor, 0), [payouts])
+  const payoutHoldByCurrency = useMemo(() => {
+    const totals = new Map<string, number>()
+    for (const payout of payouts) totals.set(payout.currency, (totals.get(payout.currency) || 0) + payout.hostPayoutMinor)
+    return Array.from(totals.entries()).map(([currency, amountMinor]) => ({ currency, amountMinor }))
+  }, [payouts])
+  const moneyGroup = (rows: Array<{ currency: string; amountMinor: number }>) => rows.map((row) => moneyText(row.amountMinor, row.currency, lang)).join(' · ') || '0'
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -281,9 +340,9 @@ export function FinanceReconciliationPage({ lang }: Props) {
       )}
 
       <section style={styles.stats}>
-        <FinanceStat label={t.protectedFunds} value={moneyText(protectedMinor, 'SYP', lang)} tone="#20d29b" />
+        <FinanceStat label={t.protectedFunds} value={moneyGroup(protectedByCurrency)} tone="#20d29b" />
         <FinanceStat label={t.pendingProofs} value={String(payments.length)} tone="#5268ff" />
-        <FinanceStat label={t.payoutHold} value={moneyText(payoutHoldMinor, 'SYP', lang)} tone="#e5b80b" />
+        <FinanceStat label={t.payoutHold} value={moneyGroup(payoutHoldByCurrency)} tone="#e5b80b" />
       </section>
 
       <section style={styles.grid}>
@@ -330,8 +389,11 @@ export function FinanceReconciliationPage({ lang }: Props) {
               </div>
               <b>{moneyText(payout.hostPayoutMinor, payout.currency, lang)}</b>
               <span>{payout.eligibleNow ? t.readyToRelease : t.waitingHold}</span>
+              {payout.eligibleNow && payout.hostPayoutMethod ? <button type="button" onClick={() => void revealPayoutAccount(payout.bookingId)}>{t.revealAccount}</button> : null}
+              {revealedAccounts[payout.bookingId] ? <small dir="ltr">{revealedAccounts[payout.bookingId].accountHolder} · {revealedAccounts[payout.bookingId].number}</small> : null}
+              <input value={payoutRefs[payout.bookingId] || ''} onChange={(event) => setPayoutRefs((current) => ({ ...current, [payout.bookingId]: event.target.value }))} placeholder={t.payoutReference} disabled={!payout.eligibleNow || !revealedAccounts[payout.bookingId]} />
               <button
-                disabled={!payout.eligibleNow || releasingId === payout.bookingId}
+                disabled={!payout.eligibleNow || !revealedAccounts[payout.bookingId] || !payoutRefs[payout.bookingId]?.trim() || releasingId === payout.bookingId}
                 onClick={() => void releasePayout(payout.bookingId)}
               >
                 {releasingId === payout.bookingId ? t.releasing : t.release}
@@ -339,6 +401,44 @@ export function FinanceReconciliationPage({ lang }: Props) {
             </article>
           )) : <p style={styles.empty}>{t.empty}</p>}
         </div>
+      </section>
+
+      <section style={styles.card}>
+        <h2 style={styles.cardTitle}>{t.actualIncome}</h2>
+        {revenue && revenue.byCurrency.length ? revenue.byCurrency.map((entry) => (
+          <div key={`actual-${entry.currency}`}>
+            <p style={styles.empty}><b dir="ltr">{entry.currency}</b></p>
+            <section style={styles.stats}>
+              <FinanceStat label={t.today} value={moneyText(entry.actual.todayMinor, entry.currency, lang)} tone="#20d29b" />
+              <FinanceStat label={t.last7Days} value={moneyText(entry.actual.last7DaysMinor, entry.currency, lang)} tone="#5268ff" />
+              <FinanceStat label={t.currentMonth} value={moneyText(entry.actual.currentMonthMinor, entry.currency, lang)} tone="#e5b80b" />
+            </section>
+            <section style={styles.stats}>
+              <FinanceStat label={`${t.refunds} · ${t.currentMonth}`} value={moneyText(entry.actual.refundsCurrentMonthMinor, entry.currency, lang)} tone="#ff5f7d" />
+              <FinanceStat label={`${t.releasedMoney} · ${t.currentMonth}`} value={moneyText(entry.actual.releasedCurrentMonthMinor, entry.currency, lang)} tone="#9b8cff" />
+              <FinanceStat label={`${t.hostIncome} · ${t.held}`} value={moneyText(entry.actual.hostEarningsHeldMinor, entry.currency, lang)} tone="#e5b80b" />
+              <FinanceStat label={`${t.hostIncome} · ${t.released}`} value={moneyText(entry.actual.hostEarningsReleasedMinor, entry.currency, lang)} tone="#20d29b" />
+            </section>
+          </div>
+        )) : <p style={styles.empty}>{t.noRevenueYet}</p>}
+      </section>
+
+      <section style={styles.card}>
+        <h2 style={styles.cardTitle}>{t.revenueSources}</h2>
+        {revenue && revenue.byCurrency.length ? revenue.byCurrency.map((entry) => (
+          <div key={`sources-${entry.currency}`}>
+            <p style={styles.empty}><b dir="ltr">{entry.currency}</b></p>
+            <div style={styles.payoutTable}>
+              {entry.sources.map((source) => (
+                <article key={source.key} style={styles.financeRow}>
+                  <span style={{ ...styles.riskDot, background: '#20d29b' }} />
+                  <div><strong>{source.label}</strong><small>{source.key}</small></div>
+                  <b>{moneyText(source.amountMinor, entry.currency, lang)}</b>
+                </article>
+              ))}
+            </div>
+          </div>
+        )) : <p style={styles.empty}>{t.noRevenueYet}</p>}
       </section>
 
       <section style={styles.card}>
@@ -351,7 +451,9 @@ export function FinanceReconciliationPage({ lang }: Props) {
                 <b dir="ltr">{entry.currency}</b>
               </p>
               <section style={styles.stats}>
-                <FinanceStat label={t.totalCollected} value={moneyText(entry.totalRevenueMinor, entry.currency, lang)} tone="#20d29b" />
+                <FinanceStat label={t.grossCollected} value={moneyText(entry.grossRevenueMinor, entry.currency, lang)} tone="#5268ff" />
+                <FinanceStat label={t.revenueReversed} value={moneyText(entry.reversedRevenueMinor, entry.currency, lang)} tone="#ff5f7d" />
+                <FinanceStat label={t.netRevenue} value={moneyText(entry.totalRevenueMinor, entry.currency, lang)} tone="#20d29b" />
                 <FinanceStat label={t.dailyAverage} value={moneyText(entry.projection.dailyAverageMinor, entry.currency, lang)} tone="#5268ff" />
                 <FinanceStat label={t.next30Days} value={moneyText(entry.projection.next30DaysMinor, entry.currency, lang)} tone="#e5b80b" />
                 <FinanceStat label={t.next90Days} value={moneyText(entry.projection.next90DaysMinor, entry.currency, lang)} tone="#ff5f7d" />

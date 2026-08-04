@@ -29,7 +29,9 @@ const checks = [
   ['reviews require completed booking', () => assert.match(reviews, /REVIEW_BOOKING_NOT_COMPLETED/)],
   ['public listings only expose approved inventory', () => assert.match(listings, /status: 'APPROVED'/)],
   ['paid plan listings require approved seller profile', () => assert.match(listings, /SELLER_PLAN_REQUIRED/)],
-  ['production email code never exposes devCode', () => assert.match(emailVerification, /isProduction \? undefined : code/)],
+  ['hosted deployments never expose a raw email code', () => {
+    assert.match(emailVerification, /const devCode = !isProduction && !process\.env\.VERCEL_ENV \? code : undefined/)
+  }],
   ['auth rejects missing or invalid bearer token server-side', () => assert.match(authContext, /AUTH_REQUIRED|INVALID_TOKEN|verifySessionToken/)],
 ]
 

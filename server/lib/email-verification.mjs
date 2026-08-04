@@ -1,5 +1,5 @@
 import { db } from './prisma.mjs'
-import { generateEmailVerificationCode, hashEmailVerificationCode, verifyEmailVerificationCodeHash } from './security.mjs'
+import { generateEmailVerificationCode, generateVerificationGrant, hashEmailVerificationCode, hashVerificationGrant, verifyEmailVerificationCodeHash } from './security.mjs'
 import { isMailerConfigured, sendVerificationCodeEmail } from './mailer.mjs'
 
 const CODE_TTL_MINUTES = 10
@@ -7,6 +7,7 @@ const MAX_ATTEMPTS = 5
 // A successful verify() must be recent to count toward register() -- otherwise a code verified
 // once, long ago, for a since-abandoned signup attempt would stay valid forever.
 const CONSUMED_TRUST_WINDOW_MINUTES = 30
+const OTP_RETENTION_HOURS = 24
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase()
@@ -27,15 +28,26 @@ export async function sendEmailVerificationCode(email, purpose = 'guest-signup')
     throw error
   }
 
+  const isProduction = process.env.NODE_ENV === 'production'
+  if (isProduction && !isMailerConfigured()) {
+    const error = new Error('Email verification is temporarily unavailable.')
+    error.statusCode = 503
+    error.code = 'EMAIL_NOT_CONFIGURED'
+    error.expose = true
+    throw error
+  }
+
   const code = generateEmailVerificationCode()
   const codeHash = hashEmailVerificationCode(code)
   const expiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000)
 
+  await db().emailVerificationCode.deleteMany({
+    where: { createdAt: { lt: new Date(Date.now() - OTP_RETENTION_HOURS * 60 * 60 * 1000) } },
+  })
   await db().emailVerificationCode.create({
     data: { email: normalized, codeHash, purpose, expiresAt },
   })
 
-  const isProduction = process.env.NODE_ENV === 'production'
   let emailSent = false
   let emailError
   // Send real mail in local/staging when Resend/SMTP is configured so owner QA can exercise
@@ -49,7 +61,18 @@ export async function sendEmailVerificationCode(email, purpose = 'guest-signup')
     }
   }
 
-  const devCode = isProduction ? undefined : code
+
+  if (isProduction && !emailSent) {
+    const error = new Error('Email verification could not be delivered. Try again shortly.')
+    error.statusCode = 503
+    error.code = 'EMAIL_DELIVERY_FAILED'
+    error.expose = true
+    throw error
+  }
+
+  // Never expose a raw OTP from any hosted Vercel deployment, even if NODE_ENV is accidentally
+  // scoped as development on a Preview deployment. Local development/tests have no VERCEL_ENV.
+  const devCode = !isProduction && !process.env.VERCEL_ENV ? code : undefined
   return { ok: true, emailSent, emailError, devCode }
 }
 
@@ -69,29 +92,30 @@ export async function consumeEmailVerificationCode(email, code, purpose = 'guest
 
   const matches = verifyEmailVerificationCodeHash(code, candidate.codeHash)
   if (!matches) {
-    await db().emailVerificationCode.update({
-      where: { id: candidate.id },
+    await db().emailVerificationCode.updateMany({
+      where: { id: candidate.id, consumedAt: null, attempts: { lt: MAX_ATTEMPTS } },
       data: { attempts: { increment: 1 } },
     })
     return { ok: false, reason: 'INVALID_OR_EXPIRED_CODE' }
   }
 
-  await db().emailVerificationCode.update({
-    where: { id: candidate.id },
-    data: { consumedAt: new Date() },
+  const verificationGrant = generateVerificationGrant()
+  const consumed = await db().emailVerificationCode.updateMany({
+    where: { id: candidate.id, consumedAt: null, attempts: { lt: MAX_ATTEMPTS } },
+    data: { consumedAt: new Date(), grantHash: hashVerificationGrant(verificationGrant) },
   })
-  return { ok: true }
+  return consumed.count === 1 ? { ok: true, verificationGrant } : { ok: false, reason: 'INVALID_OR_EXPIRED_CODE' }
 }
 
-// Server-side proof, at register() time, that this exact email really was verified recently --
-// never trusts a client-supplied "I verified it" boolean.
-export async function hasRecentlyVerifiedEmail(email, purpose = 'guest-signup') {
+// Consume the short-lived verification proof exactly once for the final action (register/login/reset).
+// The code itself is consumed by verify(); claimedAt prevents replaying that proof for more actions.
+export async function claimRecentlyVerifiedEmail(email, purpose = 'guest-signup', verificationGrant) {
   const normalized = normalizeEmail(email)
-  if (!normalized) return false
+  if (!normalized || !verificationGrant) return false
   const since = new Date(Date.now() - CONSUMED_TRUST_WINDOW_MINUTES * 60 * 1000)
-  const verified = await db().emailVerificationCode.findFirst({
-    where: { email: normalized, purpose, consumedAt: { gt: since } },
-    orderBy: { consumedAt: 'desc' },
+  const claimed = await db().emailVerificationCode.updateMany({
+    where: { email: normalized, purpose, consumedAt: { gt: since }, claimedAt: null, grantHash: hashVerificationGrant(verificationGrant) },
+    data: { claimedAt: new Date() },
   })
-  return Boolean(verified)
+  return claimed.count === 1
 }

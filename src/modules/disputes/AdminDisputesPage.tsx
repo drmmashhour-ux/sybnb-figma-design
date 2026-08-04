@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { fetchAdminDisputes, resolveDispute, type PlatformDispute } from '../../shared/api/platformApi'
+import { AdminShell } from '../admin/AdminShell'
 
 // Admin dispute queue (GET /api/admin/disputes, OPEN only) + resolve REFUND/REJECT
 // (PATCH /api/admin/disputes/:id). Mirrors the dispute-adjudication backend.
@@ -47,7 +48,7 @@ const copy = {
   },
 }
 
-export function AdminDisputesPage({ lang }: { lang: Lang }) {
+export function AdminDisputesPage({ lang, onLanguageChange }: { lang: Lang; onLanguageChange?: (lang: Lang) => void }) {
   const isAr = lang === 'ar'
   const t = isAr ? copy.ar : copy.en
   const [disputes, setDisputes] = useState<PlatformDispute[]>([])
@@ -73,19 +74,17 @@ export function AdminDisputesPage({ lang }: { lang: Lang }) {
   }
 
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <button style={styles.back} onClick={() => (window.location.hash = '/admin/review')}>{t.back}</button>
-      <h1 style={styles.title}>{t.title}</h1>
-      <p style={styles.subtitle}>{t.subtitle}</p>
-
-      {state === 'loading' && <p style={styles.muted}>{t.loading}</p>}
-      {state === 'error' && <p style={styles.error}>{t.error}</p>}
-      {state === 'ready' && disputes.length === 0 && <p style={styles.muted}>{t.empty}</p>}
-      {state === 'ready' &&
-        disputes.map((d) => (
-          <DisputeRow key={d.id} dispute={d} t={t} lang={lang} resolvedText={resolved[d.id]} onResolved={onResolved} />
-        ))}
-    </main>
+    <AdminShell lang={lang} active="reports" title={t.title} subtitle={t.subtitle} onLanguageChange={onLanguageChange} onRefresh={() => void load()}>
+      <div dir={isAr ? 'rtl' : 'ltr'} style={{ display: 'grid', gap: 14 }}>
+        {state === 'loading' && <p style={styles.muted}>{t.loading}</p>}
+        {state === 'error' && <p style={styles.error}>{t.error}</p>}
+        {state === 'ready' && disputes.length === 0 && <div className="empty"><div><span>✓</span>{t.empty}</div></div>}
+        {state === 'ready' &&
+          disputes.map((d) => (
+            <DisputeRow key={d.id} dispute={d} t={t} lang={lang} resolvedText={resolved[d.id]} onResolved={onResolved} />
+          ))}
+      </div>
+    </AdminShell>
   )
 }
 

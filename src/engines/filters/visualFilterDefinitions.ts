@@ -32,6 +32,8 @@ const visualFilterPhotoSrc: Partial<Record<VisualFilterArt, string>> = {
   'bed-sofa': '/assets/filter-photos/beds/sofa-bed.webp',
   'property-apartment': '/assets/filter-photos/properties/apartment.webp',
   'property-villa': '/assets/filter-photos/properties/villa.webp',
+  // Placeholder: copy of the building image. Replace with a real hotel photo at this path when available.
+  'property-hotel': '/assets/filter-photos/properties/hotel.webp',
   'property-room': '/assets/filter-photos/properties/private-room.webp',
   'property-heritage': '/assets/filter-photos/properties/heritage-home.webp',
   'property-farm': '/assets/filter-photos/properties/farm.webp',
@@ -201,6 +203,7 @@ export const propertyFilterGroup: VisualFilterGroup = {
     { id: 'any', label: { ar: 'الكل', en: 'Any' }, art: 'general-properties' },
     { id: 'apartment', label: { ar: 'شقة', en: 'Apartment' }, art: 'property-apartment' },
     { id: 'villa', label: { ar: 'فيلا', en: 'Villa' }, art: 'property-villa' },
+    { id: 'hotel', label: { ar: 'فندق', en: 'Hotel' }, art: 'property-hotel' },
     { id: 'room', label: { ar: 'غرفة', en: 'Room' }, art: 'property-room' },
     { id: 'heritage', label: { ar: 'بيت تراثي', en: 'Heritage' }, art: 'property-heritage' },
     { id: 'farm', label: { ar: 'مزرعة', en: 'Farm' }, art: 'property-farm' },
@@ -577,7 +580,12 @@ function marketplaceVisualFilterGroups() {
 }
 
 export function sellerPropertyFilterGroupsFromConfig() {
-  return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'payments'])
+  // Host LISTING flow: bed type is multi-select — one room/ad can offer several bed options
+  // (e.g. a family room with a queen + a sofa bed, or a hotel room sold as queen-or-king). Guest
+  // SEARCH keeps bed type single (visualFilterGroupsForDivision), so this override is host-only.
+  return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'payments']).map((group) =>
+    group.id === 'bedType' ? { ...group, mode: 'multi' as const } : group,
+  )
 }
 
 export function sellerCarFilterGroupsFromConfig() {

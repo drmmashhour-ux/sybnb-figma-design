@@ -14,8 +14,8 @@ describe('recordWalletEntry idempotency', () => {
   beforeAll(async () => {
     app = testApp()
     const email = uniqueTestEmail('wallet-idempotency')
-    await verifyEmailForTest(app, email, 'staff-login')
-    const res = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email, 'staff-login')
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1,
       role: 'HOST',
       email,
       password: 'correct-horse-battery',

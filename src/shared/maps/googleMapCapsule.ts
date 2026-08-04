@@ -20,10 +20,6 @@ export function googleMapsSearchUrl(listing: PlatformListing, title: string, lan
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listingMapTarget(listing, title, lang).query)}`
 }
 
-export function googleMapsEmbedUrl(listing: PlatformListing, title: string, lang: Lang) {
-  return `https://www.google.com/maps?q=${encodeURIComponent(listingMapTarget(listing, title, lang).query)}&output=embed`
-}
-
 export function offlineMapSnapshot(listing: PlatformListing, title: string, lang: Lang): OfflineMapSnapshot {
   const target = listingMapTarget(listing, title, lang)
   return {
@@ -43,8 +39,12 @@ export function offlineMapStorageKey(listingId: string) {
 export function listingMapTarget(listing: PlatformListing, title: string, lang: Lang): GoogleMapTarget {
   const metadata = listing.metadata || {}
   const location = listing.location || {}
-  const lat = numberFrom(location.lat ?? location.latitude ?? location.geoLat ?? metadata.lat ?? metadata.latitude ?? metadata.geoLat)
-  const lng = numberFrom(location.lng ?? location.lon ?? location.longitude ?? location.geoLng ?? metadata.lng ?? metadata.lon ?? metadata.longitude ?? metadata.geoLng)
+  // The seller wizard stores property coordinates nested under metadata.mapLocation.{latitude,longitude};
+  // read that too, else every wizard-created listing (which never populates the `location` relation)
+  // reports hasCoordinates:false and the map/directions silently never render.
+  const mapLoc = (metadata.mapLocation && typeof metadata.mapLocation === 'object' ? metadata.mapLocation : {}) as Record<string, unknown>
+  const lat = numberFrom(location.lat ?? location.latitude ?? location.geoLat ?? metadata.lat ?? metadata.latitude ?? metadata.geoLat ?? mapLoc.latitude ?? mapLoc.lat)
+  const lng = numberFrom(location.lng ?? location.lon ?? location.longitude ?? location.geoLng ?? metadata.lng ?? metadata.lon ?? metadata.longitude ?? metadata.geoLng ?? mapLoc.longitude ?? mapLoc.lng)
   const addressParts = [
     stringFrom(location.addressAr ?? metadata.addressAr),
     stringFrom(location.address ?? metadata.address),

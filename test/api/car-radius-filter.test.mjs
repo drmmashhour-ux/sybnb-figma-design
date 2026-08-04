@@ -29,8 +29,8 @@ describe('Search radius filter on GET /api/listings', () => {
 
   async function registerSeller(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email, 'staff-login')
-    const res = await request(app).post('/api/auth/register').send({ role: 'SELLER', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email, 'staff-login')
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'SELLER', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     return { email, token: res.body.token, user: res.body.user }
   }

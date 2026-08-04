@@ -56,7 +56,9 @@ function propertyRules() {
     { key: 'city', label: 'city', valid: (m) => isFilledString(pick(m, 'city')) },
     { key: 'bedrooms', label: 'number of bedrooms', valid: (m) => isNumberInRange(pick(m, 'bedrooms'), 0, 50, { integer: true }) },
     { key: 'bathrooms', label: 'number of bathrooms', valid: (m) => isNumberInRange(pick(m, 'bathrooms'), 0, 50, { integer: true }) },
-    { key: 'areaSqm', label: 'area (m²)', valid: (m) => isNumberInRange(pick(m, 'areaSqm'), 1, 1_000_000) },
+    // The seller wizard writes the size as `sizeSqm`; older/test fixtures use `areaSqm`. Accept either so
+    // the submit gate matches what the UI actually produces (valuation + the search reader already do).
+    { key: 'areaSqm', label: 'area (m²)', valid: (m) => isNumberInRange(pick(m, 'sizeSqm'), 1, 1_000_000) || isNumberInRange(pick(m, 'areaSqm'), 1, 1_000_000) },
   ]
 }
 

@@ -1,0 +1,233 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+
+describe('launch UI safety guards', () => {
+  it('does not store a staff session for the wrong portal role', () => {
+    const api = read('src/shared/api/platformApi.ts')
+    const staffSessionFunction = api.slice(api.indexOf('export async function createStaffAccountSession'), api.indexOf('export function clearStoredStaffSession'))
+    expect(staffSessionFunction).toContain('if (!session.user.roles.includes(role))')
+    expect(staffSessionFunction.indexOf('if (!session.user.roles.includes(role))')).toBeLessThan(
+      staffSessionFunction.indexOf('authStorage.setItem(STAFF_SESSION_KEY'),
+    )
+  })
+
+  it('opens buyer and renter authentication without routing into daily stays', () => {
+    const rentals = read('src/modules/rentals/RentalsPage.tsx')
+    const shell = read('src/shared/layout/AppShell.tsx')
+    expect(rentals).toContain("window.dispatchEvent(new Event('sybnb-open-auth'))")
+    expect(rentals).not.toContain("window.location.hash = '/account/open'")
+    expect(shell).toContain("window.addEventListener('sybnb-open-auth', onOpenAuth)")
+    expect(shell).toContain("if (path === '/buy')")
+    expect(shell).toContain("if (path === '/rentals')")
+  })
+
+  it('labels new construction and marketplace controls accurately', () => {
+    const search = read('src/modules/search/SearchPreviewPage.tsx')
+    const marketplace = read('src/modules/marketplace/MarketplaceBrowsePage.tsx')
+    expect(search).toContain("'مشاريع جديدة في سوريا'")
+    expect(search).toContain("'New construction in Syria'")
+    expect(marketplace).toContain('aria-label={t.minPrice}')
+    expect(marketplace).toContain('aria-label={t.condition}')
+    expect(marketplace).toContain('tabIndex={0}')
+  })
+
+  it('does not present buyer/renter property prices as a platform payment', () => {
+    const rentals = read('src/modules/rentals/RentalsPage.tsx')
+    const cars = read('src/modules/cars/CarFilterFields.tsx')
+    expect(rentals).not.toContain('<PaymentCapsule')
+    expect(rentals).not.toContain("destinationCode={isBuyMode ? 'BUYER-CAPSULE' : 'RENTAL-CAPSULE'}")
+    expect(cars).toContain('aria-label={`${t.year} — ${t.from}`}')
+    expect(cars).toContain('aria-label={`${t.mileage} — ${t.to}`}')
+  })
+
+  it('does not ship sample wallet recipient, amount, or gift message values', () => {
+    const source = read('src/modules/wallet-live/WalletPage.tsx')
+    expect(source).toContain("useState('')")
+    expect(source).not.toContain("useState('+963900000001')")
+    expect(source).not.toContain("useState('50000')")
+    expect(source).not.toContain("useState(isAr ? 'هدية من محفظة SYBNB' : 'Gift from SYBNB Wallet')")
+    expect(source).toMatch(/disabled=\{status === 'saving' \|\| recipientPhone\.trim\(\)\.length < 8 \|\| Number\(amountMinor\) <= 0\}/)
+  })
+
+  it('keeps staff registration OTP-gated while letting the API authorize sign-in', () => {
+    const source = read('src/modules/account/StaffAccessPage.tsx')
+    expect(source).toContain("(mode === 'signUp' && !confirmed)")
+    expect(source).toContain("/^\\d{4,8}$/.test(code.trim())")
+    expect(source).toContain("disabled={status === 'loading' || codeBusy !== 'idle'}")
+    expect(source).toContain('autoComplete="one-time-code"')
+    expect(source).toContain('aria-label={t.code}')
+    expect(source).toContain("event.target.value.replace(/\\D/g, '')")
+    expect(source).toContain('autoComplete="new-password"')
+    expect(source).toContain("if (!codeConfirmed && code.trim()) activeGrant = (await confirmCode()) || ''")
+    expect(source).toContain('name="sybnb-new-password-confirmation"')
+    expect(source).toContain('if (newPassword !== passwordRepeat)')
+    expect(source).toContain("type={showResetPasswords ? 'text' : 'password'}")
+    expect(source).toContain('aria-pressed={showResetPasswords}')
+    expect(source).toContain('setResetStep(2)')
+    expect(source).toContain("resetStep === 1 ? beginPasswordResetVerification() : submitPasswordReset()")
+    expect(source).toContain("(mode !== 'forgotPassword' && codeSent)")
+    expect(source).toContain("authError.code === 'STAFF_OTP_REQUIRED'")
+    expect(source).toContain("mode === 'signUp' && !codeSent ? beginAccountVerification() : openSession()")
+    expect(source).not.toContain('sybnb-staff-email-confirmation')
+    expect(source).toContain("{mode === 'signUp' && (")
+    expect(source).not.toContain("mode === 'signUp' || mode === 'forgotPassword'")
+    expect(source).toContain("setMode('signIn')")
+    expect(source.indexOf("setMode('signIn')")).toBeLessThan(source.indexOf('setMessage(t.resetSuccess)'))
+
+    const guestAuth = read('src/modules/auth/AuthPanel.tsx')
+    expect(guestAuth).not.toContain('value={repeatEmail}')
+    expect(guestAuth).toContain("event.target.value.replace(/\\D/g, '')")
+  })
+
+  it('keeps advertising payments closed until a real campaign system exists', () => {
+    const source = read('src/modules/seller/SellerDivisionRoutes.tsx')
+    const routeGuard = read('src/modules/seller/sellerRoutes.ts')
+    expect(source).toContain("path === '/advertising' || path === '/advertising/account'")
+    expect(source).toContain('Advertising campaigns are not open yet')
+    expect(source).toContain('will not accept advertising payments')
+    expect(source).not.toContain('<SellerAccountPage flow="advertising"')
+    expect(routeGuard).toContain("path === '/advertising'")
+  })
+
+  it('keeps seller authentication inside the shared session capsule and logout', () => {
+    const api = read('src/shared/api/platformApi.ts')
+    const shell = read('src/shared/layout/AppShell.tsx')
+    expect(api).toContain('authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))')
+    expect(api).toContain('export function clearAllStoredSessions()')
+    expect(api).toContain('authStorage.removeItem(SELLER_SESSION_KEY)')
+    expect(shell).toContain('getStoredStaffSession() || getStoredSellerSession()')
+    expect(shell).toContain('clearAllStoredSessions()')
+  })
+
+  it('keeps admin navigation labels visible at tablet and narrow desktop widths', () => {
+    const shell = read('src/modules/admin/AdminShell.tsx')
+    const css = read('src/modules/admin/admin-console.css')
+    expect(shell).toContain('title={isAr ? item.ar : item.en}')
+    expect(shell).toContain('aria-label={isAr ? item.ar : item.en}')
+    expect(css).not.toContain('.sidebar nav b, .sybnb-admin .sidebar nav em')
+    expect(css).toContain('grid-template-columns: 210px 1fr')
+    expect(css).toContain('.sidebar-groups { display: flex; gap: 8px; }')
+    expect(shell).toContain("key: 'str', ar: '١. الإيجار القصير (STR)', en: '1. Short-Term Rentals (STR)'")
+    expect(shell).toContain("key: 'hosts', ar: '٢. إدارة المضيفين', en: '2. Host Control'")
+    expect(shell).toContain("key: 'realestate', ar: '٣. العقارات', en: '3. Real Estate'")
+    expect(shell).toContain("key: 'commerce', ar: '٤. السوق والمركبات والإعلانات', en: '4. Marketplace, Cars & Ads'")
+    expect(shell).toContain("key: 'transport', ar: '٥. النقل SR', en: '5. SR Transport'")
+    expect(shell).toContain("key: 'finance', ar: '٦. المالية والإيرادات', en: '6. Finance & Revenue'")
+    expect(shell).toContain("key: 'ai', ar: '٧. إدارة الذكاء الاصطناعي', en: '7. AI Management'")
+  })
+
+  it('describes AI controls as report preferences and schedules one Toronto 8 AM report', () => {
+    const ai = read('src/modules/ai/AiBrainPage.tsx')
+    const cron = read('server/routes/cron.mjs')
+    const vercel = JSON.parse(read('vercel.json'))
+    expect(ai).toContain('AI does not execute actions by itself')
+    expect(ai).toContain('لا ينفذ الذكاء الاصطناعي إجراءات بنفسه')
+    expect(ai).not.toContain('When ON: AI monitors the section, detects problems')
+    expect(vercel.crons).toContainEqual({ path: '/api/cron/daily-report', schedule: '0 12,13 * * *' })
+    expect(cron).toContain("const DAILY_REPORT_TIME_ZONE = 'America/Toronto'")
+    expect(cron).toContain('if (clock.hour !== 8)')
+    expect(cron).toContain("reason: 'already_sent'")
+    expect(cron).toContain('entityId: clock.date')
+  })
+
+  it('keeps driver actions inside driver-accessible surfaces and reports dispatch failures', () => {
+    const driver = read('src/modules/driver/DriverDashboardPage.tsx')
+    const dispatch = read('src/modules/admin/AdminSrDispatchPage.tsx')
+    expect(driver).toContain("window.location.hash = '/driver/vehicles'")
+    expect(driver).toContain("window.location.hash = '/wallet'")
+    expect(driver).not.toContain("window.location.hash = '/operations'")
+    expect(driver).not.toContain("window.location.hash = '/finance'")
+    expect(dispatch).toContain('role="alert"')
+    expect(dispatch).not.toContain('/* surfaced by the next refresh */')
+    expect(driver).toContain('saveDriverPayout')
+    expect(dispatch).toContain('releaseAdminSrPayout')
+  })
+
+  it('shows the real SR commission in finance projections', () => {
+    const finance = read('src/modules/finance/FinanceReconciliationPage.tsx')
+    expect(finance).toContain('the platform receives 15% commission')
+    expect(finance).toContain('srSypFareVolume * 0.15')
+    expect(finance).toContain('srUsdFareVolume * 0.15')
+    expect(finance).not.toContain('platform currently collects no commission on SR rides')
+  })
+
+  it('keeps finance currencies separate and requires a reconciled host payout transfer', () => {
+    const finance = read('src/modules/finance/FinanceReconciliationPage.tsx')
+    const api = read('src/shared/api/platformApi.ts')
+    expect(finance).toContain('protectedByCurrency')
+    expect(finance).toContain('payoutHoldByCurrency')
+    expect(finance).not.toContain("moneyText(protectedMinor, 'SYP'")
+    expect(finance).toContain('fetchAdminPayoutAccount')
+    expect(finance).toContain('payoutRefs[bookingId]')
+    expect(api).toContain('body: { payoutRef }')
+  })
+
+  it('uses server email/phone OTP for seller signup and never compares a browser-generated code', () => {
+    const source = read('src/modules/seller/SellerAccountPage.tsx')
+    expect(source).toContain("sendEmailVerificationCode(email.trim(), 'staff-login')")
+    expect(source).toContain("verifyEmailVerificationCode(email.trim(), mobileCode.trim(), 'staff-login')")
+    expect(source).toContain("sendPhoneVerificationCode(phone.trim(), 'staff-login')")
+    expect(source).toContain("verifyPhoneVerificationCode(phone.trim(), mobileCode.trim(), 'staff-login')")
+    expect(source).not.toContain('createMobileVerificationCode')
+    expect(source).not.toContain('mobileCode.trim() !== sentMobileCode')
+    expect(source).toContain("email: verificationMethod === 'email' ? email.trim() : ''")
+    expect(source).toContain("phone: verificationMethod === 'phone' ? phone.trim() : ''")
+  })
+
+  it('stops Trips and Booking on explicit loading/error screens instead of rendering empty business state', () => {
+    const trips = read('src/modules/dashboard/DashboardPage.tsx')
+    const booking = read('src/modules/bookings/BookingDetailPage.tsx')
+    expect(trips).toContain("if (status !== 'ready')")
+    expect(trips).toContain("role={status === 'error' ? 'alert' : 'status'}")
+    expect(booking).toContain("if (status !== 'ready')")
+    expect(booking).toContain("role={status === 'error' ? 'alert' : 'status'}")
+  })
+
+  it('keeps builds read-only and public inventory fail-closed', () => {
+    const packageJson = JSON.parse(read('package.json'))
+    const api = read('src/shared/api/platformApi.ts')
+    expect(packageJson.scripts.postbuild).toBeUndefined()
+    expect(api).not.toMatch(/catch\s*\{\s*return \{ listings: fallbackApprovedListings\(division\)/)
+  })
+
+  it('does not turn payout or operations load failures into empty business state', () => {
+    const payout = read('src/modules/host/HostPayoutPage.tsx')
+    const operations = read('src/modules/operations/OperationsCalendarPage.tsx')
+    expect(payout).toContain("setStatus('error')")
+    expect(payout).toContain("disabled={status !== 'ready'}")
+    expect(operations).toContain('role="alert"')
+    expect(operations).not.toContain('July 2026')
+    expect(operations).not.toContain('Guesty-style')
+    expect(operations).not.toContain('Guesty gap #1')
+    expect(operations).not.toContain("id: 'maintenance-cleaning'")
+    expect(operations).toContain('if (rideCount > 0)')
+  })
+
+  it('keeps cross-platform navigation and authentication accessible', () => {
+    const app = read('src/app/App.tsx')
+    const shell = read('src/shared/layout/AppShell.tsx')
+    const auth = read('src/modules/auth/AuthPanel.tsx')
+    const inbox = read('src/modules/immocontact/ImmocontactPage.tsx')
+    expect(app).toContain('<NotFoundPage lang={lang} />')
+    expect(app).toContain("path === '/' ?")
+    expect(shell).toContain("backPath: '/synitres'")
+    expect(shell).not.toContain("nextPath: '/rentals'")
+    expect(shell).toContain("backPath: reviewId ? `/listing/${reviewId}` : '/trips'")
+    expect(auth).toContain('role="dialog"')
+    expect(auth).toContain('aria-modal="true"')
+    expect(auth).toContain('autoComplete="one-time-code"')
+    expect(inbox).toContain('fetchPrototypeDriverOverview()')
+  })
+
+  it('gates marketplace publishing and gives standalone platforms shared support navigation', () => {
+    const marketplace = read('src/modules/marketplace/MarketplaceSellPage.tsx')
+    const standalone = read('src/shared/layout/StandalonePlatformShell.tsx')
+    const listing = read('src/modules/listings/ListingDetailPage.tsx')
+    expect(marketplace).toContain('if (!sellerSession)')
+    expect(standalone).toContain('href="#standalone-main"')
+    expect(standalone).toContain("window.location.hash = '/terms'")
+    expect(listing).toContain('onClick={() => void loadListing()}')
+  })
+})

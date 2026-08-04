@@ -17,12 +17,13 @@ describe('POST /api/auth/register', () => {
 
   it('creates a GUEST account with a valid email + password, after verifying the email code', async () => {
     const email = uniqueTestEmail('register-ok')
-    await verifyEmailForTest(app, email)
+    const verificationGrant = await verifyEmailForTest(app, email)
     const res = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',
       displayName: 'Test Guest',
+      verificationGrant,
     })
 
     expect(res.status).toBe(201)
@@ -33,11 +34,67 @@ describe('POST /api/auth/register', () => {
     trackTestUser(res.body.user.id)
   })
 
+  it('persists an allowlisted partner subtype and gives the operator baseline customer access', async () => {
+    const email = uniqueTestEmail('register-builder')
+    const verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'HOST', email, password: 'correct-horse-battery', partnerType: 'BUILDER', verificationGrant,
+    })
+    expect(res.status).toBe(201)
+    expect(res.body.user.partnerType).toBe('BUILDER')
+    expect(res.body.user.roles).toEqual(expect.arrayContaining(['HOST', 'GUEST']))
+    trackTestUser(res.body.user.id)
+  })
+
   it('rejects a GUEST registration whose email was never verified (F-EMAIL-01)', async () => {
     const email = uniqueTestEmail('register-unverified')
     const res = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
+      password: 'correct-horse-battery',
+    })
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('EMAIL_NOT_VERIFIED')
+  })
+
+  it('binds the verified OTP proof to the browser-held opaque grant and consumes it once', async () => {
+    const email = uniqueTestEmail('grant-binding')
+    const verificationGrant = await verifyEmailForTest(app, email)
+    const account = { role: 'GUEST', email, password: 'correct-horse-battery' }
+
+    expect((await request(app).post('/api/auth/register').send(account)).status).toBe(403)
+    expect((await request(app).post('/api/auth/register').send({ ...account, verificationGrant: 'wrong-grant' })).status).toBe(403)
+
+    const created = await request(app).post('/api/auth/register').send({ ...account, verificationGrant })
+    expect(created.status).toBe(201)
+    trackTestUser(created.body.user.id)
+  })
+
+  it('requires distinct grants for both identifiers on a dual-identifier registration', async () => {
+    const email = uniqueTestEmail('dual-grants')
+    const phone = `+9639${String(Date.now() + 17).slice(-8)}`
+    const emailVerificationGrant = await verifyEmailForTest(app, email)
+    const phoneSend = await request(app).post('/api/auth/phone-code/send').send({ phone, purpose: 'guest-signup' })
+    const phoneVerify = await request(app).post('/api/auth/phone-code/verify').send({ phone, code: phoneSend.body.devCode, purpose: 'guest-signup' })
+    const phoneVerificationGrant = phoneVerify.body.verificationGrant
+    const account = { role: 'GUEST', email, phone, password: 'correct-horse-battery', emailVerificationGrant, phoneVerificationGrant }
+    expect(emailVerificationGrant).not.toBe(phoneVerificationGrant)
+    const created = await request(app).post('/api/auth/register').send(account)
+    expect(created.status).toBe(201)
+    trackTestUser(created.body.user.id)
+  })
+
+  it('does not let a verified phone bind an unverified email to a guest account', async () => {
+    const email = uniqueTestEmail('register-cross-identifier')
+    const phone = `+9639${String(Date.now()).slice(-8)}`
+    const sent = await request(app).post('/api/auth/phone-code/send').send({ phone, purpose: 'guest-signup' })
+    await request(app).post('/api/auth/phone-code/verify').send({ phone, code: sent.body.devCode, purpose: 'guest-signup' })
+
+    const res = await request(app).post('/api/auth/register').send({
+      role: 'GUEST',
+      email,
+      phone,
       password: 'correct-horse-battery',
     })
 
@@ -125,13 +182,14 @@ describe('POST /api/auth/register', () => {
 
   it('falls back to a combined firstName + lastName as displayName when no explicit displayName is given', async () => {
     const email = uniqueTestEmail('register-first-last')
-    await verifyEmailForTest(app, email)
+    const verificationGrant = await verifyEmailForTest(app, email)
     const res = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',
       firstName: 'Layla',
       lastName: 'Haddad',
+      verificationGrant,
     })
 
     expect(res.status).toBe(201)
@@ -141,11 +199,12 @@ describe('POST /api/auth/register', () => {
 
   it('rejects a duplicate email with 409', async () => {
     const email = uniqueTestEmail('register-dup')
-    await verifyEmailForTest(app, email)
+    const verificationGrant = await verifyEmailForTest(app, email)
     const first = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',
+      verificationGrant,
     })
     trackTestUser(first.body.user.id)
 
@@ -169,11 +228,12 @@ describe('POST /api/auth/login', () => {
     __resetRateLimitsForTests()
 
     registeredEmail = uniqueTestEmail('login-target')
-    await verifyEmailForTest(app, registeredEmail)
+    const verificationGrant = await verifyEmailForTest(app, registeredEmail)
     const res = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email: registeredEmail,
       password: 'correct-horse-battery',
+      verificationGrant,
     })
     trackTestUser(res.body.user.id)
   })
@@ -297,11 +357,12 @@ describe('POST /api/auth/logout (F-02 session revocation)', () => {
 
   async function registerAndLogin() {
     const email = uniqueTestEmail('logout')
-    await verifyEmailForTest(app, email)
+    const verificationGrant = await verifyEmailForTest(app, email)
     const registerRes = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',
+      verificationGrant,
     })
     trackTestUser(registerRes.body.user.id)
     return { email, token: registerRes.body.token }
@@ -366,11 +427,12 @@ describe('POST /api/auth/password-reset also revokes existing sessions (F-02)', 
 
   it('a token issued before a password reset stops working after the reset', async () => {
     const email = uniqueTestEmail('reset-revoke')
-    await verifyEmailForTest(app, email)
+    const verificationGrant = await verifyEmailForTest(app, email)
     const registerRes = await request(app).post('/api/auth/register').send({
       role: 'GUEST',
       email,
       password: 'original-password-1',
+      verificationGrant,
     })
     trackTestUser(registerRes.body.user.id)
     const oldToken = registerRes.body.token
@@ -378,10 +440,11 @@ describe('POST /api/auth/password-reset also revokes existing sessions (F-02)', 
     const preCheck = await request(app).get('/api/me/overview').set('authorization', `Bearer ${oldToken}`)
     expect(preCheck.status).toBe(200)
 
-    await verifyEmailForTest(app, email, 'password-reset')
+    const resetVerificationGrant = await verifyEmailForTest(app, email, 'password-reset')
     const resetRes = await request(app).post('/api/auth/password-reset').send({
       email,
       newPassword: 'new-password-2',
+      verificationGrant: resetVerificationGrant,
     })
     expect(resetRes.status).toBe(200)
     expect(resetRes.body.ok).toBe(true)
@@ -395,5 +458,33 @@ describe('POST /api/auth/password-reset also revokes existing sessions (F-02)', 
       password: 'new-password-2',
     })
     expect(loginRes.status).toBe(200)
+  })
+
+  it('lets staff sign in with the new password immediately after a verified reset without a second code', async () => {
+    const email = uniqueTestEmail('staff-reset-continuity')
+    const registrationGrant = await verifyEmailForTest(app, email, 'staff-login')
+    const registerRes = await request(app).post('/api/auth/register').send({
+      role: 'HOST',
+      email,
+      password: 'original-staff-password-1',
+      verificationGrant: registrationGrant,
+    })
+    expect(registerRes.status).toBe(201)
+    trackTestUser(registerRes.body.user.id)
+
+    const resetGrant = await verifyEmailForTest(app, email, 'password-reset')
+    const resetRes = await request(app).post('/api/auth/password-reset').send({
+      email,
+      newPassword: 'new-staff-password-2',
+      verificationGrant: resetGrant,
+    })
+    expect(resetRes.status).toBe(200)
+
+    const loginRes = await request(app).post('/api/auth/login').send({
+      email,
+      password: 'new-staff-password-2',
+    })
+    expect(loginRes.status).toBe(200)
+    expect(loginRes.body.user.roles).toContain('HOST')
   })
 })

@@ -6,6 +6,9 @@ import { deleteDriverDocument, readDriverDocument, saveDriverDocument } from '..
 import { rideRatingSummary } from '../lib/sr-ratings.mjs'
 import { chargeCompletedRide, srRideFinanceSplit } from '../lib/sr-payments.mjs'
 import { assertVehicleEligible } from '../lib/fleet.mjs'
+import { assertSyriaCoords } from '../lib/sr-geocoding.mjs'
+import { sweepExpiredOffers } from '../lib/sr-dispatch.mjs'
+import { encryptPayoutAccount, payoutAccountLast4 } from '../lib/payout-account.mjs'
 
 const DRIVER_DOCUMENT_TYPES = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE']
 // SECURITY (015): the private assetUrl/storage key is NEVER returned in JSON — bytes stream only via /file.
@@ -14,25 +17,169 @@ const DRIVER_DOCUMENT_SAFE_SELECT = {
   reviewedById: true, reviewedAt: true, createdAt: true, updatedAt: true,
 }
 
+function safeDriverPayoutView(payoutMethod) {
+  if (!payoutMethod || typeof payoutMethod !== 'object' || payoutMethod.type !== 'sham_cash') return null
+  return { type: 'sham_cash', accountHolder: payoutMethod.accountHolder || '', last4: payoutMethod.last4 || '', updatedAt: payoutMethod.updatedAt || null }
+}
+
 export async function handleDriver(req, res, url, context) {
+  if (url.pathname === '/api/driver/payout') {
+    requireAuth(context, ['DRIVER'])
+    if (req.method === 'GET') {
+      const user = await db().user.findUnique({ where: { id: context.user.id }, select: { payoutMethod: true } })
+      return json(res, 200, { ok: true, payout: safeDriverPayoutView(user?.payoutMethod) })
+    }
+    if (req.method !== 'PUT') return methodNotAllowed(res, ['GET', 'PUT'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['accountHolder', 'shamCashNumber'])
+    const accountHolder = assertBoundedString(body.accountHolder, { fieldName: 'accountHolder', maxLength: 120, required: true })
+    const digits = String(body.shamCashNumber || '').replace(/\D/g, '')
+    if (digits.length < 6 || digits.length > 24) {
+      const error = new Error('Sham Cash number must be between 6 and 24 digits.')
+      error.statusCode = 400; error.code = 'SHAM_CASH_NUMBER_INVALID'; error.expose = true; throw error
+    }
+    const payoutMethod = { type: 'sham_cash', accountHolder, last4: payoutAccountLast4(digits), ...encryptPayoutAccount(digits), updatedAt: new Date().toISOString() }
+    await db().$transaction([
+      db().user.update({ where: { id: context.user.id }, data: { payoutMethod } }),
+      db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'DRIVER_PAYOUT_METHOD_UPDATED', entityType: 'users', entityId: context.user.id, before: {}, after: { type: 'sham_cash', last4: payoutMethod.last4 } } }),
+    ])
+    return json(res, 200, { ok: true, payout: safeDriverPayoutView(payoutMethod) })
+  }
+  // SR DRIVER PRESENCE (Phase 1): go online/offline. Only a fully-vetted (road-ready) driver may go
+  // ONLINE; going offline is always allowed. Optionally pins the driver's current location in the same
+  // call so they start receiving nearby offers immediately.
+  if (url.pathname === '/api/driver/availability') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['online', 'lat', 'lng'], 'driver availability body')
+    const online = Boolean(body.online)
+    if (online) await requireRoadReadyDriver(context)
+    const coords =
+      body.lat != null && body.lng != null
+        ? assertSyriaCoords(body.lat, body.lng, { fieldName: 'driver location' })
+        : null
+
+    // A road-ready driver normally already has a profile; upsert so the toggle is robust either way.
+    await db().driverProfile.upsert({
+      where: { userId: context.user.id },
+      create: { userId: context.user.id, active: online },
+      update: { active: online },
+    })
+    if (online && coords) {
+      await db().$executeRaw`
+        UPDATE driver_profiles
+        SET last_location_geo = ST_SetSRID(ST_MakePoint(${coords.lng}::double precision, ${coords.lat}::double precision), 4326),
+            last_location_at = now()
+        WHERE user_id::text = ${context.user.id}
+      `
+    }
+    return json(res, 200, { ok: true, online, location: coords ? { lat: coords.lat, lng: coords.lng } : null })
+  }
+
+  // Idle location broadcast while online, so dispatch/nearest-first can find the driver. Rejected when
+  // the driver is offline (you only advertise your position while available — matches Uber).
+  if (url.pathname === '/api/driver/location') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    await requireRoadReadyDriver(context)
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['lat', 'lng'], 'driver location body')
+    const { lat, lng } = assertSyriaCoords(body.lat, body.lng, { fieldName: 'driver location' })
+    const updated = await db().$executeRaw`
+      UPDATE driver_profiles
+      SET last_location_geo = ST_SetSRID(ST_MakePoint(${lng}::double precision, ${lat}::double precision), 4326),
+          last_location_at = now()
+      WHERE user_id::text = ${context.user.id} AND active = true
+    `
+    if (updated === 0) {
+      const error = new Error('Go online before broadcasting your location.')
+      error.statusCode = 409
+      error.code = 'DRIVER_OFFLINE'
+      error.expose = true
+      throw error
+    }
+    return json(res, 200, { ok: true, location: { lat, lng, at: new Date().toISOString() } })
+  }
+
   if (url.pathname === '/api/driver/rides/pending') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     await requireRoadReadyDriver(context) // SECURITY (015): only fully-vetted drivers can see the rider pool
-    const rides = await db().rideRequest.findMany({
-      where: { driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
-      include: {
-        rider: {
-          // SECURITY: never expose the rider's email to drivers (esp. the whole pending pool). Contact stays in-app.
-          select: {
-            id: true,
-            displayName: true,
-          },
-        },
-      },
-      orderBy: { requestedAt: 'asc' },
-      take: 20,
+
+    // Only ONLINE drivers get offers (Uber). Offline → empty pool + a clear flag for the client.
+    const profile = await db().driverProfile.findUnique({
+      where: { userId: context.user.id },
+      select: { active: true },
     })
-    return json(res, 200, { ok: true, rides })
+    if (!profile?.active) return json(res, 200, { ok: true, online: false, rides: [] })
+
+    // AUTO-DISPATCH cascade: advance any ride whose exclusive offer lapsed to the next nearest driver
+    // (or open it to the pool once the cascade is exhausted). Piggy-backs on this poll so no cron is
+    // needed for the ~20s offer window. Best-effort — never blocks or breaks the pool response.
+    await sweepExpiredOffers().catch(() => {})
+
+    // NEAREST-FIRST: order the unassigned pool by real-world distance from the driver's last known
+    // location to each ride's pickup (PostGIS geography metres → km). Rides with no pickup coords, or
+    // when the driver hasn't shared a location yet, fall back to oldest-first (NULLS LAST). Rider email
+    // is never selected — only id + display name reach a driver.
+    const rows = await db().$queryRaw`
+      SELECT r.id,
+             r.fare_minor    AS "fareMinor",
+             r.currency,
+             r.status,
+             r.requested_at  AS "requestedAt",
+             r.metadata,
+             u.id            AS "riderId",
+             u.display_name  AS "riderName",
+             CASE
+               WHEN dp.last_location_geo IS NOT NULL AND r.pickup_geo IS NOT NULL
+               -- Great-circle (haversine) km computed straight from the lon/lat values via ST_X/ST_Y.
+               -- Deliberately NOT ST_DistanceSphere / a ::geography cast: those need SRID 4326 populated
+               -- in spatial_ref_sys, which isn't guaranteed on every PostGIS setup. This mirrors the
+               -- codebase's existing JS haversine (sr-geocoding.mjs) and depends on nothing but the
+               -- stored coordinates. LEAST/GREATEST clamp the acos argument against float rounding.
+               THEN ROUND((6371 * acos(LEAST(1, GREATEST(-1,
+                      cos(radians(ST_Y(dp.last_location_geo))) * cos(radians(ST_Y(r.pickup_geo))) *
+                        cos(radians(ST_X(r.pickup_geo)) - radians(ST_X(dp.last_location_geo))) +
+                      sin(radians(ST_Y(dp.last_location_geo))) * sin(radians(ST_Y(r.pickup_geo)))
+                    ))))::numeric, 2)
+               ELSE NULL
+             END AS "pickupDistanceKm",
+             -- Auto-dispatch: this ride is currently offered EXCLUSIVELY to me (accept-now). COALESCE to
+             -- false so an OPEN ride (offered_driver_id NULL) is FALSE, not NULL — otherwise "ORDER BY
+             -- offeredToMe DESC" would sort NULLs first and push open rides ahead of my own offer.
+             COALESCE(r.offered_driver_id::text = ${context.user.id} AND r.offer_expires_at > now(), false) AS "offeredToMe"
+      FROM ride_requests r
+      JOIN users u ON u.id = r.rider_id
+      LEFT JOIN driver_profiles dp ON dp.user_id::text = ${context.user.id}
+      WHERE r.driver_id IS NULL AND r.status IN ('REQUESTED', 'MATCHING')
+        -- Show a ride only if it's open (no live offer) OR it's offered to ME. Rides in another driver's
+        -- exclusive window are hidden until that window lapses, then they open to the nearest-first pool.
+        AND (
+          r.offered_driver_id IS NULL
+          OR r.offer_expires_at IS NULL
+          OR r.offer_expires_at <= now()
+          OR r.offered_driver_id::text = ${context.user.id}
+        )
+        -- Never show a driver a ride they've already declined (auto-dispatch).
+        AND NOT COALESCE(jsonb_exists(r.metadata->'declinedBy', ${context.user.id}), false)
+      ORDER BY "offeredToMe" DESC, "pickupDistanceKm" ASC NULLS LAST, r.requested_at ASC
+      LIMIT 20
+    `
+    const rides = rows.map((row) => ({
+      id: row.id,
+      fareMinor: row.fareMinor,
+      currency: row.currency,
+      status: row.status,
+      requestedAt: row.requestedAt,
+      // PRIVACY (SR audit): pre-accept, a driver sees only what's needed to decide — the PICKUP area,
+      // category and estimated distance + the fare/distance-to-pickup. The rider's NAME and the DROPOFF
+      // are withheld until the ride is actually claimed (they're in the post-claim payload). This blocks
+      // an idle online driver from harvesting "who is travelling from <home> to <address> right now".
+      metadata: { pickup: row.metadata?.pickup, category: row.metadata?.category, distanceKm: row.metadata?.distanceKm },
+      pickupDistanceKm: row.pickupDistanceKm != null ? Number(row.pickupDistanceKm) : null,
+      offeredToMe: Boolean(row.offeredToMe),
+    }))
+    return json(res, 200, { ok: true, online: true, rides })
   }
 
   if (url.pathname === '/api/driver/rides') {
@@ -56,8 +203,12 @@ export async function handleDriver(req, res, url, context) {
     // updatedAt is Prisma's @updatedAt column, last written on the COMPLETED transition itself
     // (that status is terminal — see assertDriverRideTransition — so no later write can move it
     // again), which makes it a reliable stand-in for "completed at" without a dedicated column.
-    const todayStart = new Date()
-    todayStart.setUTCHours(0, 0, 0, 0)
+    // The owner report and finance dashboard use Toronto business days; keep the driver's "today"
+    // card on the same boundary rather than resetting at UTC midnight.
+    const todayParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+    const noonUtc = Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day, 12)
+    const zonedNoon = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(noonUtc)).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+    const todayStart = new Date(noonUtc - (Date.UTC(zonedNoon.year, zonedNoon.month - 1, zonedNoon.day, zonedNoon.hour) - Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day)))
     const completedToday = completedRides.filter((ride) => ride.updatedAt >= todayStart)
 
     return json(res, 200, {

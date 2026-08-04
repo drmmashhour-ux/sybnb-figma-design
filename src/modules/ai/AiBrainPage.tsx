@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { fetchAdminHostInsights, type PlatformAdminHostInsight } from '../../shared/api/platformApi'
+import { fetchAdminAiControls, fetchAdminAiDailyReport, fetchAdminHostInsights, updateAdminAiControl, type AiDailyReport, type AiSectionControl, type PlatformAdminHostInsight } from '../../shared/api/platformApi'
 
 type Props = {
   lang: Lang
@@ -21,6 +21,9 @@ const copy = {
     host: 'المضيف',
     listing: 'الإعلان',
     message: 'التوصية',
+    controls: 'أقسام التقرير والمراقبة', on: 'مشمول', off: 'غير مشمول',
+    controlNote: 'عند التشغيل: يُضمّن هذا القسم في المراقبة والتقرير الصباحي ويعرض توصيات للمراجعة. لا ينفذ الذكاء الاصطناعي إجراءات بنفسه. الاسترداد، صرف الأموال، إيقاف الحسابات، الحذف، والنشر تحتاج موافقتك دائماً.',
+    morning: 'التقرير التنفيذي الصباحي', generatedAt: 'تم التحديث', pending: 'بانتظار المراجعة', disputes: 'نزاعات مفتوحة', hosts: 'المضيفون', security: 'أحداث أمنية (٧ أيام)',
   },
   en: {
     eyebrow: 'Pricing insights',
@@ -36,6 +39,9 @@ const copy = {
     host: 'Host',
     listing: 'Listing',
     message: 'Recommendation',
+    controls: 'Report and monitoring sections', on: 'INCLUDED', off: 'NOT INCLUDED',
+    controlNote: 'When included, this section is monitored in the morning report and recommendations are presented for review. AI does not execute actions by itself. Refunds, money release, account suspension, deletion, and deployment always require your approval.',
+    morning: 'Morning executive report', generatedAt: 'Updated', pending: 'Awaiting review', disputes: 'Open disputes', hosts: 'Hosts', security: 'Security events (7 days)',
   },
 }
 
@@ -46,6 +52,9 @@ export function AiBrainPage({ lang }: Props) {
   const [totals, setTotals] = useState({ generated: 0, emailed: 0, read: 0 })
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
+  const [controls, setControls] = useState<AiSectionControl[]>([])
+  const [report, setReport] = useState<AiDailyReport | null>(null)
+  const [updating, setUpdating] = useState('')
 
   useEffect(() => {
     void load()
@@ -54,15 +63,35 @@ export function AiBrainPage({ lang }: Props) {
   async function load() {
     setStatus('loading')
     try {
-      const response = await fetchAdminHostInsights()
+      const [response, controlResponse, reportResponse] = await Promise.all([fetchAdminHostInsights(), fetchAdminAiControls(), fetchAdminAiDailyReport()])
       setInsights(response.insights)
       setTotals(response.totals)
+      setControls(controlResponse.controls)
+      setReport(reportResponse.report)
       setStatus('ready')
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
+
+  async function toggleControl(control: AiSectionControl) {
+    setUpdating(control.section)
+    try {
+      const response = await updateAdminAiControl(control.section, !control.enabled)
+      setControls(response.controls)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setUpdating('')
+    }
+  }
+
+  const sectionName = (section: AiSectionControl['section']) => ({
+    str: isAr ? 'الإيجار القصير STR' : 'Short-Term Rentals', hosts: isAr ? 'المضيفون' : 'Hosts', realestate: isAr ? 'العقارات' : 'Real Estate',
+    commerce: isAr ? 'السوق والسيارات والإعلانات' : 'Marketplace, Cars & Ads', transport: isAr ? 'النقل SR' : 'SR Transport', finance: isAr ? 'المالية والإيرادات' : 'Finance & Revenue',
+    trust: isAr ? 'الثقة والأمان' : 'Trust & Safety', operations: isAr ? 'الإدارة والتشغيل' : 'Administration & Operations',
+  })[section]
 
   return (
     <main className="ai-brain-page" dir={isAr ? 'rtl' : 'ltr'}>
@@ -86,6 +115,34 @@ export function AiBrainPage({ lang }: Props) {
             <PreviewPanel title={t.emailed} value={String(totals.emailed)} />
             <PreviewPanel title={t.read} value={String(totals.read)} />
           </section>
+
+          <section className="ai-control-section">
+            <h2>{t.controls}</h2>
+            <p>{t.controlNote}</p>
+            <div className="ai-control-grid">
+              {controls.map((control) => (
+                <article key={control.section} className={control.enabled ? 'enabled' : ''}>
+                  <div><strong>{sectionName(control.section)}</strong><small>{control.enabled ? t.on : t.off}</small></div>
+                  <button type="button" role="switch" aria-checked={control.enabled} disabled={updating === control.section} onClick={() => void toggleControl(control)}>
+                    <span />
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          {report && (
+            <section className="ai-control-section">
+              <h2>{t.morning}</h2>
+              <p>{t.generatedAt}: <span dir="ltr">{new Date(report.generatedAt).toLocaleString(isAr ? 'ar' : 'en')}</span></p>
+              <div className="ai-panel-previews">
+                <PreviewPanel title={t.hosts} value={String(report.hosts)} />
+                <PreviewPanel title={t.pending} value={String(report.listingsPending)} />
+                <PreviewPanel title={t.disputes} value={String(report.openDisputes)} />
+                <PreviewPanel title={t.security} value={String(report.securityEventsLast7Days)} />
+              </div>
+            </section>
+          )}
 
           {insights.length === 0 ? (
             <p>{t.empty}</p>

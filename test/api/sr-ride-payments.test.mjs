@@ -15,9 +15,10 @@ import {
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant, role, email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
@@ -175,6 +176,25 @@ describe('SR ride payments: cashless charge + driver settlement', () => {
     expect(fareEntries).toHaveLength(1)
   })
 
+  it('fails closed before moving fare money when the platform account is missing', async () => {
+    const rider = await registerUser(app, 'GUEST', 'no-admin-rider')
+    const driver = await registerVerifiedDriver(app, 'no-admin-driver')
+    await fundRider(rider.user.id, 10_000)
+    const ride = {
+      id: crypto.randomUUID(), riderId: rider.user.id, driverId: driver.user.id,
+      fareMinor: 1_000, currency: 'SYP', status: 'COMPLETED',
+    }
+    await db().userRole.deleteMany({ where: { role: 'ADMIN' } })
+    try {
+      await expect(db().$transaction((tx) => chargeCompletedRide(tx, ride))).rejects.toMatchObject({ code: 'PLATFORM_ACCOUNT_MISSING', statusCode: 503 })
+      expect(await walletBalance(rider.user.id)).toBe(10_000)
+      expect(await walletBalance(driver.user.id)).toBe(0)
+      expect(await db().walletEntry.count({ where: { referenceId: ride.id } })).toBe(0)
+    } finally {
+      await ensurePlatformAdmin()
+    }
+  })
+
   it('the rider-facing ride payload never exposes commission or the driver share', async () => {
     const rider = await registerUser(app, 'GUEST', 'hidden-rider')
     await fundRider(rider.user.id, 10_000_000)
@@ -218,12 +238,13 @@ describe('SR ride payments: cashless charge + driver settlement', () => {
     expect(noMethod.status).toBe(400)
     expect(noMethod.body.error.code).toBe('PAYOUT_METHOD_REQUIRED')
 
-    // Add a Sham Cash payout method.
-    await db().driverProfile.upsert({
-      where: { userId: driver.user.id },
-      create: { userId: driver.user.id, payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
-      update: { payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
-    })
+    // Driver adds the encrypted Sham Cash payout method through the real account tunnel.
+    const payoutSetup = await request(app)
+      .put('/api/driver/payout')
+      .set('Authorization', `Bearer ${driver.token}`)
+      .send({ accountHolder: 'Test Driver', shamCashNumber: '0999000111' })
+    expect(payoutSetup.status).toBe(200)
+    expect(payoutSetup.body.payout).toMatchObject({ accountHolder: 'Test Driver', last4: '0111' })
 
     // Pays the accrued balance once.
     const first = await request(app)

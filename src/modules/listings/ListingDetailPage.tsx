@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAccommodation,
+  fetchApprovedListings,
   fetchListingAvailability,
   fetchListingQuote,
   fetchListingReviews,
@@ -12,13 +13,16 @@ import {
   type PlatformListingReview,
 } from '../../shared/api/platformApi'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
-import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
+import { googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
+import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
+import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGallery'
+import { shareLink } from '../../shared/share/shareLink'
+import { recordViewed } from '../../shared/recentlyViewed/recentlyViewed'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { ReportForm } from '../safety/ReportForm'
 import { BlockButton } from '../safety/BlockButton'
-import { isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
+import { DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
-import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { DealRatingBadge } from '../cars/DealRatingBadge'
 import { AuctionBidPanel } from '../cars/AuctionBidPanel'
 
@@ -84,6 +88,7 @@ const copy = {
     mapPin: 'موقع الاستضافة',
     mapApproximate: 'موقع تقريبي حسب بيانات الإعلان',
     openGoogleMaps: 'فتح في خرائط Google',
+    getDirections: 'الاتجاهات · GPS',
     saveOfflineMap: 'حفظ الموقع دون إنترنت',
     offlineMapReady: 'تم حفظ الموقع للاستخدام دون إنترنت',
     offlineMapCopy: 'في حال انقطاع الإنترنت سيبقى العنوان والإحداثيات محفوظة داخل جهاز العميل.',
@@ -91,6 +96,8 @@ const copy = {
     location: 'الموقع',
     host: 'المضيف',
     terms: 'الشروط',
+    nearbyStays: 'إقامات قريبة',
+    perNight: '/ ليلة',
     reviews: 'التقييمات',
     noReviewsYet: 'لا توجد تقييمات بعد',
     reviewsCount: (count: number) => `${count} ${count === 1 ? 'تقييم' : 'تقييمات'}`,
@@ -162,6 +169,7 @@ const copy = {
     mapPin: 'Stay location',
     mapApproximate: 'Approximate location from listing data',
     openGoogleMaps: 'Open in Google Maps',
+    getDirections: 'Get directions · GPS',
     saveOfflineMap: 'Save offline location',
     offlineMapReady: 'Location saved for offline use',
     offlineMapCopy: 'If internet is unavailable, the address and coordinates stay saved on the guest device.',
@@ -169,6 +177,8 @@ const copy = {
     location: 'Location',
     host: 'Host',
     terms: 'Terms',
+    nearbyStays: 'More stays nearby',
+    perNight: '/ night',
     reviews: 'Reviews',
     noReviewsYet: 'No reviews yet',
     reviewsCount: (count: number) => `${count} ${count === 1 ? 'review' : 'reviews'}`,
@@ -225,22 +235,41 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     average: null,
     count: 0,
   })
+  const [nearbyStays, setNearbyStays] = useState<PlatformListing[]>([])
+
+  // Record this listing in the shared "recently viewed" store so it can resurface for the visitor later.
+  useEffect(() => {
+    if (!listing) return
+    recordViewed({ id: listing.id, division: listing.division, title: listingTitleText(listing, lang), priceMinor: listing.priceMinor, currency: listing.currency, image: listingImage(listing) })
+  }, [listing, lang])
+
+  // "More stays nearby": other approved STAYS in the same city (the seller-written metadata.city),
+  // this listing excluded, capped at 4. Best-effort — a failure or empty result just hides the strip.
+  useEffect(() => {
+    if (!listing || listing.division !== 'STAYS') { setNearbyStays([]); return }
+    const city = typeof (listing.metadata as Record<string, unknown> | null)?.city === 'string' ? String((listing.metadata as Record<string, unknown>).city) : undefined
+    fetchApprovedListings('STAYS', city ? { city } : {})
+      .then((rows) => setNearbyStays(rows.filter((r) => r.id !== listing.id).slice(0, 4)))
+      .catch(() => setNearbyStays([]))
+  }, [listing])
 
   const title = listing ? listingTitleText(listing, lang) : ''
   const actionLabel = useMemo(() => actionForDivision(listing?.division || 'STAYS', lang), [lang, listing?.division])
   const detailCopy = useMemo(() => detailCopyForDivision(listing?.division || 'STAYS', lang, t), [lang, listing?.division, t])
   const returnPath = useMemo(() => readListingReturnPath(), [])
-  // Before dates are picked there's no server-computed stayQuote yet. Convert only legacy SYP
-  // stays; USD-native stays should flow through unchanged so the guest never sees mixed money.
+  // USD-only platform: nightly price is already in USD; show it directly (no SYP conversion).
   const selectedNights = isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut) ? nightsBetween(dateRange.checkIn, dateRange.checkOut) : 0
   const billableNights = Math.max(selectedNights, 1)
-  const fallbackNightlyMinor = payCurrency === 'USD' && listing?.currency === 'SYP'
-    ? sypMinorToRoundedUsdMinor(listing.priceMinor)
-    : listing?.priceMinor ?? 0
+  const fallbackNightlyMinor = listing?.priceMinor ?? 0
   const displayedTotalMinor = stayQuote?.totalMinor ?? fallbackNightlyMinor * billableNights
   const protectionFeeMinor = Math.round(displayedTotalMinor * 0.03)
   const protectedTotalMinor = displayedTotalMinor + protectionFeeMinor
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null
+  const mapCoords = (() => {
+    if (!mapTarget?.hasCoordinates) return null
+    const [lat, lng] = mapTarget.query.split(',').map(Number)
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+  })()
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -350,8 +379,23 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     setMessage('')
 
     try {
-      setListing(await fetchPrototypeListing(listingId))
+      const fetched = await fetchPrototypeListing(listingId)
+      setListing(fetched)
       setStatus('ready')
+      // Self-correct the breadcrumb's return-path memory from the listing's own division -- a
+      // direct/shared link (WhatsApp, etc.) never goes through a browse page's click handler, so
+      // sessionStorage would otherwise still hold a stale or default value from a prior visit.
+      if (typeof window !== 'undefined') {
+        const routeForDivision: Record<string, string> = {
+          STAYS: '/stays', RENTALS: '/rentals', BUY: '/buy',
+          NEW_CONSTRUCTION: '/new-construction', CARS: '/cars', MARKETPLACE: '/marketplace',
+        }
+        const route = routeForDivision[fetched.division]
+        if (route) {
+          sessionStorage.setItem('sybnb-v6-listing-return-path', route)
+          window.dispatchEvent(new Event('sybnb:listing-return-path-updated'))
+        }
+      }
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
@@ -409,13 +453,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
   function shareListing() {
     if (typeof window === 'undefined') return
-    const url = window.location.href
-    if (navigator.share) {
-      void navigator.share({ title, url }).catch(() => undefined)
-      return
-    }
-    void navigator.clipboard?.writeText(url)
-    setMessage(isAr ? 'تم نسخ رابط الإعلان.' : 'Listing link copied.')
+    void shareLink({ url: window.location.href, title }).then((result) => {
+      if (result === 'copied') setMessage(isAr ? 'تم نسخ رابط الإعلان.' : 'Listing link copied.')
+    })
   }
 
   return (
@@ -435,43 +475,45 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       </section>
 
       {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
-      {status === 'error' && <section ref={messageRef} style={styles.alert}>{message}</section>}
+      {status === 'error' && (
+        <section ref={messageRef} style={styles.alert} role="alert">
+          <p>{message}</p>
+          <button type="button" style={styles.secondaryButton} onClick={() => void loadListing()}>{isAr ? 'إعادة المحاولة' : 'Try again'}</button>
+        </section>
+      )}
       {status !== 'error' && message && <section ref={messageRef} style={styles.alert}>{message}</section>}
 
       {listing && (
         <>
-          <section style={styles.detailHero}>
-            <button style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
-              ↗
-            </button>
-            <button
-              style={styles.heroNextButton}
-              disabled={status === 'saving'}
-              onClick={() => actionBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-              aria-label={isAr ? 'الانتقال لإرسال الطلب' : 'Go to send request'}
-            >
-              →
-            </button>
-            <div style={styles.media}>
-              <img
-                src={listingImage(listing)}
-                alt={title}
-                style={styles.mediaImage}
-                onError={(event) => {
-                  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                  if (event.currentTarget.src.endsWith(fallback)) return
-                  event.currentTarget.src = fallback
-                }}
-              />
-              <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
-              {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
-              {listing.division === 'CARS' && (
-                <span style={styles.dealRatingBadge}>
-                  <DealRatingBadge dealRating={listing.dealRating} lang={lang} />
-                </span>
-              )}
-            </div>
-          </section>
+          <PhotoGallery
+            variant="hero"
+            lang={lang}
+            heroStyle={styles.detailHero}
+            photos={listingGalleryPhotos(listing, listingImage(listing), lang)}
+            fallback={DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'}
+            overlay={
+              <>
+                <button style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
+                  ↗
+                </button>
+                <button
+                  style={styles.heroNextButton}
+                  disabled={status === 'saving'}
+                  onClick={() => actionBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  aria-label={isAr ? 'الانتقال لإرسال الطلب' : 'Go to send request'}
+                >
+                  →
+                </button>
+                <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
+                {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
+                {listing.division === 'CARS' && (
+                  <span style={styles.dealRatingBadge}>
+                    <DealRatingBadge dealRating={listing.dealRating} lang={lang} />
+                  </span>
+                )}
+              </>
+            }
+          />
 
           {listing.division === 'CARS' && listing.auction != null && (
             <AuctionBidPanel lang={lang} listing={listing} onContactSeller={() => void requestListing()} />
@@ -480,6 +522,24 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           <section style={styles.detailBody}>
             <div style={styles.titleBlock}>
               <h1 style={styles.title}>{title}</h1>
+              {(listing.hostTier === 'TRUSTED' || listing.hostTier === 'ELITE') && (
+                <span
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                    fontSize: 12.5, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
+                    color: listing.hostTier === 'ELITE' ? '#8a6d1e' : '#0f6b52',
+                    background: listing.hostTier === 'ELITE' ? 'rgba(200,162,74,.16)' : 'rgba(32,210,155,.16)',
+                    border: `1px solid ${listing.hostTier === 'ELITE' ? 'rgba(200,162,74,.5)' : 'rgba(32,210,155,.5)'}`,
+                  }}
+                >
+                  {listing.hostTier === 'ELITE'
+                    ? (isAr ? '👑 مضيف نخبة' : '👑 Elite host')
+                    : (isAr ? '⭐ مضيف موثوق' : '⭐ Trusted host')}
+                </span>
+              )}
+              {reviewSummary.count > 0 && (
+                <span style={styles.ratingLine}>★ {reviewSummary.average} · {t.reviewsCount(reviewSummary.count)}</span>
+              )}
               <span style={styles.locationLine}>⌖ {mapTarget?.label || divisionText(listing.division, lang)}</span>
             </div>
 
@@ -521,11 +581,21 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
               {listing.division === 'STAYS' && (
                 <>
+                  <section style={styles.panel}>
+                    <strong>{isAr ? 'اختر تواريخك' : 'Choose your dates'}</strong>
+                    <DateRangePicker
+                      lang={lang}
+                      value={dateRange}
+                      onChange={setDateRange}
+                      disabledDates={disabledDates}
+                      disabledHint={isAr ? 'بعض التواريخ محجوزة بالفعل' : 'Some of those dates are already booked'}
+                    />
+                  </section>
                   {!dateRange.checkIn && offerSummary.count > 0 && (
                     <section style={styles.panel}>
                       <strong>{t.specialOfferBadge(offerSummary.count, 180)}</strong>
                       {offerSummary.cheapestMinor != null && (
-                        <span>{moneyText(sypMinorToRoundedUsdMinor(offerSummary.cheapestMinor), 'USD', lang)} / {isAr ? 'ليلة' : 'night'}</span>
+                        <span>{moneyText(offerSummary.cheapestMinor, 'USD', lang)} / {isAr ? 'ليلة' : 'night'}</span>
                       )}
                     </section>
                   )}
@@ -546,6 +616,28 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       <small>{cancellationProtection ? t.protectedRate : t.standardRate}</small>
                     </article>
                   </section>
+
+                  {(() => {
+                    const addOns = (listing?.metadata as { addOns?: Array<{ name?: string; priceUsd?: number; description?: string; mandatory?: boolean }> } | undefined)?.addOns
+                    const rows = Array.isArray(addOns) ? addOns.filter((row) => row && row.name) : []
+                    if (!rows.length) return null
+                    return (
+                      <section style={styles.priceSummary}>
+                        <article style={{ ...styles.priceSummaryCard, gridColumn: '1 / -1', display: 'grid', gap: 8, textAlign: isAr ? 'right' : 'left' }}>
+                          <strong>{isAr ? 'خدمات وإضافات' : 'Services & extras'}</strong>
+                          {rows.map((row, index) => (
+                            <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, borderTop: index ? '1px solid rgba(255,255,255,.08)' : 'none', paddingTop: index ? 8 : 0 }}>
+                              <span style={{ display: 'grid', gap: 2 }}>
+                                <span>{row.name}{row.mandatory ? (isAr ? ' · مشمول' : ' · included') : (isAr ? ' · عند الطلب' : ' · on request')}</span>
+                                {row.description ? <small style={{ opacity: 0.7 }}>{row.description}</small> : null}
+                              </span>
+                              <strong dir="ltr">{moneyText(Math.round((Number(row.priceUsd) || 0) * 100), 'USD', lang)}</strong>
+                            </div>
+                          ))}
+                        </article>
+                      </section>
+                    )
+                  })()}
 
                   <section style={styles.protectionChoice}>
                     <strong>{t.protectionChoice}</strong>
@@ -591,19 +683,29 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   <span>{detailCopy.mapCopy}</span>
                 </div>
                 <div style={styles.mapCanvas} aria-label={detailCopy.mapTitle}>
-                  <iframe
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                    src={googleMapsEmbedUrl(listing, title, lang)}
-                    style={styles.mapFrame}
-                    title={detailCopy.mapTitle}
-                  />
+                  {mapCoords ? (
+                    <LocationMap
+                      lat={mapCoords.lat}
+                      lng={mapCoords.lng}
+                      popupHtml={mapTarget?.label ? `<div style="color:#111;font-weight:700;max-width:220px">${mapTarget.label}</div>` : undefined}
+                      style={styles.mapFrame}
+                    />
+                  ) : (
+                    <div style={{ ...styles.mapFrame, display: 'grid', placeItems: 'center', color: '#9aa6ba', background: '#10141f' }}>
+                      {t.mapApproximate}
+                    </div>
+                  )}
                   <div style={styles.mapLocationCard}>
                     <span style={styles.mapPin}>{detailCopy.mapPin}</span>
                     <strong>{mapTarget?.label}</strong>
                     <small>{mapTarget?.hasCoordinates ? mapTarget.query : t.mapApproximate}</small>
                   </div>
                 </div>
+                {mapCoords ? (
+                  <a href={directionsUrl(mapCoords.lat, mapCoords.lng)} rel="noreferrer" target="_blank" style={styles.directionsButton}>
+                    {t.getDirections}
+                  </a>
+                ) : null}
                 <a href={googleMapsSearchUrl(listing, title, lang)} rel="noreferrer" target="_blank" style={styles.secondaryLinkButton}>
                   {t.openGoogleMaps}
                 </a>
@@ -678,7 +780,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       {listingTitleText(room, lang)}
                       {room.hasActiveOffer ? ` · ${t.specialOfferNight}` : ''}
                     </span>
-                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(sypMinorToRoundedUsdMinor(room.priceMinor), 'USD', lang)}</strong>
+                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(room.priceMinor, 'USD', lang)}</strong>
                     <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${room.id}`)}>
                       {t.openRoom}
                     </button>
@@ -704,12 +806,48 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           )}
 
           <section ref={actionBarRef} style={styles.bottomActionBar}>
+            {listing.division === 'STAYS' && (
+              <div style={styles.reserveBarPrice}>
+                <strong>{moneyText(cancellationProtection ? protectedTotalMinor : displayedTotalMinor, 'USD', lang)}</strong>
+                <small>
+                  {isValidDate(dateRange.checkIn) && isValidDate(dateRange.checkOut)
+                    ? `${stayQuote?.nights ?? billableNights} ${isAr ? 'ليالٍ' : 'nights'} · ${dateRange.checkIn} → ${dateRange.checkOut}`
+                    : isAr ? 'اختر التواريخ أعلاه' : 'Pick your dates above'}
+                </small>
+              </div>
+            )}
             {!inquirySent && (
               <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
                 {status === 'saving' ? t.saving : actionLabel}
               </button>
             )}
           </section>
+
+          {nearbyStays.length > 0 && (
+            <section style={styles.nearbyWrap}>
+              <strong style={styles.nearbyTitle}>{t.nearbyStays}</strong>
+              <div style={styles.nearbyGrid}>
+                {nearbyStays.map((r) => (
+                  <a key={r.id} href={`#/listing/${r.id}`} style={styles.nearbyCard}>
+                    <img
+                      src={listingImage(r)}
+                      alt=""
+                      style={styles.nearbyImg}
+                      onError={(event) => {
+                        const fallback = DIVISION_IMAGES[r.division] || '/assets/divisions/daily-rental.webp'
+                        if (event.currentTarget.src.endsWith(fallback)) return
+                        event.currentTarget.src = fallback
+                      }}
+                    />
+                    <div style={styles.nearbyBody}>
+                      <strong style={styles.nearbyName}>{listingTitleText(r, lang)}</strong>
+                      <span style={styles.nearbyPrice} dir="ltr">{moneyText(r.priceMinor, r.currency, lang)} {t.perNight}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', marginTop: 8 }}>
             <ReportForm lang={lang} subjectType="LISTING" subjectId={listing.id} />
@@ -851,14 +989,13 @@ const styles: Record<string, CSSProperties> = {
   detailHero: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', minHeight: 330, overflow: 'hidden', position: 'relative' },
   heroIconButton: { position: 'absolute', top: 18, insetInlineStart: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
   heroNextButton: { position: 'absolute', top: 18, insetInlineEnd: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
-  media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
-  mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
   mediaBadge: { position: 'absolute', insetInlineStart: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   dealRatingBadge: { position: 'absolute', insetInlineEnd: 14, bottom: 14 },
   instantBookBadge: { position: 'absolute', insetInlineStart: 14, top: 14, borderRadius: 999, background: 'rgba(213,169,21,.9)', color: '#1a1400', fontWeight: 950, border: '1px solid rgba(255,255,255,.25)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   detailBody: { border: '1px solid #263146', borderRadius: 8, background: '#10141f', padding: 18, display: 'grid', gap: 16, boxShadow: '0 18px 60px rgba(0,0,0,.24)' },
   titleBlock: { display: 'grid', gap: 8, justifyItems: 'center', textAlign: 'center' },
   locationLine: { color: '#9aa6ba', fontWeight: 800 },
+  ratingLine: { color: '#f5c518', fontWeight: 900, fontSize: 15 },
   tabRow: { display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
   tab: { minHeight: 42, border: 0, borderRadius: 999, background: '#20212b', color: '#c8cede', padding: '0 18px', fontWeight: 900 },
   tabActive: { minHeight: 42, border: '1px solid #4760ff', borderRadius: 999, background: '#4760ff', color: '#fff', padding: '0 18px', fontWeight: 950 },
@@ -877,6 +1014,7 @@ const styles: Record<string, CSSProperties> = {
   primaryButton: { minHeight: 54, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 16px', fontSize: 18 },
   secondaryButton: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
   secondaryLinkButton: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px', display: 'grid', placeItems: 'center', textDecoration: 'none' },
+  directionsButton: { minHeight: 44, border: 0, borderRadius: 8, background: '#14b8a6', color: '#06110e', fontWeight: 950, padding: '0 16px', display: 'grid', placeItems: 'center', textDecoration: 'none' },
   grid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' },
   trustGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   trustCard: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.08)', padding: 14, display: 'grid', gap: 8 },
@@ -906,6 +1044,15 @@ const styles: Record<string, CSSProperties> = {
   cancellationCutoff: { color: '#20d29b', fontStyle: 'normal', fontWeight: 800, fontSize: 13 },
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14, display: 'grid', gap: 12 },
+  nearbyWrap: { display: 'grid', gap: 10, marginTop: 8 },
+  nearbyTitle: { fontSize: 18, color: '#fff' },
+  nearbyGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' },
+  nearbyCard: { border: '1px solid #30384d', borderRadius: 12, background: '#111118', overflow: 'hidden', textDecoration: 'none', color: 'inherit', display: 'grid' },
+  nearbyImg: { width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', background: '#0b1120', display: 'block' },
+  nearbyBody: { display: 'grid', gap: 3, padding: '9px 11px' },
+  nearbyName: { fontSize: 14, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  nearbyPrice: { fontSize: 13, fontWeight: 800, color: '#20d29b' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
-  bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+  bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', alignItems: 'center' },
+  reserveBarPrice: { display: 'grid', gap: 2, alignContent: 'center', color: '#fff' },
 }

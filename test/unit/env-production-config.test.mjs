@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { validateProductionConfig } from '../../server/lib/env.mjs'
 
-const REQUIRED_KEYS = ['AUTH_SECRET', 'PHONE_HASH_SECRET', 'DATABASE_URL', 'CORS_ORIGIN', 'DISABLE_RATE_LIMIT']
+const REQUIRED_KEYS = ['AUTH_SECRET', 'PHONE_HASH_SECRET', 'DATABASE_URL', 'CORS_ORIGIN', 'DISABLE_RATE_LIMIT', 'RATE_LIMIT_STORE']
 
 function setValidBaseline() {
   process.env.AUTH_SECRET = 'a'.repeat(32)
   process.env.PHONE_HASH_SECRET = 'b'.repeat(32)
   process.env.DATABASE_URL = 'postgresql://user:pass@127.0.0.1:5432/placeholder'
   process.env.CORS_ORIGIN = 'https://example.com'
+  process.env.RATE_LIMIT_STORE = 'db'
   delete process.env.DISABLE_RATE_LIMIT
 }
 
@@ -44,6 +45,23 @@ describe('validateProductionConfig: pre-existing checks still pass with a valid 
   it('throws when DISABLE_RATE_LIMIT=1', () => {
     process.env.DISABLE_RATE_LIMIT = '1'
     expect(() => validateProductionConfig()).toThrow(/DISABLE_RATE_LIMIT/)
+  })
+
+  describe('new: RATE_LIMIT_STORE must be "db" in production (serverless per-instance buckets otherwise)', () => {
+    it('throws when RATE_LIMIT_STORE is unset', () => {
+      delete process.env.RATE_LIMIT_STORE
+      expect(() => validateProductionConfig()).toThrow(/RATE_LIMIT_STORE/)
+    })
+
+    it('throws when RATE_LIMIT_STORE is not "db" (e.g. "memory")', () => {
+      process.env.RATE_LIMIT_STORE = 'memory'
+      expect(() => validateProductionConfig()).toThrow(/RATE_LIMIT_STORE/)
+    })
+
+    it('does not throw when RATE_LIMIT_STORE="db"', () => {
+      process.env.RATE_LIMIT_STORE = 'db'
+      expect(() => validateProductionConfig()).not.toThrow()
+    })
   })
 
   describe('new: RATE_LIMIT_* override validation', () => {

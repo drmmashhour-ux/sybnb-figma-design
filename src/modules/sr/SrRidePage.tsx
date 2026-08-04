@@ -4,11 +4,25 @@ import { srRideFilterGroupsFromConfig, type VisualFilterSelection } from '../../
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   createPrototypeSrRide,
+  cancelSrRide,
   fetchPrototypeSrRide,
+  fetchPrototypeWallet,
   fetchSrQuote,
+  fetchSrRideDriver,
+  fetchSrRideHistory,
+  fetchSrRideLocation,
+  fetchSrRoute,
+  raiseSrSos,
+  rateSrRide,
+  shareSrRide,
+  revokeSrShare,
+  tipSrRide,
   type PlatformRideRequest,
   type PlatformSrQuote,
+  type PlatformSrRoute,
+  type SrRideDriverCard,
 } from '../../shared/api/platformApi'
+import { SrTripMap } from './SrTripMap'
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { OpenDisputeForm } from '../disputes/OpenDisputeForm'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
@@ -42,6 +56,26 @@ const copy = {
     pickupCode: 'رمز الانطلاق',
     pickupCodeHint: 'اقرأ هذا الرمز للسائق عند الوصول لبدء الرحلة.',
     location: 'الموقع',
+    km: 'كم',
+    min: 'دقيقة',
+    approx: 'تقديري',
+    myRides: 'رحلاتي',
+    noRides: 'لا رحلات بعد',
+    walletBalance: 'رصيد المحفظة',
+    needTopUp: 'رصيدك لا يكفي هذه الرحلة — اشحن محفظتك للمتابعة.',
+    topUp: 'اشحن المحفظة',
+    sosLabel: 'طوارئ',
+    share: 'مشاركة الرحلة',
+    cancelRide: 'إلغاء الرحلة',
+    sosRaised: 'تم إرسال تنبيه الطوارئ — فريق SYBNB يتابع.',
+    shareCopied: 'تم نسخ رابط المشاركة.',
+    stopShare: 'إيقاف المشاركة',
+    shareStopped: 'تم إيقاف مشاركة الرحلة.',
+    newDriver: 'سائق جديد',
+    rateRide: 'قيّم رحلتك',
+    rateThanks: 'شكراً لتقييمك.',
+    tip: 'إكرامية',
+    tipThanks: 'شكراً! أُضيفت الإكرامية.',
     accuracy: 'دقة الموقع',
     saved: 'تم حفظ الرحلة',
     error: 'تعذر تنفيذ طلب SR',
@@ -74,6 +108,26 @@ const copy = {
     pickupCode: 'Pickup code',
     pickupCodeHint: 'Read this code to your driver at pickup to start the trip.',
     location: 'Location',
+    km: 'km',
+    min: 'min',
+    approx: 'approx.',
+    myRides: 'My rides',
+    noRides: 'No rides yet',
+    walletBalance: 'Wallet balance',
+    needTopUp: 'Your balance is not enough for this ride — top up to continue.',
+    topUp: 'Top up wallet',
+    sosLabel: 'SOS',
+    share: 'Share trip',
+    cancelRide: 'Cancel ride',
+    sosRaised: 'Emergency alert sent — the SYBNB team is on it.',
+    shareCopied: 'Share link copied.',
+    stopShare: 'Stop sharing',
+    shareStopped: 'Trip sharing stopped.',
+    newDriver: 'New driver',
+    rateRide: 'Rate your ride',
+    rateThanks: 'Thanks for your rating.',
+    tip: 'Tip',
+    tipThanks: 'Thanks! Tip added.',
     accuracy: 'Accuracy',
     saved: 'Ride saved',
     error: 'Could not complete SR request',
@@ -102,12 +156,21 @@ export function SrRidePage({ lang }: Props) {
   const [pickup, setPickup] = useState(isAr ? 'دمشق، المالكي' : 'Damascus, Malki')
   const [dropoff, setDropoff] = useState(isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh')
   const [category, setCategory] = useState(categories[0])
-  const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>('SYP')
+  // SR is SYP-only for riders (guests only ever get a SYP wallet) — the fare/charge currency is fixed.
+  const [payCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [lowDataMode, setLowDataMode] = useState(true)
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
   const [ride, setRide] = useState<PlatformRideRequest | null>(null)
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
+  const [route, setRoute] = useState<PlatformSrRoute | null>(null)
+  const [driverLoc, setDriverLoc] = useState<{ lat: number; lng: number } | null>(null)
+  const [driverCard, setDriverCard] = useState<SrRideDriverCard | null>(null)
+  const [history, setHistory] = useState<PlatformRideRequest[]>([])
+  const [balanceMinor, setBalanceMinor] = useState<number | null>(null)
+  const [actionMsg, setActionMsg] = useState('')
+  const [shareLink, setShareLink] = useState('')
+  const [rated, setRated] = useState(false)
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
@@ -118,13 +181,18 @@ export function SrRidePage({ lang }: Props) {
   const [message, setMessage] = useState('')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
+  // Placeholder fare shown before the real quote resolves — derived from the SERVER rate table
+  // (base + perKm·~5km) so it's in the right ballpark, not the old ~3× overstatement.
   const fallbackFareSypMinor = useMemo(() => {
-    const base = category === 'SR XXL' ? 78000 : category === 'SR SUV' ? 58000 : category === 'SR Comfort' ? 46000 : 35000
+    const base = category === 'SR XXL' ? 36000 : category === 'SR SUV' ? 27000 : category === 'SR Comfort' ? 18500 : 12500
     return lowDataMode ? base : base + 2500
   }, [category, lowDataMode])
   const fallbackFareMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(fallbackFareSypMinor) : fallbackFareSypMinor
 
   const fareMinor = quote?.fareMinor ?? fallbackFareMinor
+  // SR is a cashless-wallet flow: a rider can only be charged from their (SYP) wallet, so the request is
+  // gated on funds. Guests get a SYP wallet only, so SR pricing/paying is SYP (the USD toggle is hidden).
+  const underfunded = balanceMinor != null && fareMinor > balanceMinor
 
   useEffect(() => {
     if (ride) return
@@ -159,6 +227,64 @@ export function SrRidePage({ lang }: Props) {
     }, 4000)
     return () => window.clearInterval(interval)
   }, [ride])
+
+  // Live trip map: fetch the real road route (OSRM → polyline + ETA) whenever the pickup/dropoff coords
+  // resolve. Quote coords drive it before booking; the map stays in sync as the rider adjusts.
+  const pickupPoint = quote?.pickupCoords ?? (pickupCoords ?? null)
+  const dropoffPoint = quote?.dropoffCoords ?? null
+  useEffect(() => {
+    if (!pickupPoint || !dropoffPoint) {
+      setRoute(null)
+      return
+    }
+    let cancelled = false
+    fetchSrRoute({ pickupCoords: pickupPoint, dropoffCoords: dropoffPoint })
+      .then((r) => !cancelled && setRoute(r))
+      .catch(() => !cancelled && setRoute(null))
+    return () => {
+      cancelled = true
+    }
+  }, [pickupPoint?.lat, pickupPoint?.lng, dropoffPoint?.lat, dropoffPoint?.lng])
+
+  // Rider trip history — refreshed on mount and whenever the active ride's status changes (so a just-
+  // completed trip appears without a manual reload).
+  useEffect(() => {
+    fetchSrRideHistory()
+      .then(setHistory)
+      .catch(() => {})
+  }, [ride?.status])
+
+  // Rider's SYP wallet balance — for the fund gate + a top-up prompt (refreshed when a ride settles).
+  useEffect(() => {
+    fetchPrototypeWallet()
+      .then((wallets) => setBalanceMinor(wallets.find((w) => w.currency === 'SYP')?.cachedBalanceMinor ?? 0))
+      .catch(() => setBalanceMinor(null))
+  }, [ride?.status])
+
+  // Poll the driver's live GPS position for the moving marker, once a driver is assigned and en route.
+  useEffect(() => {
+    const trackable = ride?.driverId && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status)
+    if (!trackable) {
+      setDriverLoc(null)
+      return
+    }
+    const poll = () =>
+      fetchSrRideLocation(ride!.id)
+        .then((r) => setDriverLoc(r.location ? { lat: r.location.lat, lng: r.location.lng } : null))
+        .catch(() => {})
+    poll()
+    const interval = window.setInterval(poll, 5000)
+    return () => window.clearInterval(interval)
+  }, [ride?.id, ride?.status, ride?.driverId])
+
+  // The PII-safe driver card (who's coming + which car + rating) — fetched once a driver is assigned.
+  useEffect(() => {
+    if (!ride?.driverId) {
+      setDriverCard(null)
+      return
+    }
+    fetchSrRideDriver(ride.id).then(setDriverCard).catch(() => setDriverCard(null))
+  }, [ride?.id, ride?.driverId])
 
   async function useCurrentLocation() {
     setMessage('')
@@ -206,6 +332,94 @@ export function SrRidePage({ lang }: Props) {
     }
   }
 
+  // ---- Rider in-ride actions (Cancel / SOS / Share while active; Rate / Tip when completed) ----
+  async function doCancel() {
+    if (!ride) return
+    setActionMsg('')
+    try {
+      const res = await cancelSrRide(ride.id)
+      setRide(res.ride)
+      sessionStorage.removeItem(ACTIVE_RIDE_ID_KEY)
+    } catch (error) {
+      setActionMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
+  async function doSos() {
+    if (!ride) return
+    setActionMsg('')
+    try {
+      const coords = await getBrowserLocation()
+      await raiseSrSos(ride.id, coords || undefined)
+      setActionMsg(t.sosRaised)
+    } catch (error) {
+      setActionMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
+  async function doStopShare() {
+    if (!ride) return
+    setActionMsg('')
+    try {
+      await revokeSrShare(ride.id)
+      setShareLink('')
+      setActionMsg(t.shareStopped)
+    } catch (error) {
+      setActionMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
+  async function doShare() {
+    if (!ride) return
+    setActionMsg('')
+    try {
+      const share = await shareSrRide(ride.id)
+      const link = `${window.location.origin}/#${share.path}`
+      setShareLink(link)
+      try {
+        await navigator.clipboard?.writeText(link)
+        setActionMsg(t.shareCopied)
+      } catch {
+        setActionMsg('')
+      }
+    } catch (error) {
+      setActionMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
+  async function doRate(stars: number) {
+    if (!ride) return
+    setActionMsg('')
+    try {
+      await rateSrRide(ride.id, stars)
+      setRated(true)
+      setActionMsg(t.rateThanks)
+    } catch (error) {
+      setActionMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
+  async function doTip(amountMinor: number) {
+    if (!ride) return
+    setActionMsg('')
+    try {
+      await tipSrRide(ride.id, amountMinor)
+      setActionMsg(t.tipThanks)
+      fetchPrototypeWallet()
+        .then((wallets) => setBalanceMinor(wallets.find((w) => w.currency === 'SYP')?.cachedBalanceMinor ?? 0))
+        .catch(() => {})
+    } catch (error) {
+      setActionMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  // Browser GPS (shared with SOS + pickup) — resolves null if unavailable/declined, never rejects.
+  function getBrowserLocation(): Promise<{ lat: number; lng: number } | null> {
+    return new Promise((resolve) => {
+      if (!('geolocation' in navigator)) return resolve(null)
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 8000 },
+      )
+    })
+  }
+
   function updateRideFilters(next: VisualFilterSelection) {
     setRideFilters(next)
     const nextCategory = String(next.srRideCategory || 'economy')
@@ -241,9 +455,23 @@ export function SrRidePage({ lang }: Props) {
       <section style={styles.grid}>
         <article style={styles.card}>
           <div style={styles.mapPreview}>
-            <span style={styles.dot} />
-            <strong>{t.location}</strong>
-            <p>{t.manualHint}</p>
+            {pickupPoint && dropoffPoint ? (
+              <>
+                <SrTripMap pickup={pickupPoint} dropoff={dropoffPoint} driver={driverLoc} route={route?.geometry ?? null} height={240} />
+                {route && route.distanceKm != null ? (
+                  <p style={styles.routeMeta} dir="ltr">
+                    🛣️ {route.distanceKm} {t.km} · ⏱️ {route.durationMin} {t.min}
+                    {route.source !== 'osrm' ? ` · ${t.approx}` : ''}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <span style={styles.dot} />
+                <strong>{t.location}</strong>
+                <p>{t.manualHint}</p>
+              </>
+            )}
           </div>
 
           <button style={styles.secondaryButton} onClick={() => void useCurrentLocation()}>
@@ -295,27 +523,6 @@ export function SrRidePage({ lang }: Props) {
             <span>{t.mode}</span>
           </label>
 
-          <section style={styles.categoryCapsule}>
-            <span style={styles.categoryTitle}>{t.payCurrency}</span>
-            <div style={styles.categoryStrip}>
-              <button
-                style={payCurrency === 'SYP' ? styles.categoryActive : styles.categoryButton}
-                onClick={() => setPayCurrency('SYP')}
-                type="button"
-              >
-                {t.payCash}
-              </button>
-              <button
-                style={payCurrency === 'USD' ? styles.categoryActive : styles.categoryButton}
-                onClick={() => setPayCurrency('USD')}
-                type="button"
-              >
-                {t.payUsd}
-              </button>
-            </div>
-            {payCurrency === 'USD' && <small>{t.usdRoundingNote}</small>}
-          </section>
-
           <div style={styles.stat}>
             <span>{t.distance}</span>
             <strong dir="ltr">
@@ -328,16 +535,32 @@ export function SrRidePage({ lang }: Props) {
             <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, payCurrency, lang)}</strong>
           </div>
 
-          <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>
-            {status === 'saving' ? t.saving : t.request}
-          </button>
+          {/* Cashless: SR is paid from the rider's SYBNB (SYP) wallet — show the balance + gate the
+              request on funds so we never dead-end on a 402. */}
+          <div style={{ ...styles.stat, ...(underfunded ? styles.statLow : null) }}>
+            <span>{t.walletBalance}</span>
+            <strong dir="ltr">{balanceMinor != null ? moneyText(balanceMinor, 'SYP', lang) : '—'}</strong>
+          </div>
+
+          {underfunded ? (
+            <>
+              <p style={styles.underfundedNote}>{t.needTopUp}</p>
+              <button style={styles.topupButton} type="button" onClick={() => (window.location.hash = '/wallet')}>
+                {t.topUp}
+              </button>
+            </>
+          ) : (
+            <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>
+              {status === 'saving' ? t.saving : t.request}
+            </button>
+          )}
         </article>
 
         <article style={styles.card}>
           <h2 style={styles.cardTitle}>{t.status}</h2>
           <Info label={t.rideId} value={ride ? ride.id.slice(0, 8).toUpperCase() : '-'} />
           <Info label={t.status} value={statusText(ride?.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.driver} value={ride?.driverId ? ride.driverId.slice(0, 8).toUpperCase() : '-'} />
+          <Info label={t.driver} value={driverCard?.firstName || (ride?.driverId ? t.driver : '-')} />
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
@@ -347,6 +570,25 @@ export function SrRidePage({ lang }: Props) {
           )}
           {ride?.driverId && (
             <div style={styles.message}>{t.driverAssigned}</div>
+          )}
+          {/* Rider#8: PII-safe driver card — who's coming, which car, and their rating (no contact PII). */}
+          {ride?.driverId && driverCard && (
+            <div style={styles.driverCard}>
+              <div style={styles.driverCardTop}>
+                <span style={styles.driverName}>{driverCard.firstName || t.driver}</span>
+                {driverCard.rating.average != null ? (
+                  <span style={styles.driverRating} dir="ltr">★ {driverCard.rating.average} · {driverCard.rating.count}</span>
+                ) : (
+                  <span style={styles.driverRatingMuted}>{t.newDriver}</span>
+                )}
+              </div>
+              {driverCard.vehicle ? (
+                <div style={styles.driverVehicle} dir="ltr">
+                  <span>{[driverCard.vehicle.color, driverCard.vehicle.make, driverCard.vehicle.model, driverCard.vehicle.year].filter(Boolean).join(' ')}</span>
+                  <strong style={styles.driverPlate}>{driverCard.vehicle.plate}</strong>
+                </div>
+              ) : null}
+            </div>
           )}
           {ride?.pickupPin && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && (
             <div style={styles.pickupCode}>
@@ -368,12 +610,76 @@ export function SrRidePage({ lang }: Props) {
             </div>
           )}
 
+          {ride && !['COMPLETED', 'CANCELLED'].includes(ride.status) && (
+            <div style={styles.rideActions}>
+              <button style={styles.sosBtn} onClick={() => void doSos()}>🆘 {t.sosLabel}</button>
+              <button style={styles.shareBtn} onClick={() => void doShare()}>🔗 {t.share}</button>
+              <button style={styles.cancelBtn} onClick={() => void doCancel()}>✕ {t.cancelRide}</button>
+            </div>
+          )}
+          {shareLink ? (
+            <div style={styles.shareBox}>
+              <p style={styles.shareLink} dir="ltr">
+                {shareLink}
+              </p>
+              <button style={styles.stopShareBtn} onClick={() => void doStopShare()}>{t.stopShare}</button>
+            </div>
+          ) : null}
+
+          {ride?.status === 'COMPLETED' && !rated && (
+            <div style={styles.rateBox}>
+              <span>{t.rateRide}</span>
+              <div style={styles.starsRow}>
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <button key={s} style={styles.starBtn} onClick={() => void doRate(s)}>
+                    ★
+                  </button>
+                ))}
+              </div>
+              <div style={styles.tipRow}>
+                <span>{t.tip}</span>
+                {[2000, 5000, 10000].map((amt) => (
+                  <button key={amt} style={styles.tipBtn} onClick={() => void doTip(amt)}>
+                    {moneyText(amt, 'SYP', lang)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {actionMsg ? <p style={styles.actionMsg}>{actionMsg}</p> : null}
+
           {ride?.status === 'COMPLETED' && ride.id && (
             <div style={{ marginTop: 12 }}>
               <OpenDisputeForm lang={lang} rideId={ride.id} />
             </div>
           )}
         </article>
+      </section>
+
+      <section style={styles.historySection}>
+        <h2 style={styles.historyTitle}>{t.myRides}</h2>
+        {history.length === 0 ? (
+          <p style={styles.historyEmpty}>{t.noRides}</p>
+        ) : (
+          <ul style={styles.historyList}>
+            {history.map((h) => (
+              <li key={h.id} style={styles.historyItem}>
+                <div style={styles.historyRoute}>
+                  <span>
+                    {String(h.metadata.pickup || '-')} → {String(h.metadata.dropoff || '-')}
+                  </span>
+                  <time dir="ltr" style={styles.historyDate}>
+                    {new Date(h.requestedAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')}
+                  </time>
+                </div>
+                <div style={styles.historyMeta}>
+                  <b dir="ltr">{moneyText(h.fareMinor || 0, h.currency, lang)}</b>
+                  <span style={styles.historyStatus}>{statusText(h.status, lang)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </main>
   )
@@ -403,6 +709,16 @@ const styles: Record<string, CSSProperties> = {
   card: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#101722', padding: 16, display: 'grid', gap: 12 },
   cardTitle: { fontSize: 22, margin: 0 },
   mapPreview: { minHeight: 170, border: '1px solid #263651', borderRadius: 8, background: 'linear-gradient(135deg,#0c1220,#122033)', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 18, position: 'relative', overflow: 'hidden' },
+  routeMeta: { margin: '10px 0 0', color: '#20d29b', fontWeight: 800, fontSize: 14, letterSpacing: '.02em' },
+  historySection: { marginTop: 24, borderTop: '1px solid #1e2a3c', paddingTop: 18 },
+  historyTitle: { margin: '0 0 12px', fontSize: 18, color: '#e6ebf4' },
+  historyEmpty: { color: '#8f96a8', fontSize: 14, margin: 0 },
+  historyList: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 10 },
+  historyItem: { border: '1px solid #1e2a3c', borderRadius: 12, background: '#0b0d14', padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  historyRoute: { display: 'grid', gap: 3 },
+  historyDate: { color: '#8f96a8', fontSize: 12 },
+  historyMeta: { display: 'grid', gap: 3, textAlign: 'end' },
+  historyStatus: { color: '#20d29b', fontSize: 12, fontWeight: 700 },
   dot: { width: 24, height: 24, borderRadius: 999, background: '#19d7ff', boxShadow: '0 0 0 16px rgba(25,215,255,.13), 0 0 36px rgba(25,215,255,.55)' },
   label: { display: 'grid', gap: 7, color: '#9aa6ba', fontSize: 12, fontWeight: 900 },
   input: { minHeight: 52, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 14px', fontWeight: 900 },
@@ -416,6 +732,29 @@ const styles: Record<string, CSSProperties> = {
   toggle: { minHeight: 52, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', fontWeight: 900 },
   stat: { border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#9aa6ba', display: 'flex', justifyContent: 'space-between', gap: 12, padding: 12 },
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#19d7ff', color: '#051014', fontWeight: 950, padding: '0 14px' },
+  statLow: { borderColor: '#f7c05b', background: '#1a1204' },
+  rideActions: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 },
+  sosBtn: { flex: 1, minHeight: 44, border: 0, borderRadius: 10, background: '#dc2626', color: '#fff', fontWeight: 900, cursor: 'pointer' },
+  shareBtn: { flex: 1, minHeight: 44, border: '1px solid #2a3b4d', borderRadius: 10, background: 'transparent', color: '#e6ebf4', fontWeight: 800, cursor: 'pointer' },
+  cancelBtn: { flex: 1, minHeight: 44, border: '1px solid #3a2530', borderRadius: 10, background: 'transparent', color: '#f08a8a', fontWeight: 800, cursor: 'pointer' },
+  driverCard: { marginTop: 10, border: '1px solid #263651', borderRadius: 12, background: '#0d1522', padding: 12, display: 'grid', gap: 8 },
+  driverCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  driverName: { fontWeight: 900, fontSize: 16, color: '#e6ebf4' },
+  driverRating: { color: '#f7c05b', fontWeight: 800, fontSize: 13 },
+  driverRatingMuted: { color: '#9aa6ba', fontWeight: 700, fontSize: 12 },
+  driverVehicle: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, color: '#9aa6ba', fontSize: 13 },
+  driverPlate: { color: '#e6ebf4', fontWeight: 900, letterSpacing: 1, border: '1px solid #35507d', borderRadius: 6, padding: '2px 8px', background: '#0d1826' },
+  shareBox: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  shareLink: { color: '#19d7ff', fontSize: 12, margin: 0, wordBreak: 'break-all', flex: 1, minWidth: 180 },
+  stopShareBtn: { minHeight: 36, border: '1px solid #3a2530', borderRadius: 8, background: 'transparent', color: '#f08a8a', fontWeight: 800, padding: '0 12px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  rateBox: { marginTop: 12, border: '1px solid #263651', borderRadius: 10, padding: 12, display: 'grid', gap: 8, color: '#9aa6ba' },
+  starsRow: { display: 'flex', gap: 4 },
+  starBtn: { background: 'transparent', border: 0, color: '#f7c05b', fontSize: 26, cursor: 'pointer', padding: '0 2px' },
+  tipRow: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
+  tipBtn: { border: '1px solid #2a3b4d', borderRadius: 8, background: 'transparent', color: '#20d29b', fontWeight: 800, padding: '6px 12px', cursor: 'pointer' },
+  actionMsg: { color: '#20d29b', fontSize: 13, margin: '8px 0 0' },
+  underfundedNote: { color: '#f7c05b', fontSize: 13, margin: '4px 0 0' },
+  topupButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#f59e0b', color: '#1a1204', fontWeight: 950, padding: '0 14px', cursor: 'pointer' },
   secondaryButton: { minHeight: 48, border: '1px solid #263651', borderRadius: 8, background: '#131e2e', color: '#fff', fontWeight: 900, padding: '0 14px' },
   actions: { display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' },
   message: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#b7ffe8', padding: 12, fontWeight: 900 },

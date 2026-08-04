@@ -1,7 +1,6 @@
 import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import {
   createSyrianLocalWalletQrPayload,
   SYRIAN_LOCAL_WALLET_QR_ASSET,
@@ -13,6 +12,7 @@ import {
   createLocalFallbackPaymentProof,
   createStripeCheckoutSession,
   fetchStripePaymentStatus,
+  submitPrototypeLocalWalletProof,
   type PlatformPaymentProof,
 } from '../../shared/api/platformApi'
 import { moneyText } from '../../shared/i18n/display'
@@ -43,7 +43,6 @@ const copy = {
     walletProcessing: 'جار تأكيد شام كاش...',
     cardUnavailable: 'الدفع بالبطاقة غير متاح الآن. استخدم شام كاش أو جرّب لاحقاً.',
     recipient: 'معلومات شام كاش',
-    receiverName: 'اسم مستلم المال',
     maskedAccount: 'الحساب',
     amountDue: 'المبلغ المستحق',
     currency: 'العملة',
@@ -71,7 +70,6 @@ const copy = {
     walletProcessing: 'Confirming Sham Cash...',
     cardUnavailable: 'Card payment is not available right now. Use Sham Cash or try again later.',
     recipient: 'Sham Cash information',
-    receiverName: 'Money receiver name',
     maskedAccount: 'Account',
     amountDue: 'Amount due',
     currency: 'Currency',
@@ -87,12 +85,13 @@ const copy = {
   },
 }
 
-export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042', amountMinor = 10, currency = 'SYP' }: Props) {
+export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042', amountMinor = 10, currency = 'USD' }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const walletAmountDue = Math.max(Number(amountMinor || 10), 1)
-  const walletCurrency = currency || 'SYP'
-  const cardAmountDue = walletCurrency === 'USD' ? walletAmountDue : sypMinorToRoundedUsdMinor(walletAmountDue)
+  // USD-only platform: the local wallet (Sham Cash) collects the same USD amount as the card. No SYP.
+  const walletCurrency = 'USD'
+  const cardAmountDue = walletAmountDue
   const cardCurrency = 'USD'
   const amountDue = walletAmountDue
   const transactionReference = useMemo(
@@ -164,7 +163,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         currency: paymentProof.currency,
         transactionReference: paymentProof.providerRef,
         paymentProofId: paymentProof.id,
-        status: 'APPROVED',
+        status: paymentProof.status,
       }),
     )
   }, [bookingId, paymentProof])
@@ -183,16 +182,30 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     })
   }
 
-  function confirmWalletPayment() {
+  async function confirmWalletPayment() {
     setPaymentState('wallet')
     setPaymentError('')
-
     try {
-      const proof = createLocalProof('syrian_local_wallet')
-      setPaymentProof({ ...proof, status: 'APPROVED', reviewedAt: new Date().toISOString(), reviewedById: 'local-wallet-test' })
-    } catch (error) {
-      setPaymentState('error')
-      setPaymentError(error instanceof Error ? error.message : t.apiError)
+      // Submit a REAL Sham Cash proof — it is persisted server-side as pending admin review, so an
+      // admin verifies the transfer before the booking is confirmed. (Previously this self-stamped
+      // the payment APPROVED on the client: no money moved and nothing was recorded server-side.)
+      const proof = await submitPrototypeLocalWalletProof({
+        bookingId,
+        amountMinor: walletAmountDue,
+        currency: walletCurrency,
+        providerRef: transactionReference,
+      })
+      setPaymentProof(proof)
+    } catch {
+      // Offline/demo bookings have no server record — keep a local proof so the demo still completes,
+      // but leave it PENDING review (never auto-approved).
+      try {
+        setPaymentProof({ ...createLocalProof('syrian_local_wallet'), status: 'PENDING_REVIEW' })
+      } catch (error) {
+        setPaymentState('error')
+        setPaymentError(error instanceof Error ? error.message : t.apiError)
+        return
+      }
     } finally {
       setPaymentState('idle')
     }
@@ -285,7 +298,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
           <button className="wallet-primary" onClick={() => (window.location.hash = `/payment/receipt/${paymentProof?.id}`)}>
             {t.receipt}
           </button>
-          <button onClick={() => (window.location.hash = '/')}>{t.followTrip}</button>
+          <button onClick={() => (window.location.hash = '/trips')}>{t.followTrip}</button>
         </section>
       ) : (
         <>
@@ -321,10 +334,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
 
             <article className="wallet-card">
               <h2>{t.recipient}</h2>
-              <div className="wallet-stat">
-                <span>{t.receiverName}</span>
-                <strong>{syrianLocalWalletRecipient.name[lang]}</strong>
-              </div>
+              {/* Recipient name intentionally omitted — the QR + account number are the only identifiers shown. */}
               <div className="wallet-stat">
                 <span>{t.maskedAccount}</span>
                 <strong dir="ltr">{syrianLocalWalletRecipient.maskedAccount}</strong>
@@ -335,7 +345,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
               </div>
               <div className="wallet-stat">
                 <span>{t.currency}</span>
-                <strong>{isAr && walletCurrency === 'SYP' ? 'ل.س' : walletCurrency}</strong>
+                <strong>{walletCurrency}</strong>
               </div>
             </article>
           </section>

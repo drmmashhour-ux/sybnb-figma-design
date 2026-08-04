@@ -16,8 +16,8 @@ import {
 
 async function registerRider(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email)
-  const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   await fundWallet(res.body.user.id)
   return { token: res.body.token, user: res.body.user }
@@ -25,8 +25,8 @@ async function registerRider(app, label) {
 
 async function registerDriver(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role: 'DRIVER', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant2 = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant2, role: 'DRIVER', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   await approveDriverForRides(res.body.user.id)
   return { token: res.body.token, user: res.body.user }
@@ -64,8 +64,9 @@ const walletBalance = async (userId, currency = 'SYP') => {
 
 describe('Consumer protection: country config + dispute/refund', () => {
   let app
-  beforeAll(() => {
+  beforeAll(async () => {
     app = testApp()
+    await bootstrapAdmin('protection-platform-admin')
   })
   afterAll(async () => {
     await cleanupTestUsers()
@@ -117,15 +118,15 @@ describe('Consumer protection: country config + dispute/refund', () => {
       expect(res.body.error.code).toBe('RIDE_NOT_DISPUTABLE')
     })
 
-    it('refuses a second open dispute for the same ride', async () => {
+    it('accepts exactly one of two concurrent disputes for the same ride', async () => {
       const rider = await registerRider(app, 'disp-dup')
       const driver = await registerDriver(app, 'disp-dup-drv')
       const ride = await completeRide(app, rider, driver, 'disp-4')
-      const first = await request(app).post('/api/disputes').set('Authorization', `Bearer ${rider.token}`).send({ rideId: ride.id, reason: 'a' })
-      expect(first.status).toBe(201)
-      const second = await request(app).post('/api/disputes').set('Authorization', `Bearer ${rider.token}`).send({ rideId: ride.id, reason: 'b' })
-      expect(second.status).toBe(409)
-      expect(second.body.error.code).toBe('DISPUTE_ALREADY_OPEN')
+      const submit = (reason) => request(app).post('/api/disputes').set('Authorization', `Bearer ${rider.token}`).send({ rideId: ride.id, reason })
+      const results = await Promise.all([submit('a'), submit('b')])
+      expect(results.map((res) => res.status).sort()).toEqual([201, 409])
+      expect(results.find((res) => res.status === 409).body.error.code).toBe('DISPUTE_ALREADY_OPEN')
+      expect(await db().dispute.count({ where: { rideId: ride.id, status: 'OPEN' } })).toBe(1)
     })
   })
 
@@ -147,6 +148,8 @@ describe('Consumer protection: country config + dispute/refund', () => {
       expect(await walletBalance(rider.user.id)).toBe(chargedBalance + ride.fareMinor)
       const refundEntry = await db().walletEntry.findFirst({ where: { referenceType: 'dispute_refund', referenceId: ride.id } })
       expect(refundEntry.amountMinor).toBe(ride.fareMinor)
+      const reversals = await db().walletEntry.findMany({ where: { referenceId: ride.id, type: 'DEBIT', referenceType: { endsWith: '_dispute_reversal' } } })
+      expect(reversals.reduce((sum, entry) => sum + entry.amountMinor, 0)).toBe(ride.fareMinor)
 
       // Re-resolving the SAME dispute is refused.
       const again = await request(app).patch(`/api/admin/disputes/${dispute.id}`).set('Authorization', `Bearer ${adminToken}`).send({ decision: 'REFUND' })
@@ -193,13 +196,13 @@ describe('Consumer protection: country config + dispute/refund', () => {
   describe('STR booking: dispute refund is not double-paid by a later guest cancel', () => {
     async function setUpConfirmedPaidBooking(adminId, label) {
       const hostEmail = uniqueTestEmail(`${label}-host`)
-      await verifyEmailForTest(app, hostEmail, 'staff-login')
-      const hostRes = await request(app).post('/api/auth/register').send({ role: 'HOST', email: hostEmail, password: 'correct-horse-battery' })
+      const legacyVerificationGrant3 = await verifyEmailForTest(app, hostEmail, 'staff-login')
+      const hostRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant3, role: 'HOST', email: hostEmail, password: 'correct-horse-battery' })
       trackTestUser(hostRes.body.user.id)
 
       const guestEmail = uniqueTestEmail(`${label}-guest`)
-      await verifyEmailForTest(app, guestEmail)
-      const guestRes = await request(app).post('/api/auth/register').send({ role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
+      const legacyVerificationGrant4 = await verifyEmailForTest(app, guestEmail)
+      const guestRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant4, role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
       trackTestUser(guestRes.body.user.id)
 
       const listing = await db().listing.create({
@@ -248,6 +251,8 @@ describe('Consumer protection: country config + dispute/refund', () => {
       expect((await db().booking.findUnique({ where: { id: bookingId } })).status).toBe('CANCELLED')
       const disputeRefunds = await db().walletEntry.findMany({ where: { referenceType: 'dispute_refund', referenceId: bookingId } })
       expect(disputeRefunds).toHaveLength(1)
+      const holdReversal = await db().walletEntry.findFirst({ where: { referenceType: 'booking_payout_hold_reversal', referenceId: bookingId, type: 'HOLD' } })
+      expect(holdReversal).not.toBeNull()
       const balanceAfterRefund = (await db().wallet.findUnique({ where: { userId_currency: { userId: guestId, currency: 'USD' } } }))?.cachedBalanceMinor || 0
 
       // A subsequent guest cancel must NOT issue a second refund: the booking is no longer cancellable.

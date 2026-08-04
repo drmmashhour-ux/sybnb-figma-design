@@ -21,8 +21,8 @@ const VALID_VEHICLE = {
 
 async function registerSeller(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role: 'SELLER', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant1 = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'SELLER', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
@@ -108,6 +108,7 @@ describe('Auction config: POST /api/listings/:listingId/auction', () => {
 
   it('rejects configuring an auction on a non-CARS listing', async () => {
     const seller = await registerSeller(app, 'auction-config-noncars')
+    await db().paymentProof.create({ data: { userId: seller.user.id, provider: 'str_host_plan', providerRef: `auction-stay-plan-${Date.now()}`, status: 'APPROVED', amountMinor: 9, currency: 'USD' } })
     const created = await request(app)
       .post('/api/listings')
       .set('Authorization', `Bearer ${seller.token}`)

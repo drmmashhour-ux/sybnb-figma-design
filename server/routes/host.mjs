@@ -5,17 +5,32 @@ import {
   CANCELLATION_ADMIN_FEE_MINOR,
   bookingFinanceSplit,
   buildPayoutRow,
+  debitableMinor,
+  lockWalletForSpend,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
-import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS } from '../lib/listing-lifecycle.mjs'
+import { expireOldListings, FREE_TIER_DIVISIONS, freeListingExpiryDate, listingExpiryDate, PAID_PLAN_DIVISIONS, purgeStaleListingMedia } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
+import { generateOrTemplate } from '../lib/ai-listing-description.mjs'
+import { correctText } from '../lib/ai-text-correct.mjs'
+import { checkListingHonesty } from '../lib/ai-truth-check.mjs'
+import { categorizeListingPhotos } from '../lib/ai-photo-categorize.mjs'
+import { enhancePhotoBuffer } from '../lib/ai-photo-enhance.mjs'
 import { assertBoundedString, assertNoUnknownFields } from '../lib/validate.mjs'
 import { deleteListingMedia } from '../lib/listing-media-storage.mjs'
 import { computeDealRating, loadCarsComparablePool } from '../lib/car-deal-rating.mjs'
 import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
+import { encryptPayoutAccount, payoutAccountLast4 } from '../lib/payout-account.mjs'
+import { checkListingClaims, claimCheckSignature } from '../lib/listing-claim-check.mjs'
+import {
+  STR_HOST_PLAN_PRICE_MINOR,
+  createStripeCardRefund,
+  extractStripePaymentIntentId,
+  isStripeConfigured,
+} from './payments.mjs'
 
 // SECURITY (S7/S10): the ONLY guest + payment-proof fields a host is allowed to receive.
 // A host must never see the guest's email, nor a proof's uploaded transfer screenshot (proofAssetUrl),
@@ -32,7 +47,46 @@ function hostSafePayoutRow(row) {
   return safeRow
 }
 
+// The ONLY payout fields ever returned to a client: type, holder, and last4. The encrypted
+// number envelope (ciphertext/iv/tag) never leaves the server.
+function hostSafePayoutView(payoutMethod) {
+  if (!payoutMethod || typeof payoutMethod !== 'object' || payoutMethod.type !== 'sham_cash') {
+    return null
+  }
+  return {
+    type: 'sham_cash',
+    accountHolder: payoutMethod.accountHolder || '',
+    last4: payoutMethod.last4 || '',
+    updatedAt: payoutMethod.updatedAt || null,
+  }
+}
+
 export async function handleHost(req, res, url, context) {
+  // The host listing-plan fee is a one-time charge per STR listing, recorded as an APPROVED
+  // paymentProof (provider 'str_host_plan'). The wizard used to remember that payment ONLY in the
+  // browser it was paid in (client draft state), so a page refresh — or continuing on a second
+  // device — made it demand payment AGAIN even though the fee was already captured. This endpoint
+  // lets the wizard confirm the payment server-side on load, so it can skip the plan step without
+  // ever re-charging. "Unconsumed" = the host has more approved plan fees than STAYS listings they
+  // own (each created listing consumes one plan). Distinct plan prices let us map the paid amount
+  // back to the exact plan code, so a host who paid for Basic can't silently claim a pricier plan.
+  if (url.pathname === '/api/host/str-plan-status') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+
+    const unconsumedPlan = await db().paymentProof.findFirst({
+      where: { userId: context.user.id, provider: 'str_host_plan', status: 'APPROVED', strPlanConsumption: null },
+      select: { amountMinor: true }, orderBy: { createdAt: 'asc' },
+    })
+    const hasPaidPlan = Boolean(unconsumedPlan)
+    const priceToPlan = Object.fromEntries(
+      Object.entries(STR_HOST_PLAN_PRICE_MINOR).map(([code, minor]) => [minor, code]),
+    )
+    const paidPlanCode = hasPaidPlan ? priceToPlan[unconsumedPlan.amountMinor] || null : null
+
+    return json(res, 200, { hasPaidPlan, paidPlanCode })
+  }
+
   if (url.pathname === '/api/host/earnings') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['HOST', 'SELLER'])
@@ -95,6 +149,9 @@ export async function handleHost(req, res, url, context) {
     await completeExpiredBookings({ listing: { ownerId: context.user.id } })
     await expireOldListings({ ownerId: context.user.id })
     await expireOpenAuctions({ listing: { ownerId: context.user.id } })
+    // Reclaim orphaned photo storage from long-dead listings (throttled, global, best-effort — never
+    // blocks this dashboard load, and resumes next time if a run is cut short).
+    void purgeStaleListingMedia().catch(() => {})
 
     const listings = await db().listing.findMany({
       where: { ownerId: context.user.id },
@@ -130,6 +187,7 @@ export async function handleHost(req, res, url, context) {
         },
         media: true,
         location: true,
+        _count: { select: { inquiryThreads: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -155,6 +213,14 @@ export async function handleHost(req, res, url, context) {
       }
     }
 
+    // Inquiry threads are the real lead source for non-bookable divisions (property, cars,
+    // marketplace and projects). Keep the count on each owner-facing listing; bookings are not a
+    // substitute for leads and made every seller dashboard incorrectly show zero inquiries.
+    for (const listing of listings) {
+      listing.inquiryCount = listing._count?.inquiryThreads || 0
+      delete listing._count
+    }
+
     const requests = listings.flatMap((listing) =>
       listing.bookings.map((booking) => ({
         ...booking,
@@ -170,6 +236,12 @@ export async function handleHost(req, res, url, context) {
       })),
     )
 
+    const revenueByCurrency = requests
+      .filter((booking) => booking.status === 'CONFIRMED')
+      .reduce((totals, booking) => {
+        totals[booking.currency] = (totals[booking.currency] || 0) + booking.amountMinor
+        return totals
+      }, {})
     const totals = {
       listings: listings.length,
       approvedListings: listings.filter((listing) => listing.status === 'APPROVED').length,
@@ -177,9 +249,10 @@ export async function handleHost(req, res, url, context) {
       requests: requests.length,
       requested: requests.filter((booking) => booking.status === 'REQUESTED').length,
       confirmed: requests.filter((booking) => booking.status === 'CONFIRMED').length,
-      revenueMinor: requests
-        .filter((booking) => booking.status === 'CONFIRMED')
-        .reduce((sum, booking) => sum + booking.amountMinor, 0),
+      // Kept for old clients only. New clients use revenueByCurrency; adding SYP and USD minor
+      // units together is not a meaningful financial total.
+      revenueMinor: 0,
+      revenueByCurrency,
     }
 
     // Free, zero external-cost fact computation — safe to run on every dashboard load, unlike the
@@ -223,6 +296,91 @@ export async function handleHost(req, res, url, context) {
     // to the host who explicitly clicked the button, unlike the free opportunistic signal above.
     const result = await generateHostInsights(context.user.id)
     return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI listing-description writer (capsule): turns the host's selected attributes into a bilingual
+  // description. Uses Claude when configured, template fallback otherwise — so it never hard-fails.
+  if (url.pathname === '/api/host/listing-description') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    // Any signed-in user (a host drafting a listing may still be a guest mid-onboarding). Low-risk
+    // text generation from client-provided attributes; cost is bounded by the AI_DESCRIPTION limit.
+    requireAuth(context)
+    const body = await readJson(req)
+    const result = await generateOrTemplate(body && typeof body === 'object' ? body : {})
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI text-correction (capsule): polishes the host's OWN title/description text (spelling, grammar,
+  // clarity) without inventing facts. Same auth + cost profile as the description writer.
+  if (url.pathname === '/api/host/listing-correct') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const text = typeof body?.text === 'string' ? body.text.slice(0, 4000) : ''
+    const locale = body?.locale === 'ar' ? 'ar' : 'en'
+    const result = await correctText({ text, locale })
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI truth-check (capsule): cross-checks the host's CLAIMED features against their PHOTOS with
+  // vision, and warns on mismatches. Warn-not-block honesty guard; same auth + cost profile.
+  if (url.pathname === '/api/host/listing-truth-check') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const claims = Array.isArray(body?.claims) ? body.claims.slice(0, 40).map((c) => String(c)) : []
+    const photos = Array.isArray(body?.photos) ? body.photos.slice(0, 6) : []
+    const locale = body?.locale === 'ar' ? 'ar' : 'en'
+    const result = await checkListingHonesty({ claims, photos, locale })
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI "photo tour": label each uploaded photo by room/space so the wizard can auto-group them (host can
+  // re-tag). Reuses the same Claude-vision gating as the truth-check — returns 'unavailable' with no key.
+  if (url.pathname === '/api/host/listing-photo-categories') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const photos = Array.isArray(body?.photos) ? body.photos.slice(0, 16) : []
+    const locale = body?.locale === 'ar' ? 'ar' : 'en'
+    const result = await categorizeListingPhotos({ photos, locale })
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  // PREMIUM (paid) photo enhancement — faithful AI super-resolution/denoise via the ai-photo-enhance
+  // capsule (fal.ai). Distinct from the FREE on-device enhancer. Host/seller only; bounded by the
+  // PREMIUM_PHOTO_ENHANCE rate-limit rule so provider spend can't run away. Returns the enhanced JPEG as
+  // base64 so the wizard can swap the staged photo in place. When no FAL_KEY is set the capsule throws a
+  // clean 501 (feature simply off) — the client hides the button in that case.
+  if (url.pathname === '/api/host/photos/enhance') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const body = await readJson(req)
+    const mimeType = typeof body?.mimeType === 'string' ? body.mimeType : ''
+    if (!/^image\/(jpeg|png|webp)$/.test(mimeType)) {
+      const error = new Error('Photo must be a JPEG, PNG, or WebP image.')
+      error.statusCode = 400
+      error.code = 'ENHANCE_TYPE_INVALID'
+      error.expose = true
+      throw error
+    }
+    const buffer = Buffer.from(typeof body?.fileBase64 === 'string' ? body.fileBase64 : '', 'base64')
+    if (!buffer.length) {
+      const error = new Error('No photo data to enhance.')
+      error.statusCode = 400
+      error.code = 'ENHANCE_EMPTY'
+      error.expose = true
+      throw error
+    }
+    if (buffer.length > 12 * 1024 * 1024) {
+      const error = new Error('Photo must be smaller than 12MB.')
+      error.statusCode = 400
+      error.code = 'ENHANCE_TOO_LARGE'
+      error.expose = true
+      throw error
+    }
+    const enhanced = await enhancePhotoBuffer(buffer, { mimeType })
+    return json(res, 200, { ok: true, fileBase64: enhanced.toString('base64'), mimeType: 'image/jpeg' })
   }
 
   const insightReadMatch = url.pathname.match(/^\/api\/host\/insights\/([^/]+)\/read$/)
@@ -287,6 +445,10 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
+    // If the booking was paid by CARD (Stripe), we issue a REAL card refund AFTER the transaction commits
+    // (never call an external API inside a DB transaction). Populated inside the tx; acted on after.
+    let deferredCardRefund = null
+
     const booking = await db().$transaction(async (tx) => {
       // SECURITY (S4): claim the transition atomically on the status we validated above. Without this, a
       // concurrent guest-cancel (which refunds) could commit and then this host-confirm would overwrite it
@@ -325,49 +487,85 @@ export async function handleHost(req, res, url, context) {
           },
         })
 
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
-          amountMinor: approvedPayment?.amountMinor || existing.amountMinor,
-          currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['booking-refund', existing.id, approvedPayment?.id],
-          note: 'Guest refund after host cancelled a protected booking.',
+        // If the guest paid by CARD (Stripe), refund the money back to their CARD (done after commit),
+        // NOT as an internal wallet credit they could never cash out. Sham Cash / local-wallet payments
+        // (no card to refund) still get the internal wallet credit as before. A host cancel is a full
+        // refund (no late fee is withheld from the guest when the HOST is the one cancelling).
+        // The host-safe payment projection deliberately omits provider/proofAssetUrl, so read the Stripe
+        // intent from the proof server-side (never exposed to the host), matching the dispute-refund path.
+        const guestRefundMinor = approvedPayment?.amountMinor || existing.amountMinor
+        const stripeProof = await tx.paymentProof.findFirst({
+          where: { bookingId: existing.id, provider: 'stripe', status: { in: ['REFUNDED', 'APPROVED'] } },
+          orderBy: { createdAt: 'desc' },
         })
+        const stripeIntentId = stripeProof ? extractStripePaymentIntentId(stripeProof.proofAssetUrl) : null
+        if (stripeIntentId && guestRefundMinor > 0 && isStripeConfigured()) {
+          deferredCardRefund = {
+            paymentIntentId: stripeIntentId,
+            amountMinor: guestRefundMinor,
+            currency: existing.currency,
+            bookingId: existing.id,
+            guestId: existing.guestId,
+            proofId: approvedPayment?.id,
+          }
+        } else {
+          await recordWalletEntry(tx, {
+            userId: existing.guestId,
+            type: 'REFUND',
+            amountMinor: guestRefundMinor,
+            currency: existing.currency,
+            referenceType: 'booking_refund',
+            referenceId: existing.id,
+            keyParts: ['booking-refund', existing.id, approvedPayment?.id],
+            note: 'Guest refund after host cancelled a protected booking.',
+          })
+        }
 
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'DEBIT',
-          amountMinor: split.adminShareMinor,
-          currency: existing.currency,
-          referenceType: 'booking_admin_share_reversal',
-          referenceId: existing.id,
-          keyParts: ['booking-admin-share-reversal', existing.id, approvedPayment?.id],
-          note: 'Admin/SYBNB share reversed because the protected booking was refunded.',
-        })
+        // Floor the reversal at the admin wallet's balance so undoing the admin's share can never
+        // push it negative (if the share was already withdrawn, only what remains is reversed). Lock
+        // the wallet first so the floor's read-then-write can't race a concurrent debit on it (M2 class).
+        await lockWalletForSpend(tx, adminRecipientId, existing.currency)
+        const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
+        if (adminShareRevMinor > 0) {
+          await recordWalletEntry(tx, {
+            userId: adminRecipientId,
+            type: 'DEBIT',
+            amountMinor: adminShareRevMinor,
+            currency: existing.currency,
+            referenceType: 'booking_admin_share_reversal',
+            referenceId: existing.id,
+            keyParts: ['booking-admin-share-reversal', existing.id, approvedPayment?.id],
+            note: 'Admin/SYBNB share reversed because the protected booking was refunded.',
+          })
+        }
 
-        await recordWalletEntry(tx, {
-          userId: existing.listing.ownerId,
-          type: 'DEBIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-host', existing.id, approvedPayment?.id],
-          note: 'Host cancellation admin fee after cancelling a protected paid booking.',
-        })
-
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'CREDIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-admin', existing.id, approvedPayment?.id],
-          note: 'Admin received host cancellation fee for protected paid booking.',
-        })
+        // Host cancellation admin fee is a TRANSFER (host DEBIT → admin CREDIT). Floor it at the host's
+        // available balance so an empty host wallet is never driven negative, and use the same floored
+        // amount for BOTH legs so no money is minted. If the host can't cover it, the fee isn't collected.
+        await lockWalletForSpend(tx, existing.listing.ownerId, CANCELLATION_ADMIN_FEE_CURRENCY)
+        const hostFeeMinor = await debitableMinor(tx, existing.listing.ownerId, CANCELLATION_ADMIN_FEE_CURRENCY, CANCELLATION_ADMIN_FEE_MINOR)
+        if (hostFeeMinor > 0) {
+          await recordWalletEntry(tx, {
+            userId: existing.listing.ownerId,
+            type: 'DEBIT',
+            amountMinor: hostFeeMinor,
+            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            referenceType: 'booking_host_cancel_fee',
+            referenceId: existing.id,
+            keyParts: ['booking-host-cancel-fee-host', existing.id, approvedPayment?.id],
+            note: 'Host cancellation admin fee after cancelling a protected paid booking.',
+          })
+          await recordWalletEntry(tx, {
+            userId: adminRecipientId,
+            type: 'CREDIT',
+            amountMinor: hostFeeMinor,
+            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            referenceType: 'booking_host_cancel_fee',
+            referenceId: existing.id,
+            keyParts: ['booking-host-cancel-fee-admin', existing.id, approvedPayment?.id],
+            note: 'Admin received host cancellation fee for protected paid booking.',
+          })
+        }
       }
 
       // Payout is intentionally NOT released here. Confirming only means the host accepted the
@@ -389,6 +587,40 @@ export async function handleHost(req, res, url, context) {
         },
       })
     })
+
+    // Card refund runs AFTER the transaction commits (never call Stripe inside a DB transaction). On
+    // success the guest's money is back on their card. If Stripe fails, fall back to an internal wallet
+    // credit so the guest is still made whole, and log it for follow-up.
+    if (deferredCardRefund) {
+      try {
+        const refund = await createStripeCardRefund({
+          paymentIntentId: deferredCardRefund.paymentIntentId,
+          amountMinor: deferredCardRefund.amountMinor,
+          bookingCurrency: deferredCardRefund.currency,
+        })
+        await db().adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'BOOKING_CARD_REFUNDED',
+            entityType: 'bookings',
+            entityId: deferredCardRefund.bookingId,
+            after: { stripeRefundId: refund.refundId || null, amountMinor: deferredCardRefund.amountMinor, currency: deferredCardRefund.currency },
+          },
+        })
+      } catch (refundError) {
+        console.error('[sybnb] Stripe card refund failed after host cancel; crediting wallet as fallback:', refundError?.message || refundError)
+        await recordWalletEntry(db(), {
+          userId: deferredCardRefund.guestId,
+          type: 'REFUND',
+          amountMinor: deferredCardRefund.amountMinor,
+          currency: deferredCardRefund.currency,
+          referenceType: 'booking_refund',
+          referenceId: deferredCardRefund.bookingId,
+          keyParts: ['booking-host-cancel-refund-card-fallback', deferredCardRefund.bookingId, deferredCardRefund.proofId],
+          note: 'Fallback wallet refund — the Stripe card refund could not be completed.',
+        })
+      }
+    }
 
     await db().adminAuditLog.create({
       data: {
@@ -539,6 +771,128 @@ export async function handleHost(req, res, url, context) {
     }
 
     return methodNotAllowed(res, ['GET', 'PATCH'])
+  }
+
+  // ---- AI CLAIM CHECK — verify claimed amenities against their photos (WARN, never block) ----
+  // Runs Claude vision over the listing's photos for each claimed offer-proof amenity. Advisory
+  // only: persists non-'yes' flags to metadata.claimChecks so admin can see them, and returns the
+  // per-amenity checks to the host. Fail-open — the verifier never throws and returns [] if AI is off.
+  const verifyClaimsMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/verify-claims$/)
+  if (verifyClaimsMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const listingId = verifyClaimsMatch[1]
+    const listing = await db().listing.findFirst({
+      where: { id: listingId, ownerId: context.user.id },
+      include: { media: true },
+    })
+    if (!listing) {
+      const error = new Error('Listing not found for this host account.')
+      error.statusCode = 404
+      error.code = 'HOST_LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const body = await readJson(req).catch(() => ({}))
+    const clientClaims = Array.isArray(body?.claims) ? body.claims : []
+    const force = body?.force === true
+
+    // Cost-aware: skip re-verifying an unchanged listing (same claimed amenities + same photos).
+    const signature = claimCheckSignature(listing)
+    const existing =
+      listing.metadata && typeof listing.metadata === 'object' ? listing.metadata.claimChecks : null
+    if (!force && existing && existing.signature === signature && Array.isArray(existing.checks)) {
+      return json(res, 200, { ok: true, checks: existing.checks, cached: true })
+    }
+
+    // The verifier itself never throws, but guard the whole path so a claim check can never break
+    // the host's flow.
+    let checks = []
+    try {
+      checks = await checkListingClaims(listing, clientClaims)
+    } catch {
+      checks = []
+    }
+
+    const flagCount = checks.filter((check) => check.verdict !== 'yes').length
+    const baseMetadata =
+      listing.metadata && typeof listing.metadata === 'object' ? listing.metadata : {}
+    const nextMetadata = {
+      ...baseMetadata,
+      claimChecks: {
+        checkedAt: new Date().toISOString(),
+        signature,
+        checks,
+        flagCount,
+      },
+    }
+    await db().listing.update({ where: { id: listing.id }, data: { metadata: nextMetadata } })
+
+    return json(res, 200, { ok: true, checks })
+  }
+
+  // ---- HOST PAYOUT ACCOUNT (Sham Cash) — mirrors the driver payout pattern ----
+  // Admin's /api/admin/payouts release surfaces the host's User.payoutMethod so the operator can
+  // push earnings; this endpoint lets the host set/read it. The full number is encrypted at rest
+  // (payout-account.mjs) and only the last 4 digits are ever returned to any client.
+  if (url.pathname === '/api/host/payout') {
+    requireAuth(context, ['HOST', 'SELLER'])
+
+    if (req.method === 'GET') {
+      const user = await db().user.findUnique({
+        where: { id: context.user.id },
+        select: { payoutMethod: true },
+      })
+      return json(res, 200, { ok: true, payout: hostSafePayoutView(user?.payoutMethod) })
+    }
+
+    if (req.method === 'PUT') {
+      const body = await readJson(req)
+      assertNoUnknownFields(body, ['accountHolder', 'shamCashNumber'])
+      const accountHolder = assertBoundedString(body.accountHolder, {
+        fieldName: 'accountHolder',
+        maxLength: 120,
+        required: true,
+      })
+      const digits = String(body.shamCashNumber || '').replace(/\D/g, '')
+      if (digits.length < 6 || digits.length > 24) {
+        const error = new Error('Sham Cash number must be between 6 and 24 digits.')
+        error.statusCode = 400
+        error.code = 'SHAM_CASH_NUMBER_INVALID'
+        error.expose = true
+        throw error
+      }
+
+      const payoutMethod = {
+        type: 'sham_cash',
+        accountHolder,
+        last4: payoutAccountLast4(digits),
+        ...encryptPayoutAccount(digits),
+        updatedAt: new Date().toISOString(),
+      }
+
+      await db().user.update({
+        where: { id: context.user.id },
+        data: { payoutMethod },
+      })
+
+      // Audit the change WITHOUT persisting the ciphertext or number — only the type + last4.
+      await db().adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'HOST_PAYOUT_METHOD_UPDATED',
+          entityType: 'users',
+          entityId: context.user.id,
+          before: null,
+          after: { type: 'sham_cash', last4: payoutMethod.last4 },
+        },
+      })
+
+      return json(res, 200, { ok: true, payout: hostSafePayoutView(payoutMethod) })
+    }
+
+    return methodNotAllowed(res, ['GET', 'PUT'])
   }
 
   const listingMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/status$/)
@@ -778,10 +1132,10 @@ export async function handleHost(req, res, url, context) {
       }
 
       // ListingMedia rows cascade-delete with the listing automatically (schema onDelete: Cascade),
-      // but the on-disk files need explicit cleanup first, before the DB rows referencing them are gone.
+      // but the stored files (Blob/CDN or local) need explicit cleanup first, before the rows are gone.
       const media = await db().listingMedia.findMany({ where: { listingId: existing.id } })
       for (const item of media) {
-        await deleteListingMedia(String(item.url || '').split('/').pop())
+        await deleteListingMedia(item.url) // full url: blob→CDN delete, dev→local file delete
       }
       await db().listing.delete({ where: { id: existing.id } })
 

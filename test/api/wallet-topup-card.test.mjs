@@ -12,8 +12,8 @@ import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestRe
 
 async function registerRider(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email)
-  const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return res.body.user
 }
@@ -42,9 +42,10 @@ function paidTopupSession(id, userId, baseMinor) {
 
 describe('Card (Mastercard) wallet top-up: 2.35% on top, webhook-only credit', () => {
   let app
+  let admin
   beforeAll(async () => {
     app = testApp()
-    await ensureAdmin('topup-card-admin')
+    admin = await ensureAdmin('topup-card-admin')
   })
   afterAll(async () => {
     await cleanupTestUsers()
@@ -87,5 +88,19 @@ describe('Card (Mastercard) wallet top-up: 2.35% on top, webhook-only credit', (
     expect(wallet.cachedBalanceMinor).toBe(100)
     const credits = await db().walletEntry.findMany({ where: { referenceType: 'wallet_topup', referenceId: session.id } })
     expect(credits).toHaveLength(1)
+  })
+
+  it('fails closed without a platform account and leaves the rider wallet untouched', async () => {
+    const rider = await registerRider(app, 'topup-card-no-admin')
+    const session = paidTopupSession(`cs_test_topup_${Date.now()}_NO_ADMIN`, rider.id, 100)
+    await db().userRole.deleteMany({ where: { role: 'ADMIN' } })
+    try {
+      await expect(creditWalletTopupSession(session)).rejects.toMatchObject({ code: 'PLATFORM_ACCOUNT_MISSING', statusCode: 503 })
+      const wallet = await db().wallet.findUnique({ where: { userId_currency: { userId: rider.id, currency: 'USD' } } })
+      expect(wallet?.cachedBalanceMinor || 0).toBe(0)
+      expect(await db().walletEntry.count({ where: { referenceId: session.id } })).toBe(0)
+    } finally {
+      await db().userRole.upsert({ where: { userId_role: { userId: admin.id, role: 'ADMIN' } }, create: { userId: admin.id, role: 'ADMIN' }, update: {} })
+    }
   })
 })

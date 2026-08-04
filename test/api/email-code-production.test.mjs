@@ -17,7 +17,7 @@ describe('email code production controls (§0.1)', () => {
     expect(normalized).toMatch(/isProduction\s*=\s*process\.env\.NODE_ENV\s*===\s*['"]production['"]/)
   })
 
-  it('suppresses the raw code in production (devCode = isProduction ? undefined : code)', () => {
-    expect(normalized).toContain('isProduction ? undefined : code')
+  it('suppresses the raw code in production and every hosted Vercel environment', () => {
+    expect(normalized).toContain('!isProduction && !process.env.VERCEL_ENV ? code : undefined')
   })
 })

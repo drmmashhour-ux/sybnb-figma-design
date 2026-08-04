@@ -4,10 +4,15 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { fetchApprovedListings, sendListingInquiryDocument, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
+import { aiParsePropertySearch, fetchApprovedListings, fetchPrototypeListing, sendListingInquiryDocument, sendListingInquiryMessage, type AiPropertySearchFilters, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
-import { PaymentCapsule } from '../payments/PaymentCapsule'
+import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
+import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
+import { MortgageCalculator } from '../realestate/MortgageCalculator'
+import { PhotoGallery, listingGalleryPhotos } from '../../shared/gallery/PhotoGallery'
+import { realEstateAttrs, valuationTone } from '../realestate/propertyAttrs'
+import { SYNITRES_PRESELECT_LISTING_KEY } from '../../shared/nav/synitresHandoff'
 
 type Props = {
   lang: Lang
@@ -29,14 +34,27 @@ type SortMode = 'newest' | 'lowest'
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const GUEST_TOKEN_KEY = 'sybnb-v6-guest-token'
 
+// Price-band → SYP range, mirroring the STR search (src/modules/search/SearchPreviewPage.tsx) so the
+// shared visual-filter capsule means the same thing across stays and real-estate.
+const PRICE_BANDS: Record<string, { minPrice?: number; maxPrice?: number }> = {
+  low: { maxPrice: 150000 },
+  mid: { minPrice: 150000, maxPrice: 300000 },
+  high: { minPrice: 300000 },
+}
+
 const dateOptions = ['هذا الأسبوع', 'هذا الشهر', '3 أشهر', 'تاريخ مفتوح']
+// The buyer property-type chips MUST match the seller wizard's taxonomy (SellerListingWizard
+// PROPERTY_TYPES, stored verbatim as metadata.propertyType), else a filter finds nothing. The ids are the
+// lowercased English label the wizard writes, so the server's case-insensitive compare matches. "Any"
+// (default) sends no property-type filter so the search isn't silently narrowed to apartments.
 const mainGroupOptions = [
+  { id: 'any', ar: 'الكل', en: 'Any' },
   { id: 'apartment', ar: 'شقة', en: 'Apartment' },
+  { id: 'family house', ar: 'منزل عائلي', en: 'Family house' },
   { id: 'villa', ar: 'فيلا', en: 'Villa' },
-  { id: 'room', ar: 'غرفة', en: 'Room' },
-  { id: 'office', ar: 'مكتب', en: 'Office' },
-  { id: 'shop', ar: 'محل', en: 'Shop' },
+  { id: 'commercial', ar: 'محل تجاري', en: 'Commercial' },
   { id: 'land', ar: 'أرض', en: 'Land' },
+  { id: 'new project', ar: 'مشروع جديد', en: 'New project' },
 ]
 
 const copy = {
@@ -67,6 +85,7 @@ const copy = {
     availableResults: 'النتائج المتاحة',
     sendRequest: 'إرسال طلب',
     viewDetails: 'عرض التفاصيل',
+    openPage: 'فتح صفحة العقار',
     chooseAfterAccount: 'افتح الحساب أولاً',
     eyebrow: 'الإيجار الشهري',
     title: 'مسار المستأجر',
@@ -105,6 +124,22 @@ const copy = {
     price: 'الإيجار الشهري',
     owner: 'المالك',
     status: 'الحالة',
+    bedroomsLabel: 'غرف النوم',
+    bathroomsLabel: 'الحمّامات',
+    sizeLabel: 'المساحة',
+    typeLabel: 'النوع',
+    locationLabel: 'الموقع',
+    amenitiesLabel: 'المزايا',
+    sqm: 'م²',
+    mapTitle: 'الموقع على الخريطة',
+    getDirections: 'الاتجاهات · GPS',
+    aiPlaceholder: 'اكتب طلبك: شقة 3 غرف في دمشق بأقل من 25 مليون مع مصعد',
+    aiSearch: 'بحث ذكي',
+    aiUnderstood: 'فهمت',
+    belowMarket: 'أقل من سعر السوق',
+    atMarket: 'ضمن سعر السوق',
+    aboveMarket: 'أعلى من سعر السوق',
+    estValue: 'القيمة التقديرية',
     empty: 'لا توجد عقارات شهرية منشورة بعد.',
     loading: 'جار التحميل',
     error: 'تعذر تحميل عقارات الإيجار الشهري',
@@ -137,6 +172,7 @@ const copy = {
     availableResults: 'Available results',
     sendRequest: 'Send request',
     viewDetails: 'View details',
+    openPage: 'Open property page',
     chooseAfterAccount: 'Open account first',
     eyebrow: 'Monthly rentals',
     title: 'Renter tunnel',
@@ -175,6 +211,22 @@ const copy = {
     price: 'Monthly rent',
     owner: 'Owner',
     status: 'Status',
+    bedroomsLabel: 'Bedrooms',
+    bathroomsLabel: 'Bathrooms',
+    sizeLabel: 'Size',
+    typeLabel: 'Type',
+    locationLabel: 'Location',
+    amenitiesLabel: 'Amenities',
+    sqm: 'm²',
+    mapTitle: 'Location on map',
+    getDirections: 'Directions · GPS',
+    aiPlaceholder: 'Describe it: 3-bed apartment in Damascus under 25 million with an elevator',
+    aiSearch: 'AI search',
+    aiUnderstood: 'Understood',
+    belowMarket: 'Below market',
+    atMarket: 'At market',
+    aboveMarket: 'Above market',
+    estValue: 'Estimated value',
     empty: 'No published monthly rentals yet.',
     loading: 'Loading',
     error: 'Could not load monthly rentals',
@@ -264,21 +316,26 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [showFilters, setShowFilters] = useState(true)
   const [hasSearched, setHasSearched] = useState(false)
   const [sortMode, setSortMode] = useState<SortMode>('newest')
+  const [aiQuery, setAiQuery] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiUnderstood, setAiUnderstood] = useState<AiPropertySearchFilters | null>(null)
   const [activeSearchPanel, setActiveSearchPanel] = useState<SearchPanel>(null)
   const [selectedGovernorate, setSelectedGovernorate] = useState('damascus')
   const [selectedCity, setSelectedCity] = useState('damascus-city')
-  const [selectedStreet, setSelectedStreet] = useState('old-city')
+  const [selectedStreet, setSelectedStreet] = useState('') // '' = any area (don't over-narrow the search)
   const [selectedDate, setSelectedDate] = useState('')
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>({
     sort: 'newest',
     priceBand: 'any',
-    propertyType: 'apartment',
+    propertyType: 'any',
     roomType: 'any',
     bedType: 'any',
-    amenities: ['wifi', 'parking'],
+    // Start with NO amenity requirements so the default search isn't silently narrowed to listings that
+    // happen to have wifi+parking — the buyer adds amenity filters explicitly.
+    amenities: [],
     access: [],
-    trust: ['verifiedHost'],
-    payments: ['shamCash'],
+    trust: [],
+    payments: [],
   })
   const hasGuestAccount = typeof window !== 'undefined' && Boolean(sessionStorage.getItem(GUEST_TOKEN_KEY))
   const activeFilterLabels = useMemo(
@@ -290,14 +347,14 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const selectedAreaData = selectedCityData?.areas.find((area) => area.key === selectedStreet)
   const selectedGovernorateLabel = labelFor(lang, selectedGovernorateData)
   const selectedCityLabel = labelFor(lang, selectedCityData)
-  const selectedStreetLabel = labelFor(lang, selectedAreaData)
+  const selectedStreetLabel = selectedStreet ? labelFor(lang, selectedAreaData) : (isAr ? 'كل الأحياء' : 'Any area')
   const currentPanelOptions = (
     activeSearchPanel === 'governorate'
       ? SYRIA_GOVERNORATES.map((item) => ({ key: item.key, label: labelFor(lang, item) }))
       : activeSearchPanel === 'city'
         ? (selectedGovernorateData?.cities || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
         : activeSearchPanel === 'street'
-          ? (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
+          ? [{ key: '', label: isAr ? 'كل الأحياء' : 'Any area' }, ...(selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))]
           : dateOptions.map((item) => ({ key: item, label: item }))
   )
   const visibleListings = useMemo(() => {
@@ -316,13 +373,56 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     void loadRentals()
   }, [mode])
 
-  async function loadRentals() {
+  // Translate the location capsule + the STR visual-filter selection into the real server-side query
+  // (GET /api/listings applies these division-agnostically). Without this the Centris-style filters were
+  // purely cosmetic — the page fetched every approved listing and only re-sorted on the client.
+  function currentFilters(): ListingSearchFilters {
+    // VisualFilterSelection is a generic Record<string, string | string[]>, so coerce each field.
+    const priceBand = typeof visualFilters.priceBand === 'string' ? visualFilters.priceBand : ''
+    const propertyType = typeof visualFilters.propertyType === 'string' ? visualFilters.propertyType : ''
+    const amenities = Array.isArray(visualFilters.amenities) ? visualFilters.amenities : []
+    const band = priceBand && priceBand !== 'any' ? PRICE_BANDS[priceBand] : undefined
+    return {
+      governorate: selectedGovernorate || undefined,
+      city: selectedCity || undefined,
+      area: selectedStreet || undefined,
+      propertyType: propertyType && propertyType !== 'any' ? propertyType : undefined,
+      amenities: amenities.length ? amenities : undefined,
+      sort: sortMode === 'lowest' ? 'priceAsc' : undefined,
+      ...band,
+    }
+  }
+
+  async function loadRentals(filters?: ListingSearchFilters) {
     setStatus('loading')
     setMessage('')
     try {
-      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS')
-      setListings(nextListings)
-      setSelectedId(nextListings[0]?.id || '')
+      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS', filters || {})
+      // Synitres deep-link: a buyer arriving from a shared /property/:id page carries that exact listing
+      // (SYNITRES_PRESELECT_LISTING_KEY) so it opens preselected here even if the default search wouldn't
+      // surface it. One-shot — consumed and cleared on arrival, then the flow behaves like a normal search.
+      const preselectId = typeof window !== 'undefined' ? sessionStorage.getItem(SYNITRES_PRESELECT_LISTING_KEY) : null
+      let resultListings = nextListings
+      let focusId = nextListings[0]?.id || ''
+      if (preselectId) {
+        sessionStorage.removeItem(SYNITRES_PRESELECT_LISTING_KEY)
+        const already = nextListings.find((listing) => listing.id === preselectId)
+        if (already) {
+          focusId = already.id
+        } else {
+          try {
+            const one = await fetchPrototypeListing(preselectId)
+            // Only merge a publicly-viewable listing from this same division.
+            if (one && one.division === (isBuyMode ? 'BUY' : 'RENTALS') && one.status === 'APPROVED') {
+              resultListings = [one, ...nextListings]
+              focusId = one.id
+            }
+          } catch { /* best-effort — fall back to the normal first result */ }
+        }
+        setHasSearched(true) // reveal the results immediately; the buyer already chose this property
+      }
+      setListings(resultListings)
+      setSelectedId(focusId)
       setStatus('ready')
     } catch (error) {
       setListings([])
@@ -333,13 +433,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
   function openAccount() {
     sessionStorage.setItem(GUEST_RETURN_PATH_KEY, isBuyMode ? '/buy' : '/rentals')
-    window.location.hash = '/account/open'
+    window.dispatchEvent(new Event('sybnb-open-auth'))
   }
 
   function openContactCenter() {
     if (!hasGuestAccount) {
       sessionStorage.setItem(GUEST_RETURN_PATH_KEY, '/immocontact')
-      window.location.hash = '/account/open'
+      window.dispatchEvent(new Event('sybnb-open-auth'))
       return
     }
     window.location.hash = '/immocontact'
@@ -355,14 +455,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     const nextCity = nextGovernorate?.cities[0]
     setSelectedGovernorate(value)
     setSelectedCity(nextCity?.key || '')
-    setSelectedStreet(nextCity?.areas[0]?.key || '')
+    setSelectedStreet('') // reset to "any area" rather than auto-narrowing to the first area
     setActiveSearchPanel('city')
   }
 
   function chooseCity(value: string) {
-    const nextCity = getCity(selectedGovernorate, value)
     setSelectedCity(value)
-    setSelectedStreet(nextCity?.areas[0]?.key || '')
+    setSelectedStreet('') // reset to "any area" so the city-wide results show
     setActiveSearchPanel('street')
   }
 
@@ -371,6 +470,38 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setActiveSearchPanel(null)
     setHasSearched(true)
     setShowFilters(false)
+    setAiUnderstood(null)
+    // Actually run the search against the chosen location + filters (previously this only closed the panel).
+    void loadRentals(currentFilters())
+  }
+
+  // AI search (Synitres): parse the free-text query into filters, reflect them, and run the search.
+  async function doAiSearch() {
+    const q = aiQuery.trim()
+    if (!q || aiBusy) return
+    setAiBusy(true)
+    setMessage('')
+    try {
+      const ai = await aiParsePropertySearch(q)
+      setAiUnderstood(ai)
+      setHasSearched(true)
+      setShowFilters(false)
+      if (ai.propertyType) setVisualFilters((v) => ({ ...v, propertyType: ai.propertyType as string }))
+      // Merge the AI-parsed fields over the current location filters (AI wins where it found something).
+      const base = currentFilters()
+      await loadRentals({
+        ...base,
+        propertyType: ai.propertyType ?? base.propertyType,
+        bedrooms: ai.bedrooms ?? base.bedrooms,
+        amenities: ai.amenities?.length ? ai.amenities : base.amenities,
+        minPrice: ai.minPrice ?? base.minPrice,
+        maxPrice: ai.maxPrice ?? base.maxPrice,
+      })
+    } catch {
+      setMessage(t.error)
+    } finally {
+      setAiBusy(false)
+    }
   }
 
   function chooseMainGroup(value: string) {
@@ -387,6 +518,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     if (!hasGuestAccount || !selectedListing || documentFiles.length === 0 || !acceptedAgreement) {
       setMessage(t.required)
       if (!hasGuestAccount) openAccount()
+      return
+    }
+    // Sample/fallback listings (shown when the API is unreachable) have non-UUID ids the server rejects —
+    // don't let a buyer complete the whole request against one only to hit a confusing 404.
+    if (selectedListing.id.startsWith('fallback')) {
+      setSendState('error')
+      setMessage(t.error)
       return
     }
 
@@ -430,6 +568,32 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           <strong>{t.searchTitle}</strong>
           <small>{t.searchCapsuleHint}</small>
         </div>
+
+        {/* AI search (Synitres): type a request in plain words; it fills the filters and searches. */}
+        <div style={styles.aiRow}>
+          <input
+            style={styles.aiInput}
+            value={aiQuery}
+            placeholder={t.aiPlaceholder}
+            onChange={(e) => setAiQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void doAiSearch() }}
+          />
+          <button style={styles.aiButton} disabled={aiBusy || !aiQuery.trim()} onClick={() => void doAiSearch()}>
+            {aiBusy ? '…' : `✨ ${t.aiSearch}`}
+          </button>
+        </div>
+        {aiUnderstood ? (
+          <div style={styles.aiUnderstood}>
+            {t.aiUnderstood}:{' '}
+            {[
+              aiUnderstood.propertyType,
+              aiUnderstood.bedrooms ? `${aiUnderstood.bedrooms}+ ${isAr ? 'غرف' : 'bed'}` : null,
+              aiUnderstood.maxPrice ? `≤ ${moneyText(aiUnderstood.maxPrice, 'SYP', lang)}` : null,
+              aiUnderstood.minPrice ? `≥ ${moneyText(aiUnderstood.minPrice, 'SYP', lang)}` : null,
+              ...(aiUnderstood.amenities || []),
+            ].filter(Boolean).join(' · ') || (isAr ? 'بحث عام' : 'general search')}
+          </div>
+        ) : null}
         <section style={styles.mainGroupCapsule}>
           <strong>{t.mainGroup}</strong>
           <div style={styles.mainGroupGrid}>
@@ -553,16 +717,40 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               <article key={listing.id} style={selectedListing?.id === listing.id ? styles.resultCardActive : styles.resultCard}>
                 <img src={listingImage(listing, isBuyMode)} alt="" style={styles.resultImage} />
                 <div style={styles.resultBody}>
-                  <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
+                  <div style={styles.pillRow}>
+                    <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
+                    {(() => {
+                      const badge = valuationBadge(listing, t)
+                      return badge ? <span style={{ ...styles.valuationPill, color: badge.color, borderColor: withAlpha(badge.color, 0.5) }}>{badge.label}</span> : null
+                    })()}
+                  </div>
                   <h2 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h2>
+                  {(() => {
+                    const a = realEstateAttrs(listing)
+                    const chips = [
+                      a.bedrooms !== undefined ? `🛏 ${a.bedrooms}` : null,
+                      a.bathrooms !== undefined ? `🛁 ${a.bathrooms}` : null,
+                      a.sizeSqm !== undefined ? `📐 ${a.sizeSqm} ${t.sqm}` : null,
+                    ].filter(Boolean) as string[]
+                    return (chips.length || a.location) ? (
+                      <div style={styles.attrRow} dir={isAr ? 'rtl' : 'ltr'}>
+                        {chips.map((c) => <span key={c} style={styles.attrChip}>{c}</span>)}
+                        {a.location ? <span style={styles.attrLocation}>📍 {a.location}</span> : null}
+                      </div>
+                    ) : null
+                  })()}
                   <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>
                   <div style={styles.metaRow}>
                     <span>{t.price}</span>
                     <strong>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
                   </div>
-                  <button style={styles.primaryButton} onClick={() => chooseListing(listing.id)}>
-                    {t.viewDetails}
-                  </button>
+                  <div style={styles.cardActions}>
+                    <button style={{ ...styles.primaryButton, flex: 1 }} onClick={() => chooseListing(listing.id)}>
+                      {t.viewDetails}
+                    </button>
+                    {/* Shareable standalone property page (its own URL). */}
+                    <a style={styles.openPageLink} href={`#/property/${listing.id}`} title={t.openPage}>🔗</a>
+                  </div>
                 </div>
               </article>
             )) : status !== 'loading' ? <p style={styles.empty}>{t.empty}</p> : null}
@@ -598,16 +786,73 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           {selectedListing ? (
             <>
               <section style={styles.selectedCard}>
-                <img src={listingImage(selectedListing, isBuyMode)} alt="" style={styles.selectedImage} />
+                <PhotoGallery photos={listingGalleryPhotos(selectedListing, listingImage(selectedListing, isBuyMode), lang)} lang={lang} aspectRatio="16 / 10" fallback={isBuyMode ? '/assets/divisions/buy-property.webp' : '/assets/divisions/monthly-rental.webp'} />
                 <div style={styles.selectedContent}>
                   <span style={styles.statusPill}>{t.protected}</span>
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(selectedListing, lang)}</p>
                   <Info label={t.price} value={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)} />
+                  {(() => {
+                    const badge = valuationBadge(selectedListing, t)
+                    const est = selectedListing.valuation?.estimatedValueMinor
+                    if (!badge) return null
+                    return (
+                      <div style={styles.valuationRow}>
+                        <span style={{ ...styles.valuationPill, color: badge.color, borderColor: withAlpha(badge.color, 0.5) }}>{badge.label}</span>
+                        {typeof est === 'number' ? <span style={styles.estValue}>{t.estValue}: <strong dir="ltr">{moneyText(est, selectedListing.currency, lang)}</strong></span> : null}
+                      </div>
+                    )
+                  })()}
+                  {(() => {
+                    const a = realEstateAttrs(selectedListing)
+                    return (
+                      <>
+                        {a.propertyType ? <Info label={t.typeLabel} value={a.propertyType} /> : null}
+                        {a.location ? <Info label={t.locationLabel} value={a.location} /> : null}
+                        {a.bedrooms !== undefined ? <Info label={t.bedroomsLabel} value={String(a.bedrooms)} /> : null}
+                        {a.bathrooms !== undefined ? <Info label={t.bathroomsLabel} value={String(a.bathrooms)} /> : null}
+                        {a.sizeSqm !== undefined ? <Info label={t.sizeLabel} value={`${a.sizeSqm} ${t.sqm}`} /> : null}
+                        {a.amenities.length ? (
+                          <div style={styles.amenityWrap}>
+                            <span style={styles.amenityLabel}>{t.amenitiesLabel}</span>
+                            <div style={styles.amenityChips}>
+                              {a.amenities.slice(0, 12).map((am) => <span key={am} style={styles.amenityChip}>{am}</span>)}
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    )
+                  })()}
                   <Info label={t.owner} value={selectedListing.owner?.displayName || selectedListing.ownerId.slice(0, 8).toUpperCase()} />
                   <Info label={t.status} value={statusText(selectedListing.status, lang)} />
                 </div>
               </section>
+
+              {/* Maps (Synitres module): the free OSM/Leaflet capsule shows the property pin + GPS directions. */}
+              {(() => {
+                const mapTarget = listingMapTarget(selectedListing, listingTitleText(selectedListing, lang), lang)
+                if (!mapTarget.hasCoordinates) return null
+                const [mlat, mlng] = mapTarget.query.split(',').map(Number)
+                if (!Number.isFinite(mlat) || !Number.isFinite(mlng)) return null
+                return (
+                  <section style={styles.mapSection}>
+                    <strong>{t.mapTitle}</strong>
+                    <LocationMap
+                      lat={mlat}
+                      lng={mlng}
+                      style={{ height: 220, borderRadius: 12, overflow: 'hidden', border: `1px solid ${colors.line}` }}
+                      popupHtml={mapTarget.label ? `<div style="color:#111;font-weight:700;max-width:220px">${mapTarget.label}</div>` : undefined}
+                    />
+                    <div style={styles.mapRow}>
+                      <span style={styles.mapAddress}>⌖ {mapTarget.label}</span>
+                      <a href={directionsUrl(mlat, mlng)} target="_blank" rel="noreferrer" style={styles.directionsLink}>{t.getDirections}</a>
+                    </div>
+                  </section>
+                )
+              })()}
+
+              {/* Synitres module — mortgage calculator, buy flow only (mortgages are for purchases). */}
+              {isBuyMode ? <MortgageCalculator priceMinor={selectedListing.priceMinor} currency={selectedListing.currency} lang={lang} /> : null}
 
               <section style={styles.detailPanel}>
                 <strong>{t.detailTitle}</strong>
@@ -621,15 +866,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 </ol>
               </section>
 
-              <PaymentCapsule
-                lang={lang}
-                methodLabel="SYBNB / IMMOContact"
-                amountLabel={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)}
-                destinationCode={isBuyMode ? 'BUYER-CAPSULE' : 'RENTAL-CAPSULE'}
-                followCode={sentRequest?.id || 'WAITING'}
-                proofCount={documentFiles.length}
-                status={sentRequest ? 'admin' : documentFiles.length ? 'proof' : hasGuestAccount ? 'ready' : 'locked'}
-              />
             </>
           ) : <p style={styles.empty}>{t.noSelection}</p>}
 
@@ -683,6 +919,16 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       </section> : null}
     </main>
   )
+}
+
+// Property-valuation badge (Synitres) — maps the server-computed tier to a label + colour. Returns null
+// when there weren't enough comparables to classify (tier null) or the division carries no valuation.
+function valuationBadge(listing: PlatformListing, t: typeof copy.en) {
+  const tier = listing.valuation?.tier
+  const color = valuationTone(tier)
+  if (!color) return null
+  const label = tier === 'BELOW_MARKET' ? t.belowMarket : tier === 'AT_MARKET' ? t.atMarket : t.aboveMarket
+  return { label, color }
 }
 
 function listingImage(listing: PlatformListing, isBuyMode = false) {
@@ -750,6 +996,27 @@ const styles: Record<string, CSSProperties> = {
   cardTitle: { margin: 0, fontSize: 22, lineHeight: 1.15 },
   cardBody: { margin: 0, color: colors.muted, lineHeight: 1.55 },
   metaRow: { borderTop: `1px solid ${colors.line}`, paddingTop: 10, display: 'flex', justifyContent: 'space-between', gap: 12, color: colors.muted },
+  attrRow: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '2px 0' },
+  attrChip: { fontSize: 13, fontWeight: 700, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 8, padding: '3px 8px' },
+  attrLocation: { fontSize: 12, color: colors.muted },
+  amenityWrap: { borderTop: `1px solid ${colors.line}`, paddingTop: 10, display: 'grid', gap: 6 },
+  amenityLabel: { color: colors.muted, fontSize: 13 },
+  amenityChips: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  amenityChip: { fontSize: 12, fontWeight: 600, color: colors.ink, background: colors.bg2, border: `1px solid ${colors.line}`, borderRadius: 999, padding: '3px 10px' },
+  cardActions: { display: 'flex', gap: 8, alignItems: 'stretch' },
+  openPageLink: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 44, borderRadius: 10, border: `1px solid ${colors.line}`, background: colors.bg2, textDecoration: 'none', fontSize: 16 },
+  aiRow: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' },
+  aiInput: { flex: 1, minWidth: 220, minHeight: 44, borderRadius: 10, border: `1px solid ${colors.line}`, background: colors.bg2, color: colors.ink, padding: '0 14px', fontSize: 14 },
+  aiButton: { minHeight: 44, borderRadius: 10, border: 'none', background: colors.green, color: '#04211d', fontWeight: 900, padding: '0 18px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  aiUnderstood: { marginTop: 8, color: colors.green, fontSize: 13, fontWeight: 700 },
+  pillRow: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
+  valuationPill: { fontSize: 11, fontWeight: 800, border: '1px solid', borderRadius: 999, padding: '2px 9px', background: 'transparent' },
+  valuationRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', borderTop: `1px solid ${colors.line}`, paddingTop: 10 },
+  estValue: { color: colors.muted, fontSize: 13 },
+  mapSection: { border: `1px solid ${colors.line}`, borderRadius: 16, background: colors.bg2, padding: 14, display: 'grid', gap: 10 },
+  mapRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  mapAddress: { color: colors.muted, fontSize: 13 },
+  directionsLink: { color: colors.green, fontWeight: 800, fontSize: 13, textDecoration: 'none', border: `1px solid ${withAlpha(colors.green, 0.5)}`, borderRadius: 8, padding: '6px 12px' },
   selectedCard: { border: `1px solid ${withAlpha(colors.green, 0.42)}`, borderRadius: 18, background: withAlpha(colors.green, 0.08), padding: 14, display: 'grid', gap: 14 },
   selectedImage: { width: '100%', aspectRatio: '16 / 10', borderRadius: 14, objectFit: 'cover', background: colors.bg2 },
   selectedContent: { display: 'grid', gap: 10 },

@@ -297,6 +297,8 @@ function searchDivisionForRoute(divisionId: DivisionId) {
 function providerPortalRoute(divisionId: DivisionId) {
   const map: Partial<Record<DivisionId, string>> = {
     stays: '/host/stays',
+    rentals: '/my-properties',
+    buy: '/my-properties',
     cars: '/host/cars',
     marketplace: '/host/marketplace',
     'new-construction': '/host/new-construction',

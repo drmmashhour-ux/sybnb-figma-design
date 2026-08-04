@@ -3,6 +3,8 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import {
   CANCELLATION_PROTECTION_RATE,
   bookingFinanceSplit,
+  debitableMinor,
+  lockWalletForSpend,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -10,6 +12,8 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
 import { strLateCancelFeeMinor, DEFAULT_COUNTRY } from '../lib/country-config.mjs'
+import { expireStalePaymentPendingBookings } from '../lib/booking-lifecycle.mjs'
+import { createStripeCardRefund, extractStripePaymentIntentId, isStripeConfigured } from './payments.mjs'
 
 // Must match src/shared/booking/cancellationPolicy.ts's STANDARD_FREE_CANCELLATION_DAYS_BEFORE_CHECKIN
 // -- that frontend module only computes the *displayed* cutoff date; this is what was actually
@@ -62,6 +66,9 @@ export async function handleBookings(req, res, url, context) {
     // inside the transaction so the audit log below records what was really charged (0 when waived or when
     // the refund was too small to cover the fee).
     let cancellationFeeCharged = 0
+    // If the booking was paid by CARD (Stripe), we issue a REAL card refund AFTER the transaction commits
+    // (never call an external API inside a DB transaction). Populated inside the tx; acted on after.
+    let deferredCardRefund = null
 
     const booking = await db().$transaction(async (tx) => {
       // SECURITY (S4): atomically claim the cancel on the expected status BEFORE doing refund work. Without
@@ -114,31 +121,51 @@ export async function handleBookings(req, res, url, context) {
           },
         })
 
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
-          amountMinor: netGuestRefundMinor,
-          currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-refund', existing.id, approvedPayment.id],
-          note: 'Guest refund after guest cancelled the booking (net of any late-cancel fee).',
-        })
+        // If the guest paid by CARD (Stripe), refund the money back to their CARD (done after commit),
+        // NOT as an internal wallet credit they could never cash out. Sham Cash / local-wallet payments
+        // (no card to refund) still get the internal wallet credit as before.
+        const stripeIntentId =
+          approvedPayment.provider === 'stripe' ? extractStripePaymentIntentId(approvedPayment.proofAssetUrl) : null
+        if (stripeIntentId && netGuestRefundMinor > 0 && isStripeConfigured()) {
+          deferredCardRefund = {
+            paymentIntentId: stripeIntentId,
+            amountMinor: netGuestRefundMinor,
+            currency: existing.currency,
+            bookingId: existing.id,
+            guestId: existing.guestId,
+            proofId: approvedPayment.id,
+          }
+        } else {
+          await recordWalletEntry(tx, {
+            userId: existing.guestId,
+            type: 'REFUND',
+            amountMinor: netGuestRefundMinor,
+            currency: existing.currency,
+            referenceType: 'booking_refund',
+            referenceId: existing.id,
+            keyParts: ['booking-guest-cancel-refund', existing.id, approvedPayment.id],
+            note: 'Guest refund after guest cancelled the booking (net of any late-cancel fee).',
+          })
+        }
 
         // adminShareMinor never included the protection fee (it's excluded from the split base and
         // recorded as its own 'booking_protection_fee' CREDIT at approval time — see
         // approvePaymentProof), so it must be reversed in full here, not reduced by the fee again.
         // The protection fee itself is a non-refundable premium and is never reversed.
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'DEBIT',
-          amountMinor: split.adminShareMinor,
-          currency: existing.currency,
-          referenceType: 'booking_admin_share_reversal',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-admin-share-reversal', existing.id, approvedPayment.id],
-          note: 'Admin/SYBNB share reversed because the guest-cancelled booking was refunded.',
-        })
+        await lockWalletForSpend(tx, adminRecipientId, existing.currency)
+        const adminShareRevMinor = await debitableMinor(tx, adminRecipientId, existing.currency, split.adminShareMinor)
+        if (adminShareRevMinor > 0) {
+          await recordWalletEntry(tx, {
+            userId: adminRecipientId,
+            type: 'DEBIT',
+            amountMinor: adminShareRevMinor,
+            currency: existing.currency,
+            referenceType: 'booking_admin_share_reversal',
+            referenceId: existing.id,
+            keyParts: ['booking-guest-cancel-admin-share-reversal', existing.id, approvedPayment.id],
+            note: 'Admin/SYBNB share reversed because the guest-cancelled booking was refunded.',
+          })
+        }
 
         // The fee is WITHHELD from the guest's refund above (not a separate guest DEBIT), so all that
         // remains is to credit the admin the same amount in the booking currency. No guest DEBIT means no
@@ -173,6 +200,40 @@ export async function handleBookings(req, res, url, context) {
         },
       })
     })
+
+    // Card refund runs AFTER the transaction commits (never call Stripe inside a DB transaction). On
+    // success the guest's money is back on their card. If Stripe fails, fall back to an internal wallet
+    // credit so the guest is still made whole, and log it for follow-up.
+    if (deferredCardRefund) {
+      try {
+        const refund = await createStripeCardRefund({
+          paymentIntentId: deferredCardRefund.paymentIntentId,
+          amountMinor: deferredCardRefund.amountMinor,
+          bookingCurrency: deferredCardRefund.currency,
+        })
+        await db().adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'BOOKING_CARD_REFUNDED',
+            entityType: 'bookings',
+            entityId: deferredCardRefund.bookingId,
+            after: { stripeRefundId: refund.refundId || null, amountMinor: deferredCardRefund.amountMinor, currency: deferredCardRefund.currency },
+          },
+        })
+      } catch (refundError) {
+        console.error('[sybnb] Stripe card refund failed after guest cancel; crediting wallet as fallback:', refundError?.message || refundError)
+        await recordWalletEntry(db(), {
+          userId: deferredCardRefund.guestId,
+          type: 'REFUND',
+          amountMinor: deferredCardRefund.amountMinor,
+          currency: deferredCardRefund.currency,
+          referenceType: 'booking_refund',
+          referenceId: deferredCardRefund.bookingId,
+          keyParts: ['booking-guest-cancel-refund-card-fallback', deferredCardRefund.bookingId, deferredCardRefund.proofId],
+          note: 'Fallback wallet refund — the Stripe card refund could not be completed.',
+        })
+      }
+    }
 
     await db().adminAuditLog.create({
       data: {
@@ -395,6 +456,16 @@ export async function handleBookings(req, res, url, context) {
 
   const isShortStay = listing.division === 'STAYS'
 
+  // A STR (STAYS) booking is meaningless without dates, and a dateless booking bypasses the overlap
+  // check entirely (which is guarded by `if (checkIn && checkOut)`), so require them for STAYS.
+  if (isShortStay && (!checkIn || !checkOut)) {
+    const error = new Error('Check-in and check-out dates are required to book a stay.')
+    error.statusCode = 400
+    error.code = 'BOOKING_DATES_REQUIRED'
+    error.expose = true
+    throw error
+  }
+
   // The overlap check and the create used to be two separate, unguarded round-trips: two guests
   // requesting the same listing/dates within a race window could both pass the check before
   // either committed, double-booking the listing. A DB-level exclusion constraint would need raw
@@ -404,12 +475,19 @@ export async function handleBookings(req, res, url, context) {
   const booking = await db().$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${listing.id}))`
 
+    // Release dates squatted by abandoned PAYMENT_PENDING bookings on THIS listing before testing
+    // overlap, so a never-paid pending booking can't permanently block new guests. Runs inside the
+    // same advisory-locked transaction as the overlap check, so the reap + check are atomic.
+    await expireStalePaymentPendingBookings({ listingId: listing.id }, tx)
+
     if (checkIn && checkOut) {
       const [overlappingBooking, blockedDate] = await Promise.all([
         tx.booking.findFirst({
           where: {
             listingId: listing.id,
-            status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] },
+            // DISPUTED is included so a not-yet-started CONFIRMED stay that a guest marks disputed
+            // still occupies its dates (it cannot be silently freed for a second booking).
+            status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED'] },
             checkIn: { lt: checkOut },
             checkOut: { gt: checkIn },
           },
@@ -436,11 +514,11 @@ export async function handleBookings(req, res, url, context) {
       ? await computeStayTotalMinor(listing, checkIn, checkOut)
       : { totalMinor: listing.priceMinor, nights: 0, perNight: [] }
 
-    // The listing itself is always priced in SYP; a guest who chose to pay in USD (matching
-    // whatever they were quoted at GET /api/listings/:id/quote?currency=USD) gets the exact same
-    // conversion + round-up-to-$5 applied here, so the booking is never created for a different
-    // amount than what was quoted.
-    const wantsUsd = body.currency === 'USD'
+    // A SYP-priced listing quoted in USD gets the fixed-rate conversion + round-up-to-$5, applied here
+    // too so the booking amount matches the quote. But STR (STAYS) listings are already USD-native —
+    // converting them again would collapse every stay to ~$5. Only convert when the listing isn't USD.
+    // Must mirror the quote endpoint (listings.mjs) exactly.
+    const wantsUsd = body.currency === 'USD' && listing.currency !== 'USD'
     const amountMinor = wantsUsd ? sypMinorToRoundedUsdMinor(quote.totalMinor) : quote.totalMinor
     const currency = wantsUsd ? 'USD' : listing.currency
 
@@ -471,6 +549,12 @@ export async function handleBookings(req, res, url, context) {
           : {},
       },
     })
+  }, {
+    // Concurrent requests intentionally queue behind the per-listing advisory lock. Prisma's 5s
+    // interactive-transaction default can expire every waiter on a busy/slow runner before even the
+    // first request commits, producing zero winners. Keep this below Vercel's function limit while
+    // allowing one short serialized booking transaction to finish under realistic contention.
+    timeout: 15_000,
   })
 
   return json(res, 201, { ok: true, booking })

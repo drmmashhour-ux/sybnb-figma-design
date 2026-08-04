@@ -118,10 +118,10 @@ export function WalletPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const [wallets, setWallets] = useState<PlatformWallet[]>([])
   const [gift, setGift] = useState<PlatformWalletGift | null>(null)
-  const [recipientPhone, setRecipientPhone] = useState('+963900000001')
-  const [amountMinor, setAmountMinor] = useState('50000')
+  const [recipientPhone, setRecipientPhone] = useState('')
+  const [amountMinor, setAmountMinor] = useState('')
   const [giftCurrency, setGiftCurrency] = useState<'SYP' | 'USD'>('SYP')
-  const [message, setMessage] = useState(isAr ? 'هدية من محفظة SYBNB' : 'Gift from SYBNB Wallet')
+  const [message, setMessage] = useState('')
   const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [notice, setNotice] = useState('')
   // The primary (SYP) wallet drives the main balance hero and stats grid, matching the existing
@@ -337,7 +337,7 @@ export function WalletPage({ lang }: Props) {
             <input style={styles.input} value={message} onChange={(event) => setMessage(event.target.value)} />
           </label>
           <div style={styles.actions}>
-            <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void sendGift()}>
+            <button disabled={status === 'saving' || recipientPhone.trim().length < 8 || Number(amountMinor) <= 0} style={styles.primaryButton} onClick={() => void sendGift()}>
               {status === 'saving' ? t.saving : t.send}
             </button>
           </div>

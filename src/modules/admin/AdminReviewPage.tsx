@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
   fetchIdDocumentBlobUrl,
+  fetchStrPlanProofBlobUrl,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
-  getStoredStaffSession,
   lookupAdminUserByEmail,
+  holdBookingPayout,
+  sendAdminBookingMessage,
   releaseAdminPayout,
   reviewPrototypePaymentProof,
   reviewPrototypeQueueEntity,
@@ -21,11 +23,12 @@ import {
   type PlatformReviewQueue,
   type PlatformWalletGift,
 } from '../../shared/api/platformApi'
-import { BrandLogo } from '../../shared/brand'
+import { AdminShell } from './AdminShell'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, providerText, statusText } from '../../shared/i18n/display'
 
 type Props = {
   lang: Lang
+  onLanguageChange?: (lang: Lang) => void
 }
 
 const copy = {
@@ -95,16 +98,7 @@ const STR_ADMIN_COMMISSION_RATE = 0.1
 const STR_TAX_RATE = 0.02
 const STR_CLEANING_RATE = 0.05
 
-const todayStatBars = [42, 61, 51, 74, 86, 104, 64]
-
-const recentAdminUsers = [
-  { ar: 'سامر محمد', en: 'Samer Mohammad', statusAr: 'نشط', statusEn: 'Active', tone: 'green', ageAr: 'انضم منذ ٥ دقائق', ageEn: 'Joined 5 minutes ago' },
-  { ar: 'محمد علي', en: 'Mohammad Ali', statusAr: 'قيد المراجعة', statusEn: 'Review', tone: 'gold', ageAr: 'انضم منذ ١٢ دقيقة', ageEn: 'Joined 12 minutes ago' },
-  { ar: 'نور حسين', en: 'Nour Hussein', statusAr: 'نشط', statusEn: 'Active', tone: 'green', ageAr: 'انضمت منذ ٢٤ دقيقة', ageEn: 'Joined 24 minutes ago' },
-  { ar: 'عمر خالد', en: 'Omar Khaled', statusAr: 'قيد المراجعة', statusEn: 'Review', tone: 'gold', ageAr: 'انضم منذ ٤٥ دقيقة', ageEn: 'Joined 45 minutes ago' },
-]
-
-export function AdminReviewPage({ lang }: Props) {
+export function AdminReviewPage({ lang, onLanguageChange }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
@@ -155,22 +149,12 @@ export function AdminReviewPage({ lang }: Props) {
     [auditLog, normalizedSearch],
   )
   const activityItems = useMemo(() => {
-    const liveItems = visibleAuditLog.slice(0, 4).map((entry, index) => ({
+    // REAL activity only — the recent audit-log entries. No fabricated fallback rows.
+    return visibleAuditLog.slice(0, 4).map((entry, index) => ({
       label: auditActionText(entry.action, lang),
-      detail: isAr ? 'منذ دقائق' : 'Minutes ago',
+      detail: new Date(entry.createdAt).toLocaleString(isAr ? 'ar-SY' : 'en-US'),
       tone: index % 3 === 0 ? 'green' : index % 3 === 1 ? 'gold' : 'red',
     }))
-
-    if (liveItems.length >= 4) return liveItems
-
-    const fallback = [
-      { label: isAr ? 'مستخدم جديد: سامر محمد' : 'New user: Samer Mohammad', detail: isAr ? 'منذ ٥ دقائق' : '5 minutes ago', tone: 'green' },
-      { label: isAr ? 'دفعة مستلمة: ١٥٠,٠٠٠ ل.س' : 'Payment received: 150,000 SYP', detail: isAr ? 'منذ ١٢ دقيقة' : '12 minutes ago', tone: 'gold' },
-      { label: isAr ? 'إعلان مرفوض: شقة في جرمانا' : 'Rejected listing: Jaramana stay', detail: isAr ? 'منذ ٣٢ دقيقة' : '32 minutes ago', tone: 'red' },
-      { label: 'AI v6.2.1', detail: isAr ? 'نشط الآن' : 'Active now', tone: 'blue' },
-    ]
-
-    return [...liveItems, ...fallback].slice(0, 4)
   }, [isAr, lang, visibleAuditLog])
   const visibleTotal = visibleListings.length + visiblePayments.length + visibleGifts.length + visibleBookings.length
   const nowLabel = new Intl.DateTimeFormat(isAr ? 'ar-SY' : 'en-US', {
@@ -225,9 +209,11 @@ export function AdminReviewPage({ lang }: Props) {
   }
 
   async function releasePayout(bookingId: string) {
+    const payoutRef = window.prompt(isAr ? 'أدخل مرجع تحويل Sham Cash بعد تنفيذ التحويل' : 'Enter the Sham Cash transfer reference after completing the transfer')?.trim()
+    if (!payoutRef) return
     setReleasingPayoutId(bookingId)
     try {
-      await releaseAdminPayout(bookingId)
+      await releaseAdminPayout(bookingId, payoutRef)
       await loadPayouts()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t.error)
@@ -270,6 +256,7 @@ export function AdminReviewPage({ lang }: Props) {
       disabled={status === 'saving'}
       isAr={isAr}
       lang={lang}
+      onLanguageChange={onLanguageChange}
       listings={visibleListings}
       loadQueue={loadQueue}
       message={message}
@@ -278,6 +265,7 @@ export function AdminReviewPage({ lang }: Props) {
       status={status}
       onBookingDecision={(id, decision) => void decide('bookings', id, decision)}
       onPaymentDecision={(id, decision, shamCashReconciliation) => void decide('payments', id, decision, { shamCashReconciliation })}
+      onListingDecision={(id, decision) => void decide('listings', id, decision)}
       onIdDocumentDecision={(id, decision) => void decide('iddocuments', id, decision)}
       bookings={visibleBookings}
       payouts={payouts}
@@ -287,223 +275,6 @@ export function AdminReviewPage({ lang }: Props) {
     />
   )
 
-  return (
-    <main dir={isAr ? 'rtl' : 'ltr'} className="admin-console">
-      <section className="admin-shell">
-        <aside className="admin-side">
-          <BrandLogo logo="platform" size="nav" className="admin-side-logo" />
-          <button className="active" onClick={() => setActiveFilter('all')}>{isAr ? 'لوحة التحكم' : 'Dashboard'} <span>▦</span></button>
-          <button onClick={() => setActiveFilter('listings')}>{t.listings} <span>▤</span></button>
-          <button onClick={() => setActiveFilter('payments')}>{t.payments} <span>▭</span></button>
-          <button onClick={() => (window.location.hash = '/finance')}>{isAr ? 'المالية' : 'Finance'} <span>▥</span></button>
-          <button onClick={() => (window.location.hash = '/admin/disputes')}>{isAr ? 'النزاعات' : 'Disputes'} <span>⚖</span></button>
-          <button onClick={() => (window.location.hash = '/admin/reports')}>{isAr ? 'البلاغات' : 'Reports'} <span>⚑</span></button>
-          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'مساعد FAI' : 'FAI helper'} <span>◉</span></button>
-          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'التقارير' : 'Reports'} <span>▧</span></button>
-          <button onClick={() => (window.location.hash = '/')}>{t.back} <span>↩</span></button>
-        </aside>
-
-        <div className="admin-main">
-          <header className="admin-topbar">
-            <div className="admin-avatar" aria-hidden="true">A</div>
-            <div className="admin-language">AR <span /> EN</div>
-            <strong>{timeLabel}</strong>
-            <strong>{nowLabel}</strong>
-            <span>Platform Admin</span>
-            <BrandLogo logo="platform" size="nav" className="admin-wordmark" />
-          </header>
-
-          <section className="admin-metrics" aria-label={isAr ? 'مؤشرات الإدارة' : 'Admin metrics'}>
-            <AdminMetric label={isAr ? 'تنبيهات' : 'Alerts'} value={String(visibleGifts.length + visibleBookings.length)} tone="red" icon="!" />
-            <AdminMetric label={isAr ? 'المعاملات اليوم' : 'Transactions'} value={String(visiblePayments.length)} tone="gold" icon="⚡" />
-            <AdminMetric label={isAr ? 'المستخدمون النشطون' : 'Active users'} value="1,483" tone="green" icon="♙" />
-            <AdminMetric label={isAr ? 'إجمالي الإعلانات' : 'Total listings'} value={String(queue?.listings.length || 0)} tone="blue" icon="▣" />
-          </section>
-
-          <section className="admin-dashboard-grid">
-            <div className="admin-quick-panel">
-              <h2>{isAr ? 'إجراءات سريعة' : 'Quick actions'}</h2>
-              <button className="admin-primary-action" onClick={() => setActiveFilter('payments')}>{isAr ? 'مراجعة المدفوعات' : 'Review payments'} <span>☑</span></button>
-              <button onClick={() => setActiveFilter('listings')}>{isAr ? 'إدارة الإعلانات' : 'Manage listings'} <span>⊕</span></button>
-              <button className="admin-gold-action" onClick={() => setActiveFilter('audit')}>{isAr ? 'تقرير اليوم' : 'Today report'} <span>▥</span></button>
-              <button onClick={() => void loadQueue()}>{t.refresh} <span>↻</span></button>
-              <div className="admin-ai-card">
-                <strong>{isAr ? 'ترقية السيرفر' : 'Server upgrade'}</strong>
-                <p>{isAr ? 'استخدم الذاكرة الذكية للوصول إلى ٨٥٪ من المتابعة.' : 'Use smart memory to reach 85% platform tracking.'}</p>
-                <button onClick={() => setActiveFilter('all')}>{isAr ? 'ابدأ الآن' : 'Start now'}</button>
-              </div>
-            </div>
-
-            <div className="admin-table-card">
-              <div className="admin-card-heading">
-                <button onClick={() => setActiveFilter('all')}>{isAr ? 'عرض الكل' : 'View all'}</button>
-                <h2>{isAr ? 'أحدث الإعلانات' : 'Latest listings'}</h2>
-              </div>
-              <div className="admin-table">
-                {(visibleListings.length ? visibleListings : queue?.listings || []).length > 0 ? (
-                  (visibleListings.length ? visibleListings : queue?.listings || []).slice(0, 5).map((listing) => (
-                    <button key={listing.id} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-                      <span>{listingTitleText(listing, lang)}</span>
-                      <small>{divisionText(listing.division, lang)}</small>
-                      <strong>{statusText(listing.status, lang)}</strong>
-                    </button>
-                  ))
-                ) : (
-                  <p className="admin-empty-row">{status === 'loading' ? t.loading : t.empty}</p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className="admin-activity-panel" aria-label={isAr ? 'آخر الأنشطة' : 'Latest activity'}>
-            <div className="admin-section-title">
-              <button onClick={() => setActiveFilter('audit')}>{isAr ? 'شاهد السجل الكامل' : 'View full log'}</button>
-              <h2>{isAr ? 'آخر الأنشطة' : 'Latest Activity'}</h2>
-            </div>
-            <div className="admin-activity-strip">
-              {activityItems.map((item) => (
-                <button key={`${item.label}-${item.detail}`} className={`admin-activity-chip ${item.tone}`} onClick={() => setActiveFilter('audit')}>
-                  <span>{item.label}</span>
-                  <small>{item.detail}</small>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-stats-card" aria-label={isAr ? 'إحصائيات اليوم' : 'Today stats'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Today Stats' : 'Today Stats'}</span>
-              <h2>{isAr ? 'إحصائيات اليوم' : 'Today Stats'}</h2>
-            </div>
-            <div className="admin-bar-chart">
-              {todayStatBars.map((height, index) => (
-                <span key={height} className={index === 5 ? 'gold' : ''} style={{ '--bar-height': `${height}px` } as CSSProperties} />
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-users-card" aria-label={isAr ? 'آخر المستخدمين' : 'Recent users'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Recent Users' : 'Recent Users'}</span>
-              <h2>{isAr ? 'آخر المستخدمين' : 'Recent Users'}</h2>
-            </div>
-            <div className="admin-recent-list">
-              {recentAdminUsers.map((user) => (
-                <article key={user.en}>
-                  <strong>{isAr ? user.ar[0] : user.en[0]}</strong>
-                  <div>
-                    <b>{isAr ? user.ar : user.en}</b>
-                    <small>{isAr ? user.ageAr : user.ageEn}</small>
-                  </div>
-                  <span className={user.tone}>{isAr ? user.statusAr : user.statusEn}</span>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-tools">
-            <input
-              aria-label={t.search}
-              placeholder={t.search}
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-            />
-            <div>
-              {filterItems.map((item) => (
-                <button
-                  key={item.id}
-                  className={activeFilter === item.id ? 'active' : ''}
-                  onClick={() => setActiveFilter(item.id)}
-                >
-                  {item.label} {item.count}
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
-      </section>
-
-      {status === 'error' && (
-        <section style={styles.alert}>
-          <strong>{t.error}</strong>
-          <span>{message}</span>
-        </section>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'listings') && (
-      <ReviewSection title={t.listings} empty={t.empty}>
-        {visibleListings.map((listing) => (
-          <ListingReviewCard
-            key={listing.id}
-            listing={listing}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('listings', listing.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'payments') && (
-      <ReviewSection title={t.payments} empty={t.empty}>
-        {visiblePayments.map((payment) => (
-          <PaymentReviewCard
-            key={payment.id}
-            payment={payment}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, provider: t.provider, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('payments', payment.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'gifts') && (
-      <ReviewSection title={t.gifts} empty={t.empty}>
-        {visibleGifts.map((gift) => (
-          <GiftReviewCard
-            key={gift.id}
-            gift={gift}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('gifts', gift.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'bookings') && (
-      <ReviewSection title={t.bookings} empty={t.empty}>
-        {visibleBookings.map((booking) => (
-          <BookingReviewCard
-            key={booking.id}
-            booking={booking}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, listing: t.listing, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('bookings', booking.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'audit') && (
-      <ReviewSection title={t.audit} empty={t.auditEmpty}>
-        {visibleAuditLog.map((entry) => (
-          <AuditLogCard
-            key={entry.id}
-            entry={entry}
-            labels={{ actor: t.actor, entity: t.entity, details: t.details }}
-            lang={lang}
-          />
-        ))}
-      </ReviewSection>
-      )}
-    </main>
-  )
 }
 
 
@@ -547,6 +318,7 @@ function FaiAdminHelperPanel({
       detail: isAr
         ? 'أي إعلان جديد يبقى للمراجعة قبل الموافقة.'
         : 'New listings stay in review before approval.',
+      // Opens the Hosts/listings view, which now has inline Approve/Reject for pending stays.
       view: 'hosts' as AdminCommandView,
     },
     {
@@ -557,7 +329,7 @@ function FaiAdminHelperPanel({
       detail: isAr
         ? 'يرتب الطلبات والنزاعات حسب الحاجة للمراجعة.'
         : 'Prioritizes booking requests and disputes for review.',
-      view: disputeCount > 0 ? 'disputes' as AdminCommandView : 'bookings' as AdminCommandView,
+      view: disputeCount > 0 ? ('disputes' as AdminCommandView) : ('bookings' as AdminCommandView),
     },
     {
       key: 'payout',
@@ -581,7 +353,7 @@ function FaiAdminHelperPanel({
     <section style={commandStyles.faiPanel}>
       <div style={commandStyles.faiHeader}>
         <div>
-          <small style={commandStyles.faiEyebrow}>FAI · {isAr ? 'مساعد الإدارة' : 'Admin helper'}</small>
+          <small style={commandStyles.faiEyebrow}>SYBNB · {isAr ? 'مساعد الإدارة' : 'Admin helper'}</small>
           <h2 style={{ margin: '4px 0 0' }}>{isAr ? 'فحص ذكي بدون تنفيذ' : 'Smart checks, no automatic action'}</h2>
           <p style={commandStyles.faiCopy}>
             {isAr
@@ -618,6 +390,7 @@ function ShortRentAdminCommandDashboard({
   disabled,
   isAr,
   lang,
+  onLanguageChange,
   listings,
   loadQueue,
   message,
@@ -626,6 +399,7 @@ function ShortRentAdminCommandDashboard({
   status,
   onBookingDecision,
   onPaymentDecision,
+  onListingDecision,
   onIdDocumentDecision,
   payouts,
   payoutHoldDays,
@@ -637,6 +411,7 @@ function ShortRentAdminCommandDashboard({
   disabled: boolean
   isAr: boolean
   lang: Lang
+  onLanguageChange?: (lang: Lang) => void
   listings: PlatformListing[]
   loadQueue: () => Promise<void>
   message: string
@@ -645,6 +420,7 @@ function ShortRentAdminCommandDashboard({
   status: 'loading' | 'ready' | 'error' | 'saving'
   onBookingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   onPaymentDecision: (id: string, decision: 'APPROVE' | 'REJECT', shamCashReconciliation?: ShamCashApprovalPayload) => void
+  onListingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   onIdDocumentDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   payouts: AdminPayout[]
   payoutHoldDays: number
@@ -687,13 +463,9 @@ function ShortRentAdminCommandDashboard({
   const hostName = paymentHostName(previewPayment, lang)
   const hostIdVerified = previewPayment?.booking?.listing?.owner?.idDocumentStatus === 'APPROVED'
   const amountMinor = previewPayment?.amountMinor || 0
-  const currency = previewPayment?.currency || 'SYP'
+  const currency = previewPayment?.currency || 'USD'
   const selectedPaymentNeedsCashMatch = primaryPayment ? isShamCashProvider(primaryPayment.provider) : false
   const selectedPaymentHeld = primaryPayment ? Boolean(heldPaymentIds[primaryPayment.id]) : false
-  const staffSession = getStoredStaffSession('ADMIN')
-  const adminName = staffSession?.user.displayName || (isAr ? 'مدير الإدارة' : 'Platform Admin')
-  const adminRole = isAr ? 'مدير العمليات' : 'Operations manager'
-  const adminInitial = (adminName.trim()[0] || 'A').toUpperCase()
   const selectPayment = (payment: PlatformPaymentProof) => {
     setSelectedPaymentId(payment.id)
     if (payment.bookingId) setSelectedBookingId(payment.bookingId)
@@ -738,7 +510,7 @@ function ShortRentAdminCommandDashboard({
   // the release API, so an admin could believe a payout was released (and tell the host so) when
   // no money moved. Now it calls the same real release path as the payouts table, gated by the
   // same eligibility the payouts table enforces (14-day hold, real payout row).
-  const stagePayoutDecision = (decision: 'RELEASE_STAGED' | 'HELD') => {
+  const stagePayoutDecision = async (decision: 'RELEASE_STAGED' | 'HELD') => {
     const bookingId = selectedBooking?.id || previewPayment?.bookingId
     if (!bookingId) {
       setCommandNotice(isAr ? 'اختر حجزا محددا قبل قرار الصرف.' : 'Select a specific booking before payout decision.')
@@ -746,13 +518,20 @@ function ShortRentAdminCommandDashboard({
     }
 
     if (decision === 'HELD') {
-      setPayoutDecisions((current) => ({ ...current, [bookingId]: decision }))
       setActiveCommandView('finance')
-      setCommandNotice(
-        isAr
-          ? `تمت إضافة ملاحظة تعليق شخصية للحجز ${selectedBookingRef}. هذا تذكير للفريق فقط ولا يوقف الصرف تلقائياً في النظام.`
-          : `A personal hold note was added for booking ${selectedBookingRef}. This is a team reminder only and does not stop automatic release in the system.`,
-      )
+      try {
+        // Real, enforced hold — the release endpoint now refuses a held payout (no more "note only").
+        await holdBookingPayout(bookingId, true)
+        setPayoutDecisions((current) => ({ ...current, [bookingId]: decision }))
+        setCommandNotice(
+          isAr
+            ? `تم تعليق صرف الحجز ${selectedBookingRef} فعلياً — لن يُطلق حتى ترفع التعليق.`
+            : `Payout for booking ${selectedBookingRef} is now on hold — it can't be released until you remove the hold.`,
+        )
+        void loadQueue()
+      } catch (error) {
+        setCommandNotice(error instanceof Error ? error.message : isAr ? 'تعذّر تعليق الصرف.' : 'Could not hold the payout.')
+      }
       return
     }
 
@@ -801,7 +580,12 @@ function ShortRentAdminCommandDashboard({
         : `Payment proof ${bookingReference(payment)} was reopened for an admin decision.`,
     )
   }
-  const queueAdminMessage = (target: 'guest' | 'host') => {
+  const queueAdminMessage = async (target: 'guest' | 'host') => {
+    const bookingId = selectedBooking?.id || previewPayment?.bookingId
+    if (!bookingId) {
+      setCommandNotice(isAr ? 'اختر حجزا محددا قبل إرسال الرسالة.' : 'Select a specific booking before sending a message.')
+      return
+    }
     const message =
       target === 'guest'
         ? isAr
@@ -810,24 +594,22 @@ function ShortRentAdminCommandDashboard({
         : isAr
           ? `رسالة للمضيف: تم تحديث حالة الحجز ${selectedBookingRef}. راجع لوحة المضيف قبل الصرف.`
           : `Host message: booking ${selectedBookingRef} status was updated. Review host dashboard before payout.`
-    setAdminOutbox((current) => [
-      {
-        id: `${target}-${Date.now()}`,
-        target,
-        bookingRef: selectedBookingRef,
-        message,
-      },
-      ...current,
-    ])
-    setCommandNotice(
-      target === 'guest'
-        ? isAr
-          ? 'تمت إضافة رسالة العميل إلى صندوق إرسال الإدارة.'
-          : 'Guest message added to admin outbox.'
-        : isAr
-          ? 'تمت إضافة رسالة المضيف إلى صندوق إرسال الإدارة.'
-          : 'Host message added to admin outbox.',
-    )
+    try {
+      // Real delivery — posts into the booking's message thread as an ADMIN note (guest + host see it).
+      await sendAdminBookingMessage(bookingId, target, message)
+      setAdminOutbox((current) => [{ id: `${target}-${Date.now()}`, target, bookingRef: selectedBookingRef, message }, ...current])
+      setCommandNotice(
+        target === 'guest'
+          ? isAr
+            ? 'تم إرسال رسالة للعميل في محادثة الحجز.'
+            : 'Message sent to the guest in the booking chat.'
+          : isAr
+            ? 'تم إرسال رسالة للمضيف في محادثة الحجز.'
+            : 'Message sent to the host in the booking chat.',
+      )
+    } catch (error) {
+      setCommandNotice(error instanceof Error ? error.message : isAr ? 'تعذّر إرسال الرسالة.' : 'Could not send the message.')
+    }
   }
 
   const stats = [
@@ -835,9 +617,9 @@ function ShortRentAdminCommandDashboard({
     { label: isAr ? 'بانتظار مراجعة الدفع' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
     { label: isAr ? 'حجوزات مؤكدة' : 'Confirmed bookings', value: String(confirmedBookings), tone: 'green' },
     { label: isAr ? 'حالات نزاع' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
-    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
-    { label: isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
-    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
+    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'USD', lang), tone: 'gold' },
+    { label: isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout', value: moneyText(readyPayout, 'USD', lang), tone: 'green' },
+    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'USD', lang), tone: 'blue' },
     { label: isAr ? 'عقارات نشطة' : 'Active stays', value: String(activeListings), tone: 'white' },
   ]
   const adminGroups = [
@@ -870,7 +652,7 @@ function ShortRentAdminCommandDashboard({
     { id: 'hosts', label: isAr ? 'المضيفين' : 'Hosts', count: listings.length || activeListings, tone: 'green' },
     { id: 'customers', label: isAr ? 'العملاء' : 'Customers', count: bookings.length, tone: 'blue' },
     { id: 'bookings', label: isAr ? 'الحجوزات' : 'Bookings', count: bookings.length, tone: 'blue' },
-    { id: 'finance', label: isAr ? 'المالية' : 'Finance', count: pendingPayments, tone: shamCashReconciliation.isMatched ? 'green' : 'red' },
+    { id: 'finance', label: isAr ? 'المالية' : 'Finance', count: pendingPayments, tone: shamCashReconciliation.isDiscrepancy ? 'red' : shamCashReconciliation.awaitingLink ? 'gold' : 'green' },
   ]
   const commandCategories: Array<{ id: string; label: string; subtitle: string; viewIds: AdminCommandView[] }> = [
     {
@@ -916,28 +698,15 @@ function ShortRentAdminCommandDashboard({
   ]
 
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={commandStyles.page}>
-      <header className="admin-command-header" style={commandStyles.header}>
-        <div className="admin-brand-lockup" style={commandStyles.strBrandLockup}>
-          <BrandLogo logo="stays" size="nav" />
-          <div className="admin-header-watermark" style={commandStyles.watermark}>STR · STAY TRUST RELAX · FINAL REVIEW · 3055</div>
-        </div>
-        <div className="admin-breadcrumb" style={commandStyles.breadcrumb}>
-          <strong>{isAr ? 'لوحة الإدارة' : 'Admin dashboard'}</strong>
-          <b>/</b>
-          <span>{isAr ? 'الإيجار اليومي' : 'Daily rent'}</span>
-        </div>
-        <div className="admin-identity" style={commandStyles.adminIdentity}>
-          <strong>{adminName}</strong>
-          <small className="admin-identity-role">{adminRole}</small>
-          <span style={commandStyles.avatar}>{adminInitial}</span>
-          <span className="admin-identity-notify" style={commandStyles.notify}>●</span>
-          <b className="admin-identity-lang">EN / AR</b>
-          <button style={commandStyles.circleButton} onClick={() => window.history.back()} aria-label={isAr ? 'السابق' : 'Back'}>←</button>
-          <button style={commandStyles.circleButton} onClick={() => window.history.forward()} aria-label={isAr ? 'التالي' : 'Next'}>→</button>
-        </div>
-      </header>
-
+    <AdminShell
+      lang={lang}
+      active="operations"
+      title={isAr ? 'مركز العمليات' : 'Operations command center'}
+      subtitle={isAr ? 'مراقبة الحجوزات والمدفوعات والتسويات واتخاذ القرار.' : 'Monitor bookings, payments and reconciliations — with human decisions.'}
+      onLanguageChange={onLanguageChange}
+      heroActions={<button className="button ghost" type="button" onClick={() => void loadQueue()}>↻ {isAr ? 'تحديث' : 'Refresh'}</button>}
+    >
+      <div dir={isAr ? 'rtl' : 'ltr'} style={{ display: 'grid', gap: 18 }}>
       <section style={commandStyles.departmentGroups} aria-label={isAr ? 'أقسام الإدارة' : 'Admin departments'}>
         {commandCategories.map((category) => {
           const items = commandViews.filter((view) => category.viewIds.includes(view.id))
@@ -990,21 +759,25 @@ function ShortRentAdminCommandDashboard({
             <strong style={commandTone(stat.tone)}>{stat.value}</strong>
           </article>
         ))}
-        <article style={{ ...commandStyles.statCard, borderColor: shamCashReconciliation.isMatched ? 'rgba(32,210,155,.3)' : 'rgba(255,77,115,.5)' }}>
+        <article style={{ ...commandStyles.statCard, borderColor: shamCashReconciliation.isDiscrepancy ? 'rgba(255,77,115,.5)' : shamCashReconciliation.awaitingLink ? 'rgba(229,184,11,.35)' : shamCashReconciliation.nothingToReconcile ? 'rgba(255,255,255,.15)' : 'rgba(32,210,155,.3)' }}>
           <small>{isAr ? 'مطابقة شام كاش' : 'Sham Cash match'}</small>
-          <strong style={commandTone(shamCashReconciliation.isMatched ? 'green' : 'red')}>
-            {shamCashReconciliation.isMatched ? (isAr ? 'مطابق' : 'MATCHED') : (isAr ? 'غير مطابق' : 'MISMATCH')}
+          <strong style={commandTone(shamCashReconciliation.isDiscrepancy ? 'red' : shamCashReconciliation.awaitingLink ? 'gold' : shamCashReconciliation.nothingToReconcile ? 'muted' : 'green')}>
+            {shamCashReconciliation.nothingToReconcile
+              ? (isAr ? 'لا شيء للمطابقة' : 'NOTHING TO RECONCILE')
+              : shamCashReconciliation.awaitingLink
+              ? (isAr ? 'بانتظار الربط' : 'AWAITING LINK')
+              : shamCashReconciliation.isDiscrepancy ? (isAr ? 'غير مطابق' : 'MISMATCH') : (isAr ? 'مطابق' : 'MATCHED')}
           </strong>
         </article>
       </section>
 
-      {!shamCashReconciliation.isMatched && (
+      {shamCashReconciliation.isDiscrepancy && (
         <section style={commandStyles.warningBanner}>
           <strong>⚠</strong>
           <span>
             {isAr
-              ? `تنبيه: يوجد عدم مطابقة في Sham Cash بقيمة ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} للحجز ${bookingRef}.`
-              : `Warning: Sham Cash mismatch of ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} for booking ${bookingRef}.`}
+              ? `تنبيه: يوجد عدم مطابقة في Sham Cash بقيمة ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'USD', lang)} للحجز ${bookingRef}.`
+              : `Warning: Sham Cash mismatch of ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'USD', lang)} for booking ${bookingRef}.`}
           </span>
           <button style={commandStyles.outlineGold} onClick={() => setActiveCommandView('finance')}>{isAr ? 'مراجعة الفروقات' : 'Review mismatch'}</button>
         </section>
@@ -1136,6 +909,19 @@ function ShortRentAdminCommandDashboard({
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
+                  {payment.provider === 'str_host_plan' && payment.proofAssetUrl ? (
+                    <button
+                      style={commandStyles.secondaryCommand}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void fetchStrPlanProofBlobUrl(payment.id)
+                          .then((blobUrl) => window.open(blobUrl, '_blank', 'noopener'))
+                          .catch(() => undefined)
+                      }}
+                    >
+                      {isAr ? 'عرض الإيصال' : 'View receipt'}
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -1197,21 +983,21 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.moneyCommandGrid}>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout'}</small>
-              <strong style={commandTone('green')}>{moneyText(readyPayout, 'SYP', lang)}</strong>
+              <strong style={commandTone('green')}>{moneyText(readyPayout, 'USD', lang)}</strong>
               <span style={commandStyles.payoutState}>{selectedPayoutState === 'RELEASE_STAGED' ? (isAr ? 'جاهز للصرف' : 'Release staged') : selectedPayoutState === 'HELD' ? (isAr ? 'معلق' : 'Held') : (isAr ? 'اختر حجزا' : 'Select booking')}</span>
               <button style={commandStyles.acceptButton} onClick={() => stagePayoutDecision('RELEASE_STAGED')}>{isAr ? 'إطلاق الدفعة للمضيف' : 'Release payout'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'عمولة المنصة' : 'Platform commission'}</small>
-              <strong style={commandTone('blue')}>{moneyText(totalAdminCommission, 'SYP', lang)}</strong>
+              <strong style={commandTone('blue')}>{moneyText(totalAdminCommission, 'USD', lang)}</strong>
               <button style={commandStyles.secondaryCommand} onClick={() => {
                 setActiveCommandView('finance')
-                setCommandNotice(isAr ? `سجل عمولة المنصة للحجز ${selectedBookingRef}: ${moneyText(adminCommission, 'SYP', lang)}.` : `Platform commission ledger for ${selectedBookingRef}: ${moneyText(adminCommission, 'SYP', lang)}.`)
+                setCommandNotice(isAr ? `سجل عمولة المنصة للحجز ${selectedBookingRef}: ${moneyText(adminCommission, 'USD', lang)}.` : `Platform commission ledger for ${selectedBookingRef}: ${moneyText(adminCommission, 'USD', lang)}.`)
               }}>{isAr ? 'عرض السجل المالي' : 'View ledger'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'مبالغ محجوزة' : 'Held funds'}</small>
-              <strong style={commandTone('gold')}>{moneyText(heldTotal, 'SYP', lang)}</strong>
+              <strong style={commandTone('gold')}>{moneyText(heldTotal, 'USD', lang)}</strong>
               <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
             </div>
           </div>
@@ -1259,11 +1045,25 @@ function ShortRentAdminCommandDashboard({
             {(listings.length ? listings : []).length === 0 ? (
               <AdminEmptyLine text={isAr ? 'لا توجد عقارات في قائمة الإدارة الحالية.' : 'No stays are in the current admin inventory.'} />
             ) : listings.map((listing) => (
-              <button key={listing.id} style={commandStyles.managementRow} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-                <span>{listingTitleText(listing, lang)}</span>
-                <small>{divisionText(listing.division, lang)}</small>
-                <strong>{statusText(listing.status, lang)}</strong>
-              </button>
+              <div key={listing.id} style={{ ...commandStyles.managementRow, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  style={{ background: 'none', border: 'none', color: 'inherit', textAlign: 'start', cursor: 'pointer', flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}
+                  onClick={() => (window.location.hash = `/listing/${listing.id}`)}
+                >
+                  <span>{listingTitleText(listing, lang)}</span>
+                  <small>{divisionText(listing.division, lang)} · {statusText(listing.status, lang)}</small>
+                </button>
+                {listing.status === 'PENDING_REVIEW' && (
+                  <span style={{ display: 'flex', gap: 8 }}>
+                    <button disabled={disabled} style={commandStyles.acceptButton} onClick={() => onListingDecision(listing.id, 'APPROVE')}>
+                      {isAr ? 'موافقة' : 'Approve'}
+                    </button>
+                    <button disabled={disabled} style={commandStyles.rejectButton} onClick={() => onListingDecision(listing.id, 'REJECT')}>
+                      {isAr ? 'رفض' : 'Reject'}
+                    </button>
+                  </span>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -1367,6 +1167,19 @@ function ShortRentAdminCommandDashboard({
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
+                  {payment.provider === 'str_host_plan' && payment.proofAssetUrl ? (
+                    <button
+                      style={commandStyles.secondaryCommand}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void fetchStrPlanProofBlobUrl(payment.id)
+                          .then((blobUrl) => window.open(blobUrl, '_blank', 'noopener'))
+                          .catch(() => undefined)
+                      }}
+                    >
+                      {isAr ? 'عرض الإيصال' : 'View receipt'}
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -1417,14 +1230,14 @@ function ShortRentAdminCommandDashboard({
           </article>
           <article style={commandStyles.sideCard}>
             <div style={commandStyles.cardTitleRow}>
-              <span style={shamCashReconciliation.isMatched ? commandStyles.confirmedPill : commandStyles.warningPill}>
-                {shamCashReconciliation.isMatched ? (isAr ? 'مطابق' : 'Matched') : (isAr ? 'فرق' : 'Mismatch')}
+              <span style={shamCashReconciliation.isDiscrepancy || shamCashReconciliation.awaitingLink ? commandStyles.warningPill : commandStyles.confirmedPill}>
+                {shamCashReconciliation.statusLabel}
               </span>
               <h2>{isAr ? 'مطابقة شام كاش' : 'Sham Cash match'}</h2>
             </div>
-            <FeeLine label={isAr ? 'المتوقع في SYBNB' : 'SYBNB expected'} value={moneyText(shamCashReconciliation.expectedMinor, 'SYP', lang)} />
-            <FeeLine label={isAr ? 'حساب شام كاش' : 'Sham Cash account'} value={moneyText(shamCashReconciliation.accountMinor, 'SYP', lang)} />
-            <FeeLine label={isAr ? 'الفرق' : 'Difference'} value={moneyText(shamCashReconciliation.differenceMinor, 'SYP', lang)} strong danger={!shamCashReconciliation.isMatched} />
+            <FeeLine label={isAr ? 'المتوقع في SYBNB' : 'SYBNB expected'} value={moneyText(shamCashReconciliation.expectedMinor, 'USD', lang)} />
+            <FeeLine label={isAr ? 'حساب شام كاش' : 'Sham Cash account'} value={moneyText(shamCashReconciliation.accountMinor, 'USD', lang)} />
+            <FeeLine label={isAr ? 'الفرق' : 'Difference'} value={moneyText(shamCashReconciliation.differenceMinor, 'USD', lang)} strong danger={shamCashReconciliation.isDiscrepancy} />
           </article>
         </aside>
       </section>
@@ -1442,7 +1255,7 @@ function ShortRentAdminCommandDashboard({
           <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
         </article>
         <article style={commandStyles.drawerCard}>
-          <h2>{isAr ? 'مساعد FAI' : 'FAI helper'} <small>{isAr ? 'مساعدة فقط، لا تنفيذ تلقائي' : 'ADVISORY ONLY — no automatic action'}</small></h2>
+          <h2>{isAr ? 'مساعد المراجعة' : 'Review assistant'} <small>{isAr ? 'مساعدة فقط، لا تنفيذ تلقائي' : 'ADVISORY ONLY — no automatic action'}</small></h2>
           {aiReview.reasons.map((reason) => (
             <p key={reason} style={commandStyles.signalLine}>
               <span>✓</span>
@@ -1474,7 +1287,8 @@ function ShortRentAdminCommandDashboard({
         <button style={commandStyles.secondaryCommand} onClick={() => window.print()}>{isAr ? 'طباعة التقرير' : 'Print report'}</button>
         <button style={commandStyles.secondaryCommand} onClick={() => void loadQueue()}>{isAr ? 'تحديث' : 'Refresh'}</button>
       </nav>
-    </main>
+      </div>
+    </AdminShell>
   )
 }
 
@@ -1713,22 +1527,22 @@ function ShamCashReconciliationPanel({
           <small>{isAr ? 'ربط مالي داخلي' : 'Internal finance link'}</small>
           <h3>{isAr ? 'مطابقة حساب شام كاش' : 'Sham Cash account reconciliation'}</h3>
         </div>
-        <span style={data.isMatched ? commandStyles.confirmedPill : commandStyles.warningPill}>
+        <span style={data.isDiscrepancy || data.awaitingLink ? commandStyles.warningPill : commandStyles.confirmedPill}>
           {data.statusLabel}
         </span>
       </div>
       <div style={commandStyles.shamCashGrid}>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'المتوقع حسب SYBNB' : 'Expected by SYBNB'}</small>
-          <strong style={commandTone('gold')}>{moneyText(data.expectedMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone('gold')}>{moneyText(data.expectedMinor, 'USD', lang)}</strong>
         </div>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'الموجود في شام كاش' : 'In Sham Cash account'}</small>
-          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{data.accountMinor == null ? (isAr ? 'غير مربوط' : 'Not linked') : moneyText(data.accountMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone(data.isDiscrepancy ? 'red' : data.awaitingLink ? 'gold' : 'green')}>{data.accountMinor == null ? (isAr ? 'غير مربوط' : 'Not linked') : moneyText(data.accountMinor, 'USD', lang)}</strong>
         </div>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'فرق المطابقة' : 'Reconciliation difference'}</small>
-          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{moneyText(data.differenceMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone(data.isDiscrepancy ? 'red' : data.awaitingLink ? 'gold' : 'green')}>{moneyText(data.differenceMinor, 'USD', lang)}</strong>
         </div>
       </div>
       <div style={commandStyles.shamCashReconcileRow}>
@@ -1771,7 +1585,7 @@ function ShamCashReconciliationPanel({
                 <small>{isAr ? 'رمز شام كاش' : 'Sham Cash code'}</small>
               </div>
               <span>{item.status}</span>
-              <b>{moneyText(item.amountMinor, 'SYP', lang)}</b>
+              <b>{moneyText(item.amountMinor, 'USD', lang)}</b>
               <small>{item.note}</small>
             </div>
           ))}
@@ -1888,12 +1702,25 @@ function createShamCashReconciliation(realPayments: PlatformPaymentProof[], disp
   const accountMinor = hasAnyEntry ? reconciledPayments.reduce((sum, payment) => sum + payment.amountMinor, 0) : null
   const hasExternalAccount = accountMinor != null
   const differenceMinor = hasExternalAccount ? accountMinor - expectedMinor : expectedMinor
-  const isMatched = sourcePayments.length > 0 && reconciledPayments.length === sourcePayments.length
+  // Empty platform (no Sham Cash payments to check) is NOT a mismatch — flagging it red trains
+  // admins to ignore the alert. Treat "nothing to reconcile" as a neutral, matched state.
+  const nothingToReconcile = sourcePayments.length === 0
+  // "Awaiting link" = there ARE Sham Cash payments but the real account balance hasn't been entered
+  // yet. That is a pending task, not a discrepancy — flagging it red trains admins to ignore the
+  // alert. A real MISMATCH only exists once a balance is entered and the numbers genuinely differ.
+  const awaitingLink = !nothingToReconcile && !hasExternalAccount
+  const isMatched = nothingToReconcile || reconciledPayments.length === sourcePayments.length
+  const isDiscrepancy = hasExternalAccount && !isMatched
   const isAr = lang === 'ar'
   return {
     accountMinor,
-    canApprove: isMatched,
-    controlNote: hasExternalAccount
+    canApprove: !nothingToReconcile && isMatched,
+    nothingToReconcile,
+    awaitingLink,
+    isDiscrepancy,
+    controlNote: nothingToReconcile
+      ? (isAr ? 'لا توجد دفعات شام كاش بانتظار المطابقة حالياً.' : 'No Sham Cash payments are waiting to be reconciled right now.')
+      : hasExternalAccount
       ? (isMatched
         ? (isAr ? 'تمت المطابقة مع رصيد شام كاش المدخل. يمكن قبول الدفع بعد مراجعة الإدارة.' : 'Matched against the entered Sham Cash balance. Admin can approve after review.')
         : (isAr ? 'يوجد فرق بين سجل SYBNB وحساب شام كاش. لا تقبل الدفع قبل حل الفرق.' : 'There is a difference between the SYBNB ledger and Sham Cash. Do not approve before resolving it.'))
@@ -1901,7 +1728,9 @@ function createShamCashReconciliation(realPayments: PlatformPaymentProof[], disp
     differenceMinor,
     expectedMinor,
     isMatched,
-    statusLabel: hasExternalAccount
+    statusLabel: nothingToReconcile
+      ? (isAr ? 'لا شيء للمطابقة' : 'Nothing to reconcile')
+      : hasExternalAccount
       ? (isMatched ? (isAr ? 'الأرقام متطابقة' : 'Numbers match') : (isAr ? 'يوجد فرق' : 'Mismatch'))
       : (isAr ? 'ينتظر الربط' : 'Awaiting link'),
     items: sourcePayments.slice(0, 6).map((payment) => {
@@ -1931,6 +1760,7 @@ function commandTone(tone: string): CSSProperties {
     green: '#20d29b',
     red: '#ff4d73',
     white: '#f7f7fb',
+    muted: '#9aa0ad',
   }
   return { color: colors[tone] || colors.white }
 }
@@ -2161,7 +1991,7 @@ const commandStyles: Record<string, CSSProperties> = {
   walletTimeline: { borderInlineStart: '2px solid rgba(255,255,255,.18)', display: 'grid', gap: 14, paddingInlineStart: 18 },
   signalLine: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', margin: 0, padding: 12 },
   riskPair: { display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' },
-  actionBar: { alignItems: 'center', background: 'rgba(7,8,13,.94)', borderTop: '1px solid rgba(255,255,255,.12)', bottom: 0, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', insetInline: 0, padding: '12px 24px', position: 'fixed', zIndex: 10 },
+  actionBar: { alignItems: 'center', background: 'rgba(18,21,26,.92)', border: '1px solid #242a33', borderRadius: 14, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', padding: '14px 18px' },
   acceptButton: { background: '#20c987', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   rejectButton: { background: '#ff4d73', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   goldButton: { background: '#e6b80d', border: 0, borderRadius: 8, color: '#111', fontWeight: 950, minHeight: 44, padding: '0 14px' },
@@ -2169,238 +1999,6 @@ const commandStyles: Record<string, CSSProperties> = {
   disputeButton: { background: 'transparent', border: '1px solid #ff744d', borderRadius: 8, color: '#ff744d', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   outlineGold: { background: 'transparent', border: '1px solid #e6b80d', borderRadius: 8, color: '#e6b80d', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   secondaryCommand: { background: 'transparent', border: '1px solid rgba(255,255,255,.3)', borderRadius: 8, color: '#d9deea', fontWeight: 950, minHeight: 44, padding: '0 14px' },
-}
-
-function AdminMetric({ label, value, icon, tone }: { label: string; value: string; icon: string; tone: 'red' | 'gold' | 'green' | 'blue' }) {
-  return (
-    <article className={`admin-metric ${tone}`}>
-      <span>{icon}</span>
-      <small>{label}</small>
-      <strong>{value}</strong>
-    </article>
-  )
-}
-
-function ReviewSection({ title, empty, children }: { title: string; empty: string; children: ReactNode }) {
-  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children)
-
-  return (
-    <section style={styles.section}>
-      <h2 style={styles.sectionTitle}>{title}</h2>
-      {hasChildren ? <div style={styles.grid}>{children}</div> : <p style={styles.empty}>{empty}</p>}
-    </section>
-  )
-}
-
-function ListingReviewCard({
-  listing,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  listing: PlatformListing
-  labels: { approve: string; reject: string; price: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(listing.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h3>
-      <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function PaymentReviewCard({
-  payment,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  payment: PlatformPaymentProof
-  labels: { approve: string; reject: string; price: string; provider: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  const isApproved = payment.status === 'APPROVED'
-  const isRejected = payment.status === 'REJECTED'
-  const isFinal = isApproved || isRejected
-  const confirmationText = isApproved
-    ? lang === 'ar'
-      ? 'تم إرسال تأكيد الدفع للعميل'
-      : 'Payment confirmation sent to client'
-    : lang === 'ar'
-      ? 'تم إرسال نتيجة الرفض للعميل'
-      : 'Payment rejection sent to client'
-
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(payment.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{payment.providerRef || payment.id.slice(0, 8).toUpperCase()}</h3>
-      <div style={styles.meta}>
-        <span>{labels.provider}</span>
-        <strong>{providerText(payment.provider, lang)}</strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
-      </div>
-      {!isFinal && (
-        <p style={styles.moneyReceivedWarning}>
-          {lang === 'ar' ? 'وافق فقط بعد التأكد من استلام المال ومطابقة الإثبات.' : 'Approve only after confirming money was received and proof matches.'}
-        </p>
-      )}
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/payment/receipt/${payment.id}`)}>
-        {labels.details}
-      </button>
-      {isFinal ? (
-        <p style={{ ...styles.confirmationNote, ...(isApproved ? styles.confirmationNoteApproved : styles.confirmationNoteRejected) }}>
-          {confirmationText}
-        </p>
-      ) : (
-        <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-      )}
-    </article>
-  )
-}
-
-function BookingReviewCard({
-  booking,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  booking: PlatformReviewBooking
-  labels: { approve: string; reject: string; price: string; listing: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  const title = booking.listing ? listingTitleText(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase()
-
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(booking.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{title}</h3>
-      <div style={styles.meta}>
-        <span>{labels.listing}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{booking.listing?.division ? divisionText(booking.listing.division, lang) : booking.listingId.slice(0, 8).toUpperCase()}</strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(booking.amountMinor, booking.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function GiftReviewCard({
-  gift,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  gift: PlatformWalletGift
-  labels: { approve: string; reject: string; price: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(gift.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{gift.message || gift.id.slice(0, 8).toUpperCase()}</h3>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(gift.amountMinor, gift.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/wallet/gift/claim/${gift.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function DecisionActions({
-  labels,
-  disabled,
-  onDecision,
-}: {
-  labels: { approve: string; reject: string }
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <div style={styles.actions}>
-      <button disabled={disabled} style={styles.primaryButton} onClick={() => onDecision('APPROVE')}>
-        {labels.approve}
-      </button>
-      <button disabled={disabled} style={styles.dangerButton} onClick={() => onDecision('REJECT')}>
-        {labels.reject}
-      </button>
-    </div>
-  )
-}
-
-function AuditLogCard({
-  entry,
-  labels,
-  lang,
-}: {
-  entry: PlatformAdminAuditLog
-  labels: { actor: string; entity: string; details: string }
-  lang: Lang
-}) {
-  const date = new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SY' : 'en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(entry.createdAt))
-  const actorName = entry.actor?.displayName || entry.actor?.email || entry.actorUserId?.slice(0, 8) || (lang === 'ar' ? 'النظام' : 'System')
-  const detailRoute = auditDetailRoute(entry)
-
-  return (
-    <article style={styles.auditCard}>
-      <div style={styles.auditHeader}>
-        <strong>{auditActionText(entry.action, lang)}</strong>
-        <span>{date}</span>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.entity}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>
-          {auditEntityText(entry.entityType, lang)} / {entry.entityId.slice(0, 8).toUpperCase()}
-        </strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.actor}</span>
-        <strong>{actorName}</strong>
-      </div>
-      {detailRoute && (
-        <button style={styles.secondaryButton} onClick={() => (window.location.hash = detailRoute)}>
-          {labels.details}
-        </button>
-      )}
-    </article>
-  )
 }
 
 function auditActionText(action: string, lang: Lang) {
@@ -2431,31 +2029,6 @@ function auditActionText(action: string, lang: Lang) {
     UPDATED: { ar: 'تم التحديث', en: 'Updated' },
   }
   return labels[action]?.[lang] || (lang === 'ar' ? action.replace(/_/g, ' ') : action.replace(/_/g, ' '))
-}
-
-function auditEntityText(entityType: string, lang: Lang) {
-  const labels: Record<string, Record<Lang, string>> = {
-    booking: { ar: 'حجز', en: 'Booking' },
-    bookings: { ar: 'حجوزات', en: 'Bookings' },
-    gift: { ar: 'هدية', en: 'Gift' },
-    gifts: { ar: 'هدايا', en: 'Gifts' },
-    listing: { ar: 'إعلان', en: 'Listing' },
-    listings: { ar: 'إعلانات', en: 'Listings' },
-    payment: { ar: 'دفع', en: 'Payment' },
-    payments: { ar: 'مدفوعات', en: 'Payments' },
-    payment_proofs: { ar: 'إثبات دفع', en: 'Payment proof' },
-    ride_requests: { ar: 'رحلات', en: 'Ride requests' },
-  }
-  return labels[entityType.toLowerCase()]?.[lang] || entityType.replace(/_/g, ' ')
-}
-
-function auditDetailRoute(entry: PlatformAdminAuditLog) {
-  const entityType = entry.entityType.toLowerCase()
-  if (entityType === 'listings' || entityType === 'listing') return `/listing/${entry.entityId}`
-  if (entityType === 'bookings' || entityType === 'booking') return `/booking/${entry.entityId}`
-  if (entityType === 'payments' || entityType === 'payment' || entityType === 'payment_proofs') return `/payment/receipt/${entry.entityId}`
-  if (entityType === 'ride_requests') return '/driver'
-  return ''
 }
 
 const styles: Record<string, CSSProperties> = {

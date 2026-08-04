@@ -1,13 +1,14 @@
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
-import { approveDriverForRides, cleanupTestUsers, fundWallet, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
+import { approveDriverForRides, cleanupTestUsers, fundWallet, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode, verifyEmailForTest } from '../support/testServer.mjs'
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'HOST' || role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'HOST' || role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant,
     role,
     email,
     password: 'correct-horse-battery',
@@ -19,12 +20,16 @@ async function registerUser(app, role, label) {
   return { email, token: res.body.token, user: res.body.user }
 }
 
-async function requestRide(app, riderToken, label) {
+// One active ride per rider is now enforced server-side, so every ride must come from a FRESH funded
+// rider — reusing one rider for multiple in-flight rides now (correctly) 409s RIDER_HAS_ACTIVE_RIDE.
+// Returns { ride, rider } so a test that later reads the ride can use its rider's token.
+async function requestRide(app, label) {
+  const rider = await registerUser(app, 'GUEST', `sr-rider-${label}`)
   const res = await request(app)
     .post('/api/sr/rides')
-    .set('Authorization', `Bearer ${riderToken}`)
+    .set('Authorization', `Bearer ${rider.token}`)
     .send({ pickup: `Malki ${label}`, dropoff: `Mezzeh ${label}`, category: 'SR Economy' })
-  return res.body.ride
+  return { ride: res.body.ride, rider }
 }
 
 // Protocol Rule 2 (one driver <-> one active ride) is now enforced server-side: a driver holding an
@@ -39,6 +44,8 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
 
   beforeAll(async () => {
     app = testApp()
+    const admin = await db().user.create({ data: { email: uniqueTestEmail('sr-flow-admin'), displayName: 'SR Flow Admin', referralCode: uniqueTestReferralCode(), roles: { create: { role: 'ADMIN' } } } })
+    trackTestUser(admin.id)
     rider = await registerUser(app, 'GUEST', 'sr-rider')
     driver = await registerUser(app, 'DRIVER', 'sr-driver')
   })
@@ -48,31 +55,37 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
   })
 
   it('a GUEST can request a ride, receiving a fare quote and REQUESTED status', async () => {
-    const ride = await requestRide(app, rider.token, 'flow-1')
+    const { ride, rider: r } = await requestRide(app, 'flow-1')
     expect(ride.status).toBe('REQUESTED')
-    expect(ride.riderId).toBe(rider.user.id)
+    expect(ride.riderId).toBe(r.user.id)
     expect(typeof ride.fareMinor).toBe('number')
     expect(ride.fareMinor).toBeGreaterThan(0)
   })
 
-  it('a DRIVER cannot request a ride (role-gated to GUEST)', async () => {
+  it('a DRIVER can request a ride using the baseline customer capability', async () => {
+    await fundWallet(driver.user.id)
     const res = await request(app)
       .post('/api/sr/rides')
       .set('Authorization', `Bearer ${driver.token}`)
       .send({ pickup: 'Malki', dropoff: 'Mezzeh' })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(201)
+    expect(res.body.ride.riderId).toBe(driver.user.id)
+    await db().rideRequest.update({ where: { id: res.body.ride.id }, data: { status: 'CANCELLED' } })
   })
 
-  it('the requested ride shows up in the driver pending queue', async () => {
-    const ride = await requestRide(app, rider.token, 'flow-2')
+  it('the requested ride shows up in the driver pending queue (once the driver is online)', async () => {
+    const { ride } = await requestRide(app, 'flow-2')
+    // Presence (Phase 1): only ONLINE drivers receive the pending pool, so go online first.
+    await request(app).patch('/api/driver/availability').set('Authorization', `Bearer ${driver.token}`).send({ online: true })
     const res = await request(app).get('/api/driver/rides/pending').set('Authorization', `Bearer ${driver.token}`)
     expect(res.status).toBe(200)
+    expect(res.body.online).toBe(true)
     expect(res.body.rides.some((r) => r.id === ride.id)).toBe(true)
   })
 
   it('the driver claims the ride, moving it to DRIVER_ASSIGNED and binding driverId', async () => {
     const claimingDriver = await registerUser(app, 'DRIVER', 'sr-claim-3')
-    const ride = await requestRide(app, rider.token, 'flow-3')
+    const { ride } = await requestRide(app, 'flow-3')
     const res = await request(app).patch(`/api/sr/rides/${ride.id}/claim`).set('Authorization', `Bearer ${claimingDriver.token}`)
 
     expect(res.status).toBe(200)
@@ -81,7 +94,7 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
   })
 
   it('a second driver cannot claim an already-claimed ride (409, not a silent overwrite)', async () => {
-    const ride = await requestRide(app, rider.token, 'flow-4')
+    const { ride } = await requestRide(app, 'flow-4')
     const firstDriver = await registerUser(app, 'DRIVER', 'sr-claim-4a')
     const otherDriver = await registerUser(app, 'DRIVER', 'sr-claim-4b')
 
@@ -95,7 +108,7 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
 
   it('drives through the full valid status sequence: DRIVER_ARRIVING -> IN_PROGRESS -> COMPLETED', async () => {
     const claimingDriver = await registerUser(app, 'DRIVER', 'sr-claim-5')
-    const ride = await requestRide(app, rider.token, 'flow-5')
+    const { ride } = await requestRide(app, 'flow-5')
     await request(app).patch(`/api/sr/rides/${ride.id}/claim`).set('Authorization', `Bearer ${claimingDriver.token}`)
 
     const arriving = await request(app)
@@ -125,7 +138,7 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
 
   it('rejects an out-of-order transition (e.g. DRIVER_ASSIGNED straight to COMPLETED)', async () => {
     const claimingDriver = await registerUser(app, 'DRIVER', 'sr-claim-6')
-    const ride = await requestRide(app, rider.token, 'flow-6')
+    const { ride } = await requestRide(app, 'flow-6')
     await request(app).patch(`/api/sr/rides/${ride.id}/claim`).set('Authorization', `Bearer ${claimingDriver.token}`)
 
     const res = await request(app)
@@ -139,7 +152,7 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
 
   it('a driver cannot progress a ride assigned to a different driver', async () => {
     const claimingDriver = await registerUser(app, 'DRIVER', 'sr-claim-7')
-    const ride = await requestRide(app, rider.token, 'flow-7')
+    const { ride } = await requestRide(app, 'flow-7')
     await request(app).patch(`/api/sr/rides/${ride.id}/claim`).set('Authorization', `Bearer ${claimingDriver.token}`)
 
     const otherDriver = await registerUser(app, 'DRIVER', 'sr-claim-7b')
@@ -153,10 +166,10 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
   })
 
   it('the rider can read their own ride detail; an unrelated guest cannot', async () => {
-    const ride = await requestRide(app, rider.token, 'flow-8')
+    const { ride, rider: rideOwner } = await requestRide(app, 'flow-8')
     const unrelatedGuest = await registerUser(app, 'GUEST', 'sr-unrelated-guest')
 
-    const riderView = await request(app).get(`/api/sr/rides/${ride.id}`).set('Authorization', `Bearer ${rider.token}`)
+    const riderView = await request(app).get(`/api/sr/rides/${ride.id}`).set('Authorization', `Bearer ${rideOwner.token}`)
     const unrelatedView = await request(app).get(`/api/sr/rides/${ride.id}`).set('Authorization', `Bearer ${unrelatedGuest.token}`)
 
     expect(riderView.status).toBe(200)
@@ -166,7 +179,7 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
 
   it('rejects an invalid status value with 400 before touching the database', async () => {
     const claimingDriver = await registerUser(app, 'DRIVER', 'sr-claim-9')
-    const ride = await requestRide(app, rider.token, 'flow-9')
+    const { ride } = await requestRide(app, 'flow-9')
     await request(app).patch(`/api/sr/rides/${ride.id}/claim`).set('Authorization', `Bearer ${claimingDriver.token}`)
 
     const res = await request(app)

@@ -104,11 +104,19 @@ export function DateField({ lang, label, value, active, onClick }: DateFieldProp
 }
 
 export function DateRangePicker({ lang, value, onChange, onClose, disabledDates, disabledHint }: DateRangePickerProps) {
-  const baseDate = fromISO(value.checkIn) ?? new Date(2026, 6, 1)
+  // Today at local midnight — the earliest bookable day. Past days are never selectable.
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const todayIso = toISO(today)
+  const baseDate = fromISO(value.checkIn) ?? today
   const [cursor, setCursor] = useState(() => new Date(baseDate.getFullYear(), baseDate.getMonth(), 1))
   const [selecting, setSelecting] = useState<'checkIn' | 'checkOut'>(value.checkIn && !value.checkOut ? 'checkOut' : 'checkIn')
   const [blockedRangeWarning, setBlockedRangeWarning] = useState(false)
   const t = T[lang]
+  // Don't let the guest page back before the current month (all past days are disabled anyway).
+  const cursorBeforeThisMonth =
+    cursor.getFullYear() < today.getFullYear() ||
+    (cursor.getFullYear() === today.getFullYear() && cursor.getMonth() <= today.getMonth())
 
   const days = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
@@ -134,7 +142,7 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
 
   const selectDay = (date: Date) => {
     const iso = toISO(date)
-    if (disabledDates?.has(iso)) return
+    if (disabledDates?.has(iso) || iso < todayIso) return
     setBlockedRangeWarning(false)
 
     if (selecting === 'checkIn' || !value.checkIn) {
@@ -160,7 +168,12 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
   return (
     <section dir={lang === 'ar' ? 'rtl' : 'ltr'} style={styles.picker}>
       <div style={styles.pickerHeader}>
-        <button type="button" style={styles.navButton} onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}>
+        <button
+          type="button"
+          disabled={cursorBeforeThisMonth}
+          style={{ ...styles.navButton, ...(cursorBeforeThisMonth ? styles.navButtonDisabled : {}) }}
+          onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}
+        >
           ‹
         </button>
         <strong style={styles.monthTitle}>{MONTHS[lang][cursor.getMonth()]} {cursor.getFullYear()}</strong>
@@ -185,7 +198,7 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
           const isStart = iso === value.checkIn
           const isEnd = iso === value.checkOut
           const inRange = value.checkIn && value.checkOut && iso > value.checkIn && iso < value.checkOut
-          const isDisabled = disabledDates?.has(iso)
+          const isDisabled = disabledDates?.has(iso) || iso < todayIso
           return (
             <button
               key={iso}
@@ -244,6 +257,7 @@ const styles: Record<string, CSSProperties> = {
   },
   pickerHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   navButton: { minWidth: 44, minHeight: 44, borderRadius: 14, border: '1px solid #30384d', background: '#171b29', color: '#fff', fontSize: 24 },
+  navButtonDisabled: { opacity: 0.35, cursor: 'not-allowed' },
   monthTitle: { color: '#fff', fontSize: 18 },
   help: { margin: '10px 0', color: '#9aa6ba', fontSize: 13 },
   weekGrid: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6 },

@@ -29,6 +29,7 @@ export type VisualFilterArt =
   | 'bed-sofa'
   | 'property-apartment'
   | 'property-villa'
+  | 'property-hotel'
   | 'property-room'
   | 'property-heritage'
   | 'property-farm'

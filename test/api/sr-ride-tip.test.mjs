@@ -2,15 +2,16 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
-import { approveDriverForRides, cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
+import { approveDriverForRides, cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode, verifyEmailForTest } from '../support/testServer.mjs'
 
 // Tips: after a COMPLETED ride, the rider tips from wallet credit; the driver receives 100% (no
 // platform commission on tips). One tip per ride.
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant, role, email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { token: res.body.token, user: res.body.user }
 }
@@ -46,7 +47,11 @@ async function completeRide(app, rider, driver, label, fareCurrency = 'SYP') {
 
 describe('SR ride tip: 100% to driver, one per ride, wallet-gated', () => {
   let app
-  beforeAll(() => { app = testApp() })
+  beforeAll(async () => {
+    app = testApp()
+    const admin = await db().user.create({ data: { email: uniqueTestEmail('sr-tip-admin'), displayName: 'SR Tip Admin', referralCode: uniqueTestReferralCode(), roles: { create: { role: 'ADMIN' } } } })
+    trackTestUser(admin.id)
+  })
   afterAll(async () => { await cleanupTestUsers() })
 
   it('a rider tips a completed ride; the driver receives 100%, and a second tip is refused', async () => {
@@ -74,6 +79,19 @@ describe('SR ride tip: 100% to driver, one per ride, wallet-gated', () => {
     const second = await request(app).post(`/api/sr/rides/${ride.id}/tip`).set('Authorization', `Bearer ${rider.token}`).send({ amountMinor: 500 })
     expect(second.status).toBe(409)
     expect(second.body.error.code).toBe('RIDE_ALREADY_TIPPED')
+  })
+
+  it('an absurdly large tip is rejected before it can touch the wallet (400)', async () => {
+    const rider = await registerUser(app, 'GUEST', 'tip-rider-big')
+    const driver = await makeRoadReadyDriver(app, 'tip-driver-big')
+    await fundRider(rider.user.id, 2_000_000_000) // funded far beyond the ceiling, to prove the cap — not the balance — rejects
+    const ride = await completeRide(app, rider, driver, 'tip-big')
+    const res = await request(app).post(`/api/sr/rides/${ride.id}/tip`).set('Authorization', `Bearer ${rider.token}`).send({ amountMinor: 1_900_000_000 })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('TIP_AMOUNT_TOO_LARGE')
+    // no tip entry was recorded
+    const driverTip = await db().walletEntry.findFirst({ where: { referenceType: 'sr_driver_tip', referenceId: ride.id } })
+    expect(driverTip).toBeNull()
   })
 
   it('a non-rider cannot tip (403)', async () => {

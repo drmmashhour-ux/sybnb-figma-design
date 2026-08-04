@@ -4,6 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   createStaffAccountSession,
   resetPasswordWithEmailCode,
+  resetPasswordWithPhoneCode,
   sendEmailVerificationCode,
   sendPhoneVerificationCode,
   verifyEmailVerificationCode,
@@ -39,14 +40,16 @@ const labels = {
     signUp: 'إنشاء حساب',
     forgotPassword: 'نسيت كلمة المرور',
     resetPasswordCta: 'تحديث كلمة المرور',
+    continueToResetCode: 'متابعة إلى رمز التأكيد',
     backToSignIn: 'العودة لتسجيل الدخول',
     email: 'البريد الإلكتروني',
     emailHelp: 'اكتب البريد كاملاً. سنرسل رمز التأكيد إلى هذا البريد.',
-    emailRepeat: 'أعد كتابة البريد الإلكتروني',
-    confirmEmail: 'تأكيد البريد',
-    emailMismatch: 'البريد الإلكتروني وتأكيد البريد غير متطابقين.',
+    verificationTitle: 'أدخل رمز التأكيد',
+    verificationHelp: 'أرسلنا رمزاً إلى بريدك الإلكتروني. اكتبه أدناه للمتابعة.',
     password: 'كلمة المرور',
     repeatPassword: 'تأكيد كلمة المرور',
+    showPasswords: 'إظهار كلمتي المرور',
+    hidePasswords: 'إخفاء كلمتي المرور',
     newPassword: 'كلمة المرور الجديدة',
     phone: 'رقم الهاتف',
     partnerType: 'نوع الحساب',
@@ -54,6 +57,8 @@ const labels = {
     sendCode: 'إرسال الرمز',
     resendCode: 'إعادة الإرسال',
     confirmCode: 'تأكيد الرمز',
+    confirmedShort: 'تم التأكيد ✓',
+    tryAgain: 'حاول مجدداً',
     confirmingCode: 'جار التأكيد...',
     sendingCode: 'جار الإرسال...',
     codeSentReal: 'تم إرسال الرمز إلى بريدك الإلكتروني.',
@@ -76,9 +81,11 @@ const labels = {
     signInRequired: 'أدخل البريد وكلمة المرور، ثم أكّد رمز البريد قبل الدخول.',
     signUpRequired: 'أدخل البريد والهاتف وكلمة المرور، واختر نوع الحساب، ثم أكّد رمز البريد.',
     passwordMismatch: 'تأكيد كلمة المرور غير مطابق.',
-    resetRequired: 'أدخل البريد وكلمة المرور الجديدة، ثم أكّد رمز البريد.',
+    resetRequired: 'أدخل البريد وكلمة المرور الجديدة مرتين، ثم أكّد رمز البريد.',
     resetSuccess: 'تم تحديث كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.',
     adminNoSignup: 'إنشاء حساب الإدارة مغلق. المالك فقط يضيف الإدارة.',
+    continue: 'متابعة',
+    changeDetails: 'تغيير البيانات',
   },
   en: {
     adminTitle: 'Admin sign in',
@@ -91,14 +98,16 @@ const labels = {
     signUp: 'Create account',
     forgotPassword: 'Forgot password',
     resetPasswordCta: 'Update password',
+    continueToResetCode: 'Continue to verification code',
     backToSignIn: 'Back to sign in',
     email: 'Email address',
     emailHelp: 'Use the full email address. We send the confirmation code here.',
-    emailRepeat: 'Repeat email address',
-    confirmEmail: 'Confirm email',
-    emailMismatch: 'Email and repeated email do not match.',
+    verificationTitle: 'Enter verification code',
+    verificationHelp: 'We sent a code to your email. Enter it below to continue.',
     password: 'Password',
     repeatPassword: 'Repeat password',
+    showPasswords: 'Show passwords',
+    hidePasswords: 'Hide passwords',
     newPassword: 'New password',
     phone: 'Phone number',
     partnerType: 'Account type',
@@ -106,6 +115,8 @@ const labels = {
     sendCode: 'Send code',
     resendCode: 'Resend code',
     confirmCode: 'Confirm code',
+    confirmedShort: 'Confirmed ✓',
+    tryAgain: 'Try again',
     confirmingCode: 'Confirming...',
     sendingCode: 'Sending...',
     codeSentReal: 'A verification code was sent to your email.',
@@ -128,9 +139,11 @@ const labels = {
     signInRequired: 'Enter email and password, then confirm the email code before signing in.',
     signUpRequired: 'Enter email, phone, password, account type, then confirm the email code.',
     passwordMismatch: 'Repeated password does not match.',
-    resetRequired: 'Enter your email and a new password, then confirm the email code.',
+    resetRequired: 'Enter your email and the new password twice, then confirm the email code.',
     resetSuccess: 'Password updated. Sign in with the new password.',
     adminNoSignup: 'Admin signup is closed. Only the owner can add admin accounts.',
+    continue: 'Continue',
+    changeDetails: 'Change details',
   },
 }
 
@@ -138,20 +151,25 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const t = labels[lang]
   const isAr = lang === 'ar'
   const canSignUp = role !== 'ADMIN'
+  const phoneOtpEnabled = import.meta.env.VITE_PHONE_OTP_ENABLED === '1'
   const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgotPassword'>('signIn')
-  // Verify by email (default) or phone/SMS. Forgot-password always uses email (password-reset code).
+  // Verify by email (default) or phone/SMS, including password recovery for phone-only accounts.
   const [verifyMethod, setVerifyMethod] = useState<'email' | 'phone'>('email')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [email, setEmail] = useState('')
-  const [emailRepeat, setEmailRepeat] = useState('')
   const [password, setPassword] = useState('')
   const [passwordRepeat, setPasswordRepeat] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [showAccountPasswords, setShowAccountPasswords] = useState(false)
+  const [showResetPasswords, setShowResetPasswords] = useState(false)
+  const [resetStep, setResetStep] = useState<1 | 2>(1)
   const [phone, setPhone] = useState('')
   const [partnerType, setPartnerType] = useState<PartnerType>('HOST')
   const [code, setCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
   const [codeConfirmed, setCodeConfirmed] = useState(false)
+  const [verificationGrant, setVerificationGrant] = useState('')
+  const [codeTryAgain, setCodeTryAgain] = useState(false)
   const [codeBusy, setCodeBusy] = useState<'idle' | 'sending' | 'confirming'>('idle')
   const [devCode, setDevCode] = useState('')
   const [message, setMessage] = useState('')
@@ -162,11 +180,13 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const actionLabel = role === 'ADMIN' ? t.openAdmin : role === 'DRIVER' ? t.openDriver : t.openPartner
   const otpPurpose = mode === 'forgotPassword' ? 'password-reset' : 'staff-login'
   // Phone verification is available for sign-in / sign-up (not the email-only password reset).
-  const usePhone = mode !== 'forgotPassword' && verifyMethod === 'phone'
+  const usePhone = verifyMethod === 'phone'
+  const identifierReady = usePhone ? phone.trim().length >= 8 : email.includes('@')
 
   function resetCodeState() {
     setCodeSent(false)
     setCodeConfirmed(false)
+    setVerificationGrant('')
     setCode('')
     setDevCode('')
     setMessage('')
@@ -181,7 +201,45 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   function switchMode(next: 'signIn' | 'signUp' | 'forgotPassword') {
     if (next === 'signUp' && !canSignUp) return
     setMode(next)
+    setResetStep(1)
     resetCodeState()
+  }
+
+  async function beginAccountVerification() {
+    const identifierOk = usePhone ? phone.trim().length >= 8 : email.includes('@')
+    if (!identifierOk || !password.trim()) {
+      setIsErrorMessage(true)
+      setMessage(mode === 'signUp' ? t.signUpRequired : t.signInRequired)
+      return
+    }
+    if (mode === 'signUp' && password !== passwordRepeat) {
+      setIsErrorMessage(true)
+      setMessage(t.passwordMismatch)
+      return
+    }
+    await sendCode()
+  }
+
+  async function beginPasswordResetVerification() {
+    const normalizedEmail = email.trim().toLowerCase()
+    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(normalizedEmail)
+    if (!identifierOk || !newPassword.trim() || !passwordRepeat.trim()) {
+      setIsErrorMessage(true)
+      setMessage(t.resetRequired)
+      return
+    }
+    if (newPassword !== passwordRepeat) {
+      setIsErrorMessage(true)
+      setMessage(t.passwordMismatch)
+      return
+    }
+    if (newPassword.length < 8) {
+      setIsErrorMessage(true)
+      setMessage(t.resetRequired)
+      return
+    }
+    setResetStep(2)
+    await sendCode()
   }
 
   async function sendCode() {
@@ -189,6 +247,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     setCodeBusy('sending')
     setCode('')
     setCodeConfirmed(false)
+    setCodeTryAgain(false)
     setDevCode('')
     try {
       const result = usePhone
@@ -210,18 +269,25 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     }
   }
 
-  async function confirmCode() {
+  async function confirmCode(): Promise<string | null> {
     setCodeBusy('confirming')
     try {
-      if (usePhone) await verifyPhoneVerificationCode(phone.trim(), code.trim(), otpPurpose)
-      else await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
+      const result = usePhone
+        ? await verifyPhoneVerificationCode(phone.trim(), code.trim(), otpPurpose)
+        : await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
+      setVerificationGrant(result.verificationGrant)
       setCodeConfirmed(true)
+      setCodeTryAgain(false)
       setMessage(usePhone ? t.phoneConfirmed : t.codeConfirmed)
       setIsErrorMessage(false)
+      return result.verificationGrant
     } catch {
       setCodeConfirmed(false)
+      setCodeTryAgain(true)
       setMessage(t.codeInvalid)
       setIsErrorMessage(true)
+      setVerificationGrant('')
+      return null
     } finally {
       setCodeBusy('idle')
     }
@@ -230,22 +296,31 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   async function openSession() {
     if (mode === 'forgotPassword') return
     const normalizedEmail = email.trim().toLowerCase()
-    const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
-    // Email-repeat match only applies when verifying by email.
-    if (mode === 'signUp' && !usePhone && normalizedEmail !== normalizedEmailRepeat) {
-      setIsErrorMessage(true)
-      setMessage(t.emailMismatch)
-      return
-    }
     const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim())
-    if (!identifierOk || !password.trim() || !codeConfirmed) {
+    // Users routinely fill the code box and click "Open" without first pressing "Confirm code" — so
+    // auto-confirm the entered code here. If it fails, confirmCode() already showed "code invalid".
+    let confirmed = codeConfirmed
+    let activeGrant = verificationGrant
+    // Password managers occasionally autofill the email identifier into the one-time-code input.
+    // Only a plausible numeric OTP should trigger verification; other autofill text must not block
+    // password-only continuity immediately after a verified reset.
+    if (!confirmed && /^\d{4,8}$/.test(code.trim()) && identifierOk) {
+      activeGrant = (await confirmCode()) || ''
+      confirmed = Boolean(activeGrant)
+      if (!confirmed) return
+    }
+    // Sign-in authorization belongs to the API: normal staff accounts still receive
+    // STAFF_OTP_REQUIRED without a valid grant, while explicitly enabled Preview demo accounts
+    // may use password-only access. Registration always requires confirmed ownership.
+    if (!identifierOk || !password.trim() || (mode === 'signUp' && !confirmed)) {
       setIsErrorMessage(true)
       setMessage(mode === 'signUp' ? t.signUpRequired : t.signInRequired)
       return
     }
     if (mode === 'signUp') {
-      // A phone is always required for partner signup; when verifying by phone it's the verified identifier.
-      if (!phone.trim()) {
+      // A phone is always required in the form for the phone-verification path. The API only receives
+      // the identifier whose OTP was actually confirmed; it must never bind the other, unverified field.
+      if (usePhone && !phone.trim()) {
         setIsErrorMessage(true)
         setMessage(t.signUpRequired)
         return
@@ -263,8 +338,10 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         // When verifying by phone, sign in/up by phone (email left empty); otherwise by email.
         email: usePhone ? '' : normalizedEmail,
         password,
-        phone: phone.trim(),
+        phone: usePhone ? phone.trim() : '',
+        partnerType: role === 'HOST' ? partnerType : undefined,
         mode,
+        verificationGrant: activeGrant,
       })
       if (role === 'HOST') {
         window.sessionStorage.setItem('sybnb-partner-type', partnerType)
@@ -272,29 +349,60 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       window.dispatchEvent(new Event('sybnb-session-changed'))
       window.location.hash = returnPath
     } catch (error) {
+      const authError = error as Error & { code?: string }
+      if (mode === 'signIn' && authError.code === 'STAFF_OTP_REQUIRED' && !codeSent) {
+        setStatus('idle')
+        await sendCode()
+        return
+      }
       setStatus('error')
-      setMessage(error instanceof Error ? error.message : t.error)
+      setMessage(authError.message || t.error)
       setIsErrorMessage(true)
     }
   }
 
   async function submitPasswordReset() {
     const normalizedEmail = email.trim().toLowerCase()
-    const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
-    if (!email.trim() || normalizedEmail !== normalizedEmailRepeat || !newPassword.trim() || !codeConfirmed) {
+    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(normalizedEmail)
+    if (!identifierOk || !newPassword.trim() || !passwordRepeat.trim()) {
       setIsErrorMessage(true)
-      setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
+      setMessage(t.resetRequired)
+      return
+    }
+    if (newPassword !== passwordRepeat) {
+      setIsErrorMessage(true)
+      setMessage(t.passwordMismatch)
+      return
+    }
+
+    // Match sign-in behavior: people commonly type the code and press the primary action without
+    // noticing the separate "Confirm code" button. Verify it here instead of making Update password
+    // appear unresponsive. The server still requires and atomically claims the opaque grant.
+    let activeGrant = verificationGrant
+    if (!codeConfirmed && code.trim()) activeGrant = (await confirmCode()) || ''
+    if (!activeGrant) {
+      setIsErrorMessage(true)
+      setMessage(t.resetRequired)
       return
     }
 
     setStatus('loading')
     try {
-      await resetPasswordWithEmailCode(normalizedEmail, newPassword)
+      if (usePhone) await resetPasswordWithPhoneCode(phone.trim(), newPassword, activeGrant)
+      else await resetPasswordWithEmailCode(normalizedEmail, newPassword, activeGrant)
       setStatus('idle')
       setNewPassword('')
+      setPasswordRepeat('')
+      setShowResetPasswords(false)
+      setResetStep(1)
       setIsErrorMessage(false)
+      setMode('signIn')
+      setCodeSent(false)
+      setCodeConfirmed(false)
+      setVerificationGrant('')
+      setCode('')
+      setDevCode('')
       setMessage(t.resetSuccess)
-      switchMode('signIn')
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
@@ -312,7 +420,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         <h1 style={styles.title}>{pageTitle}</h1>
         <p style={styles.body}>{subtitle}</p>
 
-        {mode !== 'forgotPassword' && (
+        {mode !== 'forgotPassword' && canSignUp && (
           <div style={{ ...styles.segmented, gridTemplateColumns: canSignUp ? '1fr 1fr' : '1fr' }}>
             <button style={mode === 'signIn' ? styles.segmentActive : styles.segment} onClick={() => switchMode('signIn')}>
               {t.signIn}
@@ -325,7 +433,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
           </div>
         )}
 
-        {role === 'HOST' && mode === 'signUp' && (
+        {role === 'HOST' && mode === 'signUp' && !codeSent && (
           <section style={styles.partnerPanel}>
             <strong>{t.partnerType}</strong>
             <div style={styles.partnerGrid}>
@@ -345,37 +453,23 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         )}
 
         <div style={styles.formGrid}>
-          <label style={styles.labelWide}>
+          {(mode === 'forgotPassword' || !codeSent) && <label style={styles.labelWide}>
             {t.email}
             <input
               style={styles.emailInput}
               value={email}
               type="email"
+              name="sybnb-staff-email"
+              autoComplete="off"
               placeholder="name@example.com"
               onChange={(event) => updateEmail(event.target.value)}
+              disabled={mode === 'forgotPassword' && resetStep === 2}
               dir="ltr"
             />
             <small style={styles.helpText}>{t.emailHelp}</small>
-          </label>
+          </label>}
 
-          {(mode === 'signUp' || mode === 'forgotPassword') && (
-            <label style={styles.labelWide}>
-              {t.emailRepeat}
-              <input
-                style={styles.emailInputSecondary}
-                value={emailRepeat}
-                type="email"
-                placeholder="name@example.com"
-                onChange={(event) => {
-                  setEmailRepeat(event.target.value)
-                  setCodeConfirmed(false)
-                }}
-                dir="ltr"
-              />
-            </label>
-          )}
-
-          {mode !== 'forgotPassword' && (
+          {phoneOtpEnabled && mode !== 'forgotPassword' && !codeSent && (
             <div style={{ display: 'flex', gap: 8, marginBottom: 4 }} role="tablist" aria-label={isAr ? 'طريقة التحقق' : 'Verification method'}>
               <button
                 type="button"
@@ -384,23 +478,25 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               >
                 {t.verifyByEmail}
               </button>
-              <button
+              {phoneOtpEnabled && <button
                 type="button"
                 style={verifyMethod === 'phone' ? styles.methodActive : styles.methodInactive}
                 onClick={() => { setVerifyMethod('phone'); setCodeSent(false); setCodeConfirmed(false); setCode(''); if (!phone.trim()) setPhone('+963') }}
               >
                 {t.verifyByPhone}
-              </button>
+              </button>}
             </div>
           )}
 
-          {usePhone && (
+          {usePhone && (mode === 'forgotPassword' || !codeSent) && (
             <label style={styles.labelWide}>
               {t.phone}
               <input
                 style={styles.input}
                 value={phone}
                 inputMode="tel"
+                name="sybnb-staff-phone"
+                autoComplete="off"
                 placeholder="+963..."
                 onChange={(event) => { setPhone(event.target.value); setCodeConfirmed(false) }}
                 dir="ltr"
@@ -408,45 +504,70 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             </label>
           )}
 
-          <section style={styles.emailConfirmBox}>
+          {((mode === 'forgotPassword' && resetStep === 2) || (mode !== 'forgotPassword' && codeSent)) && <section style={styles.emailConfirmBox}>
             <div style={styles.confirmHeader}>
-              <strong>{usePhone ? t.verifyByPhone : t.confirmEmail}</strong>
+              <div>
+                <strong>{t.verificationTitle}</strong>
+                <p style={styles.verificationHelp}>{t.verificationHelp}</p>
+              </div>
               {codeConfirmed && <span style={styles.confirmedPill}>{usePhone ? t.phoneConfirmed : t.codeConfirmed}</span>}
             </div>
             <div style={styles.codeRow}>
-              <input
-                style={styles.input}
-                value={code}
-                placeholder="000000"
-                onChange={(event) => {
-                  setCode(event.target.value)
-                  setCodeConfirmed(false)
-                }}
-                dir="ltr"
-              />
-              <button style={styles.codeButton} onClick={() => void sendCode()} disabled={(usePhone ? phone.trim().length < 8 : !email.includes('@')) || codeBusy !== 'idle'}>
-                {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : usePhone ? t.sendCodePhone : t.sendCode}
-              </button>
-              <button
-                style={styles.codeButton}
-                onClick={() => void confirmCode()}
-                disabled={!codeSent || code.trim().length < 4 || codeBusy !== 'idle'}
-              >
-                {codeBusy === 'confirming' ? t.confirmingCode : t.confirmCode}
-              </button>
+              <label style={styles.codeInputLabel}>
+                <span>{t.code}</span>
+                <input
+                  style={styles.input}
+                  value={code}
+                  placeholder="000000"
+                  aria-label={t.code}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  name="sybnb-staff-verification-code"
+                  autoComplete="one-time-code"
+                  onChange={(event) => {
+                    setCode(event.target.value.replace(/\D/g, ''))
+                    setCodeConfirmed(false)
+                    setCodeTryAgain(false)
+                  }}
+                  dir="ltr"
+                />
+              </label>
             </div>
-          </section>
+            <button style={styles.resendButton} type="button" onClick={() => void sendCode()} disabled={codeBusy !== 'idle'}>
+              {codeBusy === 'sending' ? t.sendingCode : t.resendCode}
+            </button>
+            {mode !== 'forgotPassword' && (
+              <button style={styles.resendButton} type="button" onClick={resetCodeState} disabled={codeBusy !== 'idle'}>
+                {t.changeDetails}
+              </button>
+            )}
+          </section>}
 
-          {mode === 'forgotPassword' ? (
-            <label style={styles.labelWide}>
-              {t.newPassword}
-              <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" dir="ltr" />
-            </label>
-          ) : (
+          {mode === 'forgotPassword' ? resetStep === 1 ? (
+            <>
+              <label style={styles.label}>
+                {t.newPassword}
+                <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type={showResetPasswords ? 'text' : 'password'} name="sybnb-new-password" autoComplete="new-password" dir="ltr" />
+              </label>
+              <label style={styles.label}>
+                {t.repeatPassword}
+                <input style={styles.input} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} type={showResetPasswords ? 'text' : 'password'} name="sybnb-new-password-confirmation" autoComplete="new-password" dir="ltr" />
+              </label>
+              <button
+                type="button"
+                style={styles.showPasswordButton}
+                aria-pressed={showResetPasswords}
+                onClick={() => setShowResetPasswords((visible) => !visible)}
+              >
+                {showResetPasswords ? t.hidePasswords : t.showPasswords}
+              </button>
+            </>
+          ) : null : !codeSent ? (
             <>
               <label style={styles.label}>
                 {t.password}
-                <input style={styles.input} value={password} onChange={(event) => setPassword(event.target.value)} type="password" dir="ltr" />
+                <input style={styles.input} value={password} onChange={(event) => setPassword(event.target.value)} type={showAccountPasswords ? 'text' : 'password'} name="sybnb-staff-password" autoComplete={mode === 'signIn' ? 'current-password' : 'new-password'} dir="ltr" />
               </label>
               {mode === 'signUp' && (
                 <label style={styles.label}>
@@ -455,7 +576,9 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                     style={styles.input}
                     value={passwordRepeat}
                     onChange={(event) => setPasswordRepeat(event.target.value)}
-                    type="password"
+                    type={showAccountPasswords ? 'text' : 'password'}
+                    name="sybnb-staff-password-confirmation"
+                    autoComplete="new-password"
                     dir="ltr"
                   />
                 </label>
@@ -463,11 +586,19 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               {mode === 'signUp' && (
                 <label style={styles.labelWide}>
                   {t.phone}
-                  <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
+                  <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} name="sybnb-partner-phone" autoComplete="off" dir="ltr" />
                 </label>
               )}
+              <button
+                type="button"
+                style={styles.showPasswordButton}
+                aria-pressed={showAccountPasswords}
+                onClick={() => setShowAccountPasswords((visible) => !visible)}
+              >
+                {showAccountPasswords ? t.hidePasswords : t.showPasswords}
+              </button>
             </>
-          )}
+          ) : null}
         </div>
 
         {devCode && (
@@ -479,12 +610,16 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         )}
         {message && <p style={isErrorMessage ? styles.error : styles.note}>{message}</p>}
         {mode === 'forgotPassword' ? (
-          <button style={styles.primary} onClick={() => void submitPasswordReset()} disabled={status === 'loading'}>
-            {status === 'loading' ? t.resetting : t.resetPasswordCta}
+          <button
+            style={styles.primary}
+            onClick={() => void (resetStep === 1 ? beginPasswordResetVerification() : submitPasswordReset())}
+            disabled={status === 'loading' || codeBusy !== 'idle'}
+          >
+            {status === 'loading' ? t.resetting : codeBusy === 'sending' ? t.sendingCode : resetStep === 1 ? t.continueToResetCode : t.resetPasswordCta}
           </button>
         ) : (
-          <button style={styles.primary} onClick={() => void openSession()} disabled={status === 'loading'}>
-            {status === 'loading' ? t.opening : actionLabel}
+          <button style={styles.primary} onClick={() => void (mode === 'signUp' && !codeSent ? beginAccountVerification() : openSession())} disabled={status === 'loading' || codeBusy !== 'idle'}>
+            {status === 'loading' ? t.opening : codeBusy === 'sending' ? t.sendingCode : mode === 'signUp' && !codeSent ? t.continue : actionLabel}
           </button>
         )}
         <button style={styles.linkButton} onClick={() => switchMode(mode === 'forgotPassword' ? 'signIn' : 'forgotPassword')}>
@@ -498,7 +633,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
 
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '70vh', display: 'grid', placeItems: 'center', padding: 24, background: '#080a10', color: '#fff' },
-  card: { width: 'min(860px, 100%)', border: '1px solid #27324d', borderRadius: 18, background: '#101522', padding: 32, boxShadow: '0 24px 80px rgba(0,0,0,.35)' },
+  card: { width: 'min(560px, 100%)', border: '1px solid #27324d', borderRadius: 22, background: '#101522', padding: 32, boxShadow: '0 24px 80px rgba(0,0,0,.35)' },
   headerRow: { alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', marginBottom: 18 },
   badge: { display: 'inline-flex', border: '1px solid #e1b60f', borderRadius: 999, color: '#e1b60f', padding: '8px 14px', fontSize: 13, fontWeight: 800 },
   adminPill: { border: '1px solid rgba(255,255,255,.14)', borderRadius: 999, color: '#aab4ca', padding: '7px 12px', fontSize: 12, fontWeight: 800 },
@@ -506,6 +641,7 @@ const styles: Record<string, CSSProperties> = {
   body: { color: '#aab4ca', lineHeight: 1.8, margin: '14px 0 24px' },
   primary: { width: '100%', minHeight: 62, border: 0, borderRadius: 12, background: '#4760ff', color: '#fff', fontWeight: 900, fontSize: 19, cursor: 'pointer', marginTop: 18 },
   linkButton: { background: 'transparent', border: 0, color: '#8fa2ff', fontWeight: 800, cursor: 'pointer', marginTop: 12, padding: 0 },
+  showPasswordButton: { background: 'transparent', border: '1px solid #4760ff', borderRadius: 10, color: '#aebaff', cursor: 'pointer', fontWeight: 850, gridColumn: '1 / -1', justifySelf: 'start', minHeight: 42, padding: '0 14px' },
   segmented: { display: 'grid', gap: 8, marginBottom: 18 },
   segment: { minHeight: 52, border: '1px solid #27324d', borderRadius: 12, background: '#0c111d', color: '#aab4ca', fontWeight: 900, cursor: 'pointer' },
   segmentActive: { minHeight: 52, border: '1px solid #4760ff', borderRadius: 12, background: '#18224a', color: '#fff', fontWeight: 900, cursor: 'pointer' },
@@ -513,18 +649,22 @@ const styles: Record<string, CSSProperties> = {
   partnerGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' },
   partnerOption: { background: '#0b1220', border: '1px solid #27324d', borderRadius: 12, color: '#d9e1f5', cursor: 'pointer', display: 'grid', gap: 5, minHeight: 86, padding: 12, textAlign: 'start' },
   partnerOptionActive: { background: '#12372e', border: '1px solid #22d28f', borderRadius: 12, color: '#fff', cursor: 'pointer', display: 'grid', gap: 5, minHeight: 86, padding: 12, textAlign: 'start' },
-  formGrid: { display: 'grid', gap: 14, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
+  formGrid: { display: 'grid', gap: 14, gridTemplateColumns: '1fr' },
   label: { display: 'grid', gap: 8, color: '#d9e1f5', fontWeight: 800 },
   labelWide: { display: 'grid', gap: 8, color: '#d9e1f5', fontWeight: 800, gridColumn: '1 / -1' },
-  emailInput: { minHeight: 68, border: '1px solid #4760ff', borderRadius: 14, background: '#0b1220', color: '#fff', padding: '0 18px', fontSize: 22, fontWeight: 850, width: '100%', boxSizing: 'border-box' },
-  emailInputSecondary: { minHeight: 62, border: '1px solid #27324d', borderRadius: 14, background: '#0b1220', color: '#fff', padding: '0 18px', fontSize: 20, fontWeight: 800, width: '100%', boxSizing: 'border-box' },
+  emailInput: { minHeight: 56, border: '1px solid #27324d', borderRadius: 12, background: '#0b1220', color: '#fff', padding: '0 14px', fontSize: 17, width: '100%', boxSizing: 'border-box' },
   input: { minHeight: 52, border: '1px solid #27324d', borderRadius: 12, background: '#0b1220', color: '#fff', padding: '0 14px', fontSize: 17, width: '100%', boxSizing: 'border-box' },
   helpText: { color: '#8f9bb3', fontWeight: 700 },
   emailConfirmBox: { border: '1px solid rgba(255,255,255,.1)', borderRadius: 14, background: '#0c111d', display: 'grid', gap: 12, gridColumn: '1 / -1', padding: 14 },
   confirmHeader: { alignItems: 'center', display: 'flex', gap: 10, justifyContent: 'space-between' },
   confirmedPill: { background: '#08251c', border: '1px solid #22d28f', borderRadius: 999, color: '#22d28f', padding: '6px 10px', fontSize: 12, fontWeight: 900 },
-  codeRow: { display: 'grid', gridTemplateColumns: 'minmax(130px, 1fr) auto auto', gap: 8 },
+  codeRow: { display: 'grid', gridTemplateColumns: '1fr', gap: 8 },
+  codeInputLabel: { color: '#d9e1f5', display: 'grid', fontSize: 13, fontWeight: 800, gap: 6 },
+  verificationHelp: { color: '#8f9bb3', fontSize: 13, fontWeight: 650, margin: '6px 0 0' },
+  resendButton: { justifySelf: 'start', border: 0, background: 'transparent', color: '#8fa2ff', fontWeight: 800, cursor: 'pointer', padding: 0 },
   codeButton: { minHeight: 52, border: '1px solid #22d28f', borderRadius: 12, background: '#08251c', color: '#22d28f', fontWeight: 900, padding: '0 16px', cursor: 'pointer', whiteSpace: 'nowrap' },
+  codeButtonConfirmed: { background: '#22d28f', color: '#06110e', border: '1px solid #22d28f' },
+  codeButtonError: { background: '#3a0f14', color: '#ff9aa2', border: '1px solid #ff5f76' },
   methodActive: { flex: 1, minHeight: 44, border: '1px solid rgba(82,104,255,.2)', borderRadius: 10, background: '#20212b', color: '#fff', fontWeight: 800, cursor: 'pointer' },
   methodInactive: { flex: 1, minHeight: 44, border: '1px solid transparent', borderRadius: 10, background: 'transparent', color: '#8a90a2', fontWeight: 800, cursor: 'pointer' },
   note: { marginTop: 18, color: '#22d28f', fontWeight: 800 },

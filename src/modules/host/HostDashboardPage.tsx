@@ -10,11 +10,14 @@ import {
   updatePrototypeHostInstantBook,
   renewPrototypeHostListing,
   updatePrototypeHostListingStatus,
+  verifyListingClaims,
   type HostDashboardMode,
+  type ListingClaimCheck,
+  type ListingClaimInput,
   type PlatformHostOverview,
   type PlatformListing,
 } from '../../shared/api/platformApi'
-import { hostInventoryFilterGroups, type VisualFilterSelection } from '../../engines/filters'
+import { hostInventoryFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { divisionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -110,6 +113,7 @@ const copy = {
     excellentMonth: 'أداء ممتاز هذا الشهر',
     steadyMonth: 'أداء مستقر هذا الشهر',
     needsAttentionMonth: 'الأداء يحتاج إلى تحسين',
+    gettingStarted: 'أضف إعلانك الأول لتبدأ',
     viewEarningsReport: 'عرض تقرير الأرباح',
     views: 'ظهور إعلانك',
     bookingsImpact: 'زيادة الحجوزات',
@@ -129,7 +133,7 @@ const copy = {
     opsSupport: 'دعم العمليات',
     clientMessages: 'رسائل العملاء',
     qualityScore: 'جودة الإعلانات',
-    payoutReady: 'جاهز للصرف',
+    payoutReady: 'قيمة الحجوزات المؤكدة',
     responseSla: 'سرعة الرد',
     aiImprove: 'تحسين AI',
     aiImproveCopy: 'أضف صور أقوى، شارة الثقة، وسياسة إلغاء واضحة لرفع التحويل.',
@@ -156,6 +160,20 @@ const copy = {
     insightPanelBody: (count: number) => `${count} من إعلاناتك فيها ليالٍ فارغة بدون سعر خاص — قد تستفيد من توصية تسعير.`,
     insightPanelEmpty: 'كل إعلاناتك تبدو جيدة الآن.',
     insightPanelCta: 'عرض التوصيات',
+    hubTitle: 'مركز المضيف',
+    hubMyListings: 'إعلاناتي',
+    hubAvailability: 'الإتاحة والتسعير',
+    hubBookings: 'الحجوزات',
+    hubPayments: 'المدفوعات',
+    hubPayout: 'إعدادات الصرف',
+    hubInquiries: 'الاستفسارات',
+    checkListing: 'فحص إعلاني (AI)',
+    checking: 'جار الفحص...',
+    claimAllGood: 'لا ملاحظات — الصور تدعم الخيارات المعلنة.',
+    claimAdvisoryNote: 'ملاحظات إرشادية فقط — يمكنك النشر. أضف صورة واضحة أو أزل الخيار.',
+    verdictMissing: 'لا توجد صورة إثبات',
+    verdictNo: 'الصورة لا تُظهر هذا الخيار بوضوح',
+    verdictUnclear: 'الصورة غير واضحة لهذا الخيار',
   },
   en: {
     back: 'Back to landing',
@@ -237,6 +255,7 @@ const copy = {
     excellentMonth: 'Excellent performance this month',
     steadyMonth: 'Steady performance this month',
     needsAttentionMonth: 'Performance needs attention',
+    gettingStarted: 'Add your first listing to get started',
     viewEarningsReport: 'View earnings report',
     views: 'Listing visibility',
     bookingsImpact: 'More bookings',
@@ -256,7 +275,7 @@ const copy = {
     opsSupport: 'Operations support',
     clientMessages: 'Client messages',
     qualityScore: 'Listing quality',
-    payoutReady: 'Payout ready',
+    payoutReady: 'Confirmed booking value',
     responseSla: 'Response SLA',
     aiImprove: 'AI improvements',
     aiImproveCopy: 'Add stronger photos, trust badge, and clear cancellation policy to raise conversion.',
@@ -283,6 +302,20 @@ const copy = {
     insightPanelBody: (count: number) => `${count} of your listings have open nights with no special price set — a pricing insight could help.`,
     insightPanelEmpty: 'All your listings look good right now.',
     insightPanelCta: 'View recommendations',
+    hubTitle: 'Host hub',
+    hubMyListings: 'My Listings',
+    hubAvailability: 'Availability & Pricing',
+    hubBookings: 'Bookings',
+    hubPayments: 'Payments',
+    hubPayout: 'Payout settings',
+    hubInquiries: 'Inquiries',
+    checkListing: 'Check my listing (AI)',
+    checking: 'Checking...',
+    claimAllGood: 'No flags — your photos support the claimed options.',
+    claimAdvisoryNote: 'Advisory only — you can still publish. Add a clear photo or remove the option.',
+    verdictMissing: 'No proof photo',
+    verdictNo: 'Photo does not clearly show this option',
+    verdictUnclear: 'Photo is unclear for this option',
   },
 }
 
@@ -291,6 +324,10 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const isAr = lang === 'ar'
   const isStaysHost = focus === 'stays'
   const providerCopy = getProviderCopy(t, isAr, focus)
+  const providerRoute = (suffix: string) => mode === 'seller' ? `/host/seller/${suffix}` : `/host/${suffix}`
+  const inventoryRoute = focus === 'cars' ? '/host/cars'
+    : focus === 'newConstruction' ? '/host/new-construction'
+      : focus === 'marketplace' ? '/host/marketplace' : '/host/stays'
   const [overview, setOverview] = useState<PlatformHostOverview | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
   const [message, setMessage] = useState('')
@@ -298,6 +335,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const [activeListingId, setActiveListingId] = useState('')
   const [calendarListingId, setCalendarListingId] = useState('')
   const [pricingToolListingId, setPricingToolListingId] = useState('')
+  const [claimChecks, setClaimChecks] = useState<Record<string, ListingClaimCheck[]>>({})
+  const [claimCheckedIds, setClaimCheckedIds] = useState<Set<string>>(() => new Set())
+  const [claimBusyId, setClaimBusyId] = useState('')
   const [editingListingId, setEditingListingId] = useState('')
   const [editTitleAr, setEditTitleAr] = useState('')
   const [editPriceMinor, setEditPriceMinor] = useState('')
@@ -340,6 +380,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     100,
   )
   const healthScore = clamp(Math.round((trustScore + averageQualityScore + responseScore) / 3), 0, 100)
+  // A brand-new host (no listings, no requests) has no real performance yet — "needs attention" reads
+  // as a problem before they've done anything, so show a neutral getting-started state instead.
+  const hasHostActivity = visibleListings.length > 0 || visibleRequests.length > 0
   const isDocumentVerified = overview?.host.idDocumentStatus === 'APPROVED'
   const verificationStatusText = isDocumentVerified
     ? providerCopy.verifiedLabel
@@ -347,9 +390,16 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
       ? t.pendingVerification
       : t.notVerifiedYet
   const dashboardCurrency = visibleListings[0]?.currency || overview?.requests[0]?.currency || 'SYP'
-  const activeListingsLabel = isAr
-    ? `${visibleListings.length} ${providerCopy.activeUnit}`
-    : `${visibleListings.length} ${providerCopy.activeUnit}`
+  const confirmedValueByCurrency = visibleRequests
+    .filter((request) => request.status === 'CONFIRMED')
+    .reduce<Record<string, number>>((totals, request) => {
+      totals[request.currency] = (totals[request.currency] || 0) + request.amountMinor
+      return totals
+    }, {})
+  const confirmedValueText = Object.entries(confirmedValueByCurrency)
+    .map(([currency, amount]) => moneyText(amount, currency, lang))
+    .join(' · ') || moneyText(0, dashboardCurrency, lang)
+  const activeListingsLabel = `${approvedListingCount} ${providerCopy.activeUnit}`
 
   const hostDocumentsCopy = getHostDocumentsCopy(isAr, focus)
     || (isAr
@@ -529,6 +579,22 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     }
   }
 
+  async function runClaimCheck(listing: PlatformListing) {
+    const claims = claimInputsForListing(listing)
+    setClaimBusyId(listing.id)
+    setMessage('')
+    try {
+      const checks = await verifyListingClaims(listing.id, claims, mode)
+      setClaimChecks((current) => ({ ...current, [listing.id]: checks }))
+      setClaimCheckedIds((current) => new Set(current).add(listing.id))
+    } catch (error) {
+      // Advisory feature — a failure must never disrupt the host. Surface a soft note only.
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setClaimBusyId('')
+    }
+  }
+
   async function toggleInstantBook(listingId: string, enabled: boolean) {
     setStatus('saving')
     setActiveListingId(listingId)
@@ -551,7 +617,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
       <section style={styles.topBar}>
         <div style={styles.topIcons}>
           <button aria-label={isAr ? 'التنبيهات' : 'Notifications'} style={styles.iconCircle} onClick={() => (window.location.hash = '/immocontact')}>⌁</button>
-          <button aria-label={isAr ? 'الإعدادات' : 'Settings'} style={styles.iconCircle} onClick={() => (window.location.hash = '/status')}>⚙</button>
+          <button aria-label={isAr ? 'الإعدادات' : 'Settings'} style={styles.iconCircle} onClick={() => (window.location.hash = '/settings')}>⚙</button>
         </div>
         <div style={styles.hostIdentity}>
           <strong>{providerCopy.dashboardTitle}</strong>
@@ -560,15 +626,34 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         <div style={styles.avatar}>{(overview?.host.displayName || 'A').slice(0, 1)}</div>
       </section>
 
+      <section style={styles.hostHub} aria-label={t.hubTitle}>
+        <span style={styles.hostHubTitle}>{t.hubTitle}</span>
+        <div style={styles.hostHubGrid}>
+          {([
+            [t.hubMyListings, inventoryRoute, '▤'],
+            [t.hubAvailability, inventoryRoute, '▦'],
+            [t.hubBookings, providerRoute('bookings'), '▧'],
+            [t.hubPayments, providerRoute('earnings'), '▰'],
+            [t.hubPayout, providerRoute('payout'), '⎘'],
+            [t.hubInquiries, providerRoute('inquiries'), '✉'],
+          ] as const).map(([label, route, icon]) => (
+            <button key={label} style={styles.hostHubLink} onClick={() => (window.location.hash = route)}>
+              <span style={styles.hostHubIcon} aria-hidden="true">{icon}</span>
+              <strong>{label}</strong>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section style={styles.providerHealth}>
         <article style={styles.healthHero}>
           <span>SYBNB · {verificationStatusText}</span>
-          <strong>{trustScore}%</strong>
+          <strong>{isDocumentVerified ? '✓' : overview?.host.idDocumentStatus === 'PENDING_REVIEW' ? '◷' : '—'}</strong>
         </article>
         <div style={styles.hostMetric}>
           <span>{t.payoutReady}</span>
-          <strong>{moneyText(overview?.totals.revenueMinor || 0, dashboardCurrency, lang)}</strong>
-          <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/earnings')}>
+          <strong>{confirmedValueText}</strong>
+          <button style={styles.earningsLink} onClick={() => (window.location.hash = providerRoute('earnings'))}>
             {t.viewEarningsReport}
           </button>
         </div>
@@ -579,9 +664,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         </div>
         <div style={styles.healthScore}>
           <span>{t.healthDegree}</span>
-          <strong>{healthScore}</strong>
-          <small>/100</small>
-          <em>{healthScore >= 80 ? t.excellentMonth : healthScore >= 50 ? t.steadyMonth : t.needsAttentionMonth}</em>
+          <strong>{hasHostActivity ? healthScore : '—'}</strong>
+          <small>{hasHostActivity ? '/100' : ''}</small>
+          <em>{!hasHostActivity ? t.gettingStarted : healthScore >= 80 ? t.excellentMonth : healthScore >= 50 ? t.steadyMonth : t.needsAttentionMonth}</em>
         </div>
       </section>
 
@@ -597,7 +682,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
             ? t.insightPanelBody(overview!.insightSignal!.listingsNeedingAttention)
             : t.insightPanelEmpty}
         </p>
-        <button style={styles.goldButton} onClick={() => (window.location.hash = '/host/insights')}>
+        <button style={styles.goldButton} onClick={() => (window.location.hash = providerRoute('insights'))}>
           {t.insightPanelCta}
         </button>
       </section>
@@ -607,11 +692,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <h2>{t.activeListings}</h2>
           <small>{providerCopy.subtitle}</small>
           <span>{activeListingsLabel}</span>
-          {mode === 'host' && (
-            <button style={styles.primaryButton} onClick={() => (window.location.hash = '/sell/listing-wizard')}>
-              + {t.createNewListing}
-            </button>
-          )}
+          <button style={styles.primaryButton} onClick={() => (window.location.hash = '/sell/listing-wizard')}>
+            + {t.createNewListing}
+          </button>
         </div>
         <div style={styles.hostTable}>
           <div style={styles.hostTableHead}>
@@ -637,7 +720,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                 <span style={{ ...styles.statusPill, ...statusTone }}>{statusLabel}</span>
                 <span>{listingViewCount(listing, visibleRequests)}</span>
                 <span>{listingInquiryCount(listing, visibleRequests)}</span>
-                <button style={styles.editButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>✎</button>
+                <button style={styles.editButton} onClick={() => startEditListing(listing)} aria-label={t.edit}>✎</button>
               </article>
             )
           })}
@@ -654,12 +737,15 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           onAddFiles={addHostDocumentFiles}
           title={hostDocumentsCopy.title}
         />
+        {/* This dashboard panel is a preparation checklist only — it does not transmit files. Documents
+            are actually uploaded and submitted to admin as part of the listing flow, so route the host
+            there instead of falsely showing "sent". (Was: onClick set a local 'sent' flag that moved no
+            data.) */}
         <button
-          disabled={!hostDocumentFiles.length}
-          style={hostDocumentsSent ? styles.primaryButton : styles.secondaryButton}
-          onClick={() => setHostDocumentsSent(true)}
+          style={styles.secondaryButton}
+          onClick={() => (window.location.hash = '/sell/listing-wizard')}
         >
-          {hostDocumentsSent ? hostDocumentsCopy.sent : hostDocumentsCopy.send}
+          {hostDocumentsCopy.cta}
         </button>
       </section>
 
@@ -808,6 +894,39 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                   </button>
                 )}
               </div>
+              {claimSlotsForListing(listing).length > 0 && (
+                <div style={styles.claimCheckPanel}>
+                  <button
+                    style={styles.secondaryButton}
+                    disabled={claimBusyId === listing.id}
+                    onClick={() => void runClaimCheck(listing)}
+                  >
+                    {claimBusyId === listing.id ? t.checking : `🔎 ${t.checkListing}`}
+                  </button>
+                  {claimCheckedIds.has(listing.id) && (() => {
+                    const flags = (claimChecks[listing.id] || []).filter((check) => check.verdict !== 'yes')
+                    if (flags.length === 0) {
+                      return <p style={styles.claimAllGood}>{t.claimAllGood}</p>
+                    }
+                    return (
+                      <div style={styles.claimFlags}>
+                        <span style={styles.claimAdvisory}>{t.claimAdvisoryNote}</span>
+                        {flags.map((flag) => {
+                          const amenity = isAr ? flag.amenityAr : flag.amenityEn
+                          const verdictLabel =
+                            flag.verdict === 'missing' ? t.verdictMissing : flag.verdict === 'no' ? t.verdictNo : t.verdictUnclear
+                          return (
+                            <div key={flag.slotId} style={styles.claimFlagRow}>
+                              🚩 <b>‘{amenity}’</b> — {verdictLabel}
+                              {flag.reason ? <small style={styles.claimReason}> · {flag.reason}</small> : null}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
               {calendarListingId === listing.id && (
                 <HostAvailabilityCalendar
                   lang={lang}
@@ -911,11 +1030,14 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
 
       <section style={styles.hostQuickLinks}>
         {[
-          [t.paymentState, '/finance', '▰'],
-          [t.profitLog, '/finance', '↗'],
+          // These must point at HOST pages — /finance and /operations are ADMIN-only (a host clicking
+          // them hit an access-denied screen). A host's money view is /host/earnings; payouts are
+          // /host/payout; support is the host inbox.
+          [t.paymentState, providerRoute('earnings'), '▰'],
+          [t.profitLog, providerRoute('earnings'), '↗'],
           [t.trustCenter, '/trust-center', '♢'],
-          [t.opsSupport, '/operations', '?'],
-          [t.clientMessages, '/host/inquiries', '✉'],
+          [t.opsSupport, providerRoute('inquiries'), '?'],
+          [t.clientMessages, providerRoute('inquiries'), '✉'],
         ].map(([label, route, icon]) => (
           <button key={label} style={styles.quickLink} onClick={() => (window.location.hash = String(route))}>
             <strong>{label}</strong>
@@ -951,6 +1073,32 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
 
 function listingTitle(listing: Pick<PlatformListing, 'id' | 'division' | 'titleAr' | 'titleEn'>, lang: Lang) {
   return listingTitleText(listing, lang)
+}
+
+const OFFER_PROOF_PREFIX = 'offerProof:'
+
+// Look up the bilingual label for a claimed offer-proof amenity slot (offerProof:<optionId>) from
+// the same seller filter catalog the wizard uses — no hard-coded/duplicated amenity list.
+function offerProofLabel(slotId: string): { ar: string; en: string } {
+  const optionId = slotId.startsWith(OFFER_PROOF_PREFIX) ? slotId.slice(OFFER_PROOF_PREFIX.length) : slotId
+  for (const group of sellerPropertyFilterGroups) {
+    const option = group.options.find((item) => item.id === optionId)
+    if (option) return option.label
+  }
+  return { ar: optionId, en: optionId }
+}
+
+function claimSlotsForListing(listing: PlatformListing): string[] {
+  const slots = (listing.metadata as Record<string, unknown> | undefined)?.selectedOfferProofSlots
+  if (!Array.isArray(slots)) return []
+  return slots.filter((slot): slot is string => typeof slot === 'string' && slot.startsWith(OFFER_PROOF_PREFIX))
+}
+
+function claimInputsForListing(listing: PlatformListing): ListingClaimInput[] {
+  return claimSlotsForListing(listing).map((slotId) => {
+    const label = offerProofLabel(slotId)
+    return { slotId, labelAr: label.ar, labelEn: label.en }
+  })
 }
 
 function matchesProviderFocus(listing: Pick<PlatformListing, 'division'>, focus?: ProviderFocus) {
@@ -1093,17 +1241,16 @@ function listingQualityScore(listing: PlatformListing) {
 
 function listingViewCount(listing: PlatformListing, requests: PlatformHostOverview['requests']) {
   const stored = metadataNumber(listing.metadata, ['views', 'viewCount', 'listingViews'])
-  if (stored) return stored
-  const mediaCount = Array.isArray(listing.media) ? listing.media.length : 0
-  const requestCount = requests.filter((request) => request.listingId === listing.id).length
-  const approvalBoost = listing.status.toUpperCase() === 'APPROVED' ? 1 : 0
-  return requestCount * 35 + mediaCount * 12 + approvalBoost * 25
+  // There is no view-event table yet. Never manufacture a view count from photos/bookings.
+  return stored || '—'
 }
 
 function listingInquiryCount(listing: PlatformListing, requests: PlatformHostOverview['requests']) {
   const stored = metadataNumber(listing.metadata, ['inquiries', 'inquiryCount'])
   if (stored) return stored
-  return requests.filter((request) => request.listingId === listing.id).length
+  if (typeof listing.inquiryCount === 'number') return listing.inquiryCount
+  // Older API fallback for STAYS: booking requests are genuine customer contacts.
+  return listing.division === 'STAYS' ? requests.filter((request) => request.listingId === listing.id).length : 0
 }
 
 function metadataNumber(metadata: Record<string, unknown>, keys: string[]) {
@@ -1166,6 +1313,11 @@ const styles: Record<string, CSSProperties> = {
   statusGold: { background: 'rgba(229,184,11,.13)', color: '#e5b80b', border: '1px solid rgba(229,184,11,.42)' },
   statusRed: { background: 'rgba(255,78,119,.13)', color: '#ff4e77', border: '1px solid rgba(255,78,119,.42)' },
   editButton: { width: 38, height: 38, borderRadius: 8, border: '1px solid rgba(82,108,255,.5)', background: 'rgba(82,108,255,.12)', color: '#526cff', fontWeight: 950 },
+  hostHub: { border: '1px solid #242735', borderRadius: 8, background: '#111118', padding: 18, display: 'grid', gap: 14 },
+  hostHubTitle: { color: '#d5a915', fontWeight: 950, fontSize: 13, letterSpacing: 1 },
+  hostHubGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' },
+  hostHubLink: { border: '1px solid #1e1e2a', borderRadius: 10, background: '#0c1220', color: '#fff', minHeight: 92, padding: 14, display: 'grid', gap: 8, alignContent: 'center', justifyItems: 'start', fontWeight: 900, cursor: 'pointer' },
+  hostHubIcon: { width: 40, height: 40, borderRadius: 10, background: 'rgba(82,108,255,.14)', color: '#8ea0ff', display: 'grid', placeItems: 'center', fontSize: 20 },
   hostQuickLinks: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' },
   quickLink: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', color: '#fff', minHeight: 86, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 950 },
   hostFinalStamp: { justifySelf: 'start', border: '1px solid rgba(229,184,11,.65)', borderRadius: 999, background: 'rgba(229,184,11,.12)', color: '#e5b80b', padding: '8px 12px', fontSize: 11, fontWeight: 950 },
@@ -1180,4 +1332,10 @@ const styles: Record<string, CSSProperties> = {
   editForm: { display: 'grid', gap: 10 },
   info: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#9aa6ba' },
   empty: { color: '#9aa6ba', margin: 0 },
+  claimCheckPanel: { display: 'grid', gap: 10, marginTop: 4 },
+  claimAllGood: { margin: 0, color: '#20d29b', fontWeight: 800, fontSize: 13 },
+  claimFlags: { border: '1px solid rgba(229,184,11,.5)', borderRadius: 8, background: 'rgba(229,184,11,.08)', padding: 12, display: 'grid', gap: 8 },
+  claimAdvisory: { color: '#f7d45f', fontSize: 12, fontWeight: 800, lineHeight: 1.5 },
+  claimFlagRow: { color: '#ffe6a3', fontSize: 13, fontWeight: 700, lineHeight: 1.5 },
+  claimReason: { color: '#c9b26a', fontWeight: 600 },
 }

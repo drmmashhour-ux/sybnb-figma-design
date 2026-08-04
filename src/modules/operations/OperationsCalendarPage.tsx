@@ -28,11 +28,12 @@ type OperationEvent = {
 
 const copy = {
   ar: {
-    eyebrow: 'Guesty gap #1',
+    eyebrow: 'مركز العمليات',
     title: 'تقويم عمليات SYBNB',
     body: 'عين واحدة على العمل اليومي: الحجوزات، المدفوعات، المراجعات، الرحلات، الصيانة، والرسائل.',
     refresh: 'تحديث',
     loading: 'جار التحميل',
+    error: 'تعذر تحميل بيانات العمليات. حاول مرة أخرى.',
     calendar: 'التقويم',
     tasks: 'قائمة المهام',
     board: 'لوحة المهام',
@@ -73,11 +74,12 @@ const copy = {
     },
   },
   en: {
-    eyebrow: 'Guesty gap #1',
+    eyebrow: 'Operations center',
     title: 'SYBNB Operations Calendar',
     body: 'One eye on daily operations: bookings, payments, reviews, rides, maintenance, and messages.',
     refresh: 'Refresh',
     loading: 'Loading',
+    error: 'Could not load operations data. Try again.',
     calendar: 'Calendar',
     tasks: 'Task board',
     board: 'Task board',
@@ -134,6 +136,10 @@ export function OperationsCalendarPage({ lang }: Props) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [selectedDay, setSelectedDay] = useState(new Date().getDate())
   const [selectedTaskId, setSelectedTaskId] = useState('')
+  const calendarDate = new Date()
+  const calendarYear = calendarDate.getFullYear()
+  const calendarMonth = calendarDate.getMonth()
+  const calendarLabel = calendarDate.toLocaleDateString(lang === 'ar' ? 'ar-SY' : 'en-US', { month: 'long', year: 'numeric' })
 
   useEffect(() => {
     void loadOperations()
@@ -159,8 +165,11 @@ export function OperationsCalendarPage({ lang }: Props) {
     }
   }
 
-  const events = useMemo(() => buildOperationEvents(queue, metrics, auditLog, lang), [auditLog, lang, metrics, queue])
-  const days = useMemo(() => buildMonthDays(events), [events])
+  const events = useMemo(
+    () => buildOperationEvents(queue, metrics, auditLog, lang),
+    [auditLog, lang, metrics, queue],
+  )
+  const days = useMemo(() => buildMonthDays(events, calendarYear, calendarMonth), [calendarMonth, calendarYear, events])
   const selectedEvents = events.filter((event) => event.day === selectedDay)
   const selectedTask = events.find((event) => event.id === selectedTaskId) || selectedEvents[0] || events[0]
   const totals = [
@@ -181,20 +190,27 @@ export function OperationsCalendarPage({ lang }: Props) {
         <button onClick={() => void loadOperations()}>{status === 'loading' ? t.loading : t.refresh}</button>
       </section>
 
-      <section className="operations-metrics">
+      {status === 'error' ? (
+        <section className="operations-task-card" role="alert">
+          <strong>{t.error}</strong>
+          <button onClick={() => void loadOperations()}>{t.refresh}</button>
+        </section>
+      ) : null}
+
+      {status !== 'error' ? <section className="operations-metrics">
         {totals.map((item) => (
           <article className={item.tone} key={item.label}>
             <span>{item.label}</span>
             <strong>{item.value}</strong>
           </article>
         ))}
-      </section>
+      </section> : null}
 
-      <section className="operations-layout">
+      {status !== 'error' ? <><section className="operations-layout">
         <div className="operations-calendar-card">
           <div className="operations-card-head">
             <h2>{t.calendar}</h2>
-            <span>July 2026</span>
+            <span>{calendarLabel}</span>
           </div>
           <div className="operations-calendar-grid">
             {days.map((day) => (
@@ -234,7 +250,7 @@ export function OperationsCalendarPage({ lang }: Props) {
       <section className="operations-board-shell">
         <div className="operations-card-head">
           <h2>{t.board}</h2>
-          <span>Guesty-style</span>
+          <span>{t.automation}</span>
         </div>
         <div className="operations-board-layout">
           <div className="operations-kanban">
@@ -277,7 +293,7 @@ export function OperationsCalendarPage({ lang }: Props) {
                 <TaskFact label={t.assignee} value={selectedTask.assignee} />
                 <TaskFact label={t.priority} value={t.priorityLabels[selectedTask.priority]} />
                 <TaskFact label={t.related} value={selectedTask.type} />
-                <TaskFact label={t.due} value={`July ${selectedTask.day}, 2026`} />
+                <TaskFact label={t.due} value={new Date(calendarYear, calendarMonth, selectedTask.day).toLocaleDateString(lang === 'ar' ? 'ar-SY' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' })} />
                 {selectedTask.href ? <button onClick={() => openEvent(selectedTask.href as string)}>{t.open}</button> : null}
               </>
             ) : <p>{t.empty}</p>}
@@ -317,7 +333,7 @@ export function OperationsCalendarPage({ lang }: Props) {
             </section>
           ))}
         </div>
-      </section>
+      </section></> : null}
     </main>
   )
 }
@@ -344,8 +360,9 @@ function TaskFact({ label, value }: { label: string; value: string }) {
   )
 }
 
-function buildMonthDays(events: OperationEvent[]) {
-  return Array.from({ length: 31 }, (_, index) => {
+function buildMonthDays(events: OperationEvent[], year: number, month: number) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  return Array.from({ length: daysInMonth }, (_, index) => {
     const date = index + 1
     return { date, events: events.filter((event) => event.day === date) }
   })
@@ -428,31 +445,21 @@ function buildOperationEvents(
       priority: 'low',
     })
   })
-  events.push(
-    {
-      id: 'maintenance-cleaning',
-      day: clampDay(today + 1),
-      type: 'maintenance',
-      title: lang === 'ar' ? 'تنظيف بعد خروج ضيف' : 'Post-checkout cleaning',
-      meta: lang === 'ar' ? 'مهمة تشغيلية من نوع Guesty' : 'Guesty-style operations task',
-      status: 'planned',
-      stage: 'progress',
-      assignee: lang === 'ar' ? 'فريق التنظيف' : 'Cleaning team',
-      priority: 'medium',
-    },
-    {
+  const rideCount = totalRecord(metrics?.ridesByStatus)
+  if (rideCount > 0) {
+    events.push({
       id: 'ride-dispatch',
       day: clampDay(today),
       type: 'ride',
       title: lang === 'ar' ? 'متابعة تعيين سائق' : 'Follow driver assignment',
-      meta: `${totalRecord(metrics?.ridesByStatus)} ${lang === 'ar' ? 'رحلات' : 'rides'}`,
+      meta: `${rideCount} ${lang === 'ar' ? 'رحلات' : 'rides'}`,
       status: 'ready',
       stage: 'assigned',
       assignee: lang === 'ar' ? 'مشرف السائقين' : 'Driver dispatcher',
       priority: 'medium',
       href: '/driver',
-    },
-  )
+    })
+  }
   return events
 }
 

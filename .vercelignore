@@ -1,0 +1,25 @@
+# Vercel CLI uploads local files to the build and does NOT honor .gitignore.
+# The local .env sets VITE_API_BASE_URL=http://127.0.0.1:3051 for local dev; if it
+# reaches the Vercel build, Vite bakes that localhost URL into the production bundle
+# and the deployed frontend calls the developer's laptop instead of the real API.
+# Keep every real env file out of the build so production falls back to same-origin
+# (VITE_API_BASE_URL="" -> requests go to sybnb.app/api). Examples are safe to keep.
+.env
+.env.*
+!.env.example
+!.env.production.example
+!.env.test.example
+
+# Not needed in the build (Vercel installs deps + builds fresh).
+.vercel
+dist
+node_modules
+
+# Local-only artifacts / diagnostics that must never ship.
+prod-diagnose.json
+prod-vs-schema.sql
+server/uploads
+test-results
+playwright-report
+blob-report
+*.log

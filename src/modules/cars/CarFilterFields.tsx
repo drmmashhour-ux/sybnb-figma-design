@@ -103,13 +103,13 @@ export function CarFilterFields({
       </label>
       <div style={styles.rangeRow}>
         <span style={styles.rangeLabel}>{t.year}</span>
-        <input dir="ltr" inputMode="numeric" onChange={(event) => set({ minYear: event.target.value })} placeholder={t.from} style={styles.rangeInput} value={value.minYear} />
-        <input dir="ltr" inputMode="numeric" onChange={(event) => set({ maxYear: event.target.value })} placeholder={t.to} style={styles.rangeInput} value={value.maxYear} />
+        <input aria-label={`${t.year} — ${t.from}`} dir="ltr" inputMode="numeric" onChange={(event) => set({ minYear: event.target.value })} placeholder={t.from} style={styles.rangeInput} value={value.minYear} />
+        <input aria-label={`${t.year} — ${t.to}`} dir="ltr" inputMode="numeric" onChange={(event) => set({ maxYear: event.target.value })} placeholder={t.to} style={styles.rangeInput} value={value.maxYear} />
       </div>
       <div style={styles.rangeRow}>
         <span style={styles.rangeLabel}>{t.mileage}</span>
-        <input dir="ltr" inputMode="numeric" onChange={(event) => set({ minMileageKm: event.target.value })} placeholder={t.from} style={styles.rangeInput} value={value.minMileageKm} />
-        <input dir="ltr" inputMode="numeric" onChange={(event) => set({ maxMileageKm: event.target.value })} placeholder={t.to} style={styles.rangeInput} value={value.maxMileageKm} />
+        <input aria-label={`${t.mileage} — ${t.from}`} dir="ltr" inputMode="numeric" onChange={(event) => set({ minMileageKm: event.target.value })} placeholder={t.from} style={styles.rangeInput} value={value.minMileageKm} />
+        <input aria-label={`${t.mileage} — ${t.to}`} dir="ltr" inputMode="numeric" onChange={(event) => set({ maxMileageKm: event.target.value })} placeholder={t.to} style={styles.rangeInput} value={value.maxMileageKm} />
       </div>
       <div style={styles.radiusBlock}>
         <span style={styles.rangeLabel}>{t.radiusTitle}</span>

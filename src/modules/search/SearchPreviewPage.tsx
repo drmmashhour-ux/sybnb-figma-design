@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListingsPage, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
+import { getGovernorate, getCity } from '../../engines/search/syriaData'
 import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { SearchStateCard } from './SearchStates'
+import { ResultsMap } from './ResultsMap'
 import { UnifiedSearchBar } from './UnifiedSearchBar'
 import type { SearchDivision, UnifiedSearchValue } from './UnifiedSearchBar'
 
@@ -146,9 +148,18 @@ const DIVISION_IMAGES: Record<string, string> = {
 export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'general' }: SearchPreviewPageProps) {
   const t = T[lang]
   const [effectiveInitialDivision, setEffectiveInitialDivision] = useState<SearchDivision>(() => readInitialSearchDivision(initialDivision))
+  // One-time handoff from the landing stays search bar. Reading it also seeds the search-bar
+  // draft (so its inputs reflect the choice) and clears the key so it never re-applies later.
+  const [seededValue] = useState<UnifiedSearchValue | null>(() => {
+    const seed = readStaySearchHandoff()
+    return seed ? { ...buildDefaultStayValue(), ...seed } : null
+  })
+  const seedAppliedRef = useRef(false)
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
   const [listings, setListings] = useState<PlatformListing[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const isStaysEntry = entry === 'stays'
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
@@ -159,7 +170,15 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   }, [initialDivision])
 
   useEffect(() => {
+    // Apply the landing handoff once so results are genuinely pre-filtered; otherwise fall
+    // back to the existing default search behavior.
+    if (seededValue && !seedAppliedRef.current) {
+      seedAppliedRef.current = true
+      void runLiveSearch(seededValue)
+      return
+    }
     void runLiveSearch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveInitialDivision])
 
   async function runLiveSearch(value?: UnifiedSearchValue) {
@@ -167,16 +186,42 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     setLastSearch(value || null)
 
     try {
-      const results = await fetchApprovedListings(
+      const { listings: results, nextCursor: cursor } = await fetchApprovedListingsPage(
         toApiDivision(value?.division || effectiveInitialDivision),
         value ? toListingSearchFilters(value) : {},
       )
       const visibleResults = isStaysEntry ? results.filter((listing) => !isSampleListing(listing)) : results
       setListings(visibleResults)
+      setNextCursor(cursor)
       setState('empty')
     } catch {
       setListings([])
+      setNextCursor(null)
       setState('error')
+    }
+  }
+
+  // "Load more" — keyset pagination: fetch the next page from the server cursor and append, so guests
+  // can reach every matching listing (not just the first page).
+  async function loadMoreResults() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const { listings: more, nextCursor: cursor } = await fetchApprovedListingsPage(
+        toApiDivision(lastSearch?.division || effectiveInitialDivision),
+        lastSearch ? toListingSearchFilters(lastSearch) : {},
+        nextCursor,
+      )
+      const visibleMore = isStaysEntry ? more.filter((listing) => !isSampleListing(listing)) : more
+      setListings((current) => {
+        const seen = new Set(current.map((l) => l.id))
+        return [...current, ...visibleMore.filter((l) => !seen.has(l.id))]
+      })
+      setNextCursor(cursor)
+    } catch {
+      /* keep what we have; the button stays so the guest can retry */
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -186,6 +231,12 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     }
     window.location.hash = `/listing/${listing.id}`
   }
+
+  const heroCaption = effectiveInitialDivision === 'newConstruction'
+    ? (lang === 'ar' ? 'مشاريع جديدة في سوريا' : 'New construction in Syria')
+    : effectiveInitialDivision === 'cars'
+      ? (lang === 'ar' ? 'مركبات في سوريا' : 'Vehicles in Syria')
+      : (lang === 'ar' ? 'إقامات في سوريا' : 'Stays in Syria')
 
   return (
     <main dir={lang === 'ar' ? 'rtl' : 'ltr'} className="search-experience">
@@ -203,16 +254,14 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         </button>
       </section>
 
-      <section className="search-hero">
-        <div>
-          <p>{divisionCopy?.ready || (isStaysEntry ? t.staysReady : t.ready)}</p>
-          <h1>{divisionCopy?.title || (isStaysEntry ? t.staysTitle : lang === 'ar' ? 'محرك بحث SYBNB' : 'SYBNB Search Engine')}</h1>
-          <span>{divisionCopy?.body || (isStaysEntry ? t.staysBody : t.body)}</span>
-        </div>
-        <div className="search-hero-metrics" aria-label={lang === 'ar' ? 'حالة البحث' : 'Search status'}>
-          <strong>{listings.length}</strong>
-          <small>{isSampleMode ? t.sampleResults : t.liveResults}</small>
-        </div>
+      <section style={flowStyles.heroPhoto} aria-label={lang === 'ar' ? 'سوريا' : 'Syria'}>
+        <img
+          src="/assets/filter-photos/popular/old-city.webp"
+          alt={lang === 'ar' ? 'سوريا' : 'Syria'}
+          style={flowStyles.heroPhotoImg}
+          loading="eager"
+        />
+        <span style={flowStyles.heroPhotoCaption}>{heroCaption}</span>
       </section>
 
       <UnifiedSearchBar
@@ -222,9 +271,19 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         onSearch={(value) => void runLiveSearch(value)}
       />
 
-      {(state !== 'empty' || listings.length === 0) && (
+      {/* Only surface the loading / error card. The "no results" case is already shown in the
+          results section below ("Matched results: 0" + copy), so a duplicate empty card here just
+          stacked two empty states around the map. */}
+      {state !== 'empty' && (
         <SearchStateCard lang={lang} state={state} onReset={() => setLastSearch(null)} />
       )}
+
+      <ResultsMap
+        listings={listings}
+        lang={lang}
+        governorate={lastSearch?.governorate}
+        placeQuery={staySearchPlaceQuery(lastSearch)}
+      />
 
       <section className="search-results">
         <div className="search-results-head">
@@ -232,12 +291,26 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <strong>{listings.length}</strong>
         </div>
         {listings.length ? (
+          <>
           <div className="search-result-grid">
             {listings.map((listing) => (
-              <article key={listing.id} className="search-result-card">
+              <article
+                key={listing.id}
+                className="search-result-card"
+                role="button"
+                tabIndex={0}
+                style={{ cursor: 'pointer' }}
+                onClick={() => openListing(listing)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openListing(listing) } }}
+              >
                 <img src={listingImage(listing)} alt="" loading="lazy" />
                 <div className="search-result-body">
-                  <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                  <div className="search-result-toprow">
+                    <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                    {(listing.reviewCount ?? 0) > 0 && (
+                      <span className="search-result-rating">★ {listing.reviewAverage} · {listing.reviewCount}</span>
+                    )}
+                  </div>
                   <h2>{listingTitleText(listing, lang)}</h2>
                   <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
                   <div className="search-result-meta">
@@ -250,7 +323,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                   <div className="search-result-actions">
                     <button
                       type="button"
-                      onClick={() => openListing(listing)}
+                      onClick={(e) => { e.stopPropagation(); openListing(listing) }}
                     >
                       {divisionCopy?.action || t.book}
                     </button>
@@ -259,6 +332,17 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               </article>
             ))}
           </div>
+          {nextCursor && (
+            <button
+              type="button"
+              onClick={() => void loadMoreResults()}
+              disabled={loadingMore}
+              style={{ justifySelf: 'center', marginTop: 16, minHeight: 48, borderRadius: 12, border: '1px solid #2a3350', background: '#141a28', color: '#dce3ff', fontWeight: 900, padding: '0 24px', cursor: loadingMore ? 'default' : 'pointer' }}
+            >
+              {loadingMore ? '…' : lang === 'ar' ? 'عرض المزيد' : 'Load more'}
+            </button>
+          )}
+          </>
         ) : (
           <p className="search-empty-copy">{t.pendingOnly}</p>
         )}
@@ -275,6 +359,18 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
 const flowStyles = {
   nav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
   arrow: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
+  heroPhoto: { position: 'relative', margin: '16px 0', borderRadius: 20, overflow: 'hidden', border: '1px solid #2d3650' },
+  heroPhotoImg: { display: 'block', width: '100%', height: 240, objectFit: 'cover' },
+  heroPhotoCaption: {
+    position: 'absolute',
+    insetInlineStart: 20,
+    bottom: 18,
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: 900,
+    letterSpacing: '.2px',
+    textShadow: '0 2px 18px rgba(0,0,0,.6)',
+  },
 } as const
 
 function listingImage(listing: PlatformListing) {
@@ -288,8 +384,10 @@ function listingImage(listing: PlatformListing) {
 
 function StayFeeDisclosure({ listing, lang }: { listing: PlatformListing; lang: Lang }) {
   const cleaningFee = metadataMinor(listing.metadata, 'cleaningFeeMinor')
-  const taxFee = metadataMinor(listing.metadata, 'taxFeeMinor')
   const basePrice = listing.currency === 'SYP' ? sypMinorToRoundedUsdMinor(listing.priceMinor) : listing.priceMinor
+  // Tax is a rate (metadata.taxRate, e.g. 0.13) applied to the nightly base; falls back to a legacy flat amount.
+  const taxRate = Number((listing.metadata as Record<string, unknown> | null)?.taxRate) || 0
+  const taxFee = taxRate > 0 ? Math.round(basePrice * taxRate) : metadataMinor(listing.metadata, 'taxFeeMinor')
   const total = basePrice + cleaningFee + taxFee
   const hasExtraFees = cleaningFee > 0 || taxFee > 0
 
@@ -392,6 +490,113 @@ function readInitialSearchDivision(fallback: SearchDivision) {
     return raw
   }
   return fallback
+}
+
+// Base stays value used only when merging the landing handoff. Governorate/city start EMPTY
+// (unlike the search-bar defaults) so an "All destinations" handoff is not silently narrowed.
+function buildDefaultStayValue(): UnifiedSearchValue {
+  return {
+    division: 'stays',
+    governorate: '',
+    city: '',
+    area: '',
+    customPlaceName: '',
+    checkIn: '',
+    checkOut: '',
+    guests: 2,
+    bedroomsCount: 0,
+    bathrooms: 0,
+    keyword: '',
+    minPrice: '',
+    maxPrice: '',
+    bedrooms: 'any',
+    propertyType: 'any',
+    furnishing: 'any',
+    carBrand: '',
+    carYear: '',
+    carFuel: 'any',
+    carTransmission: 'any',
+    marketCategory: 'any',
+    condition: 'any',
+    sort: 'newest',
+    priceBand: 'any',
+    roomType: 'any',
+    bedType: 'any',
+    carBody: 'any',
+    amenities: [],
+    trust: [],
+    popular: [],
+    views: [],
+    access: [],
+    meals: [],
+    payments: [],
+  }
+}
+
+// Build the place text for map geocoding from the search value — most specific first
+// (area/street → city → governorate → Syria), e.g. "مدحت باشا, دمشق, سوريا". ARABIC names are used
+// deliberately: OpenStreetMap/Nominatim resolves Syrian streets and neighbourhoods far better in
+// Arabic than English (English variants of these places usually return no result). The result is
+// just coordinates, so the query language does not affect the UI. A leading "شارع " (Street) is
+// stripped because it often blocks a match (e.g. مدحت باشا is tagged as a souk in OSM). Consecutive
+// duplicates are dropped (Damascus city == Damascus governorate).
+function staySearchPlaceQuery(value: UnifiedSearchValue | null): string {
+  if (!value) return ''
+  const gov = getGovernorate(value.governorate)
+  const city = value.city ? getCity(value.governorate, value.city) : undefined
+  const area = value.area ? city?.areas.find((a) => a.key === value.area) : undefined
+  const areaName = area?.ar.replace(/^شارع\s+/, '')
+  const parts = [areaName, city?.ar, gov?.ar, 'سوريا'].filter((p): p is string => Boolean(p))
+  return parts.filter((p, i) => p !== parts[i - 1]).join(', ')
+}
+
+// Read (once) the landing → search handoff written to localStorage['sybnb_v6_stay_search'],
+// clear it so later visits use the default flow, and seed the search-bar draft so its inputs
+// reflect the guest's choice. Returns the recognized fields as a partial search value.
+function readStaySearchHandoff(): Partial<UnifiedSearchValue> | null {
+  if (typeof window === 'undefined') return null
+  let raw: string | null = null
+  try {
+    raw = window.localStorage.getItem('sybnb_v6_stay_search')
+  } catch {
+    return null
+  }
+  if (!raw) return null
+  try {
+    window.localStorage.removeItem('sybnb_v6_stay_search')
+  } catch {
+    /* ignore */
+  }
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+
+  const seed: Partial<UnifiedSearchValue> = { division: 'stays' }
+  if (typeof parsed.governorate === 'string') seed.governorate = parsed.governorate
+  if (typeof parsed.city === 'string') seed.city = parsed.city
+  if (typeof parsed.area === 'string') seed.area = parsed.area
+  if (typeof parsed.checkIn === 'string') seed.checkIn = parsed.checkIn
+  if (typeof parsed.checkOut === 'string') seed.checkOut = parsed.checkOut
+  if (typeof parsed.guests === 'number') seed.guests = parsed.guests
+  if (typeof parsed.propertyType === 'string') seed.propertyType = parsed.propertyType
+  if (typeof parsed.priceBand === 'string') seed.priceBand = parsed.priceBand
+
+  // Seed the search-bar draft (UnifiedSearchBar reads it on first render). Keep the
+  // governorate/city pair consistent for its dependent selects.
+  try {
+    const draft: Record<string, unknown> = { ...seed }
+    if (seed.governorate && !seed.city) {
+      draft.city = getGovernorate(seed.governorate)?.cities[0]?.key || ''
+    }
+    window.sessionStorage.setItem('sybnb-v6-search-draft', JSON.stringify(draft))
+  } catch {
+    /* ignore */
+  }
+
+  return seed
 }
 
 function routeForDivision(division: string) {

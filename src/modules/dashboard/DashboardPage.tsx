@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
+  claimGuestAccount,
   fetchPrototypeOverview,
+  sendEmailVerificationCode,
+  verifyEmailVerificationCode,
   type PlatformOverview,
 } from '../../shared/api/platformApi'
-import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { ReferralPanel } from '../referrals/ReferralPanel'
 
 type Props = {
@@ -73,6 +76,23 @@ const copy = {
     method: 'الطريقة',
     reviewStatus: 'حالة المراجعة',
     bookingRef: 'رقم الحجز',
+    claimTitle: 'أنشئ حساباً واحفظ رحلاتك',
+    claimBody: 'حوّل جلستك المؤقتة إلى حساب باسمك لتتابع حجوزاتك وتسجّل الدخول من أي جهاز. رحلاتك الحالية ستنتقل معك.',
+    claimEmail: 'بريدك الإلكتروني',
+    claimSendCode: 'أرسل الرمز',
+    claimCode: 'رمز التحقق',
+    claimPassword: 'كلمة المرور',
+    claimConfirmPassword: 'تأكيد كلمة المرور',
+    showPassword: 'إظهار كلمة المرور',
+    hidePassword: 'إخفاء كلمة المرور',
+    claimPasswordMismatch: 'كلمتا المرور غير متطابقتين.',
+    claimName: 'الاسم (اختياري)',
+    claimSubmit: 'أنشئ الحساب',
+    claimSending: 'جار الإرسال...',
+    claimWorking: 'جار الإنشاء...',
+    claimSentMsg: 'أرسلنا رمزاً إلى بريدك.',
+    claimDone: 'تم إنشاء حسابك — رحلاتك محفوظة الآن.',
+    claimError: 'تعذر إكمال العملية.',
   },
   en: {
     back: 'Back to landing',
@@ -134,6 +154,23 @@ const copy = {
     method: 'Method',
     reviewStatus: 'Review status',
     bookingRef: 'Booking ref',
+    claimTitle: 'Create an account to save & follow your trips',
+    claimBody: 'Turn your temporary session into a named account so you can follow your bookings and sign in from any device. Your current trips carry over.',
+    claimEmail: 'Your email',
+    claimSendCode: 'Send code',
+    claimCode: 'Verification code',
+    claimPassword: 'Password',
+    claimConfirmPassword: 'Confirm password',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
+    claimPasswordMismatch: 'Passwords do not match.',
+    claimName: 'Name (optional)',
+    claimSubmit: 'Create account',
+    claimSending: 'Sending...',
+    claimWorking: 'Creating...',
+    claimSentMsg: 'We sent a code to your email.',
+    claimDone: 'Account created — your trips are saved.',
+    claimError: 'Could not complete that.',
   },
 }
 
@@ -144,9 +181,60 @@ export function DashboardPage({ lang }: Props) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
 
+  // Account-claim ("save & follow your trips") — only shown to an anonymous device guest.
+  const [claimEmail, setClaimEmail] = useState('')
+  const [claimCode, setClaimCode] = useState('')
+  const [claimPassword, setClaimPassword] = useState('')
+  const [claimConfirmPassword, setClaimConfirmPassword] = useState('')
+  const [showClaimPassword, setShowClaimPassword] = useState(false)
+  const [claimName, setClaimName] = useState('')
+  const [claimStep, setClaimStep] = useState<'idle' | 'code'>('idle')
+  const [claimBusy, setClaimBusy] = useState(false)
+  const [claimError, setClaimError] = useState('')
+  const [claimNote, setClaimNote] = useState('')
+
   useEffect(() => {
     void loadOverview()
   }, [])
+
+  async function sendClaimCode() {
+    setClaimError('')
+    setClaimNote('')
+    setClaimBusy(true)
+    try {
+      await sendEmailVerificationCode(claimEmail.trim(), 'guest-signup')
+      setClaimStep('code')
+      setClaimNote(t.claimSentMsg)
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+    } finally {
+      setClaimBusy(false)
+    }
+  }
+
+  async function submitClaim() {
+    setClaimError('')
+    setClaimNote('')
+    if (claimPassword !== claimConfirmPassword) {
+      setClaimError(t.claimPasswordMismatch)
+      return
+    }
+    setClaimBusy(true)
+    try {
+      const { verificationGrant } = await verifyEmailVerificationCode(claimEmail.trim(), claimCode.trim(), 'guest-signup')
+      await claimGuestAccount({ email: claimEmail.trim(), password: claimPassword, displayName: claimName.trim() || undefined, verificationGrant })
+      setClaimNote(t.claimDone)
+      setClaimStep('idle')
+      setClaimCode('')
+      setClaimPassword('')
+      setClaimConfirmPassword('')
+      await loadOverview()
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+    } finally {
+      setClaimBusy(false)
+    }
+  }
 
   async function loadOverview() {
     setStatus('loading')
@@ -180,19 +268,100 @@ export function DashboardPage({ lang }: Props) {
     URL.revokeObjectURL(url)
   }
 
-  const activeBooking = overview?.bookings[0]
+  // Print a CLEAN, white trip summary. The old handler was window.print() on the whole dark app page
+  // (nav, wallet, buttons, no print stylesheet) → an unusable printout. Render a self-contained document
+  // in a new window instead. Falls back to window.print() only if the popup is blocked.
+  function printTrip() {
+    if (!activeBooking) {
+      window.print()
+      return
+    }
+    const esc = (value: unknown) =>
+      String(value ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+    const rows: Array<[string, string]> = [
+      [isAr ? 'رقم الحجز' : 'Booking', activeReference || activeBooking.id],
+      [isAr ? 'مكان الإقامة' : 'Stay', activeTitle || '-'],
+      [isAr ? 'التواريخ' : 'Dates', activeTripDates || '-'],
+      [isAr ? 'الحالة' : 'Status', statusText(activeBooking.status, lang)],
+      [isAr ? 'المبلغ' : 'Amount', moneyText(activeBooking.amountMinor, activeBooking.currency, lang)],
+      [isAr ? 'الضيف' : 'Guest', displayName],
+    ]
+    const body = rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('')
+    const title = isAr ? 'رحلتي' : 'My Trip'
+    const html = `<!doctype html><html dir="${isAr ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><title>SYBNB — ${esc(title)}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;margin:36px;max-width:640px}
+h1{font-size:20px;margin:0 0 18px}
+table{width:100%;border-collapse:collapse}
+td{padding:10px 4px;border-bottom:1px solid #e5e7eb;font-size:14px;vertical-align:top}
+td.k{color:#666;width:38%}
+td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-break:break-word}
+.foot{margin-top:24px;color:#888;font-size:11px}
+</style></head><body>
+<h1>SYBNB — ${esc(title)}</h1>
+<table>${body}</table>
+<p class="foot">${esc(isAr ? 'احتفظ بهذه النسخة لسجلاتك.' : 'Keep this copy for your records.')}</p>
+</body></html>`
+    const win = window.open('', '_blank', 'width=720,height=900')
+    if (!win) {
+      window.print()
+      return
+    }
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 300)
+  }
+
+  if (status !== 'ready') {
+    return (
+      <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+        <section style={status === 'error' ? styles.alert : styles.accountTop} role={status === 'error' ? 'alert' : 'status'}>
+          <strong>{status === 'error' ? t.error : t.loading}</strong>
+          {status === 'error' && <p>{message}</p>}
+          {status === 'error' && (
+            <button style={styles.secondaryButton} onClick={() => void loadOverview()}>{t.refresh}</button>
+          )}
+        </section>
+      </main>
+    )
+  }
+
+  // Split trips by DATE + STATUS, not by array position. The old code treated bookings[0] as "active"
+  // and everything after it as "previous/completed" — so a brand-new, not-yet-started trip could land
+  // under "Previous trips" labelled "Completed". Now: a trip is UPCOMING until its check-out date has
+  // passed (or it's cancelled/completed).
+  const allBookings = overview?.bookings || []
+  const upcomingBookings = allBookings.filter((booking) => !isTripPast(booking))
+  const pastBookings = allBookings.filter((booking) => isTripPast(booking))
+  // The hero shows the current/next trip: the soonest upcoming one, else fall back to the most recent
+  // booking so a returning guest still sees their latest stay.
+  const activeBooking = upcomingBookings[0] || allBookings[0]
   const activeListing = activeBooking?.listing
   const activeTitle = activeListing ? labelForListing(activeListing, lang) : ''
   const activeReference = activeBooking?.id ? `BK-${activeBooking.id.slice(0, 4).toUpperCase()}-${activeBooking.id.slice(4, 8).toUpperCase()}` : ''
   const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
+  const guestEmail = (overview?.user as { email?: string | null } | undefined)?.email || ''
+  const isDeviceGuest = guestEmail.endsWith('@device.sybnb.local')
   const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
   const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
   const activeStep = activeBooking ? activeTripStep(overview) : -1
-  const pastTrips = overview?.bookings.slice(1, 3).map((booking) => normalizePastTrip(booking, lang)) || []
+  const pastTrips = pastBookings
+    .filter((booking) => booking.id !== activeBooking?.id)
+    .slice(0, 6)
+    .map((booking) => normalizePastTrip(booking, lang))
   const walletRows = normalizeWalletRows(overview, lang)
-  const protectedFunds = overview?.payments
+  const protectedByCurrency = (overview?.payments || [])
     .filter((payment) => ['PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED'].includes(payment.status))
-    .reduce((total, payment) => total + payment.amountMinor, 0) || activeBooking?.amountMinor || 0
+    .reduce<Record<string, number>>((totals, payment) => {
+      totals[payment.currency] = (totals[payment.currency] || 0) + payment.amountMinor
+      return totals
+    }, {})
+  if (!Object.keys(protectedByCurrency).length && activeBooking) protectedByCurrency[activeBooking.currency] = activeBooking.amountMinor
+  const protectedFundsText = Object.entries(protectedByCurrency).map(([currency, amount]) => moneyText(amount, currency, lang)).join(' · ') || moneyText(0, overview?.wallet?.currency || 'SYP', lang)
+  const approvedReceipt = activeBooking?.payments?.find((payment) => payment.status === 'APPROVED')
+  const walletCurrency = overview?.wallet?.currency || 'SYP'
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -201,14 +370,82 @@ export function DashboardPage({ lang }: Props) {
         <button style={styles.iconButton} onClick={() => (window.location.hash = '/settings')} aria-label={isAr ? 'الإعدادات' : 'Settings'}>⚙</button>
         <div style={styles.profile}>
           <span style={styles.avatar}>{avatarLetter}</span>
-          <div>
+          <div style={{ display: 'grid', gap: 2 }}>
             <strong>{displayName}</strong>
             <span>SYBNB STAYS · {t.member}</span>
           </div>
         </div>
       </section>
 
-      {status === 'error' && <section style={styles.alert}>{message}</section>}
+      {isDeviceGuest && (
+        <section style={styles.claimPanel} aria-label={t.claimTitle}>
+          <div style={styles.claimCopy}>
+            <strong style={styles.claimHeading}>{t.claimTitle}</strong>
+            <span style={styles.claimText}>{t.claimBody}</span>
+          </div>
+          <div style={styles.claimForm}>
+            <input
+              style={styles.claimInput}
+              type="email"
+              dir="ltr"
+              placeholder={t.claimEmail}
+              value={claimEmail}
+              onChange={(e) => setClaimEmail(e.target.value)}
+            />
+            {claimStep === 'idle' ? (
+              <button style={styles.claimButton} disabled={claimBusy || !claimEmail.trim()} onClick={() => void sendClaimCode()}>
+                {claimBusy ? t.claimSending : t.claimSendCode}
+              </button>
+            ) : (
+              <>
+                <input
+                  style={styles.claimInput}
+                  dir="ltr"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  placeholder={t.claimCode}
+                  value={claimCode}
+                  onChange={(e) => setClaimCode(e.target.value.replace(/\D/g, ''))}
+                />
+                <input
+                  style={styles.claimInput}
+                  type={showClaimPassword ? 'text' : 'password'}
+                  placeholder={t.claimPassword}
+                  value={claimPassword}
+                  onChange={(e) => setClaimPassword(e.target.value)}
+                />
+                <input
+                  style={styles.claimInput}
+                  type={showClaimPassword ? 'text' : 'password'}
+                  placeholder={t.claimConfirmPassword}
+                  value={claimConfirmPassword}
+                  onChange={(e) => setClaimConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <button style={styles.claimLinkButton} type="button" aria-pressed={showClaimPassword} onClick={() => setShowClaimPassword((visible) => !visible)}>
+                  {showClaimPassword ? t.hidePassword : t.showPassword}
+                </button>
+                <input
+                  style={styles.claimInput}
+                  placeholder={t.claimName}
+                  value={claimName}
+                  onChange={(e) => setClaimName(e.target.value)}
+                />
+                <button
+                  style={styles.claimButton}
+                  disabled={claimBusy || !claimCode.trim() || claimPassword.length < 8 || claimPassword !== claimConfirmPassword}
+                  onClick={() => void submitClaim()}
+                >
+                  {claimBusy ? t.claimWorking : t.claimSubmit}
+                </button>
+              </>
+            )}
+          </div>
+          {claimNote && <p style={styles.claimNoteOk}>{claimNote}</p>}
+          {claimError && <p style={styles.claimNoteErr}>{claimError}</p>}
+        </section>
+      )}
 
       <section style={styles.desktopHero}>
         <div style={styles.tripCard}>
@@ -231,9 +468,11 @@ export function DashboardPage({ lang }: Props) {
             <button style={styles.sosButton} onClick={() => (window.location.hash = activeBooking ? `/booking/dispute/${activeBooking.id}` : '/immocontact')}>
               {t.sos} ⚠
             </button>
-            <button style={styles.goldButton} onClick={() => activeBooking?.payments?.[0]?.id ? (window.location.hash = `/payment/receipt/${activeBooking.payments[0].id}`) : window.print()}>
-              {t.invoice} ▤
-            </button>
+            {approvedReceipt?.id ? (
+              <button style={styles.goldButton} onClick={() => (window.location.hash = `/payment/receipt/${approvedReceipt.id}`)}>
+                {t.invoice} ▤
+              </button>
+            ) : null}
             <button style={styles.blueButton} onClick={() => (window.location.hash = '/immocontact')}>
               {t.contact} ◯
             </button>
@@ -248,7 +487,7 @@ export function DashboardPage({ lang }: Props) {
           <section style={styles.quickCards}>
             <button style={styles.paymentTile} onClick={() => (window.location.hash = '/wallet')}>
               <span>{t.availableBalance}</span>
-              <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, overview?.wallet?.currency || activeBooking?.currency || 'SYP', lang)}</strong>
+              <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, walletCurrency, lang)}</strong>
               <small>{t.wallet}</small>
             </button>
             <button style={styles.trustTile} onClick={() => (window.location.hash = '/trust-center')}>
@@ -281,11 +520,11 @@ export function DashboardPage({ lang }: Props) {
         <div style={styles.walletStats}>
           <article style={styles.walletStat}>
             <span>{t.availableBalance}</span>
-            <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, overview?.wallet?.currency || activeBooking?.currency || 'SYP', lang)}</strong>
+            <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, walletCurrency, lang)}</strong>
           </article>
           <article style={styles.walletStatProtected}>
             <span>{t.protectedFunds}</span>
-            <strong>{moneyText(protectedFunds, activeBooking?.currency || 'SYP', lang)}</strong>
+            <strong>{protectedFundsText}</strong>
           </article>
         </div>
 
@@ -316,19 +555,26 @@ export function DashboardPage({ lang }: Props) {
 
       <section style={styles.privacyPanel}>
         <button style={styles.secondaryButton} onClick={savePersonalCopy}>{t.saveTrip}</button>
-        <button style={styles.secondaryButton} onClick={() => window.print()}>{t.printTrip}</button>
+        <button style={styles.secondaryButton} onClick={printTrip}>{t.printTrip}</button>
       </section>
 
       <section style={styles.previousTrips}>
         <h2>{t.previousTrips}</h2>
         {pastTrips.length ? pastTrips.map((trip) => (
-          <article key={trip.id} style={styles.previousTrip}>
+          <article
+            key={trip.id}
+            style={{ ...styles.previousTrip, cursor: 'pointer' }}
+            role="button"
+            tabIndex={0}
+            onClick={() => (window.location.hash = `/booking/${trip.id}`)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.hash = `/booking/${trip.id}` } }}
+          >
             <img style={styles.tripThumb} src={trip.image} alt="" />
             <div>
               <strong>{trip.title}</strong>
               <span>{trip.dates}</span>
             </div>
-            <b>{t.completed}</b>
+            <b>{trip.statusLabel}</b>
           </article>
         )) : <p style={styles.mutedText}>{t.empty}</p>}
       </section>
@@ -347,7 +593,25 @@ function normalizePastTrip(booking: PlatformOverview['bookings'][number], lang: 
     title: booking.listing ? labelForListing(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase(),
     dates: booking.checkIn && booking.checkOut ? tripDateRange(booking.checkIn, booking.checkOut, lang) : lang === 'ar' ? 'رحلة محفوظة' : 'Saved trip',
     image: bookingImage(booking),
+    statusLabel: statusText(booking.status, lang), // real status (Completed / Cancelled …) — not hardcoded
   }
+}
+
+// A trip belongs in "Previous trips" only once it's truly over: cancelled/rejected/completed, or its
+// check-out DATE is in the past. Dates are compared date-only in local time (booking.checkOut is an ISO
+// string; parsing its YYYY-MM-DD parts as a local date avoids the UTC-midnight off-by-one).
+function tripDateValue(dateInput: string): number {
+  const [y, m, d] = String(dateInput).slice(0, 10).split('-').map(Number)
+  return new Date(y || 1970, (m || 1) - 1, d || 1).getTime()
+}
+function isTripPast(booking: PlatformOverview['bookings'][number]): boolean {
+  if (['COMPLETED', 'CANCELLED', 'REJECTED'].includes(booking.status)) return true
+  if (booking.checkOut) {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    return tripDateValue(booking.checkOut) < today
+  }
+  return false
 }
 
 function tripDateRange(checkIn: string, checkOut: string, lang: Lang) {
@@ -388,7 +652,7 @@ function normalizeWalletRows(overview: PlatformOverview | null, lang: Lang) {
 
   return (overview.wallet?.entries || []).slice(0, 5).map((entry, index) => {
     const amountMinor = typeof entry.amountMinor === 'number' ? entry.amountMinor : 0
-    const currency = typeof entry.currency === 'string' ? entry.currency : overview.wallet?.currency || 'SYP'
+    const currency = typeof entry.currency === 'string' ? entry.currency : overview.wallet?.currency || 'USD'
     const type = typeof entry.type === 'string' ? entry.type : lang === 'ar' ? 'حركة محفظة' : 'Wallet movement'
     const status = typeof entry.status === 'string' ? entry.status : 'RECORDED'
     return {
@@ -425,35 +689,35 @@ function paymentStatusLabel(status: string, lang: Lang) {
 
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#050507', color: '#fff', padding: '36px clamp(22px, 4vw, 54px) 110px', display: 'grid', gap: 24, maxWidth: 1180, margin: '0 auto' },
-  accountTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 },
+  accountTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap' },
   iconButton: { width: 50, height: 50, borderRadius: 999, border: '1px solid #242b3e', background: '#101522', color: '#fff', fontSize: 26, display: 'grid', placeItems: 'center' },
   profile: { display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: 12, textAlign: 'right' },
   avatar: { width: 48, height: 48, borderRadius: 999, border: '2px solid rgba(255,255,255,.24)', background: 'linear-gradient(145deg,#5268ff,#20d29b)', display: 'grid', placeItems: 'center', fontWeight: 950, color: '#fff' },
-  desktopHero: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.42fr) minmax(330px, .78fr)', gap: 18, alignItems: 'stretch' },
+  desktopHero: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, alignItems: 'stretch' },
   sidePanel: { display: 'grid', gap: 16, alignContent: 'stretch' },
   tripCard: { border: '1.5px solid #20d29b', borderRadius: 22, background: '#14141b', padding: 30, display: 'grid', gap: 18, alignContent: 'center', minHeight: 300, boxShadow: '0 18px 42px rgba(0,0,0,.34)' },
   tripMeta: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   datePill: { borderRadius: 999, background: '#25252f', color: '#d6d9e6', padding: '7px 12px', fontSize: 12, fontWeight: 900 },
   activePill: { color: '#20d29b', fontSize: 13, fontWeight: 950 },
-  tripTitle: { margin: 0, fontSize: 38, lineHeight: 1.12, textAlign: 'right' },
+  tripTitle: { margin: 0, fontSize: 'clamp(24px, 6vw, 38px)', lineHeight: 1.12, textAlign: 'right' },
   tripRef: { margin: 0, color: '#82899b', textAlign: 'right', fontWeight: 800 },
-  tripActions: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
+  tripActions: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(92px, 1fr))', gap: 10 },
   sosButton: { minHeight: 64, borderRadius: 14, border: '2px solid #ff4c73', background: 'transparent', color: '#ff4c73', fontWeight: 950, fontSize: 17 },
-  goldButton: { minHeight: 64, border: 0, borderRadius: 14, background: '#e5b80b', color: '#fff', fontWeight: 950, fontSize: 17 },
-  blueButton: { minHeight: 64, border: 0, borderRadius: 14, background: '#4760ff', color: '#fff', fontWeight: 950, fontSize: 17 },
+  goldButton: { minHeight: 64, border: '1px solid rgba(229,184,11,.35)', borderRadius: 14, background: '#141a28', color: '#e5b80b', fontWeight: 950, fontSize: 17 },
+  blueButton: { minHeight: 64, border: '1px solid rgba(71,96,255,.4)', borderRadius: 14, background: '#141a28', color: '#8ea0ff', fontWeight: 950, fontSize: 17 },
   progressWrap: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, position: 'relative', border: '1px solid #1f2739', borderRadius: 18, background: '#101522', padding: 16 },
   progressItem: { display: 'grid', justifyItems: 'center', gap: 7 },
   progressDot: { width: 36, height: 36, borderRadius: 999, background: '#242532', color: '#a0a6b8', display: 'grid', placeItems: 'center', fontWeight: 950 },
   progressDotActive: { width: 36, height: 36, borderRadius: 999, background: '#20d29b', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 950 },
   progressText: { color: '#83899a', fontWeight: 900, textAlign: 'center' },
   progressTextActive: { color: '#fff', fontWeight: 950, textAlign: 'center' },
-  trustStrip: { borderRadius: 16, background: '#20c987', color: '#fff', padding: '18px 20px', display: 'grid', gap: 8, alignContent: 'center', fontWeight: 950, minHeight: 118 },
-  quickCards: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 },
-  paymentTile: { minHeight: 166, border: 0, borderRadius: 18, background: 'linear-gradient(145deg, #5268ff 0%, #e5b80b 74%)', color: '#fff', padding: 18, display: 'grid', alignContent: 'space-between', textAlign: 'center', fontWeight: 950 },
-  trustTile: { minHeight: 166, border: 0, borderRadius: 18, background: 'linear-gradient(145deg, #20d29b 0%, #b57dff 100%)', color: '#fff', padding: 18, display: 'grid', alignContent: 'space-between', textAlign: 'center', fontWeight: 950 },
+  trustStrip: { borderRadius: 16, background: '#111522', border: '1px solid rgba(32,201,135,.4)', color: '#fff', padding: '18px 20px', display: 'grid', gap: 8, alignContent: 'center', fontWeight: 950, minHeight: 118 },
+  quickCards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16 },
+  paymentTile: { minHeight: 166, border: '1px solid rgba(229,184,11,.3)', borderRadius: 18, background: '#111522', color: '#fff', padding: 18, display: 'grid', alignContent: 'space-between', textAlign: 'center', fontWeight: 950 },
+  trustTile: { minHeight: 166, border: '1px solid rgba(32,210,155,.35)', borderRadius: 18, background: '#111522', color: '#fff', padding: 18, display: 'grid', alignContent: 'space-between', textAlign: 'center', fontWeight: 950 },
   walletPanel: { border: '1px solid #232c42', borderRadius: 20, background: '#111520', padding: 22, display: 'grid', gap: 18 },
-  sectionHeader: { display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'center' },
-  walletStats: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 },
+  sectionHeader: { display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'center', flexWrap: 'wrap' },
+  walletStats: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14 },
   walletStat: { border: '1px solid #2a3450', borderRadius: 16, background: '#0d1320', padding: 18, display: 'grid', gap: 8 },
   walletStatProtected: { border: '1px solid rgba(32,210,155,.45)', borderRadius: 16, background: 'rgba(32,210,155,.08)', padding: 18, display: 'grid', gap: 8 },
   transactionList: { display: 'grid', gap: 10 },
@@ -461,10 +725,20 @@ const styles: Record<string, CSSProperties> = {
   statusGreen: { borderRadius: 999, background: 'rgba(32,210,155,.16)', color: '#20d29b', padding: '8px 12px', fontStyle: 'normal', fontWeight: 950 },
   statusGold: { borderRadius: 999, background: 'rgba(229,184,11,.14)', color: '#e5b80b', padding: '8px 12px', fontStyle: 'normal', fontWeight: 950 },
   mutedText: { color: '#9098ad', margin: 0 },
-  privacyPanel: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
+  privacyPanel: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 },
   secondaryButton: { minHeight: 48, border: '1px solid #30384d', borderRadius: 12, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
   previousTrips: { display: 'grid', gap: 14 },
   previousTrip: { minHeight: 96, borderRadius: 16, background: '#14141b', padding: 12, display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 14, alignItems: 'center' },
   tripThumb: { width: 90, height: 70, borderRadius: 12, objectFit: 'cover' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 12, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
+  claimPanel: { border: '1px solid rgba(32,210,155,.45)', borderRadius: 18, background: 'linear-gradient(135deg, rgba(32,210,155,.1), rgba(82,104,255,.08))', padding: 20, display: 'grid', gap: 14 },
+  claimCopy: { display: 'grid', gap: 6 },
+  claimHeading: { fontSize: 20, color: '#fff' },
+  claimText: { color: '#b9c0d2', lineHeight: 1.55 },
+  claimForm: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
+  claimInput: { minHeight: 50, flex: '1 1 180px', borderRadius: 10, border: '1px solid #30384d', background: '#0d1320', color: '#fff', padding: '0 14px', fontSize: 15, fontWeight: 700 },
+  claimButton: { minHeight: 50, border: 0, borderRadius: 10, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 22px' },
+  claimLinkButton: { minHeight: 44, border: '1px solid #526cff', borderRadius: 10, background: 'transparent', color: '#aebaff', fontWeight: 850, padding: '0 14px' },
+  claimNoteOk: { margin: 0, color: '#20d29b', fontWeight: 800 },
+  claimNoteErr: { margin: 0, color: '#ffd1d1', fontWeight: 800 },
 }

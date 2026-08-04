@@ -35,8 +35,8 @@ describe('PATCH /api/bookings/:id/cancel — cancellation fee depends on timing 
 
   async function setUpPaidBooking({ checkInDaysFromNow, currency = 'USD', priceMinor = 100_00, metadata = undefined, adminUserId = adminId }) {
     const hostEmail = uniqueTestEmail('cancel-fee-host')
-    await verifyEmailForTest(app, hostEmail, 'staff-login')
-    const hostRes = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, hostEmail, 'staff-login')
+    const hostRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1,
       role: 'HOST',
       email: hostEmail,
       password: 'correct-horse-battery',
@@ -45,8 +45,8 @@ describe('PATCH /api/bookings/:id/cancel — cancellation fee depends on timing 
     trackTestUser(hostId)
 
     const guestEmail = uniqueTestEmail('cancel-fee-guest')
-    await verifyEmailForTest(app, guestEmail)
-    const guestRes = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant2 = await verifyEmailForTest(app, guestEmail)
+    const guestRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant2,
       role: 'GUEST',
       email: guestEmail,
       password: 'correct-horse-battery',
@@ -178,13 +178,13 @@ describe('PATCH /api/bookings/:id/cancel — flat per-currency late-cancel fee (
     const adminUserId = await makeAdmin('cancel-fee2-admin')
 
     const hostEmail = uniqueTestEmail('cancel-fee2-host')
-    await verifyEmailForTest(app, hostEmail, 'staff-login')
-    const hostId = (await request(app).post('/api/auth/register').send({ role: 'HOST', email: hostEmail, password: 'correct-horse-battery' })).body.user.id
+    const legacyVerificationGrant3 = await verifyEmailForTest(app, hostEmail, 'staff-login')
+    const hostId = (await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant3, role: 'HOST', email: hostEmail, password: 'correct-horse-battery' })).body.user.id
     trackTestUser(hostId)
 
     const guestEmail = uniqueTestEmail('cancel-fee2-guest')
-    await verifyEmailForTest(app, guestEmail)
-    const guestRes = await request(app).post('/api/auth/register').send({ role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
+    const legacyVerificationGrant4 = await verifyEmailForTest(app, guestEmail)
+    const guestRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant4, role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
     const guestId = guestRes.body.user.id
     const guestToken = guestRes.body.token
     trackTestUser(guestId)

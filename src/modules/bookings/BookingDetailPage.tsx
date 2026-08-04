@@ -78,6 +78,8 @@ const copy = {
     refund: 'طلب استرداد / نزاع',
     pay: 'دفع الآن',
     receipt: 'فتح الإيصال',
+    cancelledNote: 'تم إلغاء هذا الحجز — لا يوجد مبلغ مستحق.',
+    notPayable: 'هذا الحجز لا ينتظر الدفع.',
     protection: 'حماية الحجز',
     paymentStatus: 'حالة الدفع',
     dispute: 'الإبلاغ عن مشكلة',
@@ -138,6 +140,8 @@ const copy = {
     refund: 'Refund / dispute request',
     pay: 'Pay now',
     receipt: 'Open receipt',
+    cancelledNote: 'This booking was cancelled — no payment is due.',
+    notPayable: 'This booking is not awaiting payment.',
     protection: 'Booking protection',
     paymentStatus: 'Payment status',
     dispute: 'Report issue',
@@ -262,10 +266,30 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     }
   }
 
+  if (status !== 'ready') {
+    return (
+      <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+        <section style={styles.hero} role={status === 'error' ? 'alert' : 'status'}>
+          <p style={styles.eyebrow}>{bookingId.slice(0, 12).toUpperCase()}</p>
+          <h1 style={styles.title}>{status === 'error' ? t.error : t.loading}</h1>
+          {status === 'error' && <p style={styles.body}>{message}</p>}
+          {status === 'error' && (
+            <button style={styles.primaryButton} onClick={() => void loadBooking()}>{isAr ? 'إعادة المحاولة' : 'Try again'}</button>
+          )}
+        </section>
+      </main>
+    )
+  }
+
   const listingTitle = booking?.listing ? listingTitleText(booking.listing, lang) : '-'
   const approvedPayment = booking?.payments?.find((payment) => payment.status === 'APPROVED')
   const latestPayment = booking?.payments?.[0]
   const isPaymentDraft = booking?.status === 'PAYMENT_PENDING' && !latestPayment
+  // A booking only ever awaits payment while it's PAYMENT_PENDING. The bottom "Pay now" button + the
+  // next-arrow used to check `approvedPayment` as a proxy for "paid" — but a CANCELLED/refunded booking
+  // has no APPROVED payment (its proof is REFUNDED), so it wrongly fell through to "offer payment". Gate
+  // on status so a cancelled booking never invites the guest to pay again.
+  const isPayable = booking?.status === 'PAYMENT_PENDING'
   const timeline = isPaymentDraft ? t.draftTimeline : t.paidTimeline
   const activeTimelineIndex = (() => {
     if (!booking) return 0
@@ -279,47 +303,9 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const paymentRoute = booking
     ? `/payment/local-wallet/${booking.id}/${fees?.totalMinor ?? booking.amountMinor}/${encodeURIComponent(booking.currency)}`
     : '/'
-  const hasIdDocument = Boolean(booking?.guest?.idDocumentRef)
-  const isFallbackInspectionBooking = booking?.id.startsWith('fallback-booking-') === true
-  const canContinueToPayment = hasIdDocument || isFallbackInspectionBooking
-
+  // Guests are never asked for an ID document to book or pay — same as Airbnb/Booking. Identity is a
+  // host-side concern, not a guest one. Payment options are always available once a booking exists.
   function renderPaymentOptions() {
-    if (!canContinueToPayment) {
-      return (
-        <div style={styles.idGate}>
-          <strong>{t.idGateTitle}</strong>
-          <small>{t.idGateCopy}</small>
-          <PaymentProofUpload
-            lang={lang}
-            files={idFiles}
-            onAddFiles={addIdFiles}
-            title={t.idGateTitle}
-            cta={t.idGateUpload}
-            emptyText={t.idGateEmpty}
-          />
-          {idSaveState === 'error' && <small style={{ color: '#ff9aac' }}>{t.idGateError}</small>}
-          <button style={styles.primaryButton} disabled={!idFile || idSaveState === 'saving'} onClick={() => void saveIdDocument()}>
-            {idSaveState === 'saving' ? t.saving : t.idGateSubmit}
-          </button>
-          {booking?.guest?.email && (
-            <small style={{ color: '#9aa6ba', lineHeight: 1.6 }}>
-              {isAr
-                ? `تفضل واتساب أو إيميل؟ أرسل صورة إثبات هويتك مع بريدك الإلكتروني (${booking.guest.email}) إلى `
-                : `Prefer WhatsApp or email? Send your ID photo with your account email (${booking.guest.email}) to `}
-              <a href={whatsappIdSubmissionLink(booking.guest.email, lang)} target="_blank" rel="noreferrer" style={{ color: '#dce3ff' }}>
-                {isAr ? 'واتساب' : 'WhatsApp'} ({SUPPORT_WHATSAPP_LOCAL})
-              </a>
-              {isAr ? ' أو ' : ' or '}
-              <a href={emailIdSubmissionLink(booking.guest.email, lang)} style={{ color: '#dce3ff' }}>
-                {SUPPORT_EMAIL}
-              </a>
-              .
-            </small>
-          )}
-        </div>
-      )
-    }
-
     if (!stripeConfigured) {
       return (
         <button style={styles.primaryButton} disabled={cardState === 'confirming'} onClick={() => (window.location.hash = paymentRoute)}>
@@ -355,7 +341,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
         <button
           style={styles.arrowButton}
           disabled={!booking}
-          onClick={() => (window.location.hash = approvedPayment ? `/payment/receipt/${approvedPayment.id}` : paymentRoute)}
+          onClick={() => (window.location.hash = approvedPayment ? `/payment/receipt/${approvedPayment.id}` : isPayable ? paymentRoute : '/')}
           aria-label={isAr ? 'التالي' : 'Next'}
         >
           ›
@@ -367,10 +353,6 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
       </section>
-
-      {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
-      {status === 'error' && <section style={styles.alert}>{message}</section>}
-      {status !== 'error' && message && <section style={styles.panel}>{message}</section>}
 
       {booking && (
         <>
@@ -437,15 +419,12 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
               <button style={styles.primaryButton} onClick={() => (window.location.hash = `/payment/receipt/${approvedPayment.id}`)}>
                 {t.receipt}
               </button>
-            ) : (
-              <button
-                style={styles.primaryButton}
-                disabled={!canContinueToPayment}
-                title={canContinueToPayment ? undefined : t.idGateTitle}
-                onClick={() => canContinueToPayment && (window.location.hash = paymentRoute)}
-              >
-                {canContinueToPayment ? t.pay : t.idGateTitle}
+            ) : isPayable ? (
+              <button style={styles.primaryButton} onClick={() => (window.location.hash = paymentRoute)}>
+                {t.pay}
               </button>
+            ) : (
+              <p style={styles.statusNote}>{booking.status === 'CANCELLED' ? t.cancelledNote : t.notPayable}</p>
             )}
           </section>
 
@@ -454,6 +433,15 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
           {booking.review && (
             <section style={styles.actions}>
               <Info label={t.yourReview} value={`${'★'.repeat(booking.review.rating)}${booking.review.comment ? ` · ${booking.review.comment}` : ''}`} dir={isAr ? 'rtl' : 'ltr'} />
+            </section>
+          )}
+
+          {/* Trigger to OPEN the review form — it was previously unreachable (nothing set showReviewForm). */}
+          {booking.status === 'COMPLETED' && !booking.review && !showReviewForm && (
+            <section style={styles.actions}>
+              <button style={styles.primaryButton} onClick={() => setShowReviewForm(true)}>
+                {t.leaveReview}
+              </button>
             </section>
           )}
 
@@ -532,6 +520,7 @@ const styles: Record<string, CSSProperties> = {
   infoStrong: { border: '1px solid rgba(32,210,155,.45)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#b7ffe8', padding: 12, display: 'grid', gap: 6 },
   actions: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 14px' },
+  statusNote: { margin: 0, padding: '14px 16px', border: '1px solid #30384d', borderRadius: 10, background: '#111118', color: '#9aa6ba', fontWeight: 700, gridColumn: '1 / -1' },
   payOptions: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', width: '100%' },
   payOptionCard: { display: 'grid', gap: 6, textAlign: 'start', border: '1px solid rgba(255,255,255,.14)', borderRadius: 10, background: 'rgba(255,255,255,.04)', padding: 16, color: '#fff', cursor: 'pointer' },
   idGate: { display: 'grid', gap: 12, width: '100%', textAlign: 'start', border: '1px solid rgba(255,96,96,.35)', borderRadius: 10, background: 'rgba(255,96,96,.06)', padding: 16, color: '#fff' },
