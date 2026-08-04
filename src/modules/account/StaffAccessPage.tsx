@@ -314,21 +314,38 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   async function submitPasswordReset() {
     const normalizedEmail = email.trim().toLowerCase()
     const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
-    if ((!usePhone && (!email.trim() || normalizedEmail !== normalizedEmailRepeat)) || (usePhone && phone.trim().length < 8) || !newPassword.trim() || !codeConfirmed) {
+    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim()) && normalizedEmail === normalizedEmailRepeat
+    if (!identifierOk || !newPassword.trim()) {
       setIsErrorMessage(true)
       setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
       return
     }
 
+    // Match sign-in behavior: people commonly type the code and press the primary action without
+    // noticing the separate "Confirm code" button. Verify it here instead of making Update password
+    // appear unresponsive. The server still requires and atomically claims the opaque grant.
+    let activeGrant = verificationGrant
+    if (!codeConfirmed && code.trim()) activeGrant = (await confirmCode()) || ''
+    if (!activeGrant) {
+      setIsErrorMessage(true)
+      setMessage(t.resetRequired)
+      return
+    }
+
     setStatus('loading')
     try {
-      if (usePhone) await resetPasswordWithPhoneCode(phone.trim(), newPassword, verificationGrant)
-      else await resetPasswordWithEmailCode(normalizedEmail, newPassword, verificationGrant)
+      if (usePhone) await resetPasswordWithPhoneCode(phone.trim(), newPassword, activeGrant)
+      else await resetPasswordWithEmailCode(normalizedEmail, newPassword, activeGrant)
       setStatus('idle')
       setNewPassword('')
       setIsErrorMessage(false)
+      setMode('signIn')
+      setCodeSent(false)
+      setCodeConfirmed(false)
+      setVerificationGrant('')
+      setCode('')
+      setDevCode('')
       setMessage(t.resetSuccess)
-      switchMode('signIn')
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)

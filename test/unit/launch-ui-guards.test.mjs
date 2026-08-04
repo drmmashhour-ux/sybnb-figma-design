@@ -56,6 +56,9 @@ describe('launch UI safety guards', () => {
     expect(source).toContain("disabled={status === 'loading'}")
     expect(source).toContain('autoComplete="one-time-code"')
     expect(source).toContain('autoComplete="new-password"')
+    expect(source).toContain("if (!codeConfirmed && code.trim()) activeGrant = (await confirmCode()) || ''")
+    expect(source).toContain("setMode('signIn')")
+    expect(source.indexOf("setMode('signIn')")).toBeLessThan(source.indexOf('setMessage(t.resetSuccess)'))
   })
 
   it('routes the advertising root into the advertising account flow', () => {
