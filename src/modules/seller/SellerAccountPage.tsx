@@ -148,6 +148,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
+  const [showPasswords, setShowPasswords] = useState(false)
   const [verificationMethod, setVerificationMethod] = useState<'email' | 'phone'>('email')
   const [mobileCodeSent, setMobileCodeSent] = useState(false)
   const [sentMobileCode, setSentMobileCode] = useState('')
@@ -720,7 +721,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   autoComplete={accountMode === 'signup' ? 'new-password' : 'current-password'}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder={accountMode === 'signup' ? (isAr ? 'إنشاء كلمة مرور' : 'Create password') : isAr ? 'كلمة مرور الحساب' : 'Account password'}
-                  type="password"
+                  type={showPasswords ? 'text' : 'password'}
                   value={password}
                 />
               </label>
@@ -731,12 +732,15 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                     autoComplete="new-password"
                     onChange={(event) => setRepeatPassword(event.target.value)}
                     placeholder={isAr ? 'أعد كتابة كلمة المرور' : 'Repeat password'}
-                    type="password"
+                    type={showPasswords ? 'text' : 'password'}
                     value={repeatPassword}
                   />
                 </label>
               )}
             </div>
+            <button className="seller-password-visibility" type="button" aria-pressed={showPasswords} onClick={() => setShowPasswords((visible) => !visible)}>
+              {showPasswords ? (isAr ? 'إخفاء كلمة المرور' : 'Hide password') : (isAr ? 'إظهار كلمة المرور' : 'Show password')}
+            </button>
             <div className="seller-verification-box">
               <div className="seller-account-mode-switch" role="tablist" aria-label={isAr ? 'طريقة التحقق' : 'Verification method'}>
                 <button
@@ -786,21 +790,23 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   ? isAr ? 'جارٍ الإرسال...' : 'Sending...'
                   : mobileCodeSent ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isAr ? 'إرسال الرمز' : 'Send code'}
               </button>
-              <label>
+              {mobileCodeSent && <label>
                 <small>{isAr ? 'رمز التحقق' : 'Verification code'}</small>
                 <input
                   dir="ltr"
                   inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
                   onChange={(event) => {
-                    setMobileCode(event.target.value)
+                    setMobileCode(event.target.value.replace(/\D/g, ''))
                     setMobileCodeConfirmed(false)
                     setAccountSentToAdmin(false)
                   }}
                   placeholder="123456"
                   value={mobileCode}
                 />
-              </label>
-              <button
+              </label>}
+              {mobileCodeSent && <button
                 type="button"
                 disabled={!mobileCodeSent || mobileCode.trim().length !== 6 || mobileCodeStatus !== 'idle'}
                 onClick={() => void confirmMobileCode()}
@@ -808,7 +814,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                 {mobileCodeStatus === 'verifying'
                   ? isAr ? 'جارٍ التحقق...' : 'Verifying...'
                   : mobileCodeConfirmed ? (isAr ? 'تم تأكيد الرمز' : 'Code confirmed') : isAr ? 'تأكيد الرمز' : 'Confirm code'}
-              </button>
+              </button>}
             </div>
             <div className={`seller-account-file-box ${accountFileConfirmed ? 'confirmed' : ''}`}>
               <div>

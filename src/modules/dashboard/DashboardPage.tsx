@@ -82,6 +82,10 @@ const copy = {
     claimSendCode: 'أرسل الرمز',
     claimCode: 'رمز التحقق',
     claimPassword: 'كلمة المرور',
+    claimConfirmPassword: 'تأكيد كلمة المرور',
+    showPassword: 'إظهار كلمة المرور',
+    hidePassword: 'إخفاء كلمة المرور',
+    claimPasswordMismatch: 'كلمتا المرور غير متطابقتين.',
     claimName: 'الاسم (اختياري)',
     claimSubmit: 'أنشئ الحساب',
     claimSending: 'جار الإرسال...',
@@ -156,6 +160,10 @@ const copy = {
     claimSendCode: 'Send code',
     claimCode: 'Verification code',
     claimPassword: 'Password',
+    claimConfirmPassword: 'Confirm password',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
+    claimPasswordMismatch: 'Passwords do not match.',
     claimName: 'Name (optional)',
     claimSubmit: 'Create account',
     claimSending: 'Sending...',
@@ -177,6 +185,8 @@ export function DashboardPage({ lang }: Props) {
   const [claimEmail, setClaimEmail] = useState('')
   const [claimCode, setClaimCode] = useState('')
   const [claimPassword, setClaimPassword] = useState('')
+  const [claimConfirmPassword, setClaimConfirmPassword] = useState('')
+  const [showClaimPassword, setShowClaimPassword] = useState(false)
   const [claimName, setClaimName] = useState('')
   const [claimStep, setClaimStep] = useState<'idle' | 'code'>('idle')
   const [claimBusy, setClaimBusy] = useState(false)
@@ -205,6 +215,10 @@ export function DashboardPage({ lang }: Props) {
   async function submitClaim() {
     setClaimError('')
     setClaimNote('')
+    if (claimPassword !== claimConfirmPassword) {
+      setClaimError(t.claimPasswordMismatch)
+      return
+    }
     setClaimBusy(true)
     try {
       const { verificationGrant } = await verifyEmailVerificationCode(claimEmail.trim(), claimCode.trim(), 'guest-signup')
@@ -213,6 +227,7 @@ export function DashboardPage({ lang }: Props) {
       setClaimStep('idle')
       setClaimCode('')
       setClaimPassword('')
+      setClaimConfirmPassword('')
       await loadOverview()
     } catch (error) {
       setClaimError(error instanceof Error ? error.message : t.claimError)
@@ -380,17 +395,30 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
                   style={styles.claimInput}
                   dir="ltr"
                   inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
                   placeholder={t.claimCode}
                   value={claimCode}
-                  onChange={(e) => setClaimCode(e.target.value)}
+                  onChange={(e) => setClaimCode(e.target.value.replace(/\D/g, ''))}
                 />
                 <input
                   style={styles.claimInput}
-                  type="password"
+                  type={showClaimPassword ? 'text' : 'password'}
                   placeholder={t.claimPassword}
                   value={claimPassword}
                   onChange={(e) => setClaimPassword(e.target.value)}
                 />
+                <input
+                  style={styles.claimInput}
+                  type={showClaimPassword ? 'text' : 'password'}
+                  placeholder={t.claimConfirmPassword}
+                  value={claimConfirmPassword}
+                  onChange={(e) => setClaimConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <button style={styles.claimLinkButton} type="button" aria-pressed={showClaimPassword} onClick={() => setShowClaimPassword((visible) => !visible)}>
+                  {showClaimPassword ? t.hidePassword : t.showPassword}
+                </button>
                 <input
                   style={styles.claimInput}
                   placeholder={t.claimName}
@@ -399,7 +427,7 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
                 />
                 <button
                   style={styles.claimButton}
-                  disabled={claimBusy || !claimCode.trim() || claimPassword.length < 8}
+                  disabled={claimBusy || !claimCode.trim() || claimPassword.length < 8 || claimPassword !== claimConfirmPassword}
                   onClick={() => void submitClaim()}
                 >
                   {claimBusy ? t.claimWorking : t.claimSubmit}
@@ -703,6 +731,7 @@ const styles: Record<string, CSSProperties> = {
   claimForm: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
   claimInput: { minHeight: 50, flex: '1 1 180px', borderRadius: 10, border: '1px solid #30384d', background: '#0d1320', color: '#fff', padding: '0 14px', fontSize: 15, fontWeight: 700 },
   claimButton: { minHeight: 50, border: 0, borderRadius: 10, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 22px' },
+  claimLinkButton: { minHeight: 44, border: '1px solid #526cff', borderRadius: 10, background: 'transparent', color: '#aebaff', fontWeight: 850, padding: '0 14px' },
   claimNoteOk: { margin: 0, color: '#20d29b', fontWeight: 800 },
   claimNoteErr: { margin: 0, color: '#ffd1d1', fontWeight: 800 },
 }

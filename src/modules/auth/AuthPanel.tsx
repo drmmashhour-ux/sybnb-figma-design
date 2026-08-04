@@ -165,7 +165,6 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [identifierMethod, setIdentifierMethod] = useState<'email' | 'phone'>('email')
-  const [repeatEmail, setRepeatEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [code, setCode] = useState('')
@@ -264,10 +263,6 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
       setError(t.fillAll)
       return
     }
-    if (email.trim().toLowerCase() !== repeatEmail.trim().toLowerCase()) {
-      setError(t.emailMismatch)
-      return
-    }
     if (password !== confirmPassword) {
       setError(t.passwordMismatch)
       return
@@ -337,7 +332,7 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
               : <input aria-label={t.email} style={styles.inputWide} type="email" dir="ltr" placeholder={t.email} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />}
             {codeSent && (
               <>
-                <input aria-label={t.code} autoComplete="one-time-code" style={styles.inputWide} inputMode="numeric" dir="ltr" placeholder={t.code} value={code} onChange={(event) => setCode(event.target.value)} />
+                <input aria-label={t.code} autoComplete="one-time-code" style={styles.inputWide} inputMode="numeric" pattern="[0-9]*" maxLength={8} dir="ltr" placeholder={t.code} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} />
                 <div style={styles.row2}>
                   <PasswordInput value={password} onValueChange={setPassword} placeholder={t.newPassword} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
                   <PasswordInput value={confirmPassword} onValueChange={setConfirmPassword} placeholder={t.confirmPassword} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
@@ -363,13 +358,12 @@ export function AuthPanel({ lang, onClose, onAuthed }: Props) {
               <input aria-label={t.lastName} style={styles.input} placeholder={t.lastName} value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" />
             </div>
             <input aria-label={t.email} style={styles.inputWide} type="email" dir="ltr" placeholder={t.email} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
-            <input aria-label={t.repeatEmail} style={styles.inputWide} type="email" dir="ltr" placeholder={t.repeatEmail} value={repeatEmail} onChange={(event) => setRepeatEmail(event.target.value)} autoComplete="email" />
             <div style={styles.row2}>
               <PasswordInput value={password} onValueChange={setPassword} placeholder={t.password} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
               <PasswordInput value={confirmPassword} onValueChange={setConfirmPassword} placeholder={t.confirmPassword} autoComplete="new-password" showLabel={t.show} hideLabel={t.hide} />
             </div>
             {codeSent && (
-              <input aria-label={t.code} autoComplete="one-time-code" style={styles.inputWide} inputMode="numeric" dir="ltr" placeholder={t.code} value={code} onChange={(event) => setCode(event.target.value)} />
+              <input aria-label={t.code} autoComplete="one-time-code" style={styles.inputWide} inputMode="numeric" pattern="[0-9]*" maxLength={8} dir="ltr" placeholder={t.code} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} />
             )}
             {message && <p style={styles.message}>{message}</p>}
             {error && <p style={styles.error}>{error}</p>}

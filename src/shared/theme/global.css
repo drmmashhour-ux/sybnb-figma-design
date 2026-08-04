@@ -981,6 +981,18 @@ a {
   grid-column: 1 / -1;
 }
 
+.seller-password-visibility {
+  justify-self: start;
+  min-height: 40px;
+  border: 1px solid #526cff;
+  border-radius: 10px;
+  background: transparent;
+  color: #aebaff;
+  cursor: pointer;
+  font-weight: 850;
+  padding: 0 14px;
+}
+
 .seller-form-grid label span {
   color: #9aa7bd;
   font-weight: 800;

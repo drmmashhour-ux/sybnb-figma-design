@@ -54,7 +54,7 @@ describe('launch UI safety guards', () => {
     const source = read('src/modules/account/StaffAccessPage.tsx')
     expect(source).toContain("(mode === 'signUp' && !confirmed)")
     expect(source).toContain("/^\\d{4,8}$/.test(code.trim())")
-    expect(source).toContain("disabled={status === 'loading'}")
+    expect(source).toContain("disabled={status === 'loading' || codeBusy !== 'idle'}")
     expect(source).toContain('autoComplete="one-time-code"')
     expect(source).toContain('aria-label={t.code}')
     expect(source).toContain("event.target.value.replace(/\\D/g, '')")
@@ -66,11 +66,18 @@ describe('launch UI safety guards', () => {
     expect(source).toContain('aria-pressed={showResetPasswords}')
     expect(source).toContain('setResetStep(2)')
     expect(source).toContain("resetStep === 1 ? beginPasswordResetVerification() : submitPasswordReset()")
-    expect(source).toContain("mode !== 'forgotPassword' || resetStep === 2")
+    expect(source).toContain("(mode !== 'forgotPassword' && codeSent)")
+    expect(source).toContain("authError.code === 'STAFF_OTP_REQUIRED'")
+    expect(source).toContain("mode === 'signUp' && !codeSent ? beginAccountVerification() : openSession()")
+    expect(source).not.toContain('sybnb-staff-email-confirmation')
     expect(source).toContain("{mode === 'signUp' && (")
     expect(source).not.toContain("mode === 'signUp' || mode === 'forgotPassword'")
     expect(source).toContain("setMode('signIn')")
     expect(source.indexOf("setMode('signIn')")).toBeLessThan(source.indexOf('setMessage(t.resetSuccess)'))
+
+    const guestAuth = read('src/modules/auth/AuthPanel.tsx')
+    expect(guestAuth).not.toContain('value={repeatEmail}')
+    expect(guestAuth).toContain("event.target.value.replace(/\\D/g, '')")
   })
 
   it('routes the advertising root into the advertising account flow', () => {
