@@ -84,6 +84,8 @@ export function AdminShell({ lang, active, title, subtitle, children, counts, on
     <a
       key={item.key}
       href={`#${item.hash}`}
+      title={isAr ? item.ar : item.en}
+      aria-label={isAr ? item.ar : item.en}
       className={active === item.key ? 'active' : ''}
       aria-current={active === item.key ? 'page' : undefined}
       onClick={(e) => {
@@ -110,7 +112,7 @@ export function AdminShell({ lang, active, title, subtitle, children, counts, on
         <div className="top-actions">
           <span className="environment"><i />{c.live}</span>
           {onLanguageChange && (
-            <button className="language" type="button" onClick={() => onLanguageChange(isAr ? 'en' : 'ar')} aria-label="Switch language">
+            <button className="language" type="button" onClick={() => onLanguageChange(isAr ? 'en' : 'ar')} aria-label={isAr ? 'التبديل إلى الإنجليزية' : 'Switch to Arabic'}>
               {isAr ? 'EN' : 'AR'}
             </button>
           )}

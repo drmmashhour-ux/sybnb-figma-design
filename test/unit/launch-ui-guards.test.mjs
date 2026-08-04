@@ -99,6 +99,16 @@ describe('launch UI safety guards', () => {
     expect(shell).toContain('clearAllStoredSessions()')
   })
 
+  it('keeps admin navigation labels visible at tablet and narrow desktop widths', () => {
+    const shell = read('src/modules/admin/AdminShell.tsx')
+    const css = read('src/modules/admin/admin-console.css')
+    expect(shell).toContain('title={isAr ? item.ar : item.en}')
+    expect(shell).toContain('aria-label={isAr ? item.ar : item.en}')
+    expect(css).not.toContain('.sidebar nav b, .sybnb-admin .sidebar nav em')
+    expect(css).toContain('grid-template-columns: 210px 1fr')
+    expect(css).toContain('.sidebar nav.second { display: flex; }')
+  })
+
   it('uses server email/phone OTP for seller signup and never compares a browser-generated code', () => {
     const source = read('src/modules/seller/SellerAccountPage.tsx')
     expect(source).toContain("sendEmailVerificationCode(email.trim(), 'staff-login')")

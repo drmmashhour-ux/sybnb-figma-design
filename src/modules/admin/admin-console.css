@@ -176,22 +176,21 @@
 
 /* ---- responsive ---- */
 @media (max-width: 1000px) {
-  .sybnb-admin .layout { grid-template-columns: 82px 1fr; }
+  .sybnb-admin .layout { grid-template-columns: 210px 1fr; }
   .sybnb-admin .sidebar { padding-inline: 10px; }
-  .sybnb-admin .sidebar .eyebrow, .sybnb-admin .sidebar nav b, .sybnb-admin .sidebar nav em, .sybnb-admin .sidebar-status div { display: none; }
-  .sybnb-admin .sidebar nav a { grid-template-columns: 1fr; text-align: center; justify-items: center; }
-  .sybnb-admin .sidebar-status { inset-inline: 18px; justify-content: center; }
+  .sybnb-admin .sidebar-status { inset-inline: 10px; }
   .sybnb-admin .grid, .sybnb-admin .grid.one-three { grid-template-columns: 1fr; }
   .sybnb-admin main { padding-inline: 25px; }
 }
-@media (max-width: 680px) {
+@media (max-width: 760px) {
   .sybnb-admin .topbar { padding: 0 15px; }
   .sybnb-admin .environment { display: none; }
   .sybnb-admin .layout { display: block; }
   .sybnb-admin .sidebar { position: sticky; top: 76px; width: 100%; height: auto; z-index: 15; display: flex; overflow: auto; padding: 8px; background: #0d1014; border-bottom: 1px solid var(--border); }
+  .sybnb-admin .sidebar .eyebrow, .sybnb-admin .sidebar-status { display: none; }
   .sybnb-admin .sidebar nav { display: flex; }
-  .sybnb-admin .sidebar nav.second, .sybnb-admin .sidebar-status { display: none; }
-  .sybnb-admin .sidebar nav a { min-width: 50px; }
+  .sybnb-admin .sidebar nav.second { display: flex; }
+  .sybnb-admin .sidebar nav a { min-width: 140px; grid-template-columns: 25px 1fr auto; }
   .sybnb-admin .hero { align-items: flex-start; flex-direction: column; }
   .sybnb-admin .hero-actions { width: 100%; }
   .sybnb-admin .hero-actions .button { flex: 1; }
