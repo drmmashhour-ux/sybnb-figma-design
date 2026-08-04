@@ -549,6 +549,12 @@ export async function handleBookings(req, res, url, context) {
           : {},
       },
     })
+  }, {
+    // Concurrent requests intentionally queue behind the per-listing advisory lock. Prisma's 5s
+    // interactive-transaction default can expire every waiter on a busy/slow runner before even the
+    // first request commits, producing zero winners. Keep this below Vercel's function limit while
+    // allowing one short serialized booking transaction to finish under realistic contention.
+    timeout: 15_000,
   })
 
   return json(res, 201, { ok: true, booking })
