@@ -112,6 +112,46 @@ describe('Stale PAYMENT_PENDING bookings are reaped so dates free up (M3)', () =
     expect(reaped).toBe(0)
   })
 
+  it('reaps an expired Stripe Checkout placeholder but never treats it as submitted payment', async () => {
+    const guest = await registerGuest('reaper-checkout-expired')
+    const pending = await makePending(guest.id, window(650), { ageMs: STALE_MS })
+    const placeholder = await db().paymentProof.create({
+      data: {
+        bookingId: pending.id,
+        userId: guest.id,
+        provider: 'stripe_checkout',
+        status: 'PENDING_PROOF',
+        amountMinor: 100_00,
+        currency: 'USD',
+        providerRef: `cs_expired_${Date.now()}`,
+        createdAt: new Date(Date.now() - STALE_MS),
+      },
+    })
+
+    expect(await expireStalePaymentPendingBookings({ id: pending.id })).toBe(1)
+    expect(await statusOf(pending.id)).toBe('CANCELLED')
+    expect(await db().paymentProof.findUnique({ where: { id: placeholder.id } })).toBeNull()
+  })
+
+  it('keeps a stale booking while its Stripe Checkout placeholder is still fresh', async () => {
+    const guest = await registerGuest('reaper-checkout-open')
+    const pending = await makePending(guest.id, window(675), { ageMs: STALE_MS })
+    await db().paymentProof.create({
+      data: {
+        bookingId: pending.id,
+        userId: guest.id,
+        provider: 'stripe_checkout',
+        status: 'PENDING_PROOF',
+        amountMinor: 100_00,
+        currency: 'USD',
+        providerRef: `cs_open_${Date.now()}`,
+      },
+    })
+
+    expect(await expireStalePaymentPendingBookings({ id: pending.id })).toBe(0)
+    expect(await statusOf(pending.id)).toBe('PAYMENT_PENDING')
+  })
+
   it('does NOT reap a still-fresh pending booking (within the TTL)', async () => {
     const guest = await registerGuest('reaper-fresh')
     const win = window(700)

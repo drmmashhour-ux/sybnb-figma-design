@@ -5,7 +5,7 @@ import { BrandLogo } from '../brand'
 import { Footer } from './Footer'
 import { AuthPanel } from '../../modules/auth/AuthPanel'
 import { AssistantWidget } from '../ai/AssistantWidget'
-import { clearGuestSession, clearStoredStaffSession, getStoredGuestSession, getStoredStaffSession } from '../../shared/api/platformApi'
+import { clearAllStoredSessions, getStoredGuestSession, getStoredSellerSession, getStoredStaffSession } from '../../shared/api/platformApi'
 
 type Props = {
   lang: Lang
@@ -45,10 +45,9 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
       window.removeEventListener('sybnb-open-auth', onOpenAuth)
     }
   }, [])
-  const session = getStoredGuestSession() || getStoredStaffSession()
+  const session = getStoredGuestSession() || getStoredStaffSession() || getStoredSellerSession()
   const logout = () => {
-    clearGuestSession()
-    clearStoredStaffSession()
+    clearAllStoredSessions()
     navigate('/')
   }
   // After sign in / sign up, land the user where they belong: guests on My Trips, hosts on the host

@@ -37,12 +37,38 @@ export function paymentPendingTtlMinutes() {
 // advisory-locked transaction before testing overlap.
 export async function expireStalePaymentPendingBookings(where = {}, client = db()) {
   const cutoff = new Date(Date.now() - paymentPendingTtlMinutes() * 60 * 1000)
-  const result = await client.booking.updateMany({
+  // Stripe Checkout sessions are deliberately capped at 30 minutes. Their placeholder proof keeps
+  // the booking from being reaped while Checkout is open and gives webhook delivery another 30+
+  // minutes of grace. Once the normal booking TTL has elapsed, an uncompleted placeholder is safe to
+  // remove and the dates can be released. A real/manual submitted proof never matches this predicate.
+  const candidates = await client.booking.findMany({
     where: {
       status: 'PAYMENT_PENDING',
       createdAt: { lt: cutoff },
-      payments: { none: {} },
+      payments: {
+        every: {
+          provider: 'stripe_checkout',
+          status: 'PENDING_PROOF',
+          createdAt: { lt: cutoff },
+        },
+      },
       ...where,
+    },
+    select: { id: true },
+  })
+  if (candidates.length === 0) return 0
+  const ids = candidates.map(({ id }) => id)
+  await client.paymentProof.deleteMany({
+    where: { bookingId: { in: ids }, provider: 'stripe_checkout', status: 'PENDING_PROOF' },
+  })
+  const result = await client.booking.updateMany({
+    // Re-check the proof predicate after deleting placeholders. A manual proof upload or successful
+    // webhook may have raced the candidate read; either creates a non-placeholder payment and must
+    // win over expiry.
+    where: {
+      id: { in: ids },
+      status: 'PAYMENT_PENDING',
+      payments: { every: { provider: 'stripe_checkout', status: 'PENDING_PROOF' } },
     },
     data: { status: 'CANCELLED' },
   })

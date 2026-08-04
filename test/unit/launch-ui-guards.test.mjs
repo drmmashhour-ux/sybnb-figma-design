@@ -6,9 +6,10 @@ const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), '
 describe('launch UI safety guards', () => {
   it('does not store a staff session for the wrong portal role', () => {
     const api = read('src/shared/api/platformApi.ts')
-    expect(api).toContain('if (!session.user.roles.includes(role))')
-    expect(api.indexOf('if (!session.user.roles.includes(role))')).toBeLessThan(
-      api.indexOf('authStorage.setItem(STAFF_SESSION_KEY'),
+    const staffSessionFunction = api.slice(api.indexOf('export async function createStaffAccountSession'), api.indexOf('export function clearStoredStaffSession'))
+    expect(staffSessionFunction).toContain('if (!session.user.roles.includes(role))')
+    expect(staffSessionFunction.indexOf('if (!session.user.roles.includes(role))')).toBeLessThan(
+      staffSessionFunction.indexOf('authStorage.setItem(STAFF_SESSION_KEY'),
     )
   })
 
@@ -86,6 +87,16 @@ describe('launch UI safety guards', () => {
     expect(source).toContain("path === '/advertising' || path === '/advertising/account'")
     expect(source).toContain('<SellerAccountPage flow="advertising"')
     expect(routeGuard).toContain("path === '/advertising'")
+  })
+
+  it('keeps seller authentication inside the shared session capsule and logout', () => {
+    const api = read('src/shared/api/platformApi.ts')
+    const shell = read('src/shared/layout/AppShell.tsx')
+    expect(api).toContain('authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))')
+    expect(api).toContain('export function clearAllStoredSessions()')
+    expect(api).toContain('authStorage.removeItem(SELLER_SESSION_KEY)')
+    expect(shell).toContain('getStoredStaffSession() || getStoredSellerSession()')
+    expect(shell).toContain('clearAllStoredSessions()')
   })
 
   it('uses server email/phone OTP for seller signup and never compares a browser-generated code', () => {

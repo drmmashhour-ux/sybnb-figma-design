@@ -1319,6 +1319,11 @@ export async function createSellerAccountSession(input: {
     planCode: input.planCode,
   }
   authStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(storedSession))
+  // Seller is a staff role on the server. Mirror the session into the shared staff capsule so the
+  // global shell, route guards, and logout all observe the same authenticated identity.
+  authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
   return storedSession
 }
 
@@ -1561,6 +1566,21 @@ export function clearStoredStaffSession() {
   requestServerLogout(authStorage.getItem(STAFF_SESSION_TOKEN_KEY))
   authStorage.removeItem(STAFF_SESSION_KEY)
   authStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
+}
+
+export function clearAllStoredSessions() {
+  const tokens = new Set([
+    authStorage.getItem(GUEST_SESSION_TOKEN_KEY),
+    authStorage.getItem(STAFF_SESSION_TOKEN_KEY),
+    getStoredSellerSession()?.token || null,
+  ].filter((token): token is string => Boolean(token)))
+  for (const token of tokens) requestServerLogout(token)
+  authStorage.removeItem(GUEST_SESSION_KEY)
+  authStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
+  authStorage.removeItem(STAFF_SESSION_KEY)
+  authStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
+  authStorage.removeItem(SELLER_SESSION_KEY)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
 }
 
 export function getStoredSellerSession(): PlatformAuthSession | null {

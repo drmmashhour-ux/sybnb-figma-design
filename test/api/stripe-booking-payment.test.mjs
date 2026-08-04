@@ -93,6 +93,31 @@ describe('P5: Stripe booking card payment (immediate capture) — correctness + 
     expect(adminShare.amountMinor).toBe(10_00)
   })
 
+  it('converts an open-checkout placeholder into the approved proof instead of losing a delayed payment', async () => {
+    const guest = await registerGuest('stripe-placeholder')
+    const booking = await makePendingBooking(guest.id, 1205)
+    const session = paidBookingSession(`cs_test_${Date.now()}_PLACEHOLDER`, booking.id, 100_00)
+    const placeholder = await db().paymentProof.create({
+      data: {
+        bookingId: booking.id,
+        userId: guest.id,
+        provider: 'stripe_checkout',
+        status: 'PENDING_PROOF',
+        amountMinor: 100_00,
+        currency: 'USD',
+        providerRef: session.id,
+      },
+    })
+
+    const approved = await finalizeStripeSession(session)
+
+    expect(approved.id).toBe(placeholder.id)
+    expect(approved.provider).toBe('stripe')
+    expect(approved.status).toBe('APPROVED')
+    expect(await statusOf(booking.id)).toBe('CONFIRMED')
+    expect(await db().paymentProof.count({ where: { bookingId: booking.id } })).toBe(1)
+  })
+
   it('duplicate / delayed webhook: replaying the same session does NOT create a second proof or payout', async () => {
     const guest = await registerGuest('stripe-dup')
     const booking = await makePendingBooking(guest.id, 1210)

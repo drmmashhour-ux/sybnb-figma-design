@@ -205,8 +205,10 @@ export async function finalizeStripeSession(session) {
     const booking = await tx.booking.findUnique({ where: { id: bookingId } })
     if (!booking || booking.status !== 'PAYMENT_PENDING') return null
 
-    const created = await tx.paymentProof.create({
-      data: {
+    const checkoutPlaceholder = await tx.paymentProof.findFirst({
+      where: { bookingId: booking.id, provider: 'stripe_checkout', providerRef: session.id, status: 'PENDING_PROOF' },
+    })
+    const proofData = {
         bookingId: booking.id,
         userId: booking.guestId,
         provider: 'stripe',
@@ -215,7 +217,15 @@ export async function finalizeStripeSession(session) {
         currency: booking.currency,
         providerRef: session.id,
         proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
-      },
+    }
+    const created = checkoutPlaceholder
+      ? await tx.paymentProof.update({ where: { id: checkoutPlaceholder.id }, data: proofData })
+      : await tx.paymentProof.create({ data: proofData })
+
+    // Multiple checkout attempts are allowed, but once one payment succeeds no abandoned placeholder
+    // may remain attached to the now-paid booking.
+    await tx.paymentProof.deleteMany({
+      where: { bookingId: booking.id, provider: 'stripe_checkout', id: { not: created.id } },
     })
 
     const actorUserId = await firstAdminId(tx)
@@ -355,6 +365,9 @@ export async function handlePayments(req, res, url, context) {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      // Stripe's minimum custom expiry is 30 minutes. The booking reaper defaults to 60 minutes, so
+      // Checkout closes before its placeholder can be removed and a delayed webhook has a grace window.
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
       payment_method_types: ['card'],
       line_items: [
         {
@@ -373,6 +386,22 @@ export async function handlePayments(req, res, url, context) {
       },
       success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}#/booking/${booking.id}`,
       cancel_url: `${origin}/#/booking/${booking.id}`,
+    })
+
+    // Persist the open Checkout session before returning its URL. The reaper treats only this exact
+    // PENDING_PROOF/provider combination as an expirable hold; it never mistakes a submitted payment
+    // proof for an abandoned checkout.
+    await db().paymentProof.create({
+      data: {
+        bookingId: booking.id,
+        userId: booking.guestId,
+        provider: 'stripe_checkout',
+        status: 'PENDING_PROOF',
+        amountMinor: totalMinor,
+        currency: booking.currency,
+        providerRef: session.id,
+        adminNote: 'Open Stripe Checkout session; not yet paid.',
+      },
     })
 
     return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
@@ -641,7 +670,16 @@ export async function handlePayments(req, res, url, context) {
       if (completed.metadata?.kind === 'wallet_topup') {
         await creditWalletTopupSession(completed) // SR cashless (016): credit rider wallet only on verified paid
       } else {
-        await finalizeStripeSession(completed)
+        const finalized = await finalizeStripeSession(completed)
+        // Never acknowledge a captured booking payment that could not be recorded. A non-2xx response
+        // keeps the event in Stripe's retry queue for operational recovery instead of silently losing it.
+        if (completed.metadata?.bookingId && completed.payment_status === 'paid' && !finalized) {
+          const error = new Error('Captured Stripe booking payment could not be finalized; retry required.')
+          error.statusCode = 503
+          error.code = 'STRIPE_BOOKING_FINALIZE_RETRY'
+          error.expose = true
+          throw error
+        }
       }
     }
 
