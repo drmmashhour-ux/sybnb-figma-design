@@ -122,6 +122,18 @@ export async function chargeCompletedRide(tx, ride) {
 
   const split = srRideFinanceSplit(fareMinor)
 
+  // Resolve accounting before moving any money. If the platform account is missing, completing
+  // the ride would otherwise debit 100% from the rider and credit only 85% to the driver, leaving
+  // the commission unaccounted for. Throwing rolls back the surrounding status transition too.
+  const platformUserId = await resolvePlatformUserId(tx)
+  if (!platformUserId) {
+    const error = new Error('Platform accounting account is not configured.')
+    error.statusCode = 503
+    error.code = 'PLATFORM_ACCOUNT_MISSING'
+    error.expose = true
+    throw error
+  }
+
   // 1. DEBIT the rider the full fare. This is also what settles (releases) the match-time hold:
   //    the reservation drops out of riderReservedMinor once the ride leaves the held window, so
   //    there is deliberately no crediting RELEASE entry here (that would refund the rider).
@@ -153,19 +165,16 @@ export async function chargeCompletedRide(tx, ride) {
   // 3. Record the 15% platform commission as a CREDIT to the platform admin wallet (same shape as
   //    STR booking_admin_share). In production an ADMIN always exists; if none does, the commission
   //    simply isn't recorded (matching approvePaymentProof's conditional admin credit).
-  const platformUserId = await resolvePlatformUserId(tx)
-  if (platformUserId) {
-    await recordWalletEntry(tx, {
-      userId: platformUserId,
-      type: 'CREDIT',
-      amountMinor: split.adminCommissionMinor,
-      currency: ride.currency,
-      referenceType: 'sr_admin_commission',
-      referenceId: ride.id,
-      keyParts: ['sr-admin-commission', ride.id],
-      note: 'SYBNB SR platform commission (15%) collected on ride completion.',
-    })
-  }
+  await recordWalletEntry(tx, {
+    userId: platformUserId,
+    type: 'CREDIT',
+    amountMinor: split.adminCommissionMinor,
+    currency: ride.currency,
+    referenceType: 'sr_admin_commission',
+    referenceId: ride.id,
+    keyParts: ['sr-admin-commission', ride.id],
+    note: 'SYBNB SR platform commission (15%) collected on ride completion.',
+  })
 
   return { charged: true, ...split, platformUserId }
 }

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken } from '../../server/lib/security.mjs'
 import { encryptPayoutAccount, payoutAccountLast4 } from '../../server/lib/payout-account.mjs'
+import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
 import {
   cleanupTestUsers,
   testApp,
@@ -48,9 +49,17 @@ describe('Host payout release (disbursement) + ADMIN-only account reveal', () =>
   async function makeEligibleBooking() {
     const checkOut = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000)
     const checkIn = new Date(checkOut.getTime() - 2 * 24 * 60 * 60 * 1000)
-    return db().booking.create({
+    const booking = await db().booking.create({
       data: { listingId: listing.id, guestId: guest.id, status: 'COMPLETED', amountMinor: 100_00, currency: 'USD', checkIn, checkOut },
     })
+    const proof = await db().paymentProof.create({
+      data: { bookingId: booking.id, userId: guest.id, provider: 'test', providerRef: `paid-${booking.id}`, status: 'APPROVED', amountMinor: 100_00, currency: 'USD' },
+    })
+    await db().$transaction((tx) => recordWalletEntry(tx, {
+      userId: host.id, type: 'HOLD', amountMinor: 9_000, currency: 'USD', referenceType: 'booking_payout',
+      referenceId: booking.id, keyParts: ['test-payout-hold', booking.id, proof.id], note: 'approval-time payout snapshot',
+    }))
+    return booking
   }
 
   async function setHostPayout(payoutMethod) {
@@ -78,6 +87,33 @@ describe('Host payout release (disbursement) + ADMIN-only account reveal', () =>
     expect(res.body.error.code).toBe('PAYOUT_METHOD_REQUIRED')
   })
 
+  it('fails closed when a completed booking has no approved payment or payout snapshot', async () => {
+    const number = '0955000999'
+    await setHostPayout({ type: 'sham_cash', accountHolder: 'Host Owner', last4: payoutAccountLast4(number), ...encryptPayoutAccount(number) })
+    const checkOut = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000)
+    const booking = await db().booking.create({ data: {
+      listingId: listing.id, guestId: guest.id, status: 'COMPLETED', amountMinor: 100_00, currency: 'USD',
+      checkIn: new Date(checkOut.getTime() - 86400000), checkOut,
+    } })
+    const res = await request(app).patch(`/api/admin/payouts/${booking.id}/release`)
+      .set('Authorization', `Bearer ${admin.token}`).send({ payoutRef: 'SHAM-NO-PAYMENT' })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe('PAYOUT_APPROVED_PAYMENT_REQUIRED')
+    expect(await db().walletEntry.count({ where: { referenceId: booking.id, type: { in: ['RELEASE', 'DEBIT'] } } })).toBe(0)
+  })
+
+  it('refuses payout while the booking has an open dispute', async () => {
+    const number = '0955000888'
+    await setHostPayout({ type: 'sham_cash', accountHolder: 'Host Owner', last4: payoutAccountLast4(number), ...encryptPayoutAccount(number) })
+    const booking = await makeEligibleBooking()
+    await db().dispute.create({ data: { subjectType: 'STR_BOOKING', bookingId: booking.id, openedByUserId: guest.id, reason: 'open payout-blocking dispute' } })
+    const res = await request(app).patch(`/api/admin/payouts/${booking.id}/release`)
+      .set('Authorization', `Bearer ${admin.token}`).send({ payoutRef: 'SHAM-DISPUTED' })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('PAYOUT_NOT_ELIGIBLE')
+    expect(await db().walletEntry.count({ where: { referenceType: 'booking_payout_disbursement', referenceId: booking.id } })).toBe(0)
+  })
+
   it('releases with a payout method + payoutRef and records the ref on the ledger + audit', async () => {
     const number = '0955123456'
     await setHostPayout({
@@ -99,12 +135,19 @@ describe('Host payout release (disbursement) + ADMIN-only account reveal', () =>
     })
     expect(release).not.toBeNull()
     expect(release.note).toContain('SHAM-REF-42')
+    const disbursement = await db().walletEntry.findFirst({ where: { referenceType: 'booking_payout_disbursement', referenceId: booking.id, type: 'DEBIT' } })
+    expect(disbursement?.amountMinor).toBe(release.amountMinor)
+    const repeat = await request(app).patch(`/api/admin/payouts/${booking.id}/release`)
+      .set('Authorization', `Bearer ${admin.token}`).send({ payoutRef: 'SHAM-REF-DIFFERENT' })
+    expect(repeat.status).toBe(409)
+    expect(repeat.body.error.code).toBe('PAYOUT_ALREADY_DISBURSED')
+    expect(await db().walletEntry.count({ where: { referenceType: 'booking_payout_disbursement', referenceId: booking.id } })).toBe(1)
 
     const audit = await db().adminAuditLog.findFirst({
       where: { action: 'ADMIN_PAYOUT_RELEASED', entityId: booking.id },
     })
     expect(audit).not.toBeNull()
-    expect(audit.after.payoutRef).toBe('SHAM-REF-42')
+      expect(audit.after.payoutRef).toBe('SHAM-REF-42')
   })
 
   it('reveals the decrypted Sham Cash number to ADMIN only, and audits only the last4', async () => {

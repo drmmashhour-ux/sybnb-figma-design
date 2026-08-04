@@ -232,6 +232,12 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     window.location.hash = `/listing/${listing.id}`
   }
 
+  const heroCaption = effectiveInitialDivision === 'newConstruction'
+    ? (lang === 'ar' ? 'مشاريع جديدة في سوريا' : 'New construction in Syria')
+    : effectiveInitialDivision === 'cars'
+      ? (lang === 'ar' ? 'مركبات في سوريا' : 'Vehicles in Syria')
+      : (lang === 'ar' ? 'إقامات في سوريا' : 'Stays in Syria')
+
   return (
     <main dir={lang === 'ar' ? 'rtl' : 'ltr'} className="search-experience">
       <section style={flowStyles.nav} aria-label={lang === 'ar' ? 'التنقل بين الخطوات' : 'Step navigation'}>
@@ -255,7 +261,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           style={flowStyles.heroPhotoImg}
           loading="eager"
         />
-        <span style={flowStyles.heroPhotoCaption}>{lang === 'ar' ? 'إقامات في سوريا' : 'Stays in Syria'}</span>
+        <span style={flowStyles.heroPhotoCaption}>{heroCaption}</span>
       </section>
 
       <UnifiedSearchBar

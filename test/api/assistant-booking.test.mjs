@@ -20,8 +20,8 @@ describe('AI booking assistant authorization and audit', () => {
 
     for (const target of ['guest', 'other']) {
       const email = uniqueTestEmail(`assistant-${target}`)
-      await verifyEmailForTest(app, email)
-      const response = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+      const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+      const response = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
       trackTestUser(response.body.user.id)
       if (target === 'guest') guest = response.body
       else otherGuest = response.body

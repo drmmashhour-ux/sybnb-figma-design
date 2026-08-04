@@ -1,6 +1,7 @@
 import request from 'supertest'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
+import { __resetRateLimitsForTests } from '../../server/lib/rate-limit.mjs'
 import { createSessionToken } from '../../server/lib/security.mjs'
 import {
   cleanupTestUsers,
@@ -34,14 +35,21 @@ describe('P4: guest book → pay (local wallet) → admin approve → confirm', 
     })
   })
 
+  // This file deliberately drives the real email-code endpoints several times to build fixtures.
+  // Keep its two business-journey scenarios independent from one another (and from earlier API
+  // files) without changing any production limit or bypassing the limiter in application code.
+  beforeEach(() => {
+    __resetRateLimitsForTests()
+  })
+
   afterAll(async () => {
     await cleanupTestUsers()
   })
 
   async function registerGuest(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     return { id: res.body.user.id, token: res.body.token }
   }

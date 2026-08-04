@@ -31,8 +31,8 @@ describe('POST /api/wallet/gifts is overdraw-safe under concurrent sends (M2)', 
 
   async function registerGuest(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1,
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',

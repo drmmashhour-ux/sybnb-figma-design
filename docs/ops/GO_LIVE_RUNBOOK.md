@@ -55,10 +55,11 @@ Also: **do NOT set `DISABLE_RATE_LIMIT=1`** — the server refuses to boot with 
 | Variable | Enables | Without it |
 |---|---|---|
 | `RESEND_API_KEY` *(or `SMTP_HOST`,`SMTP_PORT`,`SMTP_USER`,`SMTP_PASS`)* | **Email OTP** (sign-up + staff/admin login) | **sign-up + admin login blocked (503)** — the #1 launch blocker |
+| `SMS_PROVIDER` + `SMS_GATEWAY_URL`/`SMS_API_KEY` **or** `TWILIO_*` | phone OTP | phone verification returns 503; email OTP remains available |
 | `STRIPE_SECRET_KEY` | card payments (guest + host plan) | only Sham Cash (manual) works |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature check | webhook returns 503 |
 | `VITE_STRIPE_PUBLISHABLE_KEY` | client Stripe UI (**build-time** — redeploy after change) | card UI hidden |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | first admin auto-created on deploy (`postbuild` runs bootstrap) | no admin exists to approve listings |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | one-time admin bootstrap values | no admin exists to approve listings; run the explicit bootstrap command below |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob media storage (listing photos, ID docs) | **photo/doc uploads fail on serverless** — confirm a Blob store exists for this project |
 | `ANTHROPIC_API_KEY` | real AI descriptions + pricing insights | silently falls back to the deterministic template |
 | `CRON_SECRET` | authenticates the `/api/cron/maintenance` cron (fail-closed) | cron rejected |
@@ -138,12 +139,18 @@ Only proceed to production once staging is clean.
    `CORS_ORIGIN=https://sybnb.app`, Stripe **live** keys, `RESEND_API_KEY`, `ADMIN_EMAIL`/`ADMIN_PASSWORD`,
    `BLOB_READ_WRITE_TOKEN`, `FORCE_HTTPS=1`, `TRUST_PROXY=1`, remove `VITE_GOOGLE_MAPS_API_KEY`).
 2. Run prod migrations (per step 2 — fresh vs existing DB).
-3. Promote to production:
+3. Create or verify the first administrator explicitly against the target database. Builds never
+   create users or modify application data:
+   ```bash
+   DATABASE_URL="<target-pooled-url>" ADMIN_EMAIL="<admin-email>" \
+     ADMIN_PASSWORD="<strong-password>" ADMIN_NAME="<display-name>" npm run bootstrap:admin
+   ```
+   Remove `ADMIN_PASSWORD` from persistent deployment configuration after the bootstrap succeeds.
+4. Promote to production:
    ```bash
    vercel deploy --prod        # builds + deploys to the production domain
    ```
-   The `postbuild` step creates the first admin from `ADMIN_EMAIL`/`ADMIN_PASSWORD` (idempotent).
-4. Register the Stripe **live** webhook → endpoint `https://sybnb.app/api/…` (the payments webhook
+5. Register the Stripe **live** webhook → endpoint `https://sybnb.app/api/payments/stripe/webhook`
    path) → set `STRIPE_WEBHOOK_SECRET` to the signing secret it gives you → redeploy.
 
 ---

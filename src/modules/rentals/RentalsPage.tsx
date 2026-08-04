@@ -7,7 +7,6 @@ import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/Vi
 import { aiParsePropertySearch, fetchApprovedListings, fetchPrototypeListing, sendListingInquiryDocument, sendListingInquiryMessage, type AiPropertySearchFilters, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
-import { PaymentCapsule } from '../payments/PaymentCapsule'
 import { LocationMap, directionsUrl } from '../../shared/maps/capsule'
 import { listingMapTarget } from '../../shared/maps/googleMapCapsule'
 import { MortgageCalculator } from '../realestate/MortgageCalculator'
@@ -434,13 +433,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
   function openAccount() {
     sessionStorage.setItem(GUEST_RETURN_PATH_KEY, isBuyMode ? '/buy' : '/rentals')
-    window.location.hash = '/account/open'
+    window.dispatchEvent(new Event('sybnb-open-auth'))
   }
 
   function openContactCenter() {
     if (!hasGuestAccount) {
       sessionStorage.setItem(GUEST_RETURN_PATH_KEY, '/immocontact')
-      window.location.hash = '/account/open'
+      window.dispatchEvent(new Event('sybnb-open-auth'))
       return
     }
     window.location.hash = '/immocontact'
@@ -867,15 +866,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 </ol>
               </section>
 
-              <PaymentCapsule
-                lang={lang}
-                methodLabel="SYBNB / IMMOContact"
-                amountLabel={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)}
-                destinationCode={isBuyMode ? 'BUYER-CAPSULE' : 'RENTAL-CAPSULE'}
-                followCode={sentRequest?.id || 'WAITING'}
-                proofCount={documentFiles.length}
-                status={sentRequest ? 'admin' : documentFiles.length ? 'proof' : hasGuestAccount ? 'ready' : 'locked'}
-              />
             </>
           ) : <p style={styles.empty}>{t.noSelection}</p>}
 

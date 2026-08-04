@@ -9,8 +9,8 @@ export const PLAN_DURATION_DAYS = {
   premium: 60,
 }
 
-// The divisions that require a paid, admin-approved seller plan (as opposed to the commission/
-// contact-based STAYS/RENTALS/BUY). Single source of truth, imported by both the listing create
+// The divisions that require a paid, admin-approved seller plan (as opposed to the booking-based
+// STAYS flow and inquiry-only RENTALS/BUY launch scope). Single source of truth, imported by both the listing create
 // route (gate) and the admin approval route (which starts the paid clock).
 // Facebook-style marketplace Phase 1: MARKETPLACE (goods) is now FREE for individual listing — removed
 // from the paid-plan gate. CARS and NEW_CONSTRUCTION stay behind an admin-approved paid seller plan.
@@ -21,7 +21,7 @@ export function listingExpiryDate(planCode) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000)
 }
 
-// RENTALS/BUY (025): commission-based, no paid plan, so they never had any freshness signal at
+// RENTALS/BUY (025): inquiry-only at launch, with no paid plan, so they never had any freshness signal at
 // all -- a listing published months ago stayed live forever with no "still available?" nudge.
 // FREE_TIER_DIVISIONS get the same opportunistic expireOldListings() flip to EXPIRED as paid
 // divisions, but on a single fixed window (no plan tiers to key off), and the host can push the

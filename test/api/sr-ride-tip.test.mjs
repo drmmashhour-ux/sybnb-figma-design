@@ -2,15 +2,16 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
-import { approveDriverForRides, cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
+import { approveDriverForRides, cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode, verifyEmailForTest } from '../support/testServer.mjs'
 
 // Tips: after a COMPLETED ride, the rider tips from wallet credit; the driver receives 100% (no
 // platform commission on tips). One tip per ride.
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant, role, email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { token: res.body.token, user: res.body.user }
 }
@@ -46,7 +47,11 @@ async function completeRide(app, rider, driver, label, fareCurrency = 'SYP') {
 
 describe('SR ride tip: 100% to driver, one per ride, wallet-gated', () => {
   let app
-  beforeAll(() => { app = testApp() })
+  beforeAll(async () => {
+    app = testApp()
+    const admin = await db().user.create({ data: { email: uniqueTestEmail('sr-tip-admin'), displayName: 'SR Tip Admin', referralCode: uniqueTestReferralCode(), roles: { create: { role: 'ADMIN' } } } })
+    trackTestUser(admin.id)
+  })
   afterAll(async () => { await cleanupTestUsers() })
 
   it('a rider tips a completed ride; the driver receives 100%, and a second tip is refused', async () => {

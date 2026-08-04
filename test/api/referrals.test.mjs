@@ -32,8 +32,8 @@ describe('Referral program', () => {
 
   async function registerGuest(label, referralCode) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1,
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',
@@ -96,8 +96,8 @@ describe('Referral program', () => {
     const referee = await registerGuest('referral-referee-2', referrer.user.referralCode)
 
     const hostEmail = uniqueTestEmail('referral-host')
-    await verifyEmailForTest(app, hostEmail, 'staff-login')
-    const hostRes = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant2 = await verifyEmailForTest(app, hostEmail, 'staff-login')
+    const hostRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant2,
       role: 'HOST',
       email: hostEmail,
       password: 'correct-horse-battery',
@@ -194,8 +194,8 @@ describe('Referral program', () => {
     const referee = await registerGuest('referral-referee-3', referrer.user.referralCode)
 
     const hostEmail = uniqueTestEmail('referral-host-2')
-    await verifyEmailForTest(app, hostEmail, 'staff-login')
-    const hostRes = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant3 = await verifyEmailForTest(app, hostEmail, 'staff-login')
+    const hostRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant3,
       role: 'HOST',
       email: hostEmail,
       password: 'correct-horse-battery',

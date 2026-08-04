@@ -84,6 +84,10 @@ const RATE_LIMIT_RULES = [
   // Phone/SMS OTP: same per-IP caps as email — bounds SMS cost/bombing on send and brute-force on verify.
   { name: 'AUTH_PHONE_CODE_SEND', method: 'POST', pattern: /^\/api\/auth\/phone-code\/send$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
   { name: 'AUTH_PHONE_CODE_VERIFY', method: 'POST', pattern: /^\/api\/auth\/phone-code\/verify$/, max: 10, windowMs: 15 * 60 * 1000, byUser: false },
+  // Password reset performs an expensive password hash plus a DB write. Checkout guest can create a
+  // user + wallet for every new device id, so leaving it unlimited enables unauthenticated DB growth.
+  { name: 'AUTH_PASSWORD_RESET', method: 'POST', pattern: /^\/api\/auth\/password-reset$/, max: 5, windowMs: 15 * 60 * 1000, byUser: false },
+  { name: 'AUTH_CHECKOUT_GUEST', method: 'POST', pattern: /^\/api\/auth\/checkout-guest$/, max: 20, windowMs: 60 * 60 * 1000, byUser: false },
   { name: 'PUBLIC_SEARCH', method: 'GET', pattern: /^\/api\/listings$/, max: 60, windowMs: 60 * 1000, byUser: false },
   // Map geocoding proxy — cached server-side, but bound per-IP so nobody can pipe abuse through us to Nominatim.
   { name: 'GEOCODE_PLACE', method: 'GET', pattern: /^\/api\/geocode$/, max: 60, windowMs: 60 * 1000, byUser: false },

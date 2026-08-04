@@ -86,6 +86,19 @@ describe('STR host-plan Stripe card payment — correctness + idempotency + isol
     expect(credits).toBe(1)
   })
 
+  it('concurrent webhook + browser confirmation records one proof and one fee', async () => {
+    const session = paidStrPlanSession(`cs_test_${Date.now()}_PLAN_RACE`, host.id, 'plus', 19)
+    const results = await Promise.all([
+      finalizeStripeStrPlanSession(session),
+      finalizeStripeStrPlanSession(session),
+      finalizeStripeStrPlanSession(session),
+    ])
+    expect(results.every((proof) => proof?.id === results[0]?.id)).toBe(true)
+    const proofs = await db().paymentProof.findMany({ where: { provider: 'str_host_plan', providerRef: session.id } })
+    expect(proofs).toHaveLength(1)
+    expect(await db().walletEntry.count({ where: { referenceType: 'str_host_plan_fee', referenceId: proofs[0].id } })).toBe(1)
+  })
+
   it('unpaid session: no proof, no revenue', async () => {
     const session = paidStrPlanSession(`cs_test_${Date.now()}_PLAN_UNPAID`, host.id, 'hotel', 100)
     session.payment_status = 'unpaid'
@@ -103,12 +116,22 @@ describe('STR host-plan Stripe card payment — correctness + idempotency + isol
     expect(result).toBeNull()
   })
 
+  it('fails closed and rolls back when no platform ADMIN account exists', async () => {
+    await db().userRole.deleteMany({ where: { role: 'ADMIN' } })
+    const session = paidStrPlanSession(`cs_test_${Date.now()}_PLAN_NO_ADMIN`, host.id, 'basic', 9)
+    const creditsBefore = await db().walletEntry.count({ where: { referenceType: 'str_host_plan_fee' } })
+
+    await expect(finalizeStripeStrPlanSession(session)).rejects.toMatchObject({ code: 'PLATFORM_ACCOUNT_MISSING', statusCode: 503 })
+    expect(await db().paymentProof.count({ where: { provider: 'str_host_plan', providerRef: session.id } })).toBe(0)
+    expect(await db().walletEntry.count({ where: { referenceType: 'str_host_plan_fee' } })).toBe(creditsBefore)
+  })
+
   it('fail-closed: an AUTHED create-str-plan-checkout request returns 503 when Stripe is not configured', async () => {
     const app = testApp()
     // Auth is checked before Stripe, so use a real token; then requireStripe() fails closed (no keys here).
     const email = uniqueTestEmail('strplan-guest')
-    await verifyEmailForTest(app, email)
-    const reg = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const reg = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
     trackTestUser(reg.body.user.id)
     const res = await request(app)
       .post('/api/payments/stripe/create-str-plan-checkout-session')

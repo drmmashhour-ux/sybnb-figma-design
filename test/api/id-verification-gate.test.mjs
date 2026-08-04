@@ -20,8 +20,8 @@ describe('Payment endpoints do NOT require a guest ID document', () => {
 
   async function setUpUnpaidBooking() {
     const hostEmail = uniqueTestEmail('id-gate-host')
-    await verifyEmailForTest(app, hostEmail, 'staff-login')
-    const hostRes = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, hostEmail, 'staff-login')
+    const hostRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1,
       role: 'HOST',
       email: hostEmail,
       password: 'correct-horse-battery',
@@ -29,8 +29,8 @@ describe('Payment endpoints do NOT require a guest ID document', () => {
     trackTestUser(hostRes.body.user.id)
 
     const guestEmail = uniqueTestEmail('id-gate-guest')
-    await verifyEmailForTest(app, guestEmail)
-    const guestRes = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant2 = await verifyEmailForTest(app, guestEmail)
+    const guestRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant2,
       role: 'GUEST',
       email: guestEmail,
       password: 'correct-horse-battery',

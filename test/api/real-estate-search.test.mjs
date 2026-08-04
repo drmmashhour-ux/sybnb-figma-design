@@ -15,8 +15,8 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
   beforeAll(async () => {
     app = testApp()
     const email = uniqueTestEmail('re-seller')
-    await verifyEmailForTest(app, email, 'staff-login')
-    const res = await request(app).post('/api/auth/register').send({ role: 'SELLER', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email, 'staff-login')
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'SELLER', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     seller = res.body.user
     sellerToken = res.body.token
@@ -153,8 +153,8 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
   it('GET /api/me/properties returns only the caller\'s BUY/RENTALS listings with an inquiry count', async () => {
     // A fresh seller so the portfolio + inquiry count are isolated from the shared `seller`.
     const email = uniqueTestEmail('me-props-seller')
-    await verifyEmailForTest(app, email, 'staff-login')
-    const reg = await request(app).post('/api/auth/register').send({ role: 'SELLER', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant2 = await verifyEmailForTest(app, email, 'staff-login')
+    const reg = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant2, role: 'SELLER', email, password: 'correct-horse-battery' })
     trackTestUser(reg.body.user.id)
     const token = reg.body.token
     const ownerId = reg.body.user.id
@@ -166,8 +166,8 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
 
     // An inquiry thread on the BUY listing from some guest → inquiryCount 1.
     const guestEmail = uniqueTestEmail('me-props-guest')
-    await verifyEmailForTest(app, guestEmail)
-    const guest = await request(app).post('/api/auth/register').send({ role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
+    const legacyVerificationGrant3 = await verifyEmailForTest(app, guestEmail)
+    const guest = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant3, role: 'GUEST', email: guestEmail, password: 'correct-horse-battery' })
     trackTestUser(guest.body.user.id)
     await db().messageThread.create({ data: { listingId: buy.id, guestId: guest.body.user.id } })
 
@@ -199,8 +199,8 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
 
     // A non-owner cannot edit it (scoped to ownerId → 404, never leaks existence).
     const otherEmail = uniqueTestEmail('re-other-seller')
-    await verifyEmailForTest(app, otherEmail, 'staff-login')
-    const other = await request(app).post('/api/auth/register').send({ role: 'SELLER', email: otherEmail, password: 'correct-horse-battery' })
+    const legacyVerificationGrant4 = await verifyEmailForTest(app, otherEmail, 'staff-login')
+    const other = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant4, role: 'SELLER', email: otherEmail, password: 'correct-horse-battery' })
     trackTestUser(other.body.user.id)
     expect((await request(app).patch(`/api/listings/${rejected.id}`).set('Authorization', `Bearer ${other.body.token}`).send({ titleAr: 'hijack attempt' })).status).toBe(404)
 

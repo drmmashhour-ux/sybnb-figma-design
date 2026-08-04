@@ -50,8 +50,8 @@ describe('P5: Stripe booking card payment (immediate capture) — correctness + 
 
   async function registerGuest(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     return { id: res.body.user.id, token: res.body.token }
   }
@@ -88,6 +88,9 @@ describe('P5: Stripe booking card payment (immediate capture) — correctness + 
     // The split ran: host payout HELD, platform commission credited.
     const hold = await db().walletEntry.findFirst({ where: { referenceType: 'booking_payout', referenceId: booking.id, type: 'HOLD' } })
     expect(hold).not.toBeNull()
+    const adminShare = await db().walletEntry.findFirst({ where: { referenceType: 'booking_admin_share', referenceId: booking.id, type: 'CREDIT' } })
+    expect(adminShare).not.toBeNull()
+    expect(adminShare.amountMinor).toBe(10_00)
   })
 
   it('duplicate / delayed webhook: replaying the same session does NOT create a second proof or payout', async () => {
@@ -130,6 +133,18 @@ describe('P5: Stripe booking card payment (immediate capture) — correctness + 
     expect(late).toBeNull()
     const holds = await db().walletEntry.count({ where: { referenceType: 'booking_payout', referenceId: booking.id, type: 'HOLD' } })
     expect(holds).toBe(1) // still exactly one payout
+  })
+
+  it('fails closed and rolls back when no platform ADMIN account exists', async () => {
+    await db().userRole.deleteMany({ where: { role: 'ADMIN' } })
+    const guest = await registerGuest('stripe-no-admin')
+    const booking = await makePendingBooking(guest.id, 1240)
+    const session = paidBookingSession(`cs_test_${Date.now()}_NO_ADMIN`, booking.id, 100_00)
+
+    await expect(finalizeStripeSession(session)).rejects.toMatchObject({ code: 'PLATFORM_ACCOUNT_MISSING', statusCode: 503 })
+    expect(await statusOf(booking.id)).toBe('PAYMENT_PENDING')
+    expect(await db().paymentProof.count({ where: { provider: 'stripe', providerRef: session.id } })).toBe(0)
+    expect(await db().walletEntry.count({ where: { referenceId: booking.id } })).toBe(0)
   })
 
   it('fail-closed: Stripe HTTP endpoints return 503 when Stripe is not configured (no keys in this env)', async () => {

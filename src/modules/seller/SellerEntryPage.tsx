@@ -12,7 +12,7 @@ type Props = {
 
 const STORAGE_KEY = 'sybnb_v6_selected_seller_role'
 const FLOW_STORAGE_KEY = 'sybnb_v6_sell_flow'
-type SellerServiceMode = 'seller-plan' | 'platform-sale'
+type SellerServiceMode = 'seller-plan'
 
 const SELLER_SERVICE_MODES: Array<{
   id: SellerServiceMode
@@ -31,16 +31,6 @@ const SELLER_SERVICE_MODES: Array<{
     },
     nextStep: { ar: 'حساب + خطة + دفع + نشر', en: 'Account + plan + payment + publish' },
   },
-  {
-    id: 'platform-sale',
-    accent: '#20d29b',
-    label: { ar: 'بيع عبر المنصة', en: 'Sell through platform' },
-    description: {
-      ar: 'SYBNB تستلم الطلب والمستندات وتدير عملية البيع بعد موافقة الإدارة. لا توجد خطة نشر مقدماً؛ عمولة المنصة 5% عند إتمام البيع.',
-      en: 'SYBNB receives the request and documents, then manages the sale after admin approval. No publishing plan is paid upfront; platform commission is 5% when the sale closes.',
-    },
-    nextStep: { ar: 'حساب + مستندات + موافقة الإدارة + عمولة 5%', en: 'Account + documents + admin approval + 5% commission' },
-  },
 ]
 
 export function SellerEntryPage({ lang }: Props) {
@@ -52,8 +42,8 @@ export function SellerEntryPage({ lang }: Props) {
 
   const continueToAccount = () => {
     window.localStorage.setItem(STORAGE_KEY, selectedRole)
-    window.localStorage.setItem(FLOW_STORAGE_KEY, serviceMode === 'platform-sale' ? 'platform-sale' : 'listing')
-    navigate(serviceMode === 'platform-sale' ? '/sell/platform' : '/sell/account')
+    window.localStorage.setItem(FLOW_STORAGE_KEY, 'listing')
+    navigate('/sell/account')
   }
 
   return (
@@ -68,8 +58,8 @@ export function SellerEntryPage({ lang }: Props) {
             <h1>{isAr ? 'كيف تريد إدراج عقارك؟' : 'How do you want to list your property?'}</h1>
             <p>
               {isAr
-                ? 'لدينا مساران واضحان: بائع مع خطة يدير النشر بنفسه، أو بيع عبر المنصة حيث تساعد SYBNB في إدارة البيع بعد مراجعة الإدارة.'
-                : 'We have two clear paths: a seller with a plan who manages publishing, or sell by platform where SYBNB helps manage the sale after admin review.'}
+                ? 'أنشئ حساب بائع، اختر خطة النشر، وارفع المستندات للمراجعة قبل ظهور إعلانك.'
+                : 'Create a seller account, choose a publishing plan, and submit documents for review before your listing goes live.'}
             </p>
           </div>
           <div className="seller-logo-panel">
@@ -99,7 +89,7 @@ export function SellerEntryPage({ lang }: Props) {
               style={{ '--accent': mode.accent } as CSSVars}
             >
               <span className="seller-role-icon" aria-hidden="true">
-                {mode.id === 'seller-plan' ? (isAr ? 'خ' : 'P') : (isAr ? 'م' : 'S')}
+                {isAr ? 'خ' : 'P'}
               </span>
               <span className="seller-role-title">{mode.label[lang]}</span>
               <span className="seller-role-copy">{mode.description[lang]}</span>
@@ -137,13 +127,7 @@ export function SellerEntryPage({ lang }: Props) {
           <span>{selectedMode.nextStep[lang]} / {selected.nextStep[lang]}</span>
         </div>
         <button className="seller-primary-button" onClick={continueToAccount}>
-          {serviceMode === 'platform-sale'
-            ? isAr
-              ? 'متابعة إلى البيع عبر المنصة'
-              : 'Continue to platform sale'
-            : isAr
-              ? 'متابعة إلى الحساب والخطة'
-              : 'Continue to account and plan'}
+          {isAr ? 'متابعة إلى الحساب والخطة' : 'Continue to account and plan'}
         </button>
       </section>
     </main>

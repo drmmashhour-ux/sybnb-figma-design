@@ -45,14 +45,21 @@ describe('Guest account-claim + booking migration', () => {
     })
 
     const email = uniqueTestEmail('claimed')
-    await verifyEmailForTest(app, email)
+    const verificationGrant = await verifyEmailForTest(app, email)
 
     const res = await request(app)
       .post('/api/auth/claim-guest-account')
       .set('Authorization', `Bearer ${device.token}`)
-      .send({ email, password: 'correct-horse-battery', displayName: 'Real Guest' })
+      .send({ email, password: 'correct-horse-battery', displayName: 'Real Guest', verificationGrant })
     expect(res.status).toBe(201)
     expect(res.body.user.id).toBe(device.id) // in-place upgrade — same user row
+
+    // The pre-claim device credential must not survive the identity upgrade. Only the newly minted
+    // token returned by the claim may access the named account.
+    const staleSession = await request(app).get('/api/me/overview').set('Authorization', `Bearer ${device.token}`)
+    expect(staleSession.status).toBe(401)
+    const freshSession = await request(app).get('/api/me/overview').set('Authorization', `Bearer ${res.body.token}`)
+    expect(freshSession.status).toBe(200)
 
     const updated = await db().user.findUnique({ where: { id: device.id } })
     expect(updated.email).toBe(email.toLowerCase())
@@ -67,19 +74,19 @@ describe('Guest account-claim + booking migration', () => {
     const email = uniqueTestEmail('taken')
 
     const a = await deviceGuest('device-claim-bbbbbbbb')
-    await verifyEmailForTest(app, email)
+    const firstGrant = await verifyEmailForTest(app, email)
     const first = await request(app)
       .post('/api/auth/claim-guest-account')
       .set('Authorization', `Bearer ${a.token}`)
-      .send({ email, password: 'correct-horse-battery' })
+      .send({ email, password: 'correct-horse-battery', verificationGrant: firstGrant })
     expect(first.status).toBe(201)
 
     const b = await deviceGuest('device-claim-cccccccc')
-    await verifyEmailForTest(app, email)
+    const secondGrant = await verifyEmailForTest(app, email)
     const second = await request(app)
       .post('/api/auth/claim-guest-account')
       .set('Authorization', `Bearer ${b.token}`)
-      .send({ email, password: 'correct-horse-battery' })
+      .send({ email, password: 'correct-horse-battery', verificationGrant: secondGrant })
     expect(second.status).toBe(409)
     expect(second.body.error.code).toBe('ACCOUNT_ALREADY_EXISTS')
 
@@ -101,10 +108,10 @@ describe('Guest account-claim + booking migration', () => {
 
   it('rejects an unauthenticated claim', async () => {
     const email = uniqueTestEmail('noauth')
-    await verifyEmailForTest(app, email)
+    const verificationGrant = await verifyEmailForTest(app, email)
     const res = await request(app)
       .post('/api/auth/claim-guest-account')
-      .send({ email, password: 'correct-horse-battery' })
+      .send({ email, password: 'correct-horse-battery', verificationGrant })
     expect(res.status).toBe(401)
   })
 })

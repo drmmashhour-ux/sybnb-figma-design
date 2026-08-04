@@ -6,8 +6,8 @@ import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestRe
 
 async function registerRider(app, label) {
   const email = uniqueTestEmail(label)
-  await verifyEmailForTest(app, email)
-  const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+  const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { token: res.body.token, user: res.body.user }
 }
@@ -67,6 +67,16 @@ describe('Sham Cash wallet top-up: credits 1:1 only after admin approval', () =>
     const second = await request(app).post('/api/wallet/topup/sham-cash').set('Authorization', `Bearer ${rider.token}`).send({ amountMinor: 3000, providerRef })
     expect(second.status).toBe(409)
     expect(second.body.error.code).toBe('PAYMENT_REFERENCE_DUPLICATE')
+  })
+
+  it('accepts exactly one of two concurrent submissions with the same providerRef', async () => {
+    const rider = await registerRider(app, 'topup-sham-race')
+    const providerRef = `SHAM-${Date.now()}-RACE`
+    const submit = () => request(app).post('/api/wallet/topup/sham-cash')
+      .set('Authorization', `Bearer ${rider.token}`).send({ amountMinor: 3000, providerRef })
+    const responses = await Promise.all([submit(), submit()])
+    expect(responses.map((res) => res.status).sort()).toEqual([201, 409])
+    expect(await db().paymentProof.count({ where: { provider: 'wallet_topup_sham_cash', providerRef } })).toBe(1)
   })
 
   it('rejects a non-positive amount', async () => {

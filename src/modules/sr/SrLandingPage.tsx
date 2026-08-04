@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { StandalonePlatformShell } from '../../shared/layout/StandalonePlatformShell'
 
 // SR (Syria Rides) STANDALONE PLATFORM ENTRY — the independent ride-hailing surface, isolated from the
 // STR/stays landing (owner directive: each division is its own platform). Its own hero + branding + the
@@ -50,7 +51,7 @@ export function SrLandingPage({ lang, onLanguageChange }: Props) {
   const go = (hash: string) => (window.location.hash = hash)
 
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+    <StandalonePlatformShell lang={lang}><main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <header style={styles.topbar}>
         <button style={styles.brandBtn} onClick={() => go('/')}>
           <img src="/assets/logos/sr-ride.png" alt="Syria Rides" style={styles.brandLogo} />
@@ -88,7 +89,7 @@ export function SrLandingPage({ lang, onLanguageChange }: Props) {
         <Card icon="🧭" title={t.driveTitle} desc={t.driveDesc} cta={t.driveCta} onClick={() => go('/driver')} accent="#f59e0b" />
         <Card icon="🛡️" title={t.safeTitle} desc={t.safeDesc} accent="#3b82f6" />
       </section>
-    </main>
+    </main></StandalonePlatformShell>
   )
 }
 

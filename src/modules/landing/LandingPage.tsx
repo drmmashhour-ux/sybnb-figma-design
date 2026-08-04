@@ -1,6 +1,8 @@
 import type { Lang } from '../../engines/language/languageEngine'
+import type { CSSProperties } from 'react'
 import { navigate } from '../../app/routes'
 import { SYRIA_GOVERNORATES } from '../../engines/search/syriaData'
+import { DIVISIONS } from '../../engines/navigation/divisions'
 
 type Props = {
   lang: Lang
@@ -34,6 +36,9 @@ const COPY = {
     trustSupport: 'دعم محلي',
     trustSupportBody: 'فريق حقيقي من الحجز حتى المغادرة.',
     howTitle: 'كيف تعمل',
+    exploreTitle: 'اكتشف منصات SYBNB',
+    exploreBody: 'الإقامات والعقارات والسيارات والسوق والمشاريع الجديدة ورحلات SR — كلها من مكان واحد.',
+    openPlatform: 'فتح المنصة',
     step1: 'ابحث واختر',
     step1Body: 'حدّد وجهتك وتواريخك وعدد الضيوف، وتصفّح الإقامات.',
     step2: 'احجز وادفع بأمان',
@@ -67,6 +72,9 @@ const COPY = {
     trustSupport: 'Local support',
     trustSupportBody: 'A real team from booking to checkout.',
     howTitle: 'How it works',
+    exploreTitle: 'Explore SYBNB platforms',
+    exploreBody: 'Stays, real estate, cars, marketplace, new construction, and SR rides—all in one place.',
+    openPlatform: 'Open platform',
     step1: 'Search & choose',
     step1Body: 'Set your destination, dates, and guests, then browse stays.',
     step2: 'Book & pay safely',
@@ -105,6 +113,9 @@ export function LandingPage({ lang }: Props) {
     { n: 2, title: t.step2, body: t.step2Body },
     { n: 3, title: t.step3, body: t.step3Body },
   ]
+  const platformDivisions = DIVISIONS
+    .filter((division) => ['rentals', 'buy', 'cars', 'marketplace', 'new-construction', 'ride'].includes(division.id))
+    .map((division) => ({ ...division, route: division.id === 'ride' ? '/sr' : division.route }))
 
   return (
     <main className="landing-page str-landing">
@@ -142,6 +153,28 @@ export function LandingPage({ lang }: Props) {
             </div>
           </div>
         ))}
+      </section>
+
+      <section className="str-platforms" aria-label={t.exploreTitle}>
+        <div className="str-platforms-head">
+          <h2 className={`str-section-title${serif}`}>{t.exploreTitle}</h2>
+          <p>{t.exploreBody}</p>
+        </div>
+        <div className="str-platforms-grid">
+          {platformDivisions.map((division) => (
+            <button
+              key={division.id}
+              className="str-platform-card"
+              style={{ '--platform-accent': division.accent } as CSSProperties}
+              onClick={() => navigate(division.route)}
+            >
+              <span>{division.kicker[lang]}</span>
+              <strong>{division.title[lang]}</strong>
+              <p>{division.description[lang]}</p>
+              <b>{t.openPlatform} →</b>
+            </button>
+          ))}
+        </div>
       </section>
 
       {/* 3 — HOW IT WORKS */}

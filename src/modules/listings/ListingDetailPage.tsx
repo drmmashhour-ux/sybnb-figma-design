@@ -475,7 +475,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       </section>
 
       {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
-      {status === 'error' && <section ref={messageRef} style={styles.alert}>{message}</section>}
+      {status === 'error' && (
+        <section ref={messageRef} style={styles.alert} role="alert">
+          <p>{message}</p>
+          <button type="button" style={styles.secondaryButton} onClick={() => void loadListing()}>{isAr ? 'إعادة المحاولة' : 'Try again'}</button>
+        </section>
+      )}
       {status !== 'error' && message && <section ref={messageRef} style={styles.alert}>{message}</section>}
 
       {listing && (

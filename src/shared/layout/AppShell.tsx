@@ -31,14 +31,18 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   // page writes the correct one once its fetch resolves and fires this event so the breadcrumb
   // (otherwise computed once at mount, before that write lands) picks it up without a full reload.
   const [, forceReturnPathRecompute] = useState(0)
+  const [authOpen, setAuthOpen] = useState(false)
   useEffect(() => {
     const onUpdate = () => forceReturnPathRecompute((tick) => tick + 1)
+    const onOpenAuth = () => setAuthOpen(true)
     window.addEventListener('sybnb:listing-return-path-updated', onUpdate)
     // Re-render the nav (account name vs "Sign in") whenever the session changes.
     window.addEventListener('sybnb-session-changed', onUpdate)
+    window.addEventListener('sybnb-open-auth', onOpenAuth)
     return () => {
       window.removeEventListener('sybnb:listing-return-path-updated', onUpdate)
       window.removeEventListener('sybnb-session-changed', onUpdate)
+      window.removeEventListener('sybnb-open-auth', onOpenAuth)
     }
   }, [])
   const session = getStoredGuestSession() || getStoredStaffSession()
@@ -47,11 +51,16 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
     clearStoredStaffSession()
     navigate('/')
   }
-  const [authOpen, setAuthOpen] = useState(false)
   // After sign in / sign up, land the user where they belong: guests on My Trips, hosts on the host
   // dashboard, admins in admin, drivers on their dashboard.
   const routeAfterAuth = (roles: string[]) => {
     setAuthOpen(false)
+    const requestedReturnPath = sessionStorage.getItem('sybnb.v6.guestReturnPath')
+    if (requestedReturnPath && roles.includes('GUEST')) {
+      sessionStorage.removeItem('sybnb.v6.guestReturnPath')
+      navigate(requestedReturnPath)
+      return
+    }
     if (roles.includes('ADMIN')) navigate('/admin')
     else if (roles.includes('HOST') || roles.includes('SELLER')) navigate('/host')
     else if (roles.includes('DRIVER')) navigate('/driver')
@@ -185,12 +194,12 @@ function getRouteContext(path: string, isAr: boolean) {
       nextPath: '/stays',
     }
   }
-  if (path.startsWith('/rentals')) {
+  if (path === '/rentals') {
     return {
       section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
       page: isAr ? 'بحث العقارات' : 'Property search',
-      backPath: home,
-      nextPath: '/rentals',
+      backPath: '/synitres',
+      nextPath: '',
     }
   }
   if (path.startsWith('/cars')) {
@@ -217,7 +226,23 @@ function getRouteContext(path: string, isAr: boolean) {
       nextPath: '',
     }
   }
-  if (path.startsWith('/sell') || path.startsWith('/advertising')) {
+  if (path === '/buy') {
+    return {
+      section: isAr ? 'العقارات' : 'Real estate',
+      page: isAr ? 'بحث الشراء' : 'Buyer search',
+      backPath: '/synitres',
+      nextPath: '',
+    }
+  }
+  if (path.startsWith('/sell')) {
+    return {
+      section: isAr ? 'النشر والبيع' : 'Sell and publish',
+      page: path.includes('payment') ? (isAr ? 'الدفع' : 'Payment') : (isAr ? 'حساب البائع' : 'Seller account'),
+      backPath: '/synitres',
+      nextPath: '',
+    }
+  }
+  if (path.startsWith('/advertising')) {
     const isPaymentTunnel = path.includes('/payment')
     return {
       section: isAr ? 'الإعلان معنا' : 'Advertise with us',
@@ -248,19 +273,21 @@ function getRouteContext(path: string, isAr: boolean) {
   if (path.startsWith('/booking/')) {
     // Booking is reached from a stay's details (/booking/review/:id), so Back should return to that
     // listing — not dump the guest on the public landing and lose what they were booking.
-    const id = path.split('/')[3] || ''
+    const reviewId = path.startsWith('/booking/review/') ? path.split('/')[3] || '' : ''
     return {
       section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
       page: isAr ? 'الحجز' : 'Booking',
-      backPath: id ? `/listing/${id}` : '/',
+      backPath: reviewId ? `/listing/${reviewId}` : '/trips',
       nextPath: '',
     }
   }
   if (path.startsWith('/payment/')) {
+    const bookingId = path.startsWith('/payment/local-wallet/') ? path.split('/')[3] || '' : ''
+    const isAdmin = Boolean(getStoredStaffSession()?.user.roles.includes('ADMIN'))
     return {
       section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
       page: isAr ? 'الدفع الآمن' : 'Secure payment',
-      backPath: '/',
+      backPath: bookingId ? `/booking/${bookingId}` : isAdmin ? '/finance' : '/trips',
       nextPath: '',
     }
   }

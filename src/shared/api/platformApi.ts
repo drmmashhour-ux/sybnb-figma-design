@@ -40,6 +40,7 @@ type ApiUser = {
   displayName: string
   roles: string[]
   referralCode?: string
+  partnerType?: 'HOST' | 'SELLER' | 'RENTER' | 'BUILDER' | 'DEALER' | null
 }
 
 type AuthResponse = {
@@ -646,7 +647,8 @@ export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
 // Persistent login: the auth SESSION (guest/staff/seller token) is kept in localStorage so it survives an
 // app/tab restart — on web across browser restarts, and on mobile because the Capacitor webview persists
 // localStorage across app launches. Opening the app therefore means "already signed in" (backed by the
-// 90-day server token TTL). Ephemeral UI state (return paths, search, fallback caches) intentionally stays
+// the server token TTL: up to 90 days for customer-only sessions and 12 hours for privileged roles).
+// Ephemeral UI state (return paths, search, fallback caches) intentionally stays
 // in sessionStorage. Guarded for SSR/private-mode so a blocked storage never throws.
 export const authStorage = {
   getItem(key: string): string | null {
@@ -1288,20 +1290,27 @@ export async function createSellerAccountSession(input: {
   phone?: string
   sellerRole: string
   planCode: string
+  verificationGrant: string
 }) {
+  const current = getStoredSellerSession()
+  if (current?.user.roles.includes('SELLER')) return current
+  const email = input.email.trim()
+  const phone = input.phone?.trim() || ''
   const account = {
-    email: input.email,
+    email,
     password: input.password,
     displayName: input.displayName,
     role: 'SELLER',
-    phone: input.phone,
+    phone,
+    verificationGrant: input.verificationGrant,
   }
 
   let session: PlatformAuthSession
   try {
     session = await register(account)
-  } catch {
-    session = await login(input.email, input.password)
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ACCOUNT_ALREADY_EXISTS')) throw error
+    session = email ? await login(email, input.password, input.verificationGrant) : await loginByPhone(phone, input.password, input.verificationGrant)
   }
 
   const storedSession = {
@@ -1323,6 +1332,8 @@ export async function createGuestAccountSession(input: {
   phone?: string
   password: string
   referralCode?: string
+  partnerType?: 'HOST' | 'SELLER' | 'RENTER' | 'BUILDER' | 'DEALER'
+  verificationGrant: string
 }) {
   const displayName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || 'SYBNB Guest'
   const trimmedReferralCode = input.referralCode?.trim()
@@ -1334,6 +1345,7 @@ export async function createGuestAccountSession(input: {
     displayName,
     role: 'GUEST',
     phone,
+    verificationGrant: input.verificationGrant,
     ...(input.firstName?.trim() ? { firstName: input.firstName.trim() } : {}),
     ...(input.lastName?.trim() ? { lastName: input.lastName.trim() } : {}),
     ...(trimmedReferralCode ? { referralCode: trimmedReferralCode } : {}),
@@ -1342,7 +1354,8 @@ export async function createGuestAccountSession(input: {
   let session: PlatformAuthSession
   try {
     session = await register(account)
-  } catch {
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ACCOUNT_ALREADY_EXISTS')) throw error
     // Already registered → sign in with whichever identifier the user verified (email or phone).
     session = email ? await login(email, input.password) : await loginByPhone(phone, input.password)
   }
@@ -1362,12 +1375,12 @@ export async function createGuestAccountSession(input: {
 // device's trip history — the server upgrades the same user row in place, so existing bookings and
 // wallet entries carry over. Requires the device guest session token (proves device ownership) and
 // a just-verified email OTP. After success the stored session becomes the named account.
-export async function claimGuestAccount(input: { email: string; password: string; displayName?: string }) {
+export async function claimGuestAccount(input: { email: string; password: string; displayName?: string; verificationGrant: string }) {
   const guest = await ensurePrototypeGuestSession()
   const session = await apiRequest<PlatformAuthSession>('/api/auth/claim-guest-account', {
     method: 'POST',
     token: guest.token,
-    body: { email: input.email.trim(), password: input.password, displayName: input.displayName?.trim() || undefined },
+    body: { email: input.email.trim(), password: input.password, displayName: input.displayName?.trim() || undefined, verificationGrant: input.verificationGrant },
   })
   authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
   authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
@@ -1389,7 +1402,7 @@ export async function sendEmailVerificationCode(email: string, purpose: EmailCod
 }
 
 export async function verifyEmailVerificationCode(email: string, code: string, purpose: EmailCodePurpose = 'guest-signup') {
-  return apiRequest<{ ok: true }>('/api/auth/email-code/verify', {
+  return apiRequest<{ ok: true; verificationGrant: string }>('/api/auth/email-code/verify', {
     method: 'POST',
     body: { email, code, purpose },
   })
@@ -1405,7 +1418,7 @@ export async function sendPhoneVerificationCode(phone: string, purpose: EmailCod
 }
 
 export async function verifyPhoneVerificationCode(phone: string, code: string, purpose: EmailCodePurpose = 'guest-signup') {
-  return apiRequest<{ ok: true }>('/api/auth/phone-code/verify', {
+  return apiRequest<{ ok: true; verificationGrant: string }>('/api/auth/phone-code/verify', {
     method: 'POST',
     body: { phone, code, purpose },
   })
@@ -1413,10 +1426,17 @@ export async function verifyPhoneVerificationCode(phone: string, code: string, p
 
 // Real forgot-password flow. Caller must send + verify an email code with purpose='password-reset'
 // (the two functions above) before this will succeed server-side.
-export async function resetPasswordWithEmailCode(email: string, newPassword: string) {
+export async function resetPasswordWithEmailCode(email: string, newPassword: string, verificationGrant: string) {
   return apiRequest<{ ok: true }>('/api/auth/password-reset', {
     method: 'POST',
-    body: { email, newPassword },
+    body: { email, newPassword, verificationGrant },
+  })
+}
+
+export async function resetPasswordWithPhoneCode(phone: string, newPassword: string, verificationGrant: string) {
+  return apiRequest<{ ok: true }>('/api/auth/password-reset', {
+    method: 'POST',
+    body: { phone, newPassword, verificationGrant },
   })
 }
 
@@ -1499,7 +1519,9 @@ export async function createStaffAccountSession(
     email?: string
     password?: string
     phone?: string
+    partnerType?: 'HOST' | 'SELLER' | 'RENTER' | 'BUILDER' | 'DEALER'
     mode?: 'signIn' | 'signUp'
+    verificationGrant?: string
   },
 ) {
   const fallbackAccount = staffPrototypeAccount(role)
@@ -1521,9 +1543,14 @@ export async function createStaffAccountSession(
       email,
       password,
       phone,
+      partnerType: input?.partnerType,
+      verificationGrant: input?.verificationGrant,
     })
   } else {
-    session = email ? await login(email, password) : await loginByPhone(phone, password)
+    session = email ? await login(email, password, input?.verificationGrant) : await loginByPhone(phone, password, input?.verificationGrant)
+  }
+  if (!session.user.roles.includes(role)) {
+    throw new Error(`This account does not have ${role.toLowerCase()} access. Use an account registered for this portal.`)
   }
   authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
   authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
@@ -1640,12 +1667,8 @@ export async function fetchApprovedListingsPage(division = 'STAYS', filters: Lis
   if (filters.centerLat !== undefined) params.set('centerLat', String(filters.centerLat))
   if (filters.centerLng !== undefined) params.set('centerLng', String(filters.centerLng))
   if (filters.radiusKm !== undefined) params.set('radiusKm', String(filters.radiusKm))
-  try {
-    const response = await apiRequest<{ ok: true; listings: PlatformListing[]; nextCursor: string | null }>(`/api/listings?${params.toString()}`)
-    return { listings: response.listings, nextCursor: response.nextCursor ?? null }
-  } catch {
-    return { listings: fallbackApprovedListings(division), nextCursor: null }
-  }
+  const response = await apiRequest<{ ok: true; listings: PlatformListing[]; nextCursor: string | null }>(`/api/listings?${params.toString()}`)
+  return { listings: response.listings, nextCursor: response.nextCursor ?? null }
 }
 
 // Backward-compatible wrapper: first page as a plain array (division / marketplace / cars / rentals
@@ -3668,18 +3691,18 @@ async function createStaffAccount(account: {
   }
 }
 
-async function login(email: string, password: string) {
+async function login(email: string, password: string, verificationGrant?: string) {
   return apiRequest<AuthResponse>('/api/auth/login', {
     method: 'POST',
-    body: { email, password },
+    body: { email, password, ...(verificationGrant ? { verificationGrant } : {}) },
   })
 }
 
 // Sign in with a phone number instead of email (backend accepts either). Used by the phone-verify flow.
-async function loginByPhone(phone: string, password: string) {
+async function loginByPhone(phone: string, password: string, verificationGrant?: string) {
   return apiRequest<AuthResponse>('/api/auth/login', {
     method: 'POST',
-    body: { phone, password },
+    body: { phone, password, ...(verificationGrant ? { verificationGrant } : {}) },
   })
 }
 
@@ -3692,6 +3715,8 @@ async function register(body: {
   firstName?: string
   lastName?: string
   referralCode?: string
+  partnerType?: 'HOST' | 'SELLER' | 'RENTER' | 'BUILDER' | 'DEALER'
+  verificationGrant?: string
 }) {
   return apiRequest<AuthResponse>('/api/auth/register', {
     method: 'POST',
@@ -3707,6 +3732,22 @@ export async function signIn(email: string, password: string) {
   const session = await login(email.trim(), password)
   const roles = session.user.roles || []
   // A user can hold several roles; persist to every store that applies so each context works.
+  if (roles.includes('GUEST')) {
+    authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+    authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  }
+  if (roles.some((role) => role === 'ADMIN' || role === 'HOST' || role === 'DRIVER' || role === 'SELLER')) {
+    authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
+    authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
+  }
+  if (roles.includes('SELLER')) authStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session))
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return session
+}
+
+export async function signInWithPhone(phone: string, password: string) {
+  const session = await loginByPhone(phone.trim(), password)
+  const roles = session.user.roles || []
   if (roles.includes('GUEST')) {
     authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
     authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)

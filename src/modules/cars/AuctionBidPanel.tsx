@@ -31,6 +31,8 @@ const copy = {
     noWinner: 'انتهى المزاد دون فوز أحد بالحد الأدنى المطلوب.',
     contactSeller: 'تواصل مع البائع',
     minBidHint: (amount: string) => `أدخل ${amount} على الأقل.`,
+    loadError: 'تعذر تحميل المزاد.',
+    retry: 'إعادة المحاولة',
   },
   en: {
     title: 'Auction',
@@ -49,6 +51,8 @@ const copy = {
     noWinner: 'The auction ended without a winning bid at the reserve price.',
     contactSeller: 'Contact seller',
     minBidHint: (amount: string) => `Enter at least ${amount}.`,
+    loadError: 'Could not load the auction.',
+    retry: 'Try again',
   },
 }
 
@@ -63,6 +67,7 @@ export function AuctionBidPanel({ lang, listing, onContactSeller }: Props) {
   const countdown = useCountdown(auction?.endsAt)
 
   async function load() {
+    setStatus('loading')
     try {
       const state = await fetchAuctionState(listing.id)
       setAuction(state)
@@ -98,7 +103,15 @@ export function AuctionBidPanel({ lang, listing, onContactSeller }: Props) {
   }
 
   if (status === 'loading') return null
-  if (status === 'error' || !auction) return null
+  if (status === 'error' || !auction) {
+    return (
+      <section style={styles.panel} dir={isAr ? 'rtl' : 'ltr'}>
+        <strong>{t.title}</strong>
+        <p style={styles.error}>{t.loadError}</p>
+        <button onClick={() => void load()} style={styles.submitButton} type="button">{t.retry}</button>
+      </section>
+    )
+  }
 
   return (
     <section style={styles.panel} dir={isAr ? 'rtl' : 'ltr'}>

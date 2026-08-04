@@ -99,14 +99,14 @@ export function PlatformStatusPage({ lang }: Props) {
     () => [
       { label: t.service, value: health?.service || '-', state: health?.ok ? t.ok : t.issue },
       { label: t.database, value: isAr && health?.database.ok ? t.ok : health?.database.code || '-', state: health?.database.ok ? t.ok : t.issue },
-      { label: t.endpoints, value: String(contracts?.endpoints.length || 0), state: t.ok },
-      { label: t.security, value: String(contracts?.securityRules.length || 0), state: t.ok },
-      { label: t.users, value: String(sumMap(metrics?.usersByRole || {})), state: t.ok },
-      { label: t.listings, value: String(sumMap(metrics?.listingsByDivision || {})), state: t.ok },
-      { label: t.bookings, value: String(sumMap(metrics?.bookingsByStatus || {})), state: t.ok },
-      { label: t.rides, value: String(sumMap(metrics?.ridesByStatus || {})), state: t.ok },
-      { label: t.payments, value: moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'SYP', lang), state: t.ok },
-      { label: t.wallet, value: moneyText(metrics?.walletBalanceMinor || 0, 'SYP', lang), state: t.ok },
+      { label: t.endpoints, value: contracts ? String(contracts.endpoints.length) : '-', state: contracts ? t.ok : t.issue },
+      { label: t.security, value: contracts ? String(contracts.securityRules.length) : '-', state: contracts ? t.ok : t.issue },
+      { label: t.users, value: metrics ? String(sumMap(metrics.usersByRole)) : '-', state: metrics ? t.ok : t.issue },
+      { label: t.listings, value: metrics ? String(sumMap(metrics.listingsByDivision)) : '-', state: metrics ? t.ok : t.issue },
+      { label: t.bookings, value: metrics ? String(sumMap(metrics.bookingsByStatus)) : '-', state: metrics ? t.ok : t.issue },
+      { label: t.rides, value: metrics ? String(sumMap(metrics.ridesByStatus)) : '-', state: metrics ? t.ok : t.issue },
+      { label: t.payments, value: metrics ? moneyText(metrics.approvedPaymentVolumeMinor, 'SYP', lang) : '-', state: metrics ? t.ok : t.issue },
+      { label: t.wallet, value: metrics ? moneyText(metrics.walletBalanceMinor, 'SYP', lang) : '-', state: metrics ? t.ok : t.issue },
     ],
     [contracts, health, isAr, lang, metrics, t],
   )
@@ -114,6 +114,9 @@ export function PlatformStatusPage({ lang }: Props) {
   async function loadStatus() {
     setStatus('loading')
     setMessage('')
+    setHealth(null)
+    setContracts(null)
+    setMetrics(null)
 
     try {
       const [nextHealth, nextContracts, nextMetrics] = await Promise.all([

@@ -10,7 +10,6 @@
     "dev": "vite --host 127.0.0.1",
     "postinstall": "prisma generate",
     "build": "prisma generate && tsc && vite build",
-    "postbuild": "node scripts/bootstrap-admin.mjs || true",
     "preview": "vite preview --host 127.0.0.1",
     "api:dev": "node server/index.mjs",
     "test": "npm run test:unit && npm run test:api && npm run test:security",

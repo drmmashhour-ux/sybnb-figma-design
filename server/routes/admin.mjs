@@ -248,6 +248,7 @@ export async function handleAdmin(req, res, url, context) {
         include: {
           listing: { include: { owner: { select: { id: true, displayName: true, payoutMethod: true } } } },
           payments: true,
+          disputes: { where: { status: 'OPEN' }, select: { id: true, status: true } },
         },
         orderBy: { checkOut: 'asc' },
         take: 100,
@@ -411,7 +412,10 @@ export async function handleAdmin(req, res, url, context) {
 
       const freshBooking = await tx.booking.findUnique({
         where: { id: booking.id },
-        include: { listing: { include: { owner: { select: { id: true, payoutMethod: true } } } }, payments: true },
+        include: {
+          listing: { include: { owner: { select: { id: true, payoutMethod: true } } } }, payments: true,
+          disputes: { where: { status: 'OPEN' }, select: { id: true, status: true } },
+        },
       })
       if (!freshBooking || !isPayoutEligible(freshBooking)) throw payoutNotEligibleError()
       // Manual admin hold — an admin can pause this payout even once it's time-eligible. Enforced here so
@@ -432,19 +436,61 @@ export async function handleAdmin(req, res, url, context) {
         throw error
       }
 
+      const existingDisbursement = await tx.walletEntry.findFirst({
+        where: { referenceType: 'booking_payout_disbursement', referenceId: freshBooking.id, type: 'DEBIT' },
+      })
+      if (existingDisbursement) {
+        const error = new Error('This booking payout was already disbursed.')
+        error.statusCode = 409
+        error.code = 'PAYOUT_ALREADY_DISBURSED'
+        error.expose = true
+        throw error
+      }
+
       const approvedPayment = freshBooking.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(freshBooking, approvedPayment?.amountMinor || freshBooking.amountMinor)
+      if (!approvedPayment) {
+        const error = new Error('This booking has no approved payment to pay out.')
+        error.statusCode = 409
+        error.code = 'PAYOUT_APPROVED_PAYMENT_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      // Use the immutable approval-time HOLD as the payout snapshot. Recomputing from mutable listing
+      // metadata can change the amount after payment approval.
+      const payoutHold = await tx.walletEntry.findFirst({
+        where: { referenceType: 'booking_payout', referenceId: freshBooking.id, type: 'HOLD' },
+        orderBy: { createdAt: 'asc' },
+      })
+      if (!payoutHold || payoutHold.currency !== freshBooking.currency) {
+        const error = new Error('This booking has no valid payout snapshot.')
+        error.statusCode = 409
+        error.code = 'PAYOUT_SNAPSHOT_REQUIRED'
+        error.expose = true
+        throw error
+      }
       const released = await recordWalletEntry(tx, {
         userId: freshBooking.listing.ownerId,
         type: 'RELEASE',
-        amountMinor: split.hostGrossMinor,
+        amountMinor: payoutHold.amountMinor,
         currency: freshBooking.currency,
         referenceType: 'booking_payout',
         referenceId: freshBooking.id,
         // One payout per booking — the key intentionally excludes payoutRef so a second release with a
         // different ref cannot double-pay the host (recordWalletEntry dedupes on this key).
-        keyParts: ['booking-host-release', freshBooking.id, approvedPayment?.id],
+        keyParts: ['booking-host-release', freshBooking.id],
         note: `Host payout released by admin after the ${PAYOUT_HOLD_DAYS}-day hold following stay completion; Sham Cash ref ${payoutRef}.`,
+      })
+      // RELEASE moves the held earning into the wallet; the actual external Sham Cash transfer must
+      // immediately remove the same liability, matching the SR driver payout's DEBIT semantics.
+      const disbursed = await recordWalletEntry(tx, {
+        userId: freshBooking.listing.ownerId,
+        type: 'DEBIT',
+        amountMinor: payoutHold.amountMinor,
+        currency: freshBooking.currency,
+        referenceType: 'booking_payout_disbursement',
+        referenceId: freshBooking.id,
+        keyParts: ['booking-host-disbursement', freshBooking.id],
+        note: `Host payout disbursed externally via Sham Cash ref ${payoutRef}.`,
       })
 
       await tx.adminAuditLog.create({
@@ -454,7 +500,7 @@ export async function handleAdmin(req, res, url, context) {
           entityType: 'bookings',
           entityId: freshBooking.id,
           before: freshBooking,
-          after: { walletEntry: released, payoutRef },
+          after: { walletEntry: released, disbursementEntry: disbursed, payoutRef, snapshotEntryId: payoutHold.id },
         },
       })
 
@@ -1256,7 +1302,7 @@ export async function handleAdmin(req, res, url, context) {
     // wallet by chargeCompletedRide() as sr_admin_commission). All are CREDIT entries.
     const [commissionEntries, completedSrRides] = await Promise.all([
       db().walletEntry.findMany({
-        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission'] } },
+        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission', 'card_processing_fee'] } },
         select: { amountMinor: true, currency: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
       }),
@@ -2233,15 +2279,14 @@ export async function handleAdmin(req, res, url, context) {
         orderBy: { createdAt: 'asc' },
         take: 100,
       }),
-      // (b) + (c) source rows: every wallet with a positive balance, plus its owner + entries
+      // (b) + (c) source rows: every wallet, including zero/negative balances. Integrity must not
+      // hide precisely the wallets most likely to reveal an accounting or overdraw defect.
       db().wallet.findMany({
-        where: { cachedBalanceMinor: { gt: 0 } },
         select: {
           id: true, currency: true, cachedBalanceMinor: true,
           user: { select: { id: true, displayName: true, payoutMethod: true, roles: { select: { role: true } } } },
           entries: { select: { type: true, amountMinor: true } },
         },
-        take: 500,
       }),
       db().listing.count({ where: { status: 'PENDING_REVIEW', updatedAt: { lt: agingCutoff } } }),
       db().dispute.count({ where: { status: 'OPEN', createdAt: { lt: agingCutoff } } }),
@@ -2251,6 +2296,7 @@ export async function handleAdmin(req, res, url, context) {
     // (b) hosts/sellers holding money but with NO payout method on file.
     const noPayoutMethodHosts = positiveWallets
       .filter((wallet) =>
+        wallet.cachedBalanceMinor > 0 &&
         wallet.user &&
         !wallet.user.payoutMethod &&
         wallet.user.roles.some((entry) => entry.role === 'HOST' || entry.role === 'SELLER'),

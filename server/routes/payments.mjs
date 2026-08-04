@@ -1,7 +1,7 @@
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, recordWalletEntry, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, recordWalletEntry, lockPaymentReference, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { savePaymentProofFile, readPaymentProofFile } from '../lib/payment-proof-storage.mjs'
 
@@ -134,6 +134,16 @@ async function firstAdminId(tx) {
   return admin?.userId
 }
 
+async function requirePlatformUserId(tx) {
+  const platformUserId = await firstAdminId(tx)
+  if (platformUserId) return platformUserId
+  const error = new Error('Platform accounting account is not configured.')
+  error.statusCode = 503
+  error.code = 'PLATFORM_ACCOUNT_MISSING'
+  error.expose = true
+  throw error
+}
+
 // SR cashless card top-up (016): the 2.35% card fee is ADDED ON TOP, computed server-side (never client).
 export const CARD_TOPUP_FEE_RATE = 0.0235
 const WALLET_TOPUP_MAX_MINOR = 100_000_000
@@ -158,20 +168,20 @@ export async function creditWalletTopupSession(session) {
   if (!userId || !Number.isInteger(baseMinor) || baseMinor <= 0) return null
   const feeMinor = cardTopupFeeMinor(baseMinor)
   return db().$transaction(async (tx) => {
+    // Resolve before crediting the rider so the paid event remains retryable if accounting is not
+    // provisioned. This prevents a partial ledger where the base exists but platform fee does not.
+    const platformUserId = feeMinor > 0 ? await requirePlatformUserId(tx) : null
     const credit = await recordWalletEntry(tx, {
       userId, type: 'CREDIT', amountMinor: baseMinor, currency,
       referenceType: 'wallet_topup', referenceId: session.id, keyParts: ['wallet-topup-stripe', session.id],
       note: 'Card wallet top-up: base credit added after Stripe confirmed the charge was captured.',
     })
     if (feeMinor > 0) {
-      const platformUserId = await firstAdminId(tx)
-      if (platformUserId) {
-        await recordWalletEntry(tx, {
-          userId: platformUserId, type: 'CREDIT', amountMinor: feeMinor, currency,
-          referenceType: 'card_processing_fee', referenceId: session.id, keyParts: ['wallet-topup-stripe-fee', session.id],
-          note: 'SYBNB/platform collected the 2.35% card-processing fee on a wallet top-up.',
-        })
-      }
+      await recordWalletEntry(tx, {
+        userId: platformUserId, type: 'CREDIT', amountMinor: feeMinor, currency,
+        referenceType: 'card_processing_fee', referenceId: session.id, keyParts: ['wallet-topup-stripe-fee', session.id],
+        note: 'SYBNB/platform collected the 2.35% card-processing fee on a wallet top-up.',
+      })
     }
     return credit
   })
@@ -186,6 +196,7 @@ export async function finalizeStripeSession(session) {
   if (!bookingId || session.payment_status !== 'paid') return null
 
   return db().$transaction(async (tx) => {
+    await lockPaymentReference(tx, 'stripe', session.id)
     const existingProof = await tx.paymentProof.findFirst({
       where: { provider: 'stripe', providerRef: session.id },
     })
@@ -259,6 +270,7 @@ export async function finalizeStripeStrPlanSession(session) {
   if (!userId || !planCode || !Number.isFinite(amountMinor) || amountMinor <= 0) return null
 
   return db().$transaction(async (tx) => {
+    await lockPaymentReference(tx, 'str_host_plan', session.id)
     const existingProof = await tx.paymentProof.findFirst({
       where: { provider: 'str_host_plan', providerRef: session.id },
     })
@@ -548,16 +560,16 @@ export async function handlePayments(req, res, url, context) {
     // SECURITY (S6): amount is the server-table price for the plan code, never taken from the request.
     const amountMinor = STR_HOST_PLAN_PRICE_MINOR[planCode]
 
-    const duplicate = await db().paymentProof.findFirst({ where: { provider: 'str_host_plan', providerRef } })
-    if (duplicate) {
-      const error = new Error('This transaction reference was already submitted.')
-      error.statusCode = 409
-      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
-      error.expose = true
-      throw error
-    }
-
     const proof = await db().$transaction(async (tx) => {
+      await lockPaymentReference(tx, 'str_host_plan', providerRef)
+      const duplicate = await tx.paymentProof.findFirst({ where: { provider: 'str_host_plan', providerRef } })
+      if (duplicate) {
+        const error = new Error('This transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
       const created = await tx.paymentProof.create({
         data: {
           userId: context.user.id,
@@ -729,22 +741,20 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const duplicate = await db().paymentProof.findFirst({
-      where: { provider: 'seller_plan', providerRef },
-    })
-    if (duplicate) {
-      const error = new Error('This transaction reference was already submitted.')
-      error.statusCode = 409
-      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
-      error.expose = true
-      throw error
-    }
-
     const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
 
-    const [proof] = await db().$transaction([
-      db().paymentProof.create({
+    const proof = await db().$transaction(async (tx) => {
+      await lockPaymentReference(tx, 'seller_plan', providerRef)
+      const duplicate = await tx.paymentProof.findFirst({ where: { provider: 'seller_plan', providerRef } })
+      if (duplicate) {
+        const error = new Error('This transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
+      const created = await tx.paymentProof.create({
         data: {
           userId: context.user.id,
           provider: 'seller_plan',
@@ -754,13 +764,14 @@ export async function handlePayments(req, res, url, context) {
           proofAssetUrl: body.proofAssetUrl || undefined,
           providerRef,
         },
-      }),
-      db().sellerProfile.upsert({
+      })
+      await tx.sellerProfile.upsert({
         where: { userId: context.user.id },
         create: { userId: context.user.id, legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
         update: { legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
-      }),
-    ])
+      })
+      return created
+    })
 
     return json(res, 201, { ok: true, proof })
   }
@@ -830,23 +841,17 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const duplicate = await db().paymentProof.findFirst({
-      where: {
-        provider: 'syrian_local_wallet',
-        providerRef,
-      },
-    })
-
-    if (duplicate) {
-      const error = new Error('This wallet transaction reference was already submitted.')
-      error.statusCode = 409
-      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
-      error.expose = true
-      throw error
-    }
-
-    const proof = await db().paymentProof.create({
-      data: {
+    const proof = await db().$transaction(async (tx) => {
+      await lockPaymentReference(tx, 'syrian_local_wallet', providerRef)
+      const duplicate = await tx.paymentProof.findFirst({ where: { provider: 'syrian_local_wallet', providerRef } })
+      if (duplicate) {
+        const error = new Error('This wallet transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
+      return tx.paymentProof.create({ data: {
         bookingId: booking?.id || undefined,
         userId: context.user.id,
         provider: 'syrian_local_wallet',
@@ -855,7 +860,7 @@ export async function handlePayments(req, res, url, context) {
         currency: booking?.currency || body.currency || 'SYP',
         proofAssetUrl: body.proofAssetUrl || undefined,
         providerRef,
-      },
+      } })
     })
 
     return json(res, 201, { ok: true, proof })

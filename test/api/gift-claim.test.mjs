@@ -21,8 +21,8 @@ describe('POST /api/wallet/gifts/:id/claim rejects an expired gift (bug fix)', (
 
   async function registerRecipient() {
     const email = uniqueTestEmail('gift-claim-recipient')
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1,
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',
@@ -33,8 +33,8 @@ describe('POST /api/wallet/gifts/:id/claim rejects an expired gift (bug fix)', (
 
   async function createGift({ expiresAt }) {
     const senderEmail = uniqueTestEmail('gift-claim-sender')
-    await verifyEmailForTest(app, senderEmail)
-    const senderRes = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant2 = await verifyEmailForTest(app, senderEmail)
+    const senderRes = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant2,
       role: 'GUEST',
       email: senderEmail,
       password: 'correct-horse-battery',

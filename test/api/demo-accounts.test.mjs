@@ -2,11 +2,11 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { testApp, verifyEmailForTest } from '../support/testServer.mjs'
-import { seedDemoAccounts, DEMO_CUSTOMER_EMAIL, DEMO_DRIVER_EMAIL, DEMO_HOST_EMAIL } from '../../scripts/seed-demo-accounts.mjs'
+import { seedDemoAccounts, DEMO_CUSTOMER_EMAIL, DEMO_DRIVER_EMAIL, DEMO_HOST_EMAIL, DEMO_QA_EMAIL } from '../../scripts/seed-demo-accounts.mjs'
 
 // Reviewer demo accounts (024): a pre-verified customer + driver (+ host) the store reviewer logs into.
 // The seed must be idempotent (re-run at every deploy) and the accounts must be verified and non-admin.
-const DEMO_EMAILS = [DEMO_CUSTOMER_EMAIL, DEMO_DRIVER_EMAIL, DEMO_HOST_EMAIL]
+const DEMO_EMAILS = [DEMO_CUSTOMER_EMAIL, DEMO_DRIVER_EMAIL, DEMO_HOST_EMAIL, DEMO_QA_EMAIL]
 const PASSWORD = 'DemoReview123!'
 
 describe('Reviewer demo accounts (seed)', () => {
@@ -29,7 +29,7 @@ describe('Reviewer demo accounts (seed)', () => {
     await seedDemoAccounts({ password: PASSWORD })
     await seedDemoAccounts({ password: PASSWORD }) // second run must not duplicate
 
-    expect(await db().user.count({ where: { email: { in: DEMO_EMAILS } } })).toBe(3)
+    expect(await db().user.count({ where: { email: { in: DEMO_EMAILS } } })).toBe(4)
 
     const customer = await db().user.findUnique({ where: { email: DEMO_CUSTOMER_EMAIL }, include: { roles: true } })
     const driver = await db().user.findUnique({ where: { email: DEMO_DRIVER_EMAIL }, include: { roles: true } })
@@ -64,9 +64,28 @@ describe('Reviewer demo accounts (seed)', () => {
   it('the demo driver can sign in via the staff access code and is verified', async () => {
     await seedDemoAccounts({ password: PASSWORD })
     // Staff sign-in: verify the access code (dev returns devCode) then log in.
-    await verifyEmailForTest(app, DEMO_DRIVER_EMAIL, 'staff-login')
-    const res = await request(app).post('/api/auth/login').send({ email: DEMO_DRIVER_EMAIL, password: PASSWORD })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, DEMO_DRIVER_EMAIL, 'staff-login')
+    const res = await request(app).post('/api/auth/login').send({ verificationGrant: legacyVerificationGrant1, email: DEMO_DRIVER_EMAIL, password: PASSWORD })
     expect(res.status).toBe(200)
     expect(res.body.user.roles).toContain('DRIVER')
+  })
+
+  it('allows the unified QA account to skip staff OTP only in an explicitly enabled Preview', async () => {
+    await seedDemoAccounts({ password: PASSWORD })
+    const previousVercelEnv = process.env.VERCEL_ENV
+    const previousDemoFlag = process.env.ALLOW_PREVIEW_DEMO_LOGIN
+    process.env.VERCEL_ENV = 'preview'
+    process.env.ALLOW_PREVIEW_DEMO_LOGIN = '1'
+    try {
+      const res = await request(app).post('/api/auth/login').send({ email: DEMO_QA_EMAIL, password: PASSWORD })
+      expect(res.status).toBe(200)
+      expect(res.body.user.roles).toEqual(expect.arrayContaining(['GUEST', 'HOST', 'DRIVER']))
+      expect(res.body.user.roles).not.toContain('ADMIN')
+    } finally {
+      if (previousVercelEnv === undefined) delete process.env.VERCEL_ENV
+      else process.env.VERCEL_ENV = previousVercelEnv
+      if (previousDemoFlag === undefined) delete process.env.ALLOW_PREVIEW_DEMO_LOGIN
+      else process.env.ALLOW_PREVIEW_DEMO_LOGIN = previousDemoFlag
+    }
   })
 })

@@ -4,9 +4,8 @@ The code blockers are fixed. What remains are **configuration/operations steps t
 accounts and secrets** (they can't be done from the codebase). Do these in order.
 
 ## 1. Create the first admin (unblocks all approvals) — NO terminal needed
-The admin is now created **automatically on deploy** from env vars (a `postbuild` step runs the
-bootstrap; it safely skips when the vars are absent). So in **Vercel → Settings → Environment
-Variables**, add:
+The admin is created with an explicit one-time bootstrap command. Production builds intentionally
+never create users or modify application data. Prepare these values securely for the bootstrap:
 
 | Variable | Value |
 |---|---|
@@ -14,15 +13,16 @@ Variables**, add:
 | `ADMIN_PASSWORD` | a strong password you choose (8+ chars) |
 | `ADMIN_NAME` | `SYBNB Admin` (optional) |
 
-Then **Redeploy**. On that deploy the first admin is created (idempotent — safe to redeploy).
-Sign in at **/host/stays → Partner/Admin gate** with that email + password (email OTP is already on).
-
-*(Prefer a terminal instead? `ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run bootstrap:admin` against the prod DB also works.)*
+Run `DATABASE_URL=... ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run bootstrap:admin` against the target
+database, verify the account, then remove `ADMIN_PASSWORD` from persistent deployment configuration.
+Production builds never create the administrator automatically. After the explicit bootstrap succeeds,
+redeploy if environment values changed, then sign in at the Admin gate with email, password, and OTP.
 
 ## 2. Set the production secrets (Vercel → Project → Settings → Environment Variables)
 | Variable | Enables | Without it |
 |---|---|---|
 | `RESEND_API_KEY` (or `SMTP_HOST`/`SMTP_*`) | **Email OTP** for sign-up / staff login | signup + admin login are blocked (503) |
+| `SMS_PROVIDER` plus gateway or Twilio credentials | **Phone OTP** for phone sign-up / login | phone verification is blocked (503); use email OTP until configured |
 | `STRIPE_SECRET_KEY` | **Card payments** (guest + host plan) | card option hidden; only Sham Cash (manual) works |
 | `ANTHROPIC_API_KEY` | Real **AI** descriptions + pricing insights | AI silently falls back to the deterministic template |
 | *(remove)* `VITE_GOOGLE_MAPS_API_KEY` | — | delete it; the map is free OSM now (stops Mastercard billing) |

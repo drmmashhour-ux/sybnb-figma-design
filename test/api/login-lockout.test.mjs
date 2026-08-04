@@ -24,10 +24,10 @@ describe('Per-account login lockout', () => {
 
   async function makeUser(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ role: 'GUEST', email, password: GOOD, displayName: 'Lock Test' })
+      .send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: GOOD, displayName: 'Lock Test' })
     trackTestUser(res.body.user.id)
     return { email, id: res.body.user.id }
   }

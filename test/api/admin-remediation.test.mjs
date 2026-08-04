@@ -2,6 +2,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken } from '../../server/lib/security.mjs'
+import { recordWalletEntry } from '../../server/lib/finance-ledger.mjs'
 import {
   cleanupTestUsers,
   fundWallet,
@@ -39,8 +40,8 @@ describe('Admin remediation controls', () => {
 
   async function registerGuest(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     return { id: res.body.user.id, token: res.body.token }
   }
@@ -198,5 +199,36 @@ describe('Admin remediation controls', () => {
     expect(res.body.counts.stuckPayments).toBeGreaterThanOrEqual(1)
     expect(res.body.counts.noPayoutMethodHosts).toBeGreaterThanOrEqual(1)
     expect(res.body.counts.imbalancedWallets).toBeGreaterThanOrEqual(1)
+  })
+
+  it('B: needs-attention detects an imbalanced zero-balance wallet', async () => {
+    const user = await makeUser('rem-na-zero-imbalanced', 'GUEST')
+    await fundWallet(user.id, 123, 'USD')
+    await db().wallet.update({
+      where: { userId_currency: { userId: user.id, currency: 'USD' } },
+      data: { cachedBalanceMinor: 0 },
+    })
+
+    const res = await request(app).get('/api/admin/needs-attention').set('Authorization', `Bearer ${admin.token}`)
+    expect(res.status).toBe(200)
+    expect(res.body.items.imbalancedWallets.some((wallet) => wallet.userId === user.id)).toBe(true)
+  })
+
+  it('revenue summary includes card processing fee credits', async () => {
+    await db().$transaction((tx) => recordWalletEntry(tx, {
+      userId: admin.id,
+      type: 'CREDIT',
+      amountMinor: 7,
+      currency: 'USD',
+      referenceType: 'card_processing_fee',
+      referenceId: `topup-fee-${admin.id}`,
+      keyParts: ['test-card-processing-fee', admin.id],
+      note: 'test card processing fee',
+    }))
+    const res = await request(app).get('/api/admin/revenue-summary').set('Authorization', `Bearer ${admin.token}`)
+    expect(res.status).toBe(200)
+    const usd = res.body.revenue.byCurrency.find((row) => row.currency === 'USD')
+    expect(usd).toBeTruthy()
+    expect(usd.totalRevenueMinor).toBeGreaterThanOrEqual(7)
   })
 })

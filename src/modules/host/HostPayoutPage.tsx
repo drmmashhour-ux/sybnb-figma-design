@@ -60,7 +60,7 @@ export function HostPayoutPage({ lang, mode = 'host' }: Props) {
   const [current, setCurrent] = useState<HostPayoutView>(null)
   const [holder, setHolder] = useState('')
   const [number, setNumber] = useState('')
-  const [status, setStatus] = useState<'loading' | 'ready' | 'saving'>('loading')
+  const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -74,10 +74,9 @@ export function HostPayoutPage({ lang, mode = 'host' }: Props) {
         if (payout?.accountHolder) setHolder(payout.accountHolder)
       })
       .catch(() => {
-        if (active) setError(t.loadError)
-      })
-      .finally(() => {
-        if (active) setStatus('ready')
+        if (!active) return
+        setError(t.loadError)
+        setStatus('error')
       })
     return () => {
       active = false
@@ -126,9 +125,9 @@ export function HostPayoutPage({ lang, mode = 'host' }: Props) {
             )}
             <span style={styles.secured}>{t.secured}</span>
           </div>
-        ) : (
-          <p style={styles.none}>{status === 'loading' ? '…' : t.none}</p>
-        )}
+        ) : status === 'ready' ? (
+          <p style={styles.none}>{t.none}</p>
+        ) : status === 'loading' ? <p style={styles.none}>…</p> : null}
       </section>
 
       <form style={styles.form} onSubmit={submit}>
@@ -137,6 +136,7 @@ export function HostPayoutPage({ lang, mode = 'host' }: Props) {
           <input
             style={styles.input}
             value={holder}
+            disabled={status !== 'ready'}
             placeholder={t.holderPlaceholder}
             onChange={(event) => setHolder(event.target.value)}
             required
@@ -147,6 +147,7 @@ export function HostPayoutPage({ lang, mode = 'host' }: Props) {
           <input
             style={styles.input}
             value={number}
+            disabled={status !== 'ready'}
             dir="ltr"
             inputMode="numeric"
             placeholder={current ? `•••• ${current.last4}` : t.numberPlaceholder}
@@ -159,7 +160,7 @@ export function HostPayoutPage({ lang, mode = 'host' }: Props) {
         {error && <p style={styles.error}>{error}</p>}
         {message && <p style={styles.success}>{message}</p>}
 
-        <button type="submit" disabled={status === 'saving'} style={styles.saveButton}>
+        <button type="submit" disabled={status !== 'ready'} style={styles.saveButton}>
           {status === 'saving' ? t.saving : t.save}
         </button>
       </form>

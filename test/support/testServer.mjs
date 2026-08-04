@@ -74,6 +74,8 @@ export async function verifyEmailForTest(app, email, purpose = 'guest-signup') {
   if (!verifyRes.body.ok) {
     throw new Error(`Test email-code verify failed: ${JSON.stringify(verifyRes.body)}`)
   }
+  if (!verifyRes.body.verificationGrant) throw new Error('Test email-code verify did not return a verificationGrant')
+  return verifyRes.body.verificationGrant
 }
 
 // Phone/SMS OTP (022): drives the real send+verify endpoints using the dev-only devCode, mirroring
@@ -84,6 +86,8 @@ export async function verifyPhoneForTest(app, phone, purpose = 'guest-signup') {
   if (!code) throw new Error('Test phone-code send did not return a devCode — is NODE_ENV=production set?')
   const verifyRes = await request(app).post('/api/auth/phone-code/verify').send({ phone, code, purpose })
   if (!verifyRes.body.ok) throw new Error(`Test phone-code verify failed: ${JSON.stringify(verifyRes.body)}`)
+  if (!verifyRes.body.verificationGrant) throw new Error('Test phone-code verify did not return a verificationGrant')
+  return verifyRes.body.verificationGrant
 }
 
 export function uniqueTestPhone() {

@@ -120,3 +120,38 @@ describe('TRUST_PROXY is honored end-to-end when rate-limiting by IP', () => {
     expect(second.status).toBe(401) // independent bucket, not rate-limited despite max=1
   })
 })
+
+describe('rate limiting covers unauthenticated account-creation and reset work', () => {
+  let app
+
+  beforeAll(() => {
+    app = testApp()
+  })
+
+  beforeEach(() => {
+    __resetRateLimitsForTests()
+    process.env.RATE_LIMIT_AUTH_CHECKOUT_GUEST_MAX = '1'
+    process.env.RATE_LIMIT_AUTH_PASSWORD_RESET_MAX = '1'
+  })
+
+  afterEach(() => {
+    process.env.RATE_LIMIT_AUTH_CHECKOUT_GUEST_MAX = '1000'
+    process.env.RATE_LIMIT_AUTH_PASSWORD_RESET_MAX = '1000'
+    __resetRateLimitsForTests()
+  })
+
+  it('limits checkout-guest account creation by IP', async () => {
+    const first = await request(app).post('/api/auth/checkout-guest').send({ deviceId: 'rate-device-aaaaaaaa' })
+    const second = await request(app).post('/api/auth/checkout-guest').send({ deviceId: 'rate-device-bbbbbbbb' })
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(429)
+  })
+
+  it('limits password-reset attempts by IP before route work runs', async () => {
+    const body = { email: 'rate-reset@sybnb.test', newPassword: 'correct-horse-battery' }
+    const first = await request(app).post('/api/auth/password-reset').send(body)
+    const second = await request(app).post('/api/auth/password-reset').send(body)
+    expect(first.status).toBe(403)
+    expect(second.status).toBe(429)
+  })
+})

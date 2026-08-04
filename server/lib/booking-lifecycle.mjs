@@ -56,6 +56,7 @@ export function payoutEligibleAt(checkOut) {
 
 export function isPayoutEligible(booking) {
   if (booking.status !== 'COMPLETED') return false
+  if (Array.isArray(booking.disputes) && booking.disputes.some((dispute) => dispute.status === 'OPEN')) return false
   const eligibleAt = payoutEligibleAt(booking.checkOut)
   if (!eligibleAt) return false
   return eligibleAt.getTime() <= Date.now()

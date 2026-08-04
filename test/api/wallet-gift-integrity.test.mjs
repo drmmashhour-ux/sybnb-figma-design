@@ -29,8 +29,8 @@ describe('Wallet gifts conserve money (mint fix)', () => {
 
   async function registerGuest(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     return { token: res.body.token, id: res.body.user.id }
   }

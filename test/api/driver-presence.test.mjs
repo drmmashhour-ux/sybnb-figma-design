@@ -7,9 +7,10 @@ import { approveDriverForRides, cleanupTestUsers, fundWallet, testApp, trackTest
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant, role, email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   if (role === 'DRIVER') await approveDriverForRides(res.body.user.id)
   if (role === 'GUEST') await fundWallet(res.body.user.id)
@@ -59,8 +60,8 @@ describe('SR driver presence: online toggle, location broadcast, nearest-first p
 
   it('an un-vetted driver cannot go online (road-ready gate → 403)', async () => {
     const email = uniqueTestEmail('presence-unvetted')
-    await verifyEmailForTest(app, email, 'staff-login')
-    const reg = await request(app).post('/api/auth/register').send({ role: 'DRIVER', email, password: 'correct-horse-battery' })
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email, 'staff-login')
+    const reg = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1, role: 'DRIVER', email, password: 'correct-horse-battery' })
     trackTestUser(reg.body.user.id)
     const res = await goOnline(reg.body.token)
     expect(res.status).toBe(403)

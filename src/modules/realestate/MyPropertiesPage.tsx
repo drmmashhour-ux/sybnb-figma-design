@@ -12,14 +12,14 @@ type Props = { lang: Lang }
 const copy = {
   ar: {
     title: 'عقاراتي', subtitle: 'أدِر إعلاناتك العقارية وتابع حالتها والاستفسارات.',
-    loading: 'جار التحميل…', signIn: 'سجّل الدخول كبائع لعرض عقاراتك.',
+    loading: 'جار التحميل…', signIn: 'سجّل الدخول كبائع لعرض عقاراتك.', error: 'تعذر تحميل عقاراتك.', retry: 'إعادة المحاولة',
     empty: 'لا توجد عقارات بعد.', addListing: 'أضف إعلاناً',
     inquiries: 'استفسارات', viewPage: 'عرض الصفحة', edit: 'تعديل / إعادة إرسال',
     buy: 'للبيع', rent: 'إيجار', back: 'الرئيسية', openInbox: 'افتح الرسائل',
   },
   en: {
     title: 'My properties', subtitle: 'Manage your real-estate listings, their status, and inquiries.',
-    loading: 'Loading…', signIn: 'Sign in as a seller to see your properties.',
+    loading: 'Loading…', signIn: 'Sign in as a seller to see your properties.', error: 'Could not load your properties.', retry: 'Try again',
     empty: 'No properties yet.', addListing: 'Add a listing',
     inquiries: 'inquiries', viewPage: 'View page', edit: 'Edit / resubmit',
     buy: 'For sale', rent: 'Rental', back: 'Home', openInbox: 'Open messages',
@@ -30,12 +30,20 @@ export function MyPropertiesPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [properties, setProperties] = useState<MyProperty[] | null>(null)
-  const [state, setState] = useState<'loading' | 'ready' | 'signin'>('loading')
+  const [state, setState] = useState<'loading' | 'ready' | 'signin' | 'error'>('loading')
 
-  useEffect(() => {
+  function loadProperties() {
+    setState('loading')
     fetchMyProperties()
       .then((p) => { setProperties(p); setState('ready') })
-      .catch(() => setState('signin'))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : ''
+        setState(/unauth|forbidden|sign in|session|401|403/i.test(message) ? 'signin' : 'error')
+      })
+  }
+
+  useEffect(() => {
+    loadProperties()
   }, [])
 
   const go = (hash: string) => (window.location.hash = hash)
@@ -52,6 +60,9 @@ export function MyPropertiesPage({ lang }: Props) {
           <p style={styles.muted}>{t.signIn}</p>
           <button style={styles.primary} onClick={() => go('/sell')}>{t.addListing}</button>
         </div>
+      ) : null}
+      {state === 'error' ? (
+        <div style={styles.card} role="alert"><p style={styles.muted}>{t.error}</p><button style={styles.primary} onClick={loadProperties}>{t.retry}</button></div>
       ) : null}
 
       {state === 'ready' && properties && properties.length === 0 ? (

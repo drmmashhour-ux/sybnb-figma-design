@@ -16,9 +16,10 @@ const DAMASCUS = { lat: 33.5169, lng: 36.287 }
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant, role, email, password: 'correct-horse-battery' })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }
 }
@@ -113,7 +114,7 @@ describe('SR SAFETY layer: SOS, live location, trip share', () => {
     expect(res.body.sosEvent.status).toBe('OPEN')
     expect(res.body.sosEvent.raisedByRole).toBe('RIDER')
     const listed = await request(app).get('/api/admin/sos').set('Authorization', `Bearer ${adminBearer}`)
-    expect(listed.status).toBe(200)
+    expect(listed.status, JSON.stringify(listed.body)).toBe(200)
     expect(listed.body.sos.some((e) => e.id === res.body.sosEvent.id)).toBe(true)
   })
 

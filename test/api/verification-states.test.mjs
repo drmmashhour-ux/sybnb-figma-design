@@ -6,11 +6,12 @@ import { cleanupTestUsers, testApp, trackTestUser, uniqueTestEmail, uniqueTestRe
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
+  const verificationGrant = role === 'GUEST' ? await verifyEmailForTest(app, email) : undefined
   const res = await request(app).post('/api/auth/register').send({
     role,
     email,
     password: 'correct-horse-battery',
+    verificationGrant,
   })
   trackTestUser(res.body.user.id)
   return { email, token: res.body.token, user: res.body.user }

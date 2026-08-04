@@ -8,7 +8,7 @@ import { expect, test } from '@playwright/test'
 test.describe('landing page', () => {
   test('loads and renders the platform heading', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: /منصة سوريا الكاملة/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /تشعر أنك في المكان الصحيح/ })).toBeVisible()
   })
 
   test('is served with lang="ar" dir="rtl", and RTL is actually applied', async ({ page }) => {
@@ -74,10 +74,10 @@ test.describe('partner/staff sign-in portal', () => {
     await page.goto('/#/host')
     await page.getByRole('textbox', { name: /البريد الإلكتروني/ }).first().fill('nobody@sybnb.test')
     await page.getByLabel('كلمة المرور', { exact: true }).fill('definitely-wrong-password')
-    // Submit without confirming the emailed code: the portal must surface a visible status message
-    // rather than failing silently.
+    // The API remains the authority for password and OTP checks. An invalid attempt must surface
+    // its safe, enumeration-resistant error rather than failing silently.
     await page.getByRole('button', { name: 'فتح لوحة الشريك' }).click()
-    await expect(page.getByText('أدخل البريد وكلمة المرور، ثم أكّد رمز البريد قبل الدخول.')).toBeVisible({
+    await expect(page.getByText('Invalid login credentials.')).toBeVisible({
       timeout: 10_000,
     })
   })

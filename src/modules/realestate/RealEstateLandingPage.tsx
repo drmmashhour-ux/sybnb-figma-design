@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { RecentlyViewedStrip } from '../../shared/recentlyViewed/RecentlyViewedStrip'
+import { StandalonePlatformShell } from '../../shared/layout/StandalonePlatformShell'
 
 // Synitres (synitres.com) — the STANDALONE sale/buy/rent + marketplace platform for Syria (the "Centris
 // of Syria"), isolated from the STR stays landing and the SR ride landing per the owner's "each division
@@ -42,7 +43,7 @@ const copy = {
     brand: 'Synitres',
     eyebrow: "Syria's property market",
     title: 'Find your home in Syria — to buy or to rent',
-    subtitle: 'Thousands of verified properties: apartments, villas, and shops — map + filter search, and safe contact with the owner.',
+    subtitle: 'Explore verified properties: apartments, villas, and shops — map + filter search, and safe contact with the owner.',
     tabBuy: 'Buy',
     tabRent: 'Monthly rent',
     searchBuy: 'Browse properties for sale',
@@ -70,7 +71,7 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
   const go = (hash: string) => (window.location.hash = hash)
 
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+    <StandalonePlatformShell lang={lang}><main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <header style={styles.topbar}>
         <button style={styles.brandBtn} onClick={() => go('/')}>
           <span style={styles.brandMark}>🏙️</span>
@@ -92,11 +93,11 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.subtitle}>{t.subtitle}</p>
 
-        <div style={styles.tabs} role="tablist">
-          <button role="tab" aria-selected={tab === 'buy'} style={{ ...styles.tab, ...(tab === 'buy' ? styles.tabOn : null) }} onClick={() => setTab('buy')}>
+        <div style={styles.tabs} role="group" aria-label={isAr ? 'نوع البحث' : 'Search type'}>
+          <button type="button" aria-pressed={tab === 'buy'} style={{ ...styles.tab, ...(tab === 'buy' ? styles.tabOn : null) }} onClick={() => setTab('buy')}>
             {t.tabBuy}
           </button>
-          <button role="tab" aria-selected={tab === 'rent'} style={{ ...styles.tab, ...(tab === 'rent' ? styles.tabOn : null) }} onClick={() => setTab('rent')}>
+          <button type="button" aria-pressed={tab === 'rent'} style={{ ...styles.tab, ...(tab === 'rent' ? styles.tabOn : null) }} onClick={() => setTab('rent')}>
             {t.tabRent}
           </button>
         </div>
@@ -116,7 +117,7 @@ export function RealEstateLandingPage({ lang, onLanguageChange }: Props) {
       <section style={styles.recent}>
         <RecentlyViewedStrip lang={lang} divisions={['BUY', 'RENTALS']} />
       </section>
-    </main>
+    </main></StandalonePlatformShell>
   )
 }
 

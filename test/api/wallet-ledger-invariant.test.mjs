@@ -67,8 +67,8 @@ describe('Wallet ledger financial-integrity invariant', () => {
 
   async function registerGuest(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
-    const res = await request(app).post('/api/auth/register').send({
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant: legacyVerificationGrant1,
       role: 'GUEST',
       email,
       password: 'correct-horse-battery',

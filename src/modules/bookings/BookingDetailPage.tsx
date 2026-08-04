@@ -266,6 +266,21 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     }
   }
 
+  if (status !== 'ready') {
+    return (
+      <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+        <section style={styles.hero} role={status === 'error' ? 'alert' : 'status'}>
+          <p style={styles.eyebrow}>{bookingId.slice(0, 12).toUpperCase()}</p>
+          <h1 style={styles.title}>{status === 'error' ? t.error : t.loading}</h1>
+          {status === 'error' && <p style={styles.body}>{message}</p>}
+          {status === 'error' && (
+            <button style={styles.primaryButton} onClick={() => void loadBooking()}>{isAr ? 'إعادة المحاولة' : 'Try again'}</button>
+          )}
+        </section>
+      </main>
+    )
+  }
+
   const listingTitle = booking?.listing ? listingTitleText(booking.listing, lang) : '-'
   const approvedPayment = booking?.payments?.find((payment) => payment.status === 'APPROVED')
   const latestPayment = booking?.payments?.[0]
@@ -338,10 +353,6 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
       </section>
-
-      {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
-      {status === 'error' && <section style={styles.alert}>{message}</section>}
-      {status !== 'error' && message && <section style={styles.panel}>{message}</section>}
 
       {booking && (
         <>

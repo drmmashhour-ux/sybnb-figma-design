@@ -9,9 +9,15 @@ import { approveDriverForRides, cleanupTestUsers, fundWallet, testApp, trackTest
 // earnings — never a rider top-up that shares the same wallet.
 describe('SR polish fixes', () => {
   let app
+  let admin
 
-  beforeAll(() => {
+  beforeAll(async () => {
     app = testApp()
+    admin = await db().user.create({
+      data: { email: uniqueTestEmail('sr-polish-admin'), displayName: 'A', referralCode: uniqueTestReferralCode(), roles: { create: { role: 'ADMIN' } } },
+      include: { roles: true },
+    })
+    trackTestUser(admin.id)
   })
 
   afterAll(async () => {
@@ -20,9 +26,10 @@ describe('SR polish fixes', () => {
 
   async function registerUser(role, label) {
     const email = uniqueTestEmail(label)
-    if (role === 'GUEST') await verifyEmailForTest(app, email)
-    if (role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-    const res = await request(app).post('/api/auth/register').send({ role, email, password: 'correct-horse-battery' })
+    let verificationGrant
+    if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+    if (role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+    const res = await request(app).post('/api/auth/register').send({ verificationGrant, role, email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     if (role === 'DRIVER') await approveDriverForRides(res.body.user.id)
     if (role === 'GUEST') await fundWallet(res.body.user.id)
@@ -70,12 +77,6 @@ describe('SR polish fixes', () => {
       create: { userId: driver.user.id, payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
       update: { payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
     })
-    const admin = await db().user.create({
-      data: { email: uniqueTestEmail('sr-polish-admin'), displayName: 'A', referralCode: uniqueTestReferralCode(), roles: { create: { role: 'ADMIN' } } },
-      include: { roles: true },
-    })
-    trackTestUser(admin.id)
-
     const payout = await request(app)
       .post(`/api/admin/sr-payouts/${driver.user.id}/release`)
       .set('Authorization', `Bearer ${createSessionToken(admin)}`)

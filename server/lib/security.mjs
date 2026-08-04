@@ -1,12 +1,13 @@
 import { createHash, createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
 
 const PASSWORD_PREFIX = 'scrypt:v1'
-// Persistent login (90 days): a signed-in session survives for 90 days so re-opening the app keeps the
-// user logged in. The revocation kill-switch is unchanged and independent of this TTL — logout and
+// Customer sessions may persist for 90 days; privileged operator/staff sessions expire after 12 hours.
+// The revocation kill-switch is unchanged and independent of these TTLs — logout and
 // password-reset bump user.sessionVersion, and any token minted before the bump is rejected on the next
 // request (auth-context.mjs) even though its `exp` hasn't passed. So a longer TTL does not weaken the
 // ability to invalidate sessions immediately.
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 90
+const CUSTOMER_SESSION_TTL_SECONDS = 60 * 60 * 24 * 90
+const PRIVILEGED_SESSION_TTL_SECONDS = 60 * 60 * 12
 
 function requiredSecret(name) {
   const value = process.env[name]
@@ -76,6 +77,18 @@ export function generateEmailVerificationCode() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0')
 }
 
+// High-entropy bearer proof returned only to the browser that completed the OTP challenge.
+// Only its keyed digest is persisted, so a database read cannot recover a usable grant.
+export function generateVerificationGrant() {
+  return randomBytes(32).toString('base64url')
+}
+
+export function hashVerificationGrant(grant) {
+  return createHmac('sha256', requiredSecret('AUTH_SECRET'))
+    .update(`verification-grant:${String(grant || '')}`)
+    .digest('hex')
+}
+
 export function hashEmailVerificationCode(code) {
   const secret = requiredSecret('AUTH_SECRET')
   return createHmac('sha256', secret).update(String(code || '')).digest('hex')
@@ -90,14 +103,17 @@ export function verifyEmailVerificationCodeHash(code, storedHash) {
 export function createSessionToken(user) {
   const secret = requiredSecret('AUTH_SECRET')
   const issuedAt = Math.floor(Date.now() / 1000)
+  const roles = user.roles?.map((role) => role.role) || []
+  const privileged = roles.some((role) => ['ADMIN', 'SUPPORT', 'HOST', 'SELLER', 'DRIVER'].includes(role))
+  const ttl = privileged ? PRIVILEGED_SESSION_TTL_SECONDS : CUSTOMER_SESSION_TTL_SECONDS
   const payload = {
     sub: user.id,
-    roles: user.roles?.map((role) => role.role) || [],
+    roles,
     // Checked against the user's live sessionVersion on every request (auth-context.mjs) -- the
     // only way a stateless signed token can be revoked before its own expiry (F-02).
     sv: user.sessionVersion ?? 0,
     iat: issuedAt,
-    exp: issuedAt + SESSION_TTL_SECONDS,
+    exp: issuedAt + ttl,
   }
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const signature = createHmac('sha256', secret).update(body).digest('base64url')

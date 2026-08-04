@@ -26,7 +26,13 @@ export default defineConfig({
       command: `node --env-file=.env.test server/index.mjs`,
       port: API_PORT,
       reuseExistingServer: false,
-      env: { API_PORT: String(API_PORT), API_HOST: '127.0.0.1', SYBNB_DEPLOY_ENV: 'staging', AI_BOOKING_ASSISTANT_ENABLED: '1' },
+      env: {
+        API_PORT: String(API_PORT),
+        API_HOST: '127.0.0.1',
+        CORS_ORIGIN: `http://127.0.0.1:${FRONTEND_PORT}`,
+        SYBNB_DEPLOY_ENV: 'staging',
+        AI_BOOKING_ASSISTANT_ENABLED: '1',
+      },
       timeout: 30_000,
     },
     {

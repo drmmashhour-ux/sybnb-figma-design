@@ -13,7 +13,7 @@
 
 | Variable | Value | Why |
 |---|---|---|
-| **OTP provider** — set ONE of: `RESEND_API_KEY` (+ `MAIL_FROM`, e.g. `no-reply@sybnb.app`) **or** SMTP vars **or** an SMS provider | your provider key | **Launch blocker.** Without an email/SMS sender, NO new user can register and NO host/admin can log in (2-factor code can't be sent). |
+| **OTP provider** — set ONE of: `RESEND_API_KEY` (+ `EMAIL_FROM`, e.g. `no-reply@sybnb.app`) **or** SMTP vars **or** an SMS provider | your provider key | **Launch blocker.** Without an email/SMS sender, NO new user can register and NO host/admin can log in (2-factor code can't be sent). |
 | **`TRUST_PROXY`** | `1` | Vercel is a reverse proxy. Without this the rate limiter + login lockout see every visitor as one IP → either self-DoS or ineffective throttling. |
 | **`CRON_SECRET`** | a fresh random string — generate with `openssl rand -hex 32` | The maintenance cron (`/api/cron/maintenance`) is now **fail-closed**: it runs ONLY with this bearer, which Vercel injects automatically once the var is set. Without it the sweeps don't run (and can't be spoofed by the public). |
 | **`FORCE_HTTPS`** | `1` | Enables HSTS on the API responses (the frontend HSTS is already set via `vercel.json`). |

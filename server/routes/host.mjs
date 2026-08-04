@@ -74,20 +74,15 @@ export async function handleHost(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
 
-    const [approvedPlans, consumedListings] = await Promise.all([
-      db().paymentProof.findMany({
-        where: { userId: context.user.id, provider: 'str_host_plan', status: 'APPROVED' },
-        select: { amountMinor: true },
-        orderBy: { createdAt: 'desc' },
-      }),
-      db().listing.count({ where: { ownerId: context.user.id, division: 'STAYS' } }),
-    ])
-
-    const hasPaidPlan = approvedPlans.length > consumedListings
+    const unconsumedPlan = await db().paymentProof.findFirst({
+      where: { userId: context.user.id, provider: 'str_host_plan', status: 'APPROVED', strPlanConsumption: null },
+      select: { amountMinor: true }, orderBy: { createdAt: 'asc' },
+    })
+    const hasPaidPlan = Boolean(unconsumedPlan)
     const priceToPlan = Object.fromEntries(
       Object.entries(STR_HOST_PLAN_PRICE_MINOR).map(([code, minor]) => [minor, code]),
     )
-    const paidPlanCode = hasPaidPlan ? priceToPlan[approvedPlans[0].amountMinor] || null : null
+    const paidPlanCode = hasPaidPlan ? priceToPlan[unconsumedPlan.amountMinor] || null : null
 
     return json(res, 200, { hasPaidPlan, paidPlanCode })
   }

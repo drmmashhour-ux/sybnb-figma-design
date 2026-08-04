@@ -121,6 +121,14 @@ export async function lockWalletForSpend(tx, userId, currency) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`wallet:${userId}:${currency}`}))`
 }
 
+// Serialize the check-then-create for an external payment reference. PaymentProof predates a
+// database unique(provider, providerRef) constraint, so this transaction-scoped lock closes the
+// duplicate-submission race without a risky migration over unknown historical data.
+export async function lockPaymentReference(tx, provider, providerRef) {
+  if (!provider || !providerRef) return
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`payment-proof:${provider}:${providerRef}`}))`
+}
+
 // Caps a would-be DEBIT at the wallet's current balance so a fee/reversal can never drive
 // cachedBalanceMinor negative — the same "never go negative" discipline the guest-cancel path already
 // uses by withholding rather than debiting into the red. Returns the amount that can actually be
@@ -192,12 +200,19 @@ export async function recordWalletEntry(tx, {
 // The platform's revenue CREDITs (10% booking commission, non-refundable protection fee, seller-plan
 // fee) must NEVER be silently dropped just because the caller didn't pass an admin actor (e.g. a
 // Stripe auto-approval). Resolve a stable platform account: the given actor if any, else the first
-// ADMIN. Same resolution the SR path uses (resolvePlatformUserId). Returns null only if no admin
-// exists at all (a bootstrapping edge), in which case there is genuinely no account to credit.
+// ADMIN. Same resolution the SR path uses (resolvePlatformUserId). Missing platform accounting is
+// a hard configuration error: fail the surrounding transaction so a paid webhook can be retried
+// after the ADMIN role is provisioned instead of activating access while losing platform revenue.
 async function resolvePlatformActorId(tx, actorUserId) {
   if (actorUserId) return actorUserId
   const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
-  return admin?.userId || null
+  if (admin?.userId) return admin.userId
+
+  const error = new Error('Platform accounting account is not configured.')
+  error.statusCode = 503
+  error.code = 'PLATFORM_ACCOUNT_MISSING'
+  error.expose = true
+  throw error
 }
 
 export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
@@ -271,33 +286,31 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     })
     // Resolve a platform account so the 10% is credited even when no admin actor was passed.
     const platformActorId = await resolvePlatformActorId(tx, actorUserId)
-    if (platformActorId) {
+    await recordWalletEntry(tx, {
+      userId: platformActorId,
+      type: 'CREDIT',
+      amountMinor: split.adminShareMinor,
+      currency: proof.currency,
+      referenceType: 'booking_admin_share',
+      referenceId: proof.bookingId,
+      keyParts: ['booking-admin-share', proof.bookingId, proof.id, platformActorId],
+      note: 'SYBNB/admin share collected after verified guest payment.',
+    })
+    // The cancellation-protection fee (if purchased) is excluded from staySplitBaseMinor above,
+    // so it never flows into adminShareMinor — record it as its own revenue entry here instead of
+    // letting it silently vanish from the ledger. It's a non-refundable protection premium, so
+    // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
+    if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
       await recordWalletEntry(tx, {
         userId: platformActorId,
         type: 'CREDIT',
-        amountMinor: split.adminShareMinor,
+        amountMinor: split.cancellationProtectionFeeMinor,
         currency: proof.currency,
-        referenceType: 'booking_admin_share',
+        referenceType: 'booking_protection_fee',
         referenceId: proof.bookingId,
-        keyParts: ['booking-admin-share', proof.bookingId, proof.id, platformActorId],
-        note: 'SYBNB/admin share collected after verified guest payment.',
+        keyParts: ['booking-protection-fee', proof.bookingId, proof.id, platformActorId],
+        note: 'SYBNB/admin collected the non-refundable cancellation-protection fee.',
       })
-      // The cancellation-protection fee (if purchased) is excluded from staySplitBaseMinor above,
-      // so it never flows into adminShareMinor — record it as its own revenue entry here instead of
-      // letting it silently vanish from the ledger. It's a non-refundable protection premium, so
-      // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
-      if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
-        await recordWalletEntry(tx, {
-          userId: platformActorId,
-          type: 'CREDIT',
-          amountMinor: split.cancellationProtectionFeeMinor,
-          currency: proof.currency,
-          referenceType: 'booking_protection_fee',
-          referenceId: proof.bookingId,
-          keyParts: ['booking-protection-fee', proof.bookingId, proof.id, platformActorId],
-          note: 'SYBNB/admin collected the non-refundable cancellation-protection fee.',
-        })
-      }
     }
 
     // Referral reward (double-sided referral program, server/lib/referrals.mjs): only pays the
@@ -319,18 +332,16 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // income projection, all of it. Recorded the same way booking commission is: a CREDIT to the
     // approving admin's own wallet, which is what the revenue-summary rollup reads from.
     const platformActorId = await resolvePlatformActorId(tx, actorUserId)
-    if (platformActorId) {
-      await recordWalletEntry(tx, {
-        userId: platformActorId,
-        type: 'CREDIT',
-        amountMinor: proof.amountMinor,
-        currency: proof.currency,
-        referenceType: 'seller_plan_fee',
-        referenceId: proof.id,
-        keyParts: ['seller-plan-fee', proof.id, platformActorId],
-        note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
-      })
-    }
+    await recordWalletEntry(tx, {
+      userId: platformActorId,
+      type: 'CREDIT',
+      amountMinor: proof.amountMinor,
+      currency: proof.currency,
+      referenceType: 'seller_plan_fee',
+      referenceId: proof.id,
+      keyParts: ['seller-plan-fee', proof.id, platformActorId],
+      note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
+    })
 
     // A referee who converts as a paying seller/dealer/developer is exactly as real a referral
     // outcome as one who converts as a paying guest -- see the booking branch above for the full
@@ -343,18 +354,16 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // It is 100% platform revenue and is recorded the same way booking commission / seller-plan fees are
     // — a CREDIT to the platform actor — so STR host-plan income is visible in the finance rollups.
     const platformActorId = await resolvePlatformActorId(tx, actorUserId)
-    if (platformActorId) {
-      await recordWalletEntry(tx, {
-        userId: platformActorId,
-        type: 'CREDIT',
-        amountMinor: proof.amountMinor,
-        currency: proof.currency,
-        referenceType: 'str_host_plan_fee',
-        referenceId: proof.id,
-        keyParts: ['str-host-plan-fee', proof.id, platformActorId],
-        note: 'SYBNB collected an STR host listing-plan fee (card).',
-      })
-    }
+    await recordWalletEntry(tx, {
+      userId: platformActorId,
+      type: 'CREDIT',
+      amountMinor: proof.amountMinor,
+      currency: proof.currency,
+      referenceType: 'str_host_plan_fee',
+      referenceId: proof.id,
+      keyParts: ['str-host-plan-fee', proof.id, platformActorId],
+      note: 'SYBNB collected an STR host listing-plan fee (card).',
+    })
     await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.id })
   } else if (proof.provider === 'wallet_topup_sham_cash') {
     // SR cashless (016): an admin-approved Sham Cash top-up credits the rider's OWN wallet 1:1, no fee.

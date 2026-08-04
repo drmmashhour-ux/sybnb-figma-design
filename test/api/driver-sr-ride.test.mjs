@@ -1,13 +1,14 @@
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
-import { approveDriverForRides, cleanupTestUsers, fundWallet, testApp, trackTestUser, uniqueTestEmail, verifyEmailForTest } from '../support/testServer.mjs'
+import { approveDriverForRides, cleanupTestUsers, fundWallet, testApp, trackTestUser, uniqueTestEmail, uniqueTestReferralCode, verifyEmailForTest } from '../support/testServer.mjs'
 
 async function registerUser(app, role, label) {
   const email = uniqueTestEmail(label)
-  if (role === 'GUEST') await verifyEmailForTest(app, email)
-  if (role === 'HOST' || role === 'DRIVER') await verifyEmailForTest(app, email, 'staff-login')
-  const res = await request(app).post('/api/auth/register').send({
+  let verificationGrant
+  if (role === 'GUEST') verificationGrant = await verifyEmailForTest(app, email)
+  if (role === 'HOST' || role === 'DRIVER') verificationGrant = await verifyEmailForTest(app, email, 'staff-login')
+  const res = await request(app).post('/api/auth/register').send({ verificationGrant,
     role,
     email,
     password: 'correct-horse-battery',
@@ -43,6 +44,8 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
 
   beforeAll(async () => {
     app = testApp()
+    const admin = await db().user.create({ data: { email: uniqueTestEmail('sr-flow-admin'), displayName: 'SR Flow Admin', referralCode: uniqueTestReferralCode(), roles: { create: { role: 'ADMIN' } } } })
+    trackTestUser(admin.id)
     rider = await registerUser(app, 'GUEST', 'sr-rider')
     driver = await registerUser(app, 'DRIVER', 'sr-driver')
   })
@@ -59,12 +62,15 @@ describe('SR ride dual-sided flow: rider requests, driver claims and progresses 
     expect(ride.fareMinor).toBeGreaterThan(0)
   })
 
-  it('a DRIVER cannot request a ride (role-gated to GUEST)', async () => {
+  it('a DRIVER can request a ride using the baseline customer capability', async () => {
+    await fundWallet(driver.user.id)
     const res = await request(app)
       .post('/api/sr/rides')
       .set('Authorization', `Bearer ${driver.token}`)
       .send({ pickup: 'Malki', dropoff: 'Mezzeh' })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(201)
+    expect(res.body.ride.riderId).toBe(driver.user.id)
+    await db().rideRequest.update({ where: { id: res.body.ride.id }, data: { status: 'CANCELLED' } })
   })
 
   it('the requested ride shows up in the driver pending queue (once the driver is online)', async () => {

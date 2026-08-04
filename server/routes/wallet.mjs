@@ -4,7 +4,7 @@ import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { roundUsdUpToStep } from '../lib/currency.mjs'
 import { riderAvailableBalanceMinor } from '../lib/sr-payments.mjs'
-import { lockWalletForSpend } from '../lib/finance-ledger.mjs'
+import { lockPaymentReference, lockWalletForSpend } from '../lib/finance-ledger.mjs'
 import { debitGiftFromSender, refundGiftToSender, expireAndRefundSenderGifts } from '../lib/gift-ledger.mjs'
 
 // SR cashless top-up (016): sane per-top-up ceiling (whole currency units).
@@ -43,16 +43,17 @@ export async function handleWallet(req, res, url, context) {
       error.expose = true
       throw error
     }
-    const duplicate = await db().paymentProof.findFirst({ where: { provider: 'wallet_topup_sham_cash', providerRef } })
-    if (duplicate) {
-      const error = new Error('This Sham Cash transaction reference was already submitted.')
-      error.statusCode = 409
-      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
-      error.expose = true
-      throw error
-    }
-    const proof = await db().paymentProof.create({
-      data: {
+    const proof = await db().$transaction(async (tx) => {
+      await lockPaymentReference(tx, 'wallet_topup_sham_cash', providerRef)
+      const duplicate = await tx.paymentProof.findFirst({ where: { provider: 'wallet_topup_sham_cash', providerRef } })
+      if (duplicate) {
+        const error = new Error('This Sham Cash transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
+      return tx.paymentProof.create({ data: {
         userId: context.user.id,
         provider: 'wallet_topup_sham_cash',
         status: 'PENDING_ADMIN_REVIEW',
@@ -60,7 +61,7 @@ export async function handleWallet(req, res, url, context) {
         currency,
         proofAssetUrl: body.proofAssetUrl || undefined,
         providerRef,
-      },
+      } })
     })
     return json(res, 201, { ok: true, proof })
   }

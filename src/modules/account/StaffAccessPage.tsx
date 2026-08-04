@@ -4,6 +4,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   createStaffAccountSession,
   resetPasswordWithEmailCode,
+  resetPasswordWithPhoneCode,
   sendEmailVerificationCode,
   sendPhoneVerificationCode,
   verifyEmailVerificationCode,
@@ -142,8 +143,9 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const t = labels[lang]
   const isAr = lang === 'ar'
   const canSignUp = role !== 'ADMIN'
+  const phoneOtpEnabled = import.meta.env.VITE_PHONE_OTP_ENABLED === '1'
   const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgotPassword'>('signIn')
-  // Verify by email (default) or phone/SMS. Forgot-password always uses email (password-reset code).
+  // Verify by email (default) or phone/SMS, including password recovery for phone-only accounts.
   const [verifyMethod, setVerifyMethod] = useState<'email' | 'phone'>('email')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [email, setEmail] = useState('')
@@ -156,6 +158,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [code, setCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
   const [codeConfirmed, setCodeConfirmed] = useState(false)
+  const [verificationGrant, setVerificationGrant] = useState('')
   const [codeTryAgain, setCodeTryAgain] = useState(false)
   const [codeBusy, setCodeBusy] = useState<'idle' | 'sending' | 'confirming'>('idle')
   const [devCode, setDevCode] = useState('')
@@ -167,11 +170,13 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const actionLabel = role === 'ADMIN' ? t.openAdmin : role === 'DRIVER' ? t.openDriver : t.openPartner
   const otpPurpose = mode === 'forgotPassword' ? 'password-reset' : 'staff-login'
   // Phone verification is available for sign-in / sign-up (not the email-only password reset).
-  const usePhone = mode !== 'forgotPassword' && verifyMethod === 'phone'
+  const usePhone = verifyMethod === 'phone'
+  const identifierReady = usePhone ? phone.trim().length >= 8 : email.includes('@')
 
   function resetCodeState() {
     setCodeSent(false)
     setCodeConfirmed(false)
+    setVerificationGrant('')
     setCode('')
     setDevCode('')
     setMessage('')
@@ -216,22 +221,25 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     }
   }
 
-  async function confirmCode(): Promise<boolean> {
+  async function confirmCode(): Promise<string | null> {
     setCodeBusy('confirming')
     try {
-      if (usePhone) await verifyPhoneVerificationCode(phone.trim(), code.trim(), otpPurpose)
-      else await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
+      const result = usePhone
+        ? await verifyPhoneVerificationCode(phone.trim(), code.trim(), otpPurpose)
+        : await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
+      setVerificationGrant(result.verificationGrant)
       setCodeConfirmed(true)
       setCodeTryAgain(false)
       setMessage(usePhone ? t.phoneConfirmed : t.codeConfirmed)
       setIsErrorMessage(false)
-      return true
+      return result.verificationGrant
     } catch {
       setCodeConfirmed(false)
       setCodeTryAgain(true)
       setMessage(t.codeInvalid)
       setIsErrorMessage(true)
-      return false
+      setVerificationGrant('')
+      return null
     } finally {
       setCodeBusy('idle')
     }
@@ -251,18 +259,24 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     // Users routinely fill the code box and click "Open" without first pressing "Confirm code" — so
     // auto-confirm the entered code here. If it fails, confirmCode() already showed "code invalid".
     let confirmed = codeConfirmed
+    let activeGrant = verificationGrant
     if (!confirmed && code.trim() && identifierOk) {
-      confirmed = await confirmCode()
+      activeGrant = (await confirmCode()) || ''
+      confirmed = Boolean(activeGrant)
       if (!confirmed) return
     }
-    if (!identifierOk || !password.trim() || !confirmed) {
+    // Sign-in authorization belongs to the API: normal staff accounts still receive
+    // STAFF_OTP_REQUIRED without a valid grant, while explicitly enabled Preview demo accounts
+    // may use password-only access. Registration always requires confirmed ownership.
+    if (!identifierOk || !password.trim() || (mode === 'signUp' && !confirmed)) {
       setIsErrorMessage(true)
       setMessage(mode === 'signUp' ? t.signUpRequired : t.signInRequired)
       return
     }
     if (mode === 'signUp') {
-      // A phone is always required for partner signup; when verifying by phone it's the verified identifier.
-      if (!phone.trim()) {
+      // A phone is always required in the form for the phone-verification path. The API only receives
+      // the identifier whose OTP was actually confirmed; it must never bind the other, unverified field.
+      if (usePhone && !phone.trim()) {
         setIsErrorMessage(true)
         setMessage(t.signUpRequired)
         return
@@ -280,8 +294,10 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         // When verifying by phone, sign in/up by phone (email left empty); otherwise by email.
         email: usePhone ? '' : normalizedEmail,
         password,
-        phone: phone.trim(),
+        phone: usePhone ? phone.trim() : '',
+        partnerType: role === 'HOST' ? partnerType : undefined,
         mode,
+        verificationGrant: activeGrant,
       })
       if (role === 'HOST') {
         window.sessionStorage.setItem('sybnb-partner-type', partnerType)
@@ -298,7 +314,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   async function submitPasswordReset() {
     const normalizedEmail = email.trim().toLowerCase()
     const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
-    if (!email.trim() || normalizedEmail !== normalizedEmailRepeat || !newPassword.trim() || !codeConfirmed) {
+    if ((!usePhone && (!email.trim() || normalizedEmail !== normalizedEmailRepeat)) || (usePhone && phone.trim().length < 8) || !newPassword.trim() || !codeConfirmed) {
       setIsErrorMessage(true)
       setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
       return
@@ -306,7 +322,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
 
     setStatus('loading')
     try {
-      await resetPasswordWithEmailCode(normalizedEmail, newPassword)
+      if (usePhone) await resetPasswordWithPhoneCode(phone.trim(), newPassword, verificationGrant)
+      else await resetPasswordWithEmailCode(normalizedEmail, newPassword, verificationGrant)
       setStatus('idle')
       setNewPassword('')
       setIsErrorMessage(false)
@@ -368,6 +385,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               style={styles.emailInput}
               value={email}
               type="email"
+              name="sybnb-staff-email"
+              autoComplete="off"
               placeholder="name@example.com"
               onChange={(event) => updateEmail(event.target.value)}
               dir="ltr"
@@ -382,6 +401,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 style={styles.emailInputSecondary}
                 value={emailRepeat}
                 type="email"
+                name="sybnb-staff-email-confirmation"
+                autoComplete="off"
                 placeholder="name@example.com"
                 onChange={(event) => {
                   setEmailRepeat(event.target.value)
@@ -392,7 +413,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             </label>
           )}
 
-          {mode !== 'forgotPassword' && (
+          {
             <div style={{ display: 'flex', gap: 8, marginBottom: 4 }} role="tablist" aria-label={isAr ? 'طريقة التحقق' : 'Verification method'}>
               <button
                 type="button"
@@ -401,15 +422,15 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               >
                 {t.verifyByEmail}
               </button>
-              <button
+              {phoneOtpEnabled && <button
                 type="button"
                 style={verifyMethod === 'phone' ? styles.methodActive : styles.methodInactive}
                 onClick={() => { setVerifyMethod('phone'); setCodeSent(false); setCodeConfirmed(false); setCode(''); if (!phone.trim()) setPhone('+963') }}
               >
                 {t.verifyByPhone}
-              </button>
+              </button>}
             </div>
-          )}
+          }
 
           {usePhone && (
             <label style={styles.labelWide}>
@@ -418,6 +439,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 style={styles.input}
                 value={phone}
                 inputMode="tel"
+                name="sybnb-staff-phone"
+                autoComplete="off"
                 placeholder="+963..."
                 onChange={(event) => { setPhone(event.target.value); setCodeConfirmed(false) }}
                 dir="ltr"
@@ -435,6 +458,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 style={styles.input}
                 value={code}
                 placeholder="000000"
+                name="sybnb-staff-verification-code"
+                autoComplete="one-time-code"
                 onChange={(event) => {
                   setCode(event.target.value)
                   setCodeConfirmed(false)
@@ -468,13 +493,13 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
           {mode === 'forgotPassword' ? (
             <label style={styles.labelWide}>
               {t.newPassword}
-              <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" dir="ltr" />
+              <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" name="sybnb-new-password" autoComplete="new-password" dir="ltr" />
             </label>
           ) : (
             <>
               <label style={styles.label}>
                 {t.password}
-                <input style={styles.input} value={password} onChange={(event) => setPassword(event.target.value)} type="password" dir="ltr" />
+                <input style={styles.input} value={password} onChange={(event) => setPassword(event.target.value)} type="password" name="sybnb-staff-password" autoComplete="new-password" dir="ltr" />
               </label>
               {mode === 'signUp' && (
                 <label style={styles.label}>
@@ -484,6 +509,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                     value={passwordRepeat}
                     onChange={(event) => setPasswordRepeat(event.target.value)}
                     type="password"
+                    name="sybnb-staff-password-confirmation"
+                    autoComplete="new-password"
                     dir="ltr"
                   />
                 </label>
@@ -491,7 +518,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               {mode === 'signUp' && (
                 <label style={styles.labelWide}>
                   {t.phone}
-                  <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
+                  <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} name="sybnb-partner-phone" autoComplete="off" dir="ltr" />
                 </label>
               )}
             </>

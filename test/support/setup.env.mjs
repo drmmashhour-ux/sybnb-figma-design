@@ -4,6 +4,11 @@
 // server/index.mjs's own loadEnv('.env') populate DATABASE_URL from the development environment.
 import '../../scripts/require-test-env.mjs'
 
+// Never let optional developer credentials from the repository's local .env leak into automated
+// tests. AI behavior is covered with deterministic fallbacks or explicit per-test stubs; real provider
+// calls make the suite slow, nondeterministic, and capable of spending money.
+process.env.ANTHROPIC_API_KEY = ''
+
 // Then reset the isolated test database to a blank slate before this run's first test. Combined
 // with test/support/testServer.mjs's unique-per-run id generation, this makes two consecutive
 // full suite runs produce identical results — not just "no collisions" but "provably starting

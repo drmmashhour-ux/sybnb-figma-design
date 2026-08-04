@@ -11,6 +11,7 @@ import { computePropertyValuation, loadPropertyComparablePool } from '../lib/pro
 import { parsePropertyQuery } from '../lib/ai-property-search.mjs'
 import { haversineKm, isValidCoords } from '../lib/sr-geocoding.mjs'
 import { expireStalePaymentPendingBookings } from '../lib/booking-lifecycle.mjs'
+import { createStayListingWithPlan } from '../lib/str-plan-consumption.mjs'
 import { expireOpenAuctions, loadAuctionSummaries } from '../lib/auction-lifecycle.mjs'
 import {
   MAX_LISTING_PHOTOS,
@@ -395,8 +396,7 @@ export async function handleListings(req, res, url, context) {
         error.expose = true
         throw error
       }
-      const listing = await db().listing.create({
-        data: {
+      const listingData = {
           ownerId: context.user.id,
           division,
           titleAr: String(body.titleAr).trim(),
@@ -406,8 +406,10 @@ export async function handleListings(req, res, url, context) {
           currency: body.currency || 'SYP',
           instantBookEnabled: Boolean(body.instantBookEnabled),
           metadata: body.metadata || {},
-        },
-      })
+      }
+      const listing = division === 'STAYS'
+        ? await createStayListingWithPlan(context.user.id, listingData)
+        : await db().listing.create({ data: listingData })
       return json(res, 201, { ok: true, listing })
     }
 

@@ -85,7 +85,7 @@ export function MarketplaceBrowsePage({ lang }: { lang: Lang }) {
         <button style={styles.sellButton} onClick={() => (window.location.hash = '/marketplace/sell')}>{t.sell}</button>
       </div>
 
-      <input style={styles.search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t.search} />
+      <input aria-label={t.search} style={styles.search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t.search} />
 
       <div style={styles.chips}>
         <button style={category === '' ? styles.chipActive : styles.chip} onClick={() => setCategory('')}>{t.all}</button>
@@ -97,10 +97,10 @@ export function MarketplaceBrowsePage({ lang }: { lang: Lang }) {
       </div>
 
       <div style={styles.filters}>
-        <input style={styles.filterInput} value={city} onChange={(e) => setCity(e.target.value)} placeholder={t.city} />
-        <input style={styles.filterInput} type="number" inputMode="numeric" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} placeholder={t.minPrice} />
-        <input style={styles.filterInput} type="number" inputMode="numeric" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} placeholder={t.maxPrice} />
-        <select style={styles.filterInput} value={condition} onChange={(e) => setCondition(e.target.value)}>
+        <input aria-label={t.city} style={styles.filterInput} value={city} onChange={(e) => setCity(e.target.value)} placeholder={t.city} />
+        <input aria-label={t.minPrice} style={styles.filterInput} type="number" inputMode="numeric" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} placeholder={t.minPrice} />
+        <input aria-label={t.maxPrice} style={styles.filterInput} type="number" inputMode="numeric" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} placeholder={t.maxPrice} />
+        <select aria-label={t.condition} style={styles.filterInput} value={condition} onChange={(e) => setCondition(e.target.value)}>
           <option value="">{t.anyCondition}</option>
           {MARKETPLACE_CONDITIONS.map((c) => <option key={c.id} value={c.id}>{isAr ? c.ar : c.en}</option>)}
         </select>
@@ -115,7 +115,16 @@ export function MarketplaceBrowsePage({ lang }: { lang: Lang }) {
           {results.map((l) => {
             const photo = (l.media && l.media[0] && (l.media[0].url as string)) || ''
             return (
-              <article key={l.id} style={styles.item} onClick={() => (window.location.hash = `/listing/${l.id}`)} role="button">
+              <article
+                key={l.id}
+                style={styles.item}
+                onClick={() => (window.location.hash = `/listing/${l.id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') window.location.hash = `/listing/${l.id}`
+                }}
+                role="button"
+                tabIndex={0}
+              >
                 <div style={{ ...styles.thumb, ...(photo ? { backgroundImage: `url(${photo})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}) }}>
                   {!photo && <span style={styles.thumbEmoji}>📦</span>}
                 </div>

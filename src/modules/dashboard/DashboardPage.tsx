@@ -207,8 +207,8 @@ export function DashboardPage({ lang }: Props) {
     setClaimNote('')
     setClaimBusy(true)
     try {
-      await verifyEmailVerificationCode(claimEmail.trim(), claimCode.trim(), 'guest-signup')
-      await claimGuestAccount({ email: claimEmail.trim(), password: claimPassword, displayName: claimName.trim() || undefined })
+      const { verificationGrant } = await verifyEmailVerificationCode(claimEmail.trim(), claimCode.trim(), 'guest-signup')
+      await claimGuestAccount({ email: claimEmail.trim(), password: claimPassword, displayName: claimName.trim() || undefined, verificationGrant })
       setClaimNote(t.claimDone)
       setClaimStep('idle')
       setClaimCode('')
@@ -299,6 +299,20 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
     setTimeout(() => win.print(), 300)
   }
 
+  if (status !== 'ready') {
+    return (
+      <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+        <section style={status === 'error' ? styles.alert : styles.accountTop} role={status === 'error' ? 'alert' : 'status'}>
+          <strong>{status === 'error' ? t.error : t.loading}</strong>
+          {status === 'error' && <p>{message}</p>}
+          {status === 'error' && (
+            <button style={styles.secondaryButton} onClick={() => void loadOverview()}>{t.refresh}</button>
+          )}
+        </section>
+      </main>
+    )
+  }
+
   // Split trips by DATE + STATUS, not by array position. The old code treated bookings[0] as "active"
   // and everything after it as "previous/completed" — so a brand-new, not-yet-started trip could land
   // under "Previous trips" labelled "Completed". Now: a trip is UPCOMING until its check-out date has
@@ -340,8 +354,6 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
           </div>
         </div>
       </section>
-
-      {status === 'error' && <section style={styles.alert}>{message}</section>}
 
       {isDeviceGuest && (
         <section style={styles.claimPanel} aria-label={t.claimTitle}>

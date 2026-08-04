@@ -15,6 +15,7 @@ import { hashPassword } from '../server/lib/security.mjs'
 const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase()
 const password = process.env.ADMIN_PASSWORD || ''
 const displayName = process.env.ADMIN_NAME || 'SYBNB Admin'
+const rotateExistingPassword = process.env.ROTATE_ADMIN_PASSWORD === 'true'
 
 async function main() {
   // Safe to run on every deploy: with no ADMIN_EMAIL/ADMIN_PASSWORD it simply skips (exit 0), so it
@@ -33,22 +34,25 @@ async function main() {
     // roles they don't already have, so an owner who already uses this email as a host keeps that role.
     const have = new Set(existing.roles.map((r) => r.role))
     const toAdd = wantRoles.filter((r) => !have.has(r))
-    // Keep the account usable but DON'T clobber an existing password — if the user already has one they
-    // log in with the password they already know; only set the bootstrap password when there is none.
+    // Keep the account usable and do not clobber an existing password during normal deploys. An explicit
+    // ROTATE_ADMIN_PASSWORD=true is the audited recovery path after credential exposure: replace the
+    // hash and increment sessionVersion so every previously issued admin token is rejected immediately.
+    const shouldSetPassword = !existing.passwordHash || rotateExistingPassword
     await db().user.update({
       where: { id: existing.id },
       data: {
         status: 'ACTIVE',
         idDocumentStatus: 'APPROVED',
         idDocumentSubmittedAt: existing.idDocumentSubmittedAt ?? new Date(),
-        ...(existing.passwordHash ? {} : { passwordHash }),
+        ...(shouldSetPassword ? { passwordHash } : {}),
+        ...(rotateExistingPassword ? { sessionVersion: { increment: 1 } } : {}),
         ...(toAdd.length ? { roles: { create: toAdd.map((role) => ({ role })) } } : {}),
       },
     })
     const finalRoles = [...have, ...toAdd].join(', ')
     console.log(
       `Granted ADMIN to existing user: ${email} -> ${finalRoles}` +
-        (existing.passwordHash ? ' (kept existing password)' : ' (set bootstrap password)'),
+        (rotateExistingPassword ? ' (rotated password and revoked sessions)' : existing.passwordHash ? ' (kept existing password)' : ' (set bootstrap password)'),
     )
     return
   }

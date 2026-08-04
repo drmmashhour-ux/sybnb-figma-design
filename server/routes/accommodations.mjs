@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { summarizeOffers } from '../lib/offers.mjs'
+import { createStayListingWithPlan } from '../lib/str-plan-consumption.mjs'
 
 // Lets a hotel-like host (Studio/Suite/Double-Queen room types under one physical property)
 // share one location + one set of seller documents/photos across multiple STAYS Listing rows,
@@ -81,8 +82,7 @@ export async function handleAccommodations(req, res, url, context) {
     // The room type inherits the accommodation's location into its own metadata (not a relation)
     // so the existing search/filter system (server/routes/listings.mjs, which reads governorate/
     // city/area/propertyType/bedrooms/bathrooms/amenities from metadata) keeps working unchanged.
-    const listing = await db().listing.create({
-      data: {
+    const listing = await createStayListingWithPlan(context.user.id, {
         ownerId: context.user.id,
         accommodationId: accommodation.id,
         division: 'STAYS',
@@ -98,7 +98,6 @@ export async function handleAccommodations(req, res, url, context) {
           city: accommodation.city,
           area: accommodation.area,
         },
-      },
     })
     return json(res, 201, { ok: true, listing })
   }

@@ -2,8 +2,8 @@ import { db } from '../lib/prisma.mjs'
 import { createSessionToken, hashPassword, hashPhone, verifyPassword } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { assertBoundedString, assertNoUnknownFields, assertValidEmail, assertValidPassword, assertValidPhone } from '../lib/validate.mjs'
-import { consumeEmailVerificationCode, hasRecentlyVerifiedEmail, sendEmailVerificationCode } from '../lib/email-verification.mjs'
-import { consumePhoneVerificationCode, hasRecentlyVerifiedPhone, sendPhoneVerificationCode } from '../lib/phone-verification.mjs'
+import { claimRecentlyVerifiedEmail, consumeEmailVerificationCode, sendEmailVerificationCode } from '../lib/email-verification.mjs'
+import { claimRecentlyVerifiedPhone, consumePhoneVerificationCode, sendPhoneVerificationCode } from '../lib/phone-verification.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { attachReferralOnRegister, generateUniqueReferralCode } from '../lib/referrals.mjs'
 import { isMailerConfigured, sendPasswordChangedEmail } from '../lib/mailer.mjs'
@@ -22,6 +22,7 @@ const ALLOWED_EMAIL_CODE_PURPOSES = new Set(['guest-signup', 'staff-login', 'pas
 // SELLER is a marketplace operator (cars / property / goods) with money on the line, so it passes the
 // same real email-OTP gate as HOST/DRIVER at sign-up and sign-in — not the lighter guest flow.
 const STAFF_ROLES_REQUIRING_OTP = new Set(['ADMIN', 'HOST', 'DRIVER', 'SELLER'])
+const PARTNER_TYPES = new Set(['HOST', 'SELLER', 'RENTER', 'BUILDER', 'DEALER'])
 
 function resolveEmailCodePurpose(value) {
   return ALLOWED_EMAIL_CODE_PURPOSES.has(value) ? value : 'guest-signup'
@@ -78,7 +79,7 @@ export async function handleAuth(req, res, url, context) {
       error.expose = true
       throw error
     }
-    return json(res, 200, { ok: true })
+    return json(res, 200, { ok: true, verificationGrant: result.verificationGrant })
   }
 
   // Real phone/SMS OTP — the alternative to the email code for guests and staff. Pre-signup, so these
@@ -122,22 +123,35 @@ export async function handleAuth(req, res, url, context) {
       error.expose = true
       throw error
     }
-    return json(res, 200, { ok: true })
+    return json(res, 200, { ok: true, verificationGrant: result.verificationGrant })
   }
 
   // Real forgot-password flow (security audit finding F-01). The client must first send + verify
   // an email code with purpose='password-reset' via the two endpoints above, then call this one --
-  // never trusts a client-supplied "I verified it" boolean, same pattern as guest registration's
-  // hasRecentlyVerifiedEmail check below. Always returns ok:true regardless of whether the email
+  // never trusts a client-supplied "I verified it" boolean; it requires the opaque grant returned
+  // only to the client that completed the OTP challenge. Always returns ok:true regardless of whether the identifier
   // matches an account, so this endpoint can't be used to enumerate registered accounts.
   if (url.pathname === '/api/auth/password-reset') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
-    assertNoUnknownFields(body, ['email', 'newPassword'], 'password-reset body')
-    const validEmail = assertValidEmail(body.email)
+    assertNoUnknownFields(body, ['email', 'phone', 'newPassword', 'verificationGrant'], 'password-reset body')
+    if (body.email && body.phone) {
+      const error = new Error('Provide either email or phone, not both.')
+      error.statusCode = 400; error.code = 'RESET_IDENTIFIER_AMBIGUOUS'; error.expose = true
+      throw error
+    }
+    const validEmail = body.email ? assertValidEmail(body.email) : undefined
+    const validPhone = body.phone ? assertValidPhone(body.phone) : undefined
+    if (!validEmail && !validPhone) {
+      const error = new Error('email or phone is required.')
+      error.statusCode = 400; error.code = 'RESET_IDENTIFIER_REQUIRED'; error.expose = true
+      throw error
+    }
     const validPassword = assertValidPassword(body.newPassword)
 
-    const verified = await hasRecentlyVerifiedEmail(validEmail, 'password-reset')
+    const verified = validEmail
+      ? await claimRecentlyVerifiedEmail(validEmail, 'password-reset', body.verificationGrant)
+      : await claimRecentlyVerifiedPhone(validPhone, 'password-reset', body.verificationGrant)
     if (!verified) {
       const error = new Error('Verify your email with the access code before resetting the password.')
       error.statusCode = 403
@@ -150,13 +164,13 @@ export async function handleAuth(req, res, url, context) {
     // an attacker who stole a session token loses it the moment the legitimate owner resets their
     // password, instead of the token staying valid until its own 7-day expiry regardless.
     const result = await db().user.updateMany({
-      where: { email: validEmail },
+      where: validEmail ? { email: validEmail } : { phoneHash: hashPhone(validPhone) },
       data: { passwordHash: hashPassword(validPassword), sessionVersion: { increment: 1 } },
     })
 
     // Security confirmation: tell the account owner their password changed so they can react if it
     // wasn't them. Fire-and-forget + mailer-gated + try/catch, so a mail hiccup never fails the reset.
-    if (result.count > 0 && isMailerConfigured()) {
+    if (validEmail && result.count > 0 && isMailerConfigured()) {
       sendPasswordChangedEmail(validEmail).catch((err) =>
         console.error('[auth] password-changed email failed:', err?.message || err),
       )
@@ -223,7 +237,7 @@ export async function handleAuth(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
-    assertNoUnknownFields(body, ['email', 'password', 'displayName'], 'claim body')
+    assertNoUnknownFields(body, ['email', 'password', 'displayName', 'verificationGrant'], 'claim body')
 
     const email = assertValidEmail(body.email)
     if (!email) {
@@ -244,7 +258,7 @@ export async function handleAuth(req, res, url, context) {
 
     // Ownership of the email is proven by a recently-verified guest-signup OTP (same gate as guest
     // self-registration). We never trust a client "verified" flag.
-    const emailVerified = await hasRecentlyVerifiedEmail(email, 'guest-signup')
+    const emailVerified = await claimRecentlyVerifiedEmail(email, 'guest-signup', body.verificationGrant)
     if (!emailVerified) {
       const error = new Error('Verify your email with the access code before claiming the account.')
       error.statusCode = 403
@@ -283,7 +297,10 @@ export async function handleAuth(req, res, url, context) {
     const updated = await db().$transaction(async (tx) => {
       const user = await tx.user.update({
         where: { id: device.id },
-        data: { email, passwordHash, displayName },
+        // Revoke the anonymous device token as part of the same transaction that upgrades the
+        // identity. Otherwise anybody who copied that token before the claim would retain access to
+        // the newly named account for the remainder of the token's 90-day lifetime.
+        data: { email, passwordHash, displayName, sessionVersion: { increment: 1 } },
         include: { roles: true },
       })
       await tx.adminAuditLog.create({
@@ -305,7 +322,7 @@ export async function handleAuth(req, res, url, context) {
   if (url.pathname === '/api/auth/register') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
-    assertNoUnknownFields(body, ['role', 'email', 'phone', 'password', 'displayName', 'firstName', 'lastName', 'referralCode'], 'registration body')
+    assertNoUnknownFields(body, ['role', 'email', 'phone', 'password', 'displayName', 'firstName', 'lastName', 'referralCode', 'partnerType', 'verificationGrant', 'emailVerificationGrant', 'phoneVerificationGrant'], 'registration body')
     const role = body.role || 'GUEST'
     if (!PUBLIC_REGISTER_ROLES.has(role)) {
       const error = new Error('This role cannot be self-registered.')
@@ -329,6 +346,22 @@ export async function handleAuth(req, res, url, context) {
     const displayName = assertBoundedString(body.displayName, { fieldName: 'displayName', maxLength: NAME_FIELD_MAX_LENGTH })
     const firstName = assertBoundedString(body.firstName, { fieldName: 'firstName', maxLength: NAME_FIELD_MAX_LENGTH })
     const lastName = assertBoundedString(body.lastName, { fieldName: 'lastName', maxLength: NAME_FIELD_MAX_LENGTH })
+    const partnerType = body.partnerType ? String(body.partnerType).toUpperCase() : role === 'HOST' ? 'HOST' : role === 'SELLER' ? 'SELLER' : undefined
+    if (partnerType && !PARTNER_TYPES.has(partnerType)) {
+      const error = new Error('partnerType is invalid.')
+      error.statusCode = 400; error.code = 'PARTNER_TYPE_INVALID'; error.expose = true
+      throw error
+    }
+
+    const existingAccount = await db().user.findFirst({
+      where: { OR: [...(validEmail ? [{ email: validEmail }] : []), ...(validPhone ? [{ phoneHash: hashPhone(validPhone) }] : [])] },
+      select: { id: true },
+    })
+    if (existingAccount) {
+      const conflict = new Error('An account with this email or phone already exists.')
+      conflict.statusCode = 409; conflict.code = 'ACCOUNT_ALREADY_EXISTS'; conflict.expose = true
+      throw conflict
+    }
 
     // Guest self-registration (the Rentals/Buy/Stays "open account" gate) must prove email
     // ownership before an account is created — the frontend's old phone-code step never actually
@@ -342,10 +375,14 @@ export async function handleAuth(req, res, url, context) {
         error.expose = true
         throw error
       }
-      // Ownership proven by a recently-verified email OR phone — whichever the guest used.
-      const emailVerified = validEmail ? await hasRecentlyVerifiedEmail(validEmail, 'guest-signup') : false
-      const phoneVerified = validPhone ? await hasRecentlyVerifiedPhone(validPhone, 'guest-signup') : false
-      if (!emailVerified && !phoneVerified) {
+      // Every identifier persisted on the account must have been verified. Accepting a verified phone
+      // as proof for an unrelated, unverified email would let an attacker reserve somebody else's
+      // email address (and present it as their own) simply by supplying both fields.
+      const emailGrant = body.emailVerificationGrant || (!validPhone ? body.verificationGrant : undefined)
+      const phoneGrant = body.phoneVerificationGrant || (!validEmail ? body.verificationGrant : undefined)
+      const emailVerified = validEmail ? await claimRecentlyVerifiedEmail(validEmail, 'guest-signup', emailGrant) : false
+      const phoneVerified = validPhone ? await claimRecentlyVerifiedPhone(validPhone, 'guest-signup', phoneGrant) : false
+      if ((validEmail && !emailVerified) || (validPhone && !phoneVerified)) {
         const error = new Error('Verify your email or phone before opening an account.')
         error.statusCode = 403
         error.code = 'EMAIL_NOT_VERIFIED'
@@ -367,9 +404,11 @@ export async function handleAuth(req, res, url, context) {
         error.expose = true
         throw error
       }
-      const emailVerified = validEmail ? await hasRecentlyVerifiedEmail(validEmail, 'staff-login') : false
-      const phoneVerified = validPhone ? await hasRecentlyVerifiedPhone(validPhone, 'staff-login') : false
-      if (!emailVerified && !phoneVerified) {
+      const emailGrant = body.emailVerificationGrant || (!validPhone ? body.verificationGrant : undefined)
+      const phoneGrant = body.phoneVerificationGrant || (!validEmail ? body.verificationGrant : undefined)
+      const emailVerified = validEmail ? await claimRecentlyVerifiedEmail(validEmail, 'staff-login', emailGrant) : false
+      const phoneVerified = validPhone ? await claimRecentlyVerifiedPhone(validPhone, 'staff-login', phoneGrant) : false
+      if ((validEmail && !emailVerified) || (validPhone && !phoneVerified)) {
         const error = new Error('Verify your email or phone with the access code before opening this account.')
         error.statusCode = 403
         error.code = 'EMAIL_NOT_VERIFIED'
@@ -389,6 +428,7 @@ export async function handleAuth(req, res, url, context) {
             email: validEmail,
             phoneHash,
             passwordHash,
+            partnerType,
             // PII: never default a display name to the FULL email address — it would then surface in
             // on-platform message threads and host inquiry payloads (see the SR/STR PII guards). Fall
             // back to the email's local part (before the @), which carries no contact address.
@@ -398,9 +438,8 @@ export async function handleAuth(req, res, url, context) {
               (validEmail ? validEmail.split('@')[0] : '') ||
               'SYBNB User',
             referralCode,
-            roles: {
-              create: { role },
-            },
+            // Public partners are customers too: one identity can buy/book/ride as well as operate.
+            roles: { create: role === 'GUEST' ? [{ role: 'GUEST' }] : [{ role }, { role: 'GUEST' }] },
             wallets: {
               create: { currency: 'SYP' },
             },
@@ -435,7 +474,7 @@ export async function handleAuth(req, res, url, context) {
   if (url.pathname === '/api/auth/login') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     const body = await readJson(req)
-    assertNoUnknownFields(body, ['email', 'phone', 'password'], 'login body')
+    assertNoUnknownFields(body, ['email', 'phone', 'password', 'verificationGrant'], 'login body')
 
     if (body.email && body.phone) {
       const error = new Error('Provide either email or phone, not both.')
@@ -528,7 +567,12 @@ export async function handleAuth(req, res, url, context) {
     // timing/response-shape. Replaces the old client-side-only code box that the server never
     // verified at all (StaffAccessPage.tsx / verificationCodeEngine.ts).
     const needsStaffOtp = user.roles.some((entry) => STAFF_ROLES_REQUIRING_OTP.has(entry.role))
-    if (needsStaffOtp) {
+    // Explicit Preview-only convenience for synthetic demo accounts. VERCEL_ENV is supplied by
+    // Vercel and equals "production" on the live deployment, so this can never bypass live OTP.
+    const previewDemoLogin = process.env.VERCEL_ENV === 'preview'
+      && process.env.ALLOW_PREVIEW_DEMO_LOGIN === '1'
+      && user.isDemo === true
+    if (needsStaffOtp && !previewDemoLogin) {
       if (!validEmail && !validPhone) {
         const error = new Error('Sign in with the access code sent to your email or phone for this account type.')
         error.statusCode = 400
@@ -537,8 +581,8 @@ export async function handleAuth(req, res, url, context) {
         throw error
       }
       // A recently-verified email OR phone code satisfies the staff sign-in gate.
-      const emailVerified = validEmail ? await hasRecentlyVerifiedEmail(validEmail, 'staff-login') : false
-      const phoneVerified = validPhone ? await hasRecentlyVerifiedPhone(validPhone, 'staff-login') : false
+      const emailVerified = validEmail ? await claimRecentlyVerifiedEmail(validEmail, 'staff-login', body.verificationGrant) : false
+      const phoneVerified = validPhone ? await claimRecentlyVerifiedPhone(validPhone, 'staff-login', body.verificationGrant) : false
       if (!emailVerified && !phoneVerified) {
         const error = new Error('Verify your email or phone with the access code before signing in.')
         error.statusCode = 403
@@ -567,5 +611,6 @@ function publicUser(user) {
     status: user.status,
     roles: user.roles.map((item) => item.role),
     referralCode: user.referralCode,
+    partnerType: user.partnerType || null,
   }
 }

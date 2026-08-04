@@ -76,6 +76,10 @@ export function App() {
   }, [lang])
 
   useEffect(() => {
+    document.title = routeTitle(path, lang)
+  }, [path, lang])
+
+  useEffect(() => {
     const sync = () => setPath(getCurrentPath())
     const syncAuth = () => setAuthVersion((version) => version + 1)
     window.addEventListener('hashchange', sync)
@@ -107,6 +111,8 @@ export function App() {
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
           guestAccountMatch[1] ? <ListingDetailPage listingId={guestAccountMatch[1]} lang={lang} /> : <SearchPreviewPage lang={lang} initialDivision="stays" entry="stays" />
+        ) : path === '/' ? (
+          <LandingPage lang={lang} />
         ) : path === '/become-host' ? (
           <HostHomePage lang={lang} />
         ) : path === '/trips' || path === '/my-trips' ? (
@@ -224,7 +230,7 @@ export function App() {
         ) : division ? (
           <DivisionLivePage division={division} lang={lang} />
         ) : (
-          <LandingPage lang={lang} />
+          <NotFoundPage lang={lang} />
         )}
       </Suspense>
   )
@@ -241,12 +247,47 @@ export function App() {
   )
 }
 
+function NotFoundPage({ lang }: { lang: Lang }) {
+  const isAr = lang === 'ar'
+  return (
+    <main className="page-shell" role="main">
+      <section className="panel" role="alert">
+        <h1>{isAr ? 'الصفحة غير موجودة' : 'Page not found'}</h1>
+        <p>{isAr ? 'قد يكون الرابط قديماً أو غير صحيح.' : 'This link may be outdated or incorrect.'}</p>
+        <button type="button" onClick={() => (window.location.hash = '/')}>{isAr ? 'العودة للرئيسية' : 'Return home'}</button>
+      </section>
+    </main>
+  )
+}
+
 function hostFocusFromPath(path: string): 'stays' | 'cars' | 'newConstruction' | 'marketplace' | undefined {
   if (path === '/host/stays') return 'stays'
   if (path === '/host/cars') return 'cars'
   if (path === '/host/new-construction') return 'newConstruction'
   if (path === '/host/marketplace') return 'marketplace'
   return undefined
+}
+
+function routeTitle(path: string, lang: Lang) {
+  const section = path.startsWith('/admin') ? (lang === 'ar' ? 'الإدارة' : 'Admin')
+    : path.startsWith('/host') ? (lang === 'ar' ? 'المضيف' : 'Host')
+      : path.startsWith('/driver') || path.startsWith('/ride') || path === '/sr' ? 'SR'
+        : path.startsWith('/booking') ? (lang === 'ar' ? 'الحجز' : 'Booking')
+          : path.startsWith('/trips') || path.startsWith('/my-trips') ? (lang === 'ar' ? 'رحلاتي' : 'My Trips')
+            : path.startsWith('/wallet') ? (lang === 'ar' ? 'المحفظة' : 'Wallet')
+              : path.startsWith('/finance') ? (lang === 'ar' ? 'المالية' : 'Finance')
+                : path.startsWith('/operations') ? (lang === 'ar' ? 'العمليات' : 'Operations')
+                : path.startsWith('/advertising') ? (lang === 'ar' ? 'الإعلانات' : 'Advertising')
+                  : path === '/stays' || path === '/search-preview' ? (lang === 'ar' ? 'الإقامات اليومية' : 'Daily Stays')
+                    : path === '/rentals' ? (lang === 'ar' ? 'الإيجار الشهري' : 'Monthly Rentals')
+                      : path === '/buy' || path === '/homes' || path === '/realestate' ? (lang === 'ar' ? 'العقارات' : 'Real Estate')
+                        : path === '/cars' ? (lang === 'ar' ? 'السيارات' : 'Cars')
+                          : path === '/marketplace' ? (lang === 'ar' ? 'السوق' : 'Marketplace')
+                            : path === '/new-construction' ? (lang === 'ar' ? 'مشاريع جديدة' : 'New Construction')
+                  : path === '/privacy' ? (lang === 'ar' ? 'الخصوصية' : 'Privacy')
+                    : path === '/terms' ? (lang === 'ar' ? 'الشروط' : 'Terms')
+                      : lang === 'ar' ? 'الرئيسية' : 'Home'
+  return `${section} | SYBNB`
 }
 
 function getStaffRequiredRole(path: string): 'ADMIN' | 'HOST' | 'DRIVER' | null {

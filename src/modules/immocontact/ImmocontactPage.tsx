@@ -3,6 +3,7 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchBookingThread,
   fetchPrototypeHostOverview,
+  fetchPrototypeDriverOverview,
   fetchPrototypeOverview,
   fetchPrototypeReviewQueue,
   getStoredStaffSession,
@@ -140,6 +141,7 @@ export function ImmocontactPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const [overview, setOverview] = useState<PlatformOverview | null>(null)
   const [staffBookings, setStaffBookings] = useState<Array<PlatformBooking & { listing?: StaffBookingListing }>>([])
+  const [staffRides, setStaffRides] = useState<PlatformRideRequest[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const [activeType, setActiveType] = useState<Thread['type'] | 'all'>('all')
@@ -152,6 +154,7 @@ export function ImmocontactPage({ lang }: Props) {
   const staffSession = getStoredStaffSession()
   const isStaff = Boolean(staffSession)
   const isAdminViewer = Boolean(staffSession?.user.roles.includes('ADMIN'))
+  const isDriverViewer = Boolean(staffSession?.user.roles.includes('DRIVER'))
 
   useEffect(() => {
     void loadOverview()
@@ -171,8 +174,8 @@ export function ImmocontactPage({ lang }: Props) {
     [lang, overview?.payments],
   )
   const rideThreads = useMemo(
-    () => (overview?.rides || []).map((ride) => rideThread(ride, lang)),
-    [lang, overview?.rides],
+    () => (isDriverViewer ? staffRides : overview?.rides || []).map((ride) => rideThread(ride, lang)),
+    [isDriverViewer, lang, overview?.rides, staffRides],
   )
   const giftThreads = useMemo(
     () => [
@@ -204,6 +207,9 @@ export function ImmocontactPage({ lang }: Props) {
         if (isAdminViewer) {
           const queue = await fetchPrototypeReviewQueue()
           setStaffBookings(queue.bookings)
+        } else if (isDriverViewer) {
+          const driverOverview = await fetchPrototypeDriverOverview()
+          setStaffRides(driverOverview.rides)
         } else {
           const hostOverview = await fetchPrototypeHostOverview()
           setStaffBookings(hostOverview.requests)

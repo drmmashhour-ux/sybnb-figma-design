@@ -1,7 +1,8 @@
 import request from 'supertest'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../../server/lib/prisma.mjs'
 import { paymentPendingTtlMinutes } from '../../server/lib/booking-lifecycle.mjs'
+import { __resetRateLimitsForTests } from '../../server/lib/rate-limit.mjs'
 import {
   cleanupTestUsers,
   testApp,
@@ -32,26 +33,32 @@ describe('Booking concurrency + no-double-booking invariant (STR)', () => {
     app = testApp()
   })
 
+  // Fixture creation exercises the real registration endpoints. Keep the per-IP production limiter
+  // from leaking across scenarios; the five-way case intentionally creates six fresh accounts.
+  beforeEach(() => {
+    __resetRateLimitsForTests()
+  })
+
   afterAll(async () => {
     await cleanupTestUsers()
   })
 
   async function registerGuest(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email)
+    const legacyVerificationGrant1 = await verifyEmailForTest(app, email)
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ role: 'GUEST', email, password: 'correct-horse-battery' })
+      .send({ verificationGrant: legacyVerificationGrant1, role: 'GUEST', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     return { id: res.body.user.id, token: res.body.token }
   }
 
   async function registerHost(label) {
     const email = uniqueTestEmail(label)
-    await verifyEmailForTest(app, email, 'staff-login')
+    const legacyVerificationGrant2 = await verifyEmailForTest(app, email, 'staff-login')
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ role: 'HOST', email, password: 'correct-horse-battery' })
+      .send({ verificationGrant: legacyVerificationGrant2, role: 'HOST', email, password: 'correct-horse-battery' })
     trackTestUser(res.body.user.id)
     return { id: res.body.user.id, token: res.body.token }
   }

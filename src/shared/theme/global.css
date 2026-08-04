@@ -9372,6 +9372,29 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   margin: 6px 0 0;
 }
 
+/* ---- PLATFORM DIRECTORY ---- */
+.str-platforms {
+  background: #f6f8fb;
+  border-radius: 20px;
+  color: #101828;
+  margin-top: clamp(48px, 7vw, 88px);
+  padding: clamp(28px, 5vw, 56px);
+}
+
+.str-platforms-head {
+  margin: 0 0 28px;
+}
+
+.str-platforms-head .str-section-title { color: #101828; }
+.str-platforms-head p { color: #52606f; line-height: 1.7; margin: 10px 0 0; max-width: 760px; }
+.str-platforms-grid { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.str-platform-card { background: #fff; border: 1px solid #dfe5ec; border-top: 4px solid var(--platform-accent, #20a88a); border-radius: 16px; color: #101828; cursor: pointer; display: grid; gap: 8px; min-height: 210px; padding: 22px; text-align: start; transition: box-shadow .2s ease, transform .2s ease; }
+.str-platform-card:hover, .str-platform-card:focus-visible { box-shadow: 0 16px 38px rgba(16, 24, 40, .12); transform: translateY(-2px); }
+.str-platform-card span { color: var(--platform-accent, #168a73); font-size: 12px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.str-platform-card strong { font-size: 23px; }
+.str-platform-card p { color: #52606f; line-height: 1.55; margin: 0; }
+.str-platform-card b { align-self: end; color: #101828; font-size: 13px; }
+
 /* ---- 7. ABOUT ---- */
 .str-about {
   border-top: 1px solid var(--line);
@@ -9441,6 +9464,9 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
 }
 
 @media (max-width: 900px) {
+  .str-platforms-grid {
+    grid-template-columns: 1fr;
+  }
   .str-search {
     grid-template-columns: 1fr 1fr;
   }
@@ -10215,4 +10241,27 @@ html[dir='rtl'] .seller-upload-grid button.offer-proof strong::after {
   .hosth-hero-search {
     grid-template-columns: 1fr;
   }
+}
+/* Lightweight shared footer for independent SR and Synitres surfaces. */
+.standalone-platform-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 18px;
+  background: #080d16;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}
+.standalone-platform-footer a,
+.standalone-platform-footer button {
+  border: 0;
+  background: transparent;
+  color: #aeb7c6;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+@media (max-width: 560px) {
+  #standalone-main h1 { font-size: 32px !important; }
+  .standalone-platform-footer { gap: 12px; }
 }

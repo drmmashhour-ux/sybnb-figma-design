@@ -25,6 +25,7 @@ model User {
   idDocumentReviewedAt                                                            DateTime?                          @map("id_document_reviewed_at")
   payoutMethod                                                                    Json?                              @map("payout_method")
   sessionVersion                                                                  Int                                @default(0) @map("session_version")
+  partnerType                                                                     String?                            @map("partner_type")
   referralCode                                                                    String                             @unique @map("referral_code")
   createdAt                                                                       DateTime                           @default(now()) @map("created_at")
   updatedAt                                                                       DateTime                           @updatedAt @map("updated_at")
@@ -195,6 +196,7 @@ model Listing {
   accommodation      Accommodation?        @relation(fields: [accommodationId], references: [id])
   location           Location?             @relation(fields: [locationId], references: [id])
   owner              User                  @relation("ListingOwner", fields: [ownerId], references: [id])
+  strPlanConsumption StrPlanConsumption?
   inquiryThreads     MessageThread[]
   sales              SellerSale[]
 
@@ -321,10 +323,13 @@ model EmailVerificationCode {
   purpose    String    @default("guest-signup")
   expiresAt  DateTime  @map("expires_at")
   consumedAt DateTime? @map("consumed_at")
+  claimedAt  DateTime? @map("claimed_at")
+  grantHash  String?   @map("grant_hash")
   attempts   Int       @default(0)
   createdAt  DateTime  @default(now()) @map("created_at")
 
   @@index([email, purpose])
+  @@index([createdAt])
   @@map("email_verification_codes")
 }
 
@@ -335,10 +340,13 @@ model PhoneVerificationCode {
   purpose    String    @default("guest-signup")
   expiresAt  DateTime  @map("expires_at")
   consumedAt DateTime? @map("consumed_at")
+  claimedAt  DateTime? @map("claimed_at")
+  grantHash  String?   @map("grant_hash")
   attempts   Int       @default(0)
   createdAt  DateTime  @default(now()) @map("created_at")
 
   @@index([phone, purpose])
+  @@index([createdAt])
   @@map("phone_verification_codes")
 }
 
@@ -421,10 +429,21 @@ model PaymentProof {
   booking       Booking?      @relation(fields: [bookingId], references: [id])
   payer         User          @relation("PaymentPayer", fields: [userId], references: [id])
   proofFile     PaymentProofFile?
+  strPlanConsumption StrPlanConsumption?
 
   @@index([status, createdAt])
   @@index([userId])
   @@map("payment_proofs")
+}
+
+model StrPlanConsumption {
+  listingId  String       @id @map("listing_id")
+  proofId    String       @unique @map("proof_id")
+  consumedAt DateTime     @default(now()) @map("consumed_at")
+  listing    Listing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  proof      PaymentProof @relation(fields: [proofId], references: [id], onDelete: Restrict)
+
+  @@map("str_plan_consumptions")
 }
 
 // Loyalty / fidelity program (admin Phase 2). AccountStanding is the LIVE, admin-approved tier for a

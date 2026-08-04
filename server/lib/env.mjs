@@ -43,6 +43,9 @@ export function validateProductionConfig() {
   if (process.env.DISABLE_RATE_LIMIT === '1') {
     problems.push('DISABLE_RATE_LIMIT must not be "1" in production.')
   }
+  if (process.env.ALLOW_PREVIEW_DEMO_LOGIN === '1' && process.env.VERCEL_ENV !== 'preview') {
+    problems.push('ALLOW_PREVIEW_DEMO_LOGIN may only be "1" when VERCEL_ENV is exactly "preview".')
+  }
   // The deploy target is Vercel (serverless / multi-instance). The default in-memory limiter keeps its
   // buckets in per-instance process memory, so without the shared DB store each warm instance grants a
   // fresh limit and the effective cap multiplies by the instance count — defeating the login / OTP /

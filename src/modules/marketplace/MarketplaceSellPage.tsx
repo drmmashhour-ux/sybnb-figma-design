@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { createAndSubmitMarketplaceListing } from '../../shared/api/platformApi'
+import { createAndSubmitMarketplaceListing, getStoredSellerSession, getStoredStaffSession } from '../../shared/api/platformApi'
 import { MARKETPLACE_CATEGORIES, MARKETPLACE_CONDITIONS } from '../../shared/marketplace/categories'
 
 // Facebook-style quick-list "Sell something" flow — free MARKETPLACE (goods) listing.
@@ -73,6 +73,8 @@ export function MarketplaceSellPage({ lang }: { lang: Lang }) {
   const [photo, setPhoto] = useState<{ base64: string; mime: string } | null>(null)
   const [state, setState] = useState<'idle' | 'saving' | 'done'>('idle')
   const [error, setError] = useState('')
+  const staffSession = getStoredStaffSession()
+  const sellerSession = getStoredSellerSession() || (staffSession?.user.roles.some((role) => role === 'SELLER' || role === 'HOST') ? staffSession : null)
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((p) => ({ ...p, [k]: e.target.value }))
@@ -108,6 +110,19 @@ export function MarketplaceSellPage({ lang }: { lang: Lang }) {
       const msg = err instanceof Error && err.message ? err.message : t.genericError
       setError(/seller|session|sign in/i.test(msg) ? t.signInNeeded : msg)
     }
+  }
+
+  if (!sellerSession) {
+    return (
+      <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
+        <button style={styles.back} onClick={() => (window.location.hash = '/marketplace')}>{t.back}</button>
+        <div style={styles.card} role="status">
+          <h1 style={styles.title}>{t.title}</h1>
+          <p style={styles.subtitle}>{t.signInNeeded}</p>
+          <button style={styles.primary} onClick={() => (window.location.hash = '/sell/account')}>{t.signInCta}</button>
+        </div>
+      </main>
+    )
   }
 
   if (state === 'done') {

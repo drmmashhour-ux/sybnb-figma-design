@@ -34,7 +34,7 @@ const copy = {
         },
         {
           heading: '٣. الحساب والتحقق',
-          body: 'يتطلب إنشاء حساب ضيف، أو حساب مضيف أو سائق أو إداري، التحقق من بريدك الإلكتروني برمز لمرة واحدة يُرسل إليك قبل إنشاء الحساب أو تسجيل الدخول. الحسابات الإدارية (مضيف، سائق، إداري) تتطلب أيضاً نفس التحقق بالبريد الإلكتروني في كل عملية تسجيل دخول. تُخزَّن كلمات المرور عبر تجزئة تشفيرية أحادية الاتجاه — لا تصل سيبنب أبداً إلى كلمة مرورك الفعلية بعد ضبطها.',
+          body: 'يتطلب إنشاء الحساب إثبات ملكية البريد الإلكتروني أو رقم الهاتف برمز لمرة واحدة قبل إنشاء الحساب. تتطلب حسابات الشركاء والموظفين تحققاً إضافياً عند تسجيل الدخول. تُخزَّن كلمات المرور عبر تجزئة تشفيرية أحادية الاتجاه — لا تصل سيبنب أبداً إلى كلمة مرورك الفعلية بعد ضبطها.',
         },
         {
           heading: '٤. التحقق من الهوية',
@@ -42,11 +42,11 @@ const copy = {
         },
         {
           heading: '٥. الحجز والدفع والعمولة',
-          body: 'تتم معالجة الدفع لحجوزات الإقامة حالياً يدوياً: تُرسل إثبات الدفع (مثل إيصال تحويل عبر شام كاش)، ويراجعه فريق سيبنب ويوافق عليه قبل تأكيد حجزك. تحتفظ سيبنب بعمولة قدرها 10% من مبلغ الإيجار الأساسي لكل حجز إقامة مؤكَّد، ويُفصح عن ذلك لك قبل تأكيد الحجز، وللمضيفين بشكل منفصل عند إدراج عقاراتهم.',
+          body: 'تتم معالجة دفع حجوزات الإقامة إما بالبطاقة عند توفرها أو عبر إثبات تحويل يدوي (مثل شام كاش) يراجعه فريق سيبنب قبل تأكيد الحجز. تحتفظ سيبنب بعمولة قدرها 10% من مبلغ الإيجار الأساسي لكل حجز إقامة مؤكَّد، ويُفصح عن ذلك لك قبل تأكيد الحجز، وللمضيفين بشكل منفصل عند إدراج عقاراتهم.',
         },
         {
           heading: '٦. الإلغاء والاسترداد',
-          body: 'الحجوزات القياسية: يمكنك الإلغاء مجاناً في أي وقت حتى 3 أيام قبل تاريخ الدخول. الإلغاء خلال 3 أيام من تاريخ الدخول يستوجب رسماً إدارياً ثابتاً قدره 10 دولارات أمريكية، يُخصم من مبلغ الاسترداد. حماية الإلغاء: إذا اشتريت خدمة "حماية الإلغاء" (رسم إضافي غير قابل للاسترداد بنسبة 3% من الإيجار) عند الحجز، يمكنك الإلغاء دون رسم الـ10 دولارات في أي وقت حتى تاريخ الدخول؛ رسم الحماية نفسه لا يُسترد أبداً. تُصرف المبالغ المستردة كرصيد في محفظة سيبنب الخاصة بك، وليس كإرجاع إلى وسيلة الدفع الخارجية الأصلية.',
+          body: 'الحجوزات القياسية: يمكنك الإلغاء مجاناً في أي وقت حتى 3 أيام قبل تاريخ الدخول. الإلغاء خلال 3 أيام من تاريخ الدخول يستوجب رسماً إدارياً ثابتاً قدره 10 دولارات أمريكية، يُخصم من مبلغ الاسترداد. حماية الإلغاء: إذا اشتريت خدمة "حماية الإلغاء" (رسم إضافي غير قابل للاسترداد بنسبة 3% من الإيجار) عند الحجز، يمكنك الإلغاء دون رسم الـ10 دولارات في أي وقت حتى تاريخ الدخول؛ رسم الحماية نفسه لا يُسترد أبداً. تُعاد دفعات البطاقة المؤهلة إلى البطاقة، وتُصرف المبالغ الأخرى كرصيد في محفظة سيبنب بحسب مسار الدفع وحالة المراجعة.',
         },
         {
           heading: '٧. النزاعات',
@@ -71,7 +71,7 @@ const copy = {
       sections: [
         {
           heading: '١. المعلومات التي نجمعها',
-          body: 'معلومات الحساب: البريد الإلكتروني، الاسم المعروض، ورقم الهاتف إن قدّمته (نخزّن فقط تجزئة تشفيرية أحادية الاتجاه لرقم هاتفك، وليس الرقم نفسه). كلمة مرورك تُخزَّن فقط كتجزئة تشفيرية أحادية الاتجاه — لا يمكننا قراءتها أو استرجاعها. وثائق الهوية التي ترفعها للتحقق من الحجز (تُخزَّن في مكان خاص غير قابل للوصول عبر الويب، ويراجعها فريق سيبنب فقط). إثبات الدفع (مثل لقطة شاشة لتحويل عبر شام كاش) الذي تقدّمه لتأكيد دفع حجزك. الرسائل التي ترسلها عبر نظام المراسلة داخل التطبيق تُخزَّن كما أُرسلت، لإتاحة مراجعتها من الدعم في حال نشوء نزاع. ونشاط الحجوزات والإعلانات والمحفظة والرحلات المرتبط بحسابك.',
+          body: 'معلومات الحساب: البريد الإلكتروني، الاسم المعروض، ورقم الهاتف إن قدّمته. يخزن الحساب تجزئة تشفيرية أحادية الاتجاه لرقم الهاتف؛ وقد يُحتفظ بالعنوان أو الرقم القابل للقراءة مؤقتاً لمدة تصل إلى 24 ساعة في سجل رمز التحقق لمنع إساءة الاستخدام وإتمام التحقق ثم يُحذف دورياً. كلمة مرورك تُخزَّن فقط كتجزئة تشفيرية أحادية الاتجاه — لا يمكننا قراءتها أو استرجاعها. وثائق الهوية وإثباتات الدفع والرسائل ونشاط الحجوزات والإعلانات والمحفظة والرحلات تُخزَّن بالقدر اللازم لتقديم الخدمة والمراجعة وحل النزاعات.',
         },
         {
           heading: '٢. كيف نستخدم هذه المعلومات',
@@ -79,7 +79,7 @@ const copy = {
         },
         {
           heading: '٣. كيف نحميها',
-          body: 'لا تُخزَّن كلمات المرور وأرقام الهواتف أبداً بصيغة قابلة للقراءة. تُخزَّن وثائق الهوية خارج أي مجلد قابل للوصول عبر الويب، ويُشار إليها برمز عشوائي فقط، وليس باسمك أو رقم حسابك. يمكن إبطال جلسات الدخول (مثلاً عند تسجيل الخروج أو إعادة تعيين كلمة المرور)، ويتطلب كل حساب التحقق بالبريد الإلكتروني.',
+          body: 'لا تُخزَّن كلمات المرور بصيغة قابلة للقراءة، ويخزن سجل الحساب تجزئة رقم الهاتف. تُحذف سجلات رموز التحقق المؤقتة دورياً بعد 24 ساعة. تُخزَّن وثائق الهوية خارج أي مجلد قابل للوصول عبر الويب، ويُشار إليها برمز عشوائي فقط. يمكن إبطال جلسات الدخول، ويتطلب كل حساب التحقق من البريد الإلكتروني أو الهاتف.',
         },
         {
           heading: '٤. مع من نشاركها',
@@ -116,7 +116,7 @@ const copy = {
         },
         {
           heading: '3. Account & verification',
-          body: 'Creating a guest account, or a host/driver/admin account, requires verifying your email address with a one-time code sent to you before the account is created or you can sign in. Staff accounts (host, driver, admin) also require the same email verification on every sign-in. Passwords are stored using one-way cryptographic hashing — SYBNB never has access to your actual password after you set it.',
+          body: 'Creating an account requires proving control of an email address or phone number with a one-time code before the account is created. Partner and staff accounts require an additional verification step at sign-in. Passwords are stored using one-way cryptographic hashing — SYBNB never has access to your actual password after you set it.',
         },
         {
           heading: '4. ID verification',
@@ -124,11 +124,11 @@ const copy = {
         },
         {
           heading: '5. Booking, payment & commission',
-          body: 'Payment for Stays bookings is currently processed manually: you submit proof of payment (for example, a Sham Cash transfer receipt), which the SYBNB team reviews and approves before your booking is confirmed. SYBNB retains a 10% commission on the base rent portion of every confirmed Stays booking; this is disclosed to you before you confirm a booking, and separately to hosts when they list a property.',
+          body: 'Payment for Stays bookings is processed by card when available or by submitting proof of a manual transfer such as Sham Cash, which the SYBNB team reviews before confirmation. SYBNB retains a 10% commission on the base rent portion of every confirmed Stays booking; this is disclosed before booking and separately to hosts when they list a property.',
         },
         {
           heading: '6. Cancellations & refunds',
-          body: 'Standard bookings: you may cancel free of charge any time until 3 days before check-in. Cancelling within 3 days of check-in incurs a flat $10 USD administrative fee, deducted from your refund. Cancellation Protection: if you purchase Cancellation Protection (a non-refundable 3% premium on the rent) at booking time, you may cancel free of the $10 fee at any time up to check-in; the protection premium itself is never refunded. Refunds are issued as a credit to your SYBNB wallet, not a reversal to your original external payment method.',
+          body: 'Standard bookings: you may cancel free of charge any time until 3 days before check-in. Cancelling within 3 days of check-in incurs a flat $10 USD administrative fee, deducted from your refund. Cancellation Protection: if you purchase Cancellation Protection (a non-refundable 3% premium on the rent) at booking time, you may cancel free of the $10 fee any time up to check-in; the protection premium itself is never refunded. Eligible card payments are returned to the card; other refunds are credited to the SYBNB wallet according to the payment path and review status.',
         },
         {
           heading: '7. Disputes',
@@ -153,7 +153,7 @@ const copy = {
       sections: [
         {
           heading: '1. Information we collect',
-          body: 'Account information: your email address, display name, and — if provided — a phone number (we store only a one-way cryptographic hash of your phone number, never the number itself). Your password, stored only as a one-way cryptographic hash — we cannot read or recover your actual password. ID documents you upload for booking verification (stored in a private, non-web-accessible location and reviewed only by SYBNB staff). Payment proof (e.g. a Sham Cash transfer screenshot) you submit to confirm a booking payment. Messages sent through SYBNB’s in-app messaging are stored as submitted, to allow support review if a dispute arises. Booking, listing, wallet, and ride activity connected to your account.',
+          body: 'Account information includes your email address, display name and, if provided, phone number. The account record stores a one-way hash of the phone number; a readable identifier may remain temporarily for up to 24 hours in an OTP verification record for verification and abuse prevention, after which scheduled cleanup removes it. Passwords are stored only as one-way hashes. We also store private verification documents, payment evidence, messages, and booking, listing, wallet and ride activity as needed to provide and review the service.',
         },
         {
           heading: '2. How we use this information',
@@ -161,7 +161,7 @@ const copy = {
         },
         {
           heading: '3. How we protect it',
-          body: 'Passwords and phone numbers are never stored in readable form. ID documents are stored outside any web-accessible directory and referenced only by a random identifier, not your name or account ID. Sessions can be revoked (for example, when you log out or reset your password), and every account requires email verification.',
+          body: 'Passwords are never stored in readable form, and the account record stores a hash of the phone number. Temporary OTP records are purged on a 24-hour retention schedule. ID documents are stored outside any web-accessible directory and referenced by a random identifier. Sessions can be revoked, and every account requires email or phone verification.',
         },
         {
           heading: '4. Who we share it with',

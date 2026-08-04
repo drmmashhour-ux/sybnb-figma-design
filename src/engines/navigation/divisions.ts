@@ -133,15 +133,15 @@ export const DIVISIONS: Division[] = [
     mark: 'crane',
     title: { ar: 'مشاريع جديدة', en: 'New Construction' },
     kicker: { ar: 'مطوّرون وخطط بناء', en: 'Developers and projects' },
-    description: { ar: 'شاهد المشروع على أقسام: الأسلوب، المخططات، الطوابق، التشطيب، والدفع.', en: 'View projects by sections: style, plans, floors, finishing, and terms.' },
+    description: { ar: 'استعرض المشاريع الجديدة وتفاصيلها المتاحة، ثم اطلب زيارة أو تواصلاً.', en: 'Browse new projects and their available details, then request a visit or contact.' },
     previewSteps: [
       { ar: 'بطاقة المشروع', en: 'Project card' },
-      { ar: 'أقسام المشروع', en: 'Project sections' },
+      { ar: 'تفاصيل المشروع', en: 'Project details' },
       { ar: 'حجز زيارة', en: 'Visit request' },
     ],
     flow: [
       { ar: 'الزائر يرى ما يرفعه المطور حسب الخطة.', en: 'Visitors see what the developer unlocks by plan.' },
-      { ar: 'كل قسم مستقل وليس صفحة طويلة واحدة.', en: 'Each section is separate, not one long page.' },
+      { ar: 'تظهر التفاصيل التي يقدّمها المطور بوضوح.', en: 'Developer-provided details are shown clearly.' },
       { ar: 'الحجز أو التواصل يتطلب حساباً.', en: 'Visit/contact requires account.' },
       { ar: 'المطور يدفع عبر Sham Cash أو بطاقة حسب الخطة.', en: 'Developer pays by Sham Cash or card by plan.' },
     ],
