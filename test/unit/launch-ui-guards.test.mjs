@@ -64,6 +64,8 @@ describe('launch UI safety guards', () => {
     expect(source).toContain('setResetStep(2)')
     expect(source).toContain("resetStep === 1 ? beginPasswordResetVerification() : submitPasswordReset()")
     expect(source).toContain("mode !== 'forgotPassword' || resetStep === 2")
+    expect(source).toContain("{mode === 'signUp' && (")
+    expect(source).not.toContain("mode === 'signUp' || mode === 'forgotPassword'")
     expect(source).toContain("setMode('signIn')")
     expect(source.indexOf("setMode('signIn')")).toBeLessThan(source.indexOf('setMessage(t.resetSuccess)'))
   })

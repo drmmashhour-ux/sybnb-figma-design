@@ -205,11 +205,10 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
 
   async function beginPasswordResetVerification() {
     const normalizedEmail = email.trim().toLowerCase()
-    const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
-    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim()) && normalizedEmail === normalizedEmailRepeat
+    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(normalizedEmail)
     if (!identifierOk || !newPassword.trim() || !passwordRepeat.trim()) {
       setIsErrorMessage(true)
-      setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
+      setMessage(t.resetRequired)
       return
     }
     if (newPassword !== passwordRepeat) {
@@ -345,11 +344,10 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
 
   async function submitPasswordReset() {
     const normalizedEmail = email.trim().toLowerCase()
-    const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
-    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim()) && normalizedEmail === normalizedEmailRepeat
+    const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(normalizedEmail)
     if (!identifierOk || !newPassword.trim() || !passwordRepeat.trim()) {
       setIsErrorMessage(true)
-      setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
+      setMessage(t.resetRequired)
       return
     }
     if (newPassword !== passwordRepeat) {
@@ -452,7 +450,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             <small style={styles.helpText}>{t.emailHelp}</small>
           </label>
 
-          {(mode === 'signUp' || mode === 'forgotPassword') && (
+          {mode === 'signUp' && (
             <label style={styles.labelWide}>
               {t.emailRepeat}
               <input
@@ -462,7 +460,6 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
                 name="sybnb-staff-email-confirmation"
                 autoComplete="off"
                 placeholder="name@example.com"
-                disabled={mode === 'forgotPassword' && resetStep === 2}
                 onChange={(event) => {
                   setEmailRepeat(event.target.value)
                   setCodeConfirmed(false)
