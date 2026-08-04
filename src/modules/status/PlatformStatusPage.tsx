@@ -105,8 +105,8 @@ export function PlatformStatusPage({ lang }: Props) {
       { label: t.listings, value: metrics ? String(sumMap(metrics.listingsByDivision)) : '-', state: metrics ? t.ok : t.issue },
       { label: t.bookings, value: metrics ? String(sumMap(metrics.bookingsByStatus)) : '-', state: metrics ? t.ok : t.issue },
       { label: t.rides, value: metrics ? String(sumMap(metrics.ridesByStatus)) : '-', state: metrics ? t.ok : t.issue },
-      { label: t.payments, value: metrics ? moneyText(metrics.approvedPaymentVolumeMinor, 'SYP', lang) : '-', state: metrics ? t.ok : t.issue },
-      { label: t.wallet, value: metrics ? moneyText(metrics.walletBalanceMinor, 'SYP', lang) : '-', state: metrics ? t.ok : t.issue },
+      { label: t.payments, value: metrics ? metrics.approvedPaymentVolumeByCurrency.map((row) => moneyText(row.amountMinor, row.currency, lang)).join(' · ') || '0' : '-', state: metrics ? t.ok : t.issue },
+      { label: t.wallet, value: metrics ? metrics.walletBalancesByCurrency.map((row) => moneyText(row.amountMinor, row.currency, lang)).join(' · ') || '0' : '-', state: metrics ? t.ok : t.issue },
     ],
     [contracts, health, isAr, lang, metrics, t],
   )

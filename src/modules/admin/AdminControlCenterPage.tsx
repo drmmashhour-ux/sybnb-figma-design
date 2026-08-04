@@ -500,8 +500,8 @@ export function AdminControlCenterPage({ lang, group = 'guest', onLanguageChange
             {(revenue?.byCurrency || []).slice(0, 1).map((cur) => (
               <Metric key={cur.currency} label={`${t.totalRevenue} (${cur.currency})`} value={moneyText(cur.totalRevenueMinor, cur.currency, lang)} sub={t.proj30(moneyText(cur.projection.next30DaysMinor, cur.currency, lang))} tone={TONE.blue} to="/admin/review" />
             ))}
-            <Metric label={t.walletBalance} value={moneyText(metrics?.walletBalanceMinor || 0, 'USD', lang)} sub={t.walletsCount(metrics?.walletCount || 0)} tone={TONE.green} to="/admin/review" />
-            <Metric label={t.approvedVolume} value={moneyText(metrics?.approvedPaymentVolumeMinor || 0, 'USD', lang)} sub={t.approvedOps(metrics?.approvedPaymentCount || 0)} tone={TONE.gold} to="/admin/review" />
+            {(metrics?.walletBalancesByCurrency || []).map((row) => <Metric key={`wallet-${row.currency}`} label={`${t.walletBalance} (${row.currency})`} value={moneyText(row.amountMinor, row.currency, lang)} sub={t.walletsCount(row.count)} tone={TONE.green} to="/admin/review" />)}
+            {(metrics?.approvedPaymentVolumeByCurrency || []).map((row) => <Metric key={`payments-${row.currency}`} label={`${t.approvedVolume} (${row.currency})`} value={moneyText(row.amountMinor, row.currency, lang)} sub={t.approvedOps(row.count)} tone={TONE.gold} to="/admin/review" />)}
             <Metric label={t.refunds} value={num(metrics?.paymentsByStatus, 'REFUNDED')} sub={t.refunds} tone={TONE.red} to="/admin/review" />
           </div>
           <KCard title={t.movements} sub={t.movementsSub} count={payouts?.payouts.length || 0} footer={t.srRides(revenue?.srRidesCompletedCount || 0)}>

@@ -37,7 +37,7 @@ const copy = {
     revenue: 'الإيرادات',
     grossApproved: 'إجمالي المدفوعات المعتمدة',
     approvedCount: 'عدد المدفوعات',
-    refunds7d: 'المبالغ المستردة (٧ أيام)',
+    refunds7d: 'استردادات المحفظة (٧ أيام)',
     pending: 'مهام بانتظار الإجراء',
     listingsReview: 'إعلانات للمراجعة',
     openDisputes: 'نزاعات مفتوحة',
@@ -70,7 +70,7 @@ const copy = {
     revenue: 'Revenue',
     grossApproved: 'Approved payments (gross)',
     approvedCount: 'Payments count',
-    refunds7d: 'Refunds (last 7 days)',
+    refunds7d: 'Wallet refunds (last 7 days)',
     pending: 'Awaiting action',
     listingsReview: 'Listings to review',
     openDisputes: 'Open disputes',
@@ -108,7 +108,7 @@ function timeText(iso: string, lang: Lang) {
 function buildSnapshotHtml(data: OfficeDashboard, lang: Lang): string {
   const t = copy[lang]
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
-  const money = (minor: number) => moneyText(minor, data.revenue.currency, lang)
+  const moneyRows = (rows: Array<{ currency: string; amountMinor: number }>) => rows.map((row) => moneyText(row.amountMinor, row.currency, lang)).join(' · ') || '0'
   const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
   const stat = (label: string, value: string | number, accent = false) =>
     `<div class="stat${accent ? ' accent' : ''}"><div class="v">${esc(String(value))}</div><div class="l">${esc(label)}</div></div>`
@@ -155,9 +155,9 @@ header{display:flex;align-items:center;gap:14px;border-bottom:3px solid var(--te
     ${stat(t.cancellations7d, data.bookings.cancellations7d)}
   </div></section>
   <section class="card"><h2>💵 ${esc(t.revenue)}</h2><div class="stats">
-    ${stat(t.grossApproved, money(data.revenue.grossApprovedMinor), true)}
-    ${stat(t.approvedCount, data.revenue.approvedCount)}
-    ${stat(t.refunds7d, money(data.revenue.refunded7dMinor))}
+    ${stat(t.grossApproved, moneyRows(data.revenue.approvedByCurrency), true)}
+    ${stat(t.approvedCount, data.revenue.approvedByCurrency.reduce((sum, row) => sum + row.count, 0))}
+    ${stat(t.refunds7d, moneyRows(data.revenue.walletRefunds7dByCurrency))}
   </div></section>
   <section class="card"><h2>📋 ${esc(t.pending)}</h2><div class="stats">
     ${stat(t.listingsReview, data.pending.listingsAwaitingReview, data.pending.listingsAwaitingReview > 0)}
@@ -211,8 +211,6 @@ export function AdminOfficeDashboardPage({ lang }: Props) {
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 2000)
   }, [data, lang])
-
-  const money = (minor: number) => (data ? moneyText(minor, data.revenue.currency, lang) : '—')
 
   return (
     <div style={styles.page} dir={lang === 'ar' ? 'rtl' : 'ltr'}>
@@ -284,9 +282,9 @@ export function AdminOfficeDashboardPage({ lang }: Props) {
 
           <Panel title={`💵 ${t.revenue}`}>
             <div style={styles.stats}>
-              <Stat label={t.grossApproved} value={money(data.revenue.grossApprovedMinor)} gold />
-              <Stat label={t.approvedCount} value={data.revenue.approvedCount} />
-              <Stat label={t.refunds7d} value={money(data.revenue.refunded7dMinor)} />
+              <Stat label={t.grossApproved} value={data.revenue.approvedByCurrency.map((row) => moneyText(row.amountMinor, row.currency, lang)).join(' · ') || '0'} gold />
+              <Stat label={t.approvedCount} value={data.revenue.approvedByCurrency.reduce((sum, row) => sum + row.count, 0)} />
+              <Stat label={t.refunds7d} value={data.revenue.walletRefunds7dByCurrency.map((row) => moneyText(row.amountMinor, row.currency, lang)).join(' · ') || '0'} />
             </div>
           </Panel>
 

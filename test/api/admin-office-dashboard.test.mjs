@@ -64,9 +64,13 @@ describe('GET /api/admin/office-dashboard', () => {
     expect(typeof res.body.bookings.checkInsToday).toBe('number')
     expect(res.body.bookings.byStatus).toBeTruthy()
 
-    // Revenue panel (USD, whole-unit minor)
-    expect(res.body.revenue.currency).toBe('USD')
-    expect(typeof res.body.revenue.grossApprovedMinor).toBe('number')
+    // Revenue panel keeps currencies separate; mixed minor units are never added together.
+    expect(Array.isArray(res.body.revenue.approvedByCurrency)).toBe(true)
+    expect(Array.isArray(res.body.revenue.walletRefunds7dByCurrency)).toBe(true)
+    for (const row of res.body.revenue.approvedByCurrency) {
+      expect(typeof row.currency).toBe('string')
+      expect(typeof row.amountMinor).toBe('number')
+    }
 
     // Pending-work panel
     expect(typeof res.body.pending.listingsAwaitingReview).toBe('number')

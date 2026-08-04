@@ -66,6 +66,9 @@ const copy = {
     revenueSources: 'مصادر الإيرادات حسب المنصة والخدمة',
     incomeProjectionNote: 'إيراد SYBNB الفعلي المحصّل: عمولة حجوزات الاستضافة، رسوم حماية الإلغاء (غير مستردة)، ورسوم خطط البائعين/الوكلاء/المطورين.',
     totalCollected: 'إجمالي العمولة المحصّلة',
+    grossCollected: 'الإيراد الإجمالي',
+    revenueReversed: 'عكس الإيراد والاستردادات',
+    netRevenue: 'صافي إيراد المنصة',
     dailyAverage: 'متوسط يومي',
     next30Days: 'توقع ٣٠ يوماً القادمة',
     next90Days: 'توقع ٩٠ يوماً القادمة',
@@ -129,6 +132,9 @@ const copy = {
     revenueSources: 'Revenue sources by platform and service',
     incomeProjectionNote: 'Real SYBNB revenue collected: booking host commission, non-refundable cancellation-protection fees, and seller/dealer/developer plan fees.',
     totalCollected: 'Total commission collected',
+    grossCollected: 'Gross platform revenue',
+    revenueReversed: 'Revenue reversed',
+    netRevenue: 'Net platform revenue',
     dailyAverage: 'Daily average',
     next30Days: 'Next 30 days (projected)',
     next90Days: 'Next 90 days (projected)',
@@ -409,7 +415,9 @@ export function FinanceReconciliationPage({ lang }: Props) {
                 <b dir="ltr">{entry.currency}</b>
               </p>
               <section style={styles.stats}>
-                <FinanceStat label={t.totalCollected} value={moneyText(entry.totalRevenueMinor, entry.currency, lang)} tone="#20d29b" />
+                <FinanceStat label={t.grossCollected} value={moneyText(entry.grossRevenueMinor, entry.currency, lang)} tone="#5268ff" />
+                <FinanceStat label={t.revenueReversed} value={moneyText(entry.reversedRevenueMinor, entry.currency, lang)} tone="#ff5f7d" />
+                <FinanceStat label={t.netRevenue} value={moneyText(entry.totalRevenueMinor, entry.currency, lang)} tone="#20d29b" />
                 <FinanceStat label={t.dailyAverage} value={moneyText(entry.projection.dailyAverageMinor, entry.currency, lang)} tone="#5268ff" />
                 <FinanceStat label={t.next30Days} value={moneyText(entry.projection.next30DaysMinor, entry.currency, lang)} tone="#e5b80b" />
                 <FinanceStat label={t.next90Days} value={moneyText(entry.projection.next90DaysMinor, entry.currency, lang)} tone="#ff5f7d" />

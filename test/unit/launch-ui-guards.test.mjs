@@ -116,6 +116,20 @@ describe('launch UI safety guards', () => {
     expect(shell).toContain("key: 'ai', ar: '٧. إدارة الذكاء الاصطناعي', en: '7. AI Management'")
   })
 
+  it('describes AI controls as report preferences and schedules one Toronto 8 AM report', () => {
+    const ai = read('src/modules/ai/AiBrainPage.tsx')
+    const cron = read('server/routes/cron.mjs')
+    const vercel = JSON.parse(read('vercel.json'))
+    expect(ai).toContain('AI does not execute actions by itself')
+    expect(ai).toContain('لا ينفذ الذكاء الاصطناعي إجراءات بنفسه')
+    expect(ai).not.toContain('When ON: AI monitors the section, detects problems')
+    expect(vercel.crons).toContainEqual({ path: '/api/cron/daily-report', schedule: '0 12,13 * * *' })
+    expect(cron).toContain("const DAILY_REPORT_TIME_ZONE = 'America/Toronto'")
+    expect(cron).toContain('if (clock.hour !== 8)')
+    expect(cron).toContain("reason: 'already_sent'")
+    expect(cron).toContain('entityId: clock.date')
+  })
+
   it('uses server email/phone OTP for seller signup and never compares a browser-generated code', () => {
     const source = read('src/modules/seller/SellerAccountPage.tsx')
     expect(source).toContain("sendEmailVerificationCode(email.trim(), 'staff-login')")

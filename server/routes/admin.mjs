@@ -35,29 +35,43 @@ async function readAiControls() {
   for (const row of rows) if (!latest.has(row.entityId)) latest.set(row.entityId, row)
   return AI_CONTROL_SECTIONS.map((section) => {
     const row = latest.get(section)
-    return { section, enabled: row?.after?.enabled === true, mode: 'MONITOR_RECOMMEND', updatedAt: row?.createdAt?.toISOString() || null }
+    return { section, enabled: row?.after?.enabled === true, mode: 'REPORT_MONITOR', updatedAt: row?.createdAt?.toISOString() || null }
   })
+}
+
+function torontoPeriodStarts(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+  const midnight = (year, month, day) => {
+    const guess = Date.UTC(year, month - 1, day)
+    const zoned = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(guess)).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+    return new Date(guess - (Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second) - guess))
+  }
+  const today = midnight(parts.year, parts.month, parts.day)
+  const weekWall = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - 6))
+  return { today, last7Days: midnight(weekWall.getUTCFullYear(), weekWall.getUTCMonth() + 1, weekWall.getUTCDate()), currentMonth: midnight(parts.year, parts.month, 1) }
 }
 
 export async function buildDailyExecutiveReport() {
   const now = new Date()
-  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0)
-  const weekStart = new Date(dayStart); weekStart.setDate(weekStart.getDate() - 6)
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const periods = torontoPeriodStarts(now)
+  const dayStart = periods.today
+  const weekStart = periods.last7Days
+  const monthStart = periods.currentMonth
   const revenueTypes = ['booking_admin_share', 'booking_protection_fee', 'booking_guest_cancel_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission', 'card_processing_fee']
-  const [controls, revenue, refunds, releases, hosts, listingsPending, bookingsByStatus, disputes, rides, securityEvents] = await Promise.all([
-    readAiControls(),
-    db().walletEntry.findMany({ where: { type: 'CREDIT', referenceType: { in: revenueTypes }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true, referenceType: true } }),
-    db().walletEntry.findMany({ where: { type: 'CREDIT', referenceType: 'booking_refund', createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }),
+  const controls = await readAiControls()
+  const enabled = new Set(controls.filter((item) => item.enabled).map((item) => item.section))
+  const [revenue, reversals, refunds, releases, hosts, listingsPending, bookingsByStatus, disputes, rides, securityEvents] = await Promise.all([
+    enabled.has('finance') ? db().walletEntry.findMany({ where: { type: 'CREDIT', referenceType: { in: revenueTypes }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true, referenceType: true } }) : [],
+    enabled.has('finance') ? db().walletEntry.findMany({ where: { type: 'DEBIT', referenceType: { in: ['booking_admin_share_reversal', 'booking_dispute_refund_funding', 'sr_admin_commission_dispute_reversal'] }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }) : [],
+    enabled.has('finance') ? db().walletEntry.findMany({ where: { OR: [{ type: 'REFUND', referenceType: 'booking_refund' }, { type: 'CREDIT', referenceType: { in: ['booking_refund', 'dispute_refund'] } }], createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }) : [],
     db().walletEntry.findMany({ where: { type: 'DEBIT', referenceType: { in: ['booking_payout_disbursement', 'sr_driver_payout'] }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }),
-    db().userRole.count({ where: { role: 'HOST' } }),
-    db().listing.count({ where: { status: 'PENDING_REVIEW' } }),
-    db().booking.groupBy({ by: ['status'], _count: { _all: true } }),
-    db().dispute.count({ where: { status: 'OPEN' } }),
-    db().rideRequest.groupBy({ by: ['status'], _count: { _all: true } }),
-    db().adminAuditLog.count({ where: { entityType: 'security', createdAt: { gte: weekStart } } }),
+    enabled.has('hosts') ? db().userRole.count({ where: { role: 'HOST', user: { status: 'ACTIVE' } } }) : 0,
+    enabled.has('str') || enabled.has('realestate') || enabled.has('commerce') ? db().listing.count({ where: { status: 'PENDING_REVIEW' } }) : 0,
+    enabled.has('str') ? db().booking.groupBy({ by: ['status'], _count: { _all: true } }) : [],
+    enabled.has('trust') ? db().dispute.count({ where: { status: 'OPEN' } }) : 0,
+    enabled.has('transport') ? db().rideRequest.groupBy({ by: ['status'], _count: { _all: true } }) : [],
+    enabled.has('operations') ? db().adminAuditLog.count({ where: { action: 'SECURITY_LOGIN_LOCKOUT', createdAt: { gte: weekStart } } }) : 0,
   ])
-  const periods = { today: dayStart, last7Days: weekStart, currentMonth: monthStart }
   const summarizeMoney = (entries) => Object.fromEntries(Object.entries(periods).map(([period, start]) => [period, Object.fromEntries(
     Array.from(new Set(entries.map((entry) => entry.currency))).map((currency) => [currency, entries.filter((entry) => entry.currency === currency && entry.createdAt >= start).reduce((sum, entry) => sum + entry.amountMinor, 0)]),
   )]))
@@ -67,7 +81,7 @@ export async function buildDailyExecutiveReport() {
     sourceTotals[key] = (sourceTotals[key] || 0) + entry.amountMinor
   }
   return {
-    generatedAt: now.toISOString(), controls, revenue: summarizeMoney(revenue), refunds: summarizeMoney(refunds), releasedMoney: summarizeMoney(releases),
+    generatedAt: now.toISOString(), periodTimeZone: 'America/Toronto', controls, revenue: summarizeMoney([...revenue, ...reversals.map((entry) => ({ ...entry, amountMinor: -entry.amountMinor }))]), refunds: summarizeMoney(refunds), releasedMoney: enabled.has('finance') ? summarizeMoney(releases) : {},
     revenueSources: sourceTotals, hosts, listingsPending, bookingsByStatus: Object.fromEntries(bookingsByStatus.map((row) => [row.status, row._count._all])),
     openDisputes: disputes, ridesByStatus: Object.fromEntries(rides.map((row) => [row.status, row._count._all])), securityEventsLast7Days: securityEvents,
     approvalRequired: ['refunds', 'payout releases', 'account suspension or deletion', 'production deployment'],
@@ -76,12 +90,17 @@ export async function buildDailyExecutiveReport() {
 
 export function formatDailyExecutiveReport(report) {
   const moneyLines = (title, values) => [title, ...Object.entries(values).map(([period, currencies]) => `  ${period}: ${Object.entries(currencies).map(([currency, amount]) => `${amount} ${currency} minor units`).join(', ') || '0'}`)]
+  const enabled = new Set(report.controls.filter((item) => item.enabled).map((item) => item.section))
   return [
     `SYBNB DAILY EXECUTIVE REPORT`, `Generated: ${report.generatedAt}`, '',
-    ...moneyLines('PLATFORM INCOME', report.revenue), '', ...moneyLines('REFUNDS', report.refunds), '', ...moneyLines('RELEASED MONEY', report.releasedMoney), '',
-    `Hosts: ${report.hosts}`, `Listings awaiting review: ${report.listingsPending}`, `Open disputes: ${report.openDisputes}`, `Security events (7d): ${report.securityEventsLast7Days}`,
-    `Bookings: ${JSON.stringify(report.bookingsByStatus)}`, `SR rides: ${JSON.stringify(report.ridesByStatus)}`, '',
-    `AI sections ON: ${report.controls.filter((item) => item.enabled).map((item) => item.section).join(', ') || 'none'}`,
+    ...(enabled.has('finance') ? [...moneyLines('NET PLATFORM INCOME', report.revenue), '', ...moneyLines('REFUNDS', report.refunds), '', ...moneyLines('RELEASED MONEY', report.releasedMoney), ''] : []),
+    ...(enabled.has('hosts') ? [`Active hosts: ${report.hosts}`] : []),
+    ...(enabled.has('str') || enabled.has('realestate') || enabled.has('commerce') ? [`Listings awaiting review: ${report.listingsPending}`] : []),
+    ...(enabled.has('trust') ? [`Open disputes: ${report.openDisputes}`] : []),
+    ...(enabled.has('operations') ? [`Login lockouts (7d): ${report.securityEventsLast7Days}`] : []),
+    ...(enabled.has('str') ? [`Bookings: ${JSON.stringify(report.bookingsByStatus)}`] : []),
+    ...(enabled.has('transport') ? [`SR rides: ${JSON.stringify(report.ridesByStatus)}`] : []), '',
+    `Report sections ON: ${Array.from(enabled).join(', ') || 'none'}`,
     `Owner approval always required for: ${report.approvalRequired.join(', ')}.`,
   ].join('\n')
 }
@@ -136,7 +155,8 @@ export async function handleAdmin(req, res, url, context) {
       const error = new Error('A valid AI section and boolean enabled value are required.')
       error.statusCode = 400; error.code = 'AI_CONTROL_INVALID'; error.expose = true; throw error
     }
-    await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_SECTION_CONTROL_UPDATED', entityType: 'ai_section', entityId: body.section, before: {}, after: { enabled: body.enabled, mode: 'MONITOR_RECOMMEND', sensitiveActionsRequireApproval: true } } })
+    const previous = (await readAiControls()).find((item) => item.section === body.section)
+    await db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'AI_SECTION_CONTROL_UPDATED', entityType: 'ai_section', entityId: body.section, before: { enabled: previous?.enabled === true, mode: previous?.mode || 'REPORT_MONITOR' }, after: { enabled: body.enabled, mode: 'REPORT_MONITOR', sensitiveActionsRequireApproval: true } } })
     return json(res, 200, { ok: true, controls: await readAiControls() })
   }
 
@@ -1170,8 +1190,8 @@ export async function handleAdmin(req, res, url, context) {
       db().booking.count({ where: { checkIn: { gte: startOfToday, lt: endOfToday }, status: { in: ['CONFIRMED', 'COMPLETED'] } } }),
       db().booking.count({ where: { checkIn: { gte: now, lt: in7d }, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] } } }),
       db().booking.count({ where: { status: 'CANCELLED', updatedAt: { gte: ago7d } } }),
-      db().paymentProof.aggregate({ _sum: { amountMinor: true }, _count: { _all: true }, where: { status: 'APPROVED' } }),
-      db().paymentProof.aggregate({ _sum: { amountMinor: true }, _count: { _all: true }, where: { status: 'REFUNDED', reviewedAt: { gte: ago7d } } }),
+      db().paymentProof.groupBy({ by: ['currency'], _sum: { amountMinor: true }, _count: { _all: true }, where: { status: 'APPROVED' } }),
+      db().walletEntry.groupBy({ by: ['currency'], _sum: { amountMinor: true }, _count: { _all: true }, where: { createdAt: { gte: ago7d }, OR: [{ type: 'REFUND', referenceType: 'booking_refund' }, { type: 'CREDIT', referenceType: { in: ['booking_refund', 'dispute_refund'] } }] } }),
       db().listing.count({ where: { status: 'PENDING_REVIEW' } }),
       db().dispute.count({ where: { status: 'OPEN' } }),
       db().booking.count({ where: { status: 'COMPLETED', checkOut: { lt: payoutHoldCutoff } } }),
@@ -1218,11 +1238,8 @@ export async function handleAdmin(req, res, url, context) {
         cancellations7d,
       },
       revenue: {
-        currency: 'USD',
-        grossApprovedMinor: approvedAgg._sum.amountMinor || 0,
-        approvedCount: approvedAgg._count._all || 0,
-        refunded7dMinor: refundedAgg._sum.amountMinor || 0,
-        refunded7dCount: refundedAgg._count._all || 0,
+        approvedByCurrency: approvedAgg.map((row) => ({ currency: row.currency, amountMinor: row._sum.amountMinor || 0, count: row._count._all })),
+        walletRefunds7dByCurrency: refundedAgg.map((row) => ({ currency: row.currency, amountMinor: row._sum.amountMinor || 0, count: row._count._all })),
       },
       pending: {
         listingsAwaitingReview,
@@ -1350,8 +1367,9 @@ export async function handleAdmin(req, res, url, context) {
       db().rideRequest.groupBy({ by: ['status'], _count: { _all: true }, orderBy: { status: 'asc' } }),
       db().paymentProof.groupBy({ by: ['status'], _count: { _all: true }, orderBy: { status: 'asc' } }),
       db().walletGift.groupBy({ by: ['status'], _count: { _all: true }, orderBy: { status: 'asc' } }),
-      db().wallet.aggregate({ _count: { _all: true }, _sum: { cachedBalanceMinor: true } }),
-      db().paymentProof.aggregate({
+      db().wallet.groupBy({ by: ['currency'], _count: { _all: true }, _sum: { cachedBalanceMinor: true } }),
+      db().paymentProof.groupBy({
+        by: ['currency'],
         where: { status: 'APPROVED' },
         _count: { _all: true },
         _sum: { amountMinor: true },
@@ -1368,10 +1386,10 @@ export async function handleAdmin(req, res, url, context) {
         ridesByStatus: toCountMap(ridesByStatus, 'status'),
         paymentsByStatus: toCountMap(paymentsByStatus, 'status'),
         giftsByStatus: toCountMap(giftsByStatus, 'status'),
-        walletCount: wallets._count._all,
-        walletBalanceMinor: wallets._sum.cachedBalanceMinor || 0,
-        approvedPaymentCount: approvedPaymentVolume._count._all,
-        approvedPaymentVolumeMinor: approvedPaymentVolume._sum.amountMinor || 0,
+        walletCount: wallets.reduce((sum, row) => sum + row._count._all, 0),
+        walletBalancesByCurrency: wallets.map((row) => ({ currency: row.currency, amountMinor: row._sum.cachedBalanceMinor || 0, count: row._count._all })),
+        approvedPaymentCount: approvedPaymentVolume.reduce((sum, row) => sum + row._count._all, 0),
+        approvedPaymentVolumeByCurrency: approvedPaymentVolume.map((row) => ({ currency: row.currency, amountMinor: row._sum.amountMinor || 0, count: row._count._all })),
       },
     })
   }
@@ -1385,45 +1403,91 @@ export async function handleAdmin(req, res, url, context) {
     // host-plan fee, AND the SR ride commission (15% of each completed ride's fare, credited to the admin
     // wallet by chargeCompletedRide() as sr_admin_commission). All are CREDIT entries.
     const revenueReferenceTypes = ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission', 'card_processing_fee', 'booking_guest_cancel_fee']
-    const [commissionEntries, refunds, releasedMoney, hostEarnings, completedSrRides] = await Promise.all([
+    const reversalReferenceTypes = ['booking_admin_share_reversal', 'booking_dispute_refund_funding', 'sr_admin_commission_dispute_reversal']
+    const [commissionEntries, reversalEntries, walletRefunds, stripeRefundAudits, releasedMoney, hostEarnings, completedSrRides, completedBookings] = await Promise.all([
       db().walletEntry.findMany({
         where: { type: 'CREDIT', referenceType: { in: revenueReferenceTypes } },
         select: { amountMinor: true, currency: true, createdAt: true, referenceType: true },
         orderBy: { createdAt: 'asc' },
       }),
       db().walletEntry.findMany({
-        where: { type: 'CREDIT', referenceType: 'booking_refund' },
-        select: { amountMinor: true, currency: true, createdAt: true },
+        where: { type: 'DEBIT', referenceType: { in: reversalReferenceTypes } },
+        select: { amountMinor: true, currency: true, createdAt: true, referenceType: true },
+      }),
+      db().walletEntry.findMany({
+        where: { OR: [
+          { type: 'REFUND', referenceType: 'booking_refund' },
+          { type: 'CREDIT', referenceType: { in: ['booking_refund', 'dispute_refund'] } },
+        ] },
+        select: { amountMinor: true, currency: true, createdAt: true, referenceType: true, referenceId: true },
+      }),
+      db().adminAuditLog.findMany({
+        where: { action: { in: ['BOOKING_CARD_REFUNDED', 'STRIPE_DISPUTE_REFUND_COMPLETED', 'STRIPE_DISPUTE_REFUND_PENDING'] } },
+        select: { action: true, entityId: true, after: true, createdAt: true },
       }),
       db().walletEntry.findMany({
         where: { type: 'DEBIT', referenceType: { in: ['booking_payout_disbursement', 'sr_driver_payout'] } },
         select: { amountMinor: true, currency: true, createdAt: true, referenceType: true },
       }),
       db().walletEntry.findMany({
-        where: { type: { in: ['HOLD', 'RELEASE'] }, referenceType: 'booking_payout' },
-        select: { amountMinor: true, currency: true, createdAt: true, type: true },
+        where: { OR: [
+          { type: { in: ['HOLD', 'RELEASE'] }, referenceType: 'booking_payout' },
+          { type: 'HOLD', referenceType: 'booking_payout_hold_reversal' },
+        ] },
+        select: { amountMinor: true, currency: true, createdAt: true, type: true, referenceType: true, referenceId: true },
       }),
       db().rideRequest.aggregate({
         where: { status: 'COMPLETED' },
         _count: { _all: true },
         _sum: { fareMinor: true },
       }),
+      db().booking.findMany({
+        where: { status: 'COMPLETED' },
+        include: {
+          listing: { include: { owner: { select: { payoutMethod: true } } } },
+          payments: true, disputes: { where: { status: 'OPEN' }, select: { id: true, status: true } },
+        },
+      }),
     ])
+
+    // A successful Stripe refund has no wallet refund entry. Audit completion is therefore the source
+    // of truth for that channel. Wallet fallbacks do have a ledger entry and never emit a completion
+    // audit, so the two sets are mutually exclusive. Ignore malformed legacy audit rows rather than
+    // inventing an amount or currency.
+    const refunds = [...walletRefunds]
+    const stripePendingByProof = new Map(stripeRefundAudits.filter((audit) => audit.action === 'STRIPE_DISPUTE_REFUND_PENDING').map((audit) => [audit.entityId, audit.after]))
+    for (const audit of stripeRefundAudits.filter((item) => item.action !== 'STRIPE_DISPUTE_REFUND_PENDING')) {
+      const amountMinor = Number(audit.after?.amountMinor)
+      const currency = String(audit.after?.currency || stripePendingByProof.get(audit.entityId)?.currency || '').toUpperCase()
+      if (Number.isFinite(amountMinor) && amountMinor > 0 && currency) refunds.push({
+        amountMinor, currency, createdAt: audit.createdAt, referenceType: 'stripe_card_refund', referenceId: audit.entityId,
+      })
+    }
 
     // Seller-plan fees default to USD while booking commission is SYP (see payments.mjs /
     // bookingFinanceSplit) — summing different currencies' minor units together as one number
     // would silently misreport the total, so each currency gets its own totals/history/projection
     // instead of being flattened into a single (wrongly-labeled) figure.
-    const entriesByCurrency = new Map()
-    for (const entry of commissionEntries) {
-      if (!entriesByCurrency.has(entry.currency)) entriesByCurrency.set(entry.currency, [])
-      entriesByCurrency.get(entry.currency).push(entry)
-    }
+    const currencies = new Set([...commissionEntries, ...reversalEntries, ...refunds, ...releasedMoney, ...hostEarnings].map((entry) => entry.currency).filter(Boolean))
 
     const now = new Date()
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0)
-    const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - 6)
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    // Convert a Toronto wall-clock midnight into its UTC instant. This remains correct on both sides
+    // of daylight-saving changes and does not depend on the Vercel process timezone (normally UTC).
+    const torontoParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+    const torontoMidnight = (year, month, day) => {
+      const guess = Date.UTC(year, month - 1, day)
+      const zoned = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+      }).formatToParts(new Date(guess)).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+      const offset = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second) - guess
+      return new Date(guess - offset)
+    }
+    const todayStart = torontoMidnight(torontoParts.year, torontoParts.month, torontoParts.day)
+    const weekWall = new Date(Date.UTC(torontoParts.year, torontoParts.month - 1, torontoParts.day - 6))
+    const weekStart = torontoMidnight(weekWall.getUTCFullYear(), weekWall.getUTCMonth() + 1, weekWall.getUTCDate())
+    const monthStart = torontoMidnight(torontoParts.year, torontoParts.month, 1)
     const sumSince = (entries, start) => entries.reduce((sum, entry) => sum + (entry.createdAt >= start ? entry.amountMinor : 0), 0)
     const sourceLabels = {
       booking_admin_share: 'STR booking commission', booking_protection_fee: 'Cancellation protection',
@@ -1432,21 +1496,26 @@ export async function handleAdmin(req, res, url, context) {
       card_processing_fee: 'Payment processing fees',
     }
 
-    const byCurrency = Array.from(entriesByCurrency.entries())
-      .map(([currency, entries]) => {
-        const totalRevenueMinor = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
+    const byCurrency = Array.from(currencies)
+      .map((currency) => {
+        const entries = commissionEntries.filter((entry) => entry.currency === currency)
+        const reversals = reversalEntries.filter((entry) => entry.currency === currency)
+        const grossRevenueMinor = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
+        const reversedRevenueMinor = reversals.reduce((sum, entry) => sum + entry.amountMinor, 0)
+        const totalRevenueMinor = grossRevenueMinor - reversedRevenueMinor
 
         const dailyTotals = new Map()
-        for (const entry of entries) {
+        for (const entry of [...entries.map((item) => ({ ...item, signedAmount: item.amountMinor })), ...reversals.map((item) => ({ ...item, signedAmount: -item.amountMinor }))]) {
           const day = entry.createdAt.toISOString().slice(0, 10)
-          dailyTotals.set(day, (dailyTotals.get(day) || 0) + entry.amountMinor)
+          dailyTotals.set(day, (dailyTotals.get(day) || 0) + entry.signedAmount)
         }
         const history = Array.from(dailyTotals.entries())
           .map(([day, amountMinor]) => ({ day, amountMinor }))
           .sort((a, b) => a.day.localeCompare(b.day))
 
-        const firstDay = new Date(entries[0].createdAt)
-        const lastDay = new Date(entries[entries.length - 1].createdAt)
+        const datedRevenue = [...entries, ...reversals].sort((a, b) => a.createdAt - b.createdAt)
+        const firstDay = datedRevenue.length ? new Date(datedRevenue[0].createdAt) : now
+        const lastDay = datedRevenue.length ? new Date(datedRevenue[datedRevenue.length - 1].createdAt) : now
         // +1 so a single day of data still divides by 1, not 0.
         const elapsedDays = Math.max(1, Math.ceil((lastDay.getTime() - firstDay.getTime()) / 86400000) + 1)
         const dailyAverageMinor = totalRevenueMinor / elapsedDays
@@ -1454,25 +1523,39 @@ export async function handleAdmin(req, res, url, context) {
         const sameCurrencyReleased = releasedMoney.filter((entry) => entry.currency === currency)
         const sameCurrencyHostEarnings = hostEarnings.filter((entry) => entry.currency === currency)
         const sourceMap = new Map()
+        for (const key of revenueReferenceTypes) sourceMap.set(key, 0)
         for (const entry of entries) sourceMap.set(entry.referenceType, (sourceMap.get(entry.referenceType) || 0) + entry.amountMinor)
+        const payoutState = new Map()
+        for (const entry of sameCurrencyHostEarnings) {
+          const state = payoutState.get(entry.referenceId) || { held: 0, released: 0, reversed: 0 }
+          if (entry.referenceType === 'booking_payout_hold_reversal') state.reversed += entry.amountMinor
+          else if (entry.type === 'HOLD') state.held += entry.amountMinor
+          else if (entry.type === 'RELEASE') state.released += entry.amountMinor
+          payoutState.set(entry.referenceId, state)
+        }
+        const hostEarningsHeldMinor = Array.from(payoutState.values()).reduce((sum, state) => sum + Math.max(0, state.held - state.released - state.reversed), 0)
+        const hostEarningsReleasedMinor = Array.from(payoutState.values()).reduce((sum, state) => sum + state.released, 0)
+        const netSince = (start) => sumSince(entries, start) - sumSince(reversals, start)
 
         return {
           currency,
           totalRevenueMinor,
+          grossRevenueMinor,
+          reversedRevenueMinor,
           sampleSize: entries.length,
           history,
           actual: {
-            todayMinor: sumSince(entries, todayStart),
-            last7DaysMinor: sumSince(entries, weekStart),
-            currentMonthMinor: sumSince(entries, monthStart),
+            todayMinor: netSince(todayStart),
+            last7DaysMinor: netSince(weekStart),
+            currentMonthMinor: netSince(monthStart),
             refundsTodayMinor: sumSince(sameCurrencyRefunds, todayStart),
             refundsLast7DaysMinor: sumSince(sameCurrencyRefunds, weekStart),
             refundsCurrentMonthMinor: sumSince(sameCurrencyRefunds, monthStart),
             releasedTodayMinor: sumSince(sameCurrencyReleased, todayStart),
             releasedLast7DaysMinor: sumSince(sameCurrencyReleased, weekStart),
             releasedCurrentMonthMinor: sumSince(sameCurrencyReleased, monthStart),
-            hostEarningsHeldMinor: sameCurrencyHostEarnings.filter((entry) => entry.type === 'HOLD').reduce((sum, entry) => sum + entry.amountMinor, 0),
-            hostEarningsReleasedMinor: sameCurrencyHostEarnings.filter((entry) => entry.type === 'RELEASE').reduce((sum, entry) => sum + entry.amountMinor, 0),
+            hostEarningsHeldMinor,
+            hostEarningsReleasedMinor,
           },
           sources: Array.from(sourceMap.entries()).map(([key, amountMinor]) => ({ key, label: sourceLabels[key] || key, amountMinor })).sort((a, b) => b.amountMinor - a.amountMinor),
           projection: {
@@ -1489,6 +1572,15 @@ export async function handleAdmin(req, res, url, context) {
       ok: true,
       revenue: {
         byCurrency,
+        periodTimeZone: 'America/Toronto',
+        payoutsReadyCount: completedBookings.filter((booking) => {
+          const payoutRows = hostEarnings.filter((entry) => entry.referenceId === booking.id)
+          const hasSnapshot = payoutRows.some((entry) => entry.referenceType === 'booking_payout' && entry.type === 'HOLD')
+          const alreadyReleased = payoutRows.some((entry) => entry.referenceType === 'booking_payout' && entry.type === 'RELEASE')
+          return isPayoutEligible(booking) && booking.metadata?.payoutHeld !== true
+            && Boolean(booking.listing?.owner?.payoutMethod) && booking.payments.some((payment) => payment.status === 'APPROVED')
+            && hasSnapshot && !alreadyReleased
+        }).length,
         srRidesCompletedCount: completedSrRides._count._all,
         srRidesFareVolumeMinor: completedSrRides._sum.fareMinor || 0,
       },

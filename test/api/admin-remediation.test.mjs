@@ -232,6 +232,36 @@ describe('Admin remediation controls', () => {
     expect(usd.totalRevenueMinor).toBeGreaterThanOrEqual(7)
   })
 
+  it('reports net revenue, every refund channel, and outstanding host holds without double counting', async () => {
+    const host = await makeUser('truth-host', 'HOST')
+    const add = (userId, type, amountMinor, referenceType, referenceId) => db().$transaction((tx) => recordWalletEntry(tx, {
+      userId, type, amountMinor, currency: 'EUR', referenceType, referenceId,
+      keyParts: ['truth-summary', referenceType, referenceId, type], note: 'financial truth fixture',
+    }))
+    await add(admin.id, 'CREDIT', 100, 'booking_admin_share', 'truth-booking-revenue')
+    await add(admin.id, 'DEBIT', 30, 'booking_admin_share_reversal', 'truth-booking-revenue')
+    await add(admin.id, 'REFUND', 40, 'booking_refund', 'truth-wallet-refund')
+    await add(admin.id, 'CREDIT', 10, 'dispute_refund', 'truth-dispute-refund')
+    await db().adminAuditLog.create({ data: {
+      actorUserId: admin.id, action: 'BOOKING_CARD_REFUNDED', entityType: 'bookings', entityId: 'truth-stripe-refund',
+      after: { amountMinor: 20, currency: 'EUR', stripeRefundId: 're_truth' },
+    } })
+    await add(host.id, 'HOLD', 90, 'booking_payout', 'truth-released-payout')
+    await add(host.id, 'RELEASE', 90, 'booking_payout', 'truth-released-payout')
+    await add(host.id, 'HOLD', 50, 'booking_payout', 'truth-reversed-payout')
+    await add(host.id, 'HOLD', 50, 'booking_payout_hold_reversal', 'truth-reversed-payout')
+
+    const res = await request(app).get('/api/admin/revenue-summary').set('Authorization', `Bearer ${admin.token}`)
+    expect(res.status).toBe(200)
+    const eur = res.body.revenue.byCurrency.find((row) => row.currency === 'EUR')
+    expect(eur).toMatchObject({ grossRevenueMinor: 100, reversedRevenueMinor: 30, totalRevenueMinor: 70 })
+    expect(eur.actual.refundsCurrentMonthMinor).toBe(70)
+    expect(eur.actual.hostEarningsHeldMinor).toBe(0)
+    expect(eur.actual.hostEarningsReleasedMinor).toBe(90)
+    expect(res.body.revenue.periodTimeZone).toBe('America/Toronto')
+    expect(eur.sources.find((source) => source.key === 'seller_plan_fee')).toMatchObject({ amountMinor: 0 })
+  })
+
   it('persists audited AI section controls and builds the daily executive report', async () => {
     const updated = await request(app)
       .put('/api/admin/ai-controls')

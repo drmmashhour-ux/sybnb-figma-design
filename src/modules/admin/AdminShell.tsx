@@ -4,7 +4,7 @@ import { navigate } from '../../app/routes'
 import { getStoredStaffSession } from '../../shared/api/platformApi'
 import './admin-console.css'
 
-export type AdminNavKey = 'guests' | 'hosts' | 'accounting' | 'management' | 'hr' | 'operations' | 'reports' | 'office' | 'srDispatch'
+export type AdminNavKey = string
 
 type NavItem = { key: string; hash: string; icon: string; ar: string; en: string }
 type NavGroup = { key: string; ar: string; en: string; items: NavItem[] }
@@ -14,7 +14,7 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'str', ar: '١. الإيجار القصير (STR)', en: '1. Short-Term Rentals (STR)',
     items: [
       { key: 'guests', hash: '/admin/guests', icon: '⌂', ar: 'نظرة STR والعملاء', en: 'STR overview & guests' },
-      { key: 'stays', hash: '/stays', icon: '⌁', ar: 'تصفح الإقامات', en: 'Browse stays' },
+      { key: 'strControl', hash: '/admin/str', icon: '⌁', ar: 'التحكم في STR', en: 'STR control' },
       { key: 'operations', hash: '/admin/review', icon: '⌘', ar: 'الحجوزات والمراجعات', en: 'Bookings & reviews' },
     ],
   },
@@ -30,24 +30,20 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'realestate', ar: '٣. العقارات', en: '3. Real Estate',
     items: [
-      { key: 'buy', hash: '/buy', icon: '⌂', ar: 'عقارات للبيع', en: 'Properties for sale' },
-      { key: 'rentals', hash: '/rentals', icon: '⌑', ar: 'الإيجار الشهري والسنوي', en: 'Monthly & yearly rentals' },
-      { key: 'construction', hash: '/new-construction', icon: '△', ar: 'المشاريع والإنشاءات', en: 'New construction' },
-      { key: 'immocontact', hash: '/immocontact', icon: '◎', ar: 'طلبات IMMOContact', en: 'IMMOContact requests' },
+      { key: 'realestateControl', hash: '/admin/real-estate', icon: '⌂', ar: 'لوحة العقارات', en: 'Real estate control' },
     ],
   },
   {
     key: 'commerce', ar: '٤. السوق والمركبات والإعلانات', en: '4. Marketplace, Cars & Ads',
     items: [
-      { key: 'marketplace', hash: '/marketplace', icon: '◇', ar: 'السوق العام', en: 'Marketplace' },
-      { key: 'cars', hash: '/cars', icon: '◉', ar: 'السيارات والمزادات', en: 'Cars & auctions' },
-      { key: 'advertising', hash: '/advertising', icon: '▣', ar: 'الإعلانات', en: 'Advertising' },
+      { key: 'marketplaceControl', hash: '/admin/marketplace', icon: '◇', ar: 'التحكم في السوق', en: 'Marketplace control' },
+      { key: 'carsControl', hash: '/admin/cars', icon: '◉', ar: 'التحكم في السيارات', en: 'Cars & auctions control' },
+      { key: 'advertisingControl', hash: '/admin/advertising', icon: '▣', ar: 'التحكم في الإعلانات', en: 'Advertising control' },
     ],
   },
   {
     key: 'transport', ar: '٥. النقل SR', en: '5. SR Transport',
     items: [
-      { key: 'srHome', hash: '/sr', icon: '➤', ar: 'واجهة رحلات SR', en: 'SR ride service' },
       { key: 'srDispatch', hash: '/admin/sr-dispatch', icon: '⊕', ar: 'التوجيه والسائقون', en: 'Dispatch & drivers' },
     ],
   },
@@ -60,7 +56,8 @@ const NAV_GROUPS: NavGroup[] = [
       { key: 'revenueSources', hash: '/finance', icon: '◆', ar: 'مصادر الإيرادات حسب المنصة', en: 'Revenue sources by platform' },
       { key: 'refunds', hash: '/finance', icon: '↶', ar: 'الاستردادات والأموال المحررة', en: 'Refunds & released money' },
       { key: 'reports', hash: '/admin/reports', icon: '⚑', ar: 'التقارير والنزاعات', en: 'Reports & disputes' },
-      { key: 'trust', hash: '/trust-center/verification', icon: '✓', ar: 'الثقة والتحقق', en: 'Trust & verification' },
+      { key: 'trustControl', hash: '/admin/trust', icon: '✓', ar: 'الثقة والتحقق', en: 'Trust & verification' },
+      { key: 'disputes', hash: '/admin/disputes', icon: '!', ar: 'النزاعات', en: 'Disputes' },
     ],
   },
   {
@@ -89,8 +86,8 @@ const CHROME = {
     live: 'مباشر',
     workspace: 'مساحة العمل',
     operationsGroup: 'العمليات والرقابة',
-    systems: 'الأنظمة تعمل',
-    lastCheck: 'مراقبة مباشرة',
+    systems: 'حالة المنصة',
+    lastCheck: 'افتح فحص الحالة',
     liveOverview: 'نظرة تشغيلية مباشرة',
     refresh: 'تحديث',
     openReview: 'فتح قائمة المراجعة',
@@ -102,8 +99,8 @@ const CHROME = {
     live: 'Live',
     workspace: 'Workspace',
     operationsGroup: 'Operations & oversight',
-    systems: 'Systems operational',
-    lastCheck: 'Live monitoring',
+    systems: 'Platform status',
+    lastCheck: 'Open the live status check',
     liveOverview: 'Live operational overview',
     refresh: 'Refresh',
     openReview: 'Open review queue',
@@ -192,10 +189,10 @@ export function AdminShell({ lang, active, title, subtitle, children, counts, on
               </section>
             ))}
           </div>
-          <div className="sidebar-status">
+          <button className="sidebar-status" type="button" onClick={() => navigate('/status')}>
             <span className="status-icon">✓</span>
             <div><strong>{c.systems}</strong><small>{c.lastCheck}</small></div>
-          </div>
+          </button>
         </aside>
 
         <main>

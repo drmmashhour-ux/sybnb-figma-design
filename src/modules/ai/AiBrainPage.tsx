@@ -21,8 +21,8 @@ const copy = {
     host: 'المضيف',
     listing: 'الإعلان',
     message: 'التوصية',
-    controls: 'إدارة أقسام الذكاء الاصطناعي', on: 'يعمل', off: 'متوقف',
-    controlNote: 'عند التشغيل: يراقب AI القسم، يكتشف المشاكل، ويقترح الإجراءات. الاسترداد، صرف الأموال، إيقاف الحسابات، والنشر تحتاج موافقتك دائماً.',
+    controls: 'أقسام التقرير والمراقبة', on: 'مشمول', off: 'غير مشمول',
+    controlNote: 'عند التشغيل: يُضمّن هذا القسم في المراقبة والتقرير الصباحي ويعرض توصيات للمراجعة. لا ينفذ الذكاء الاصطناعي إجراءات بنفسه. الاسترداد، صرف الأموال، إيقاف الحسابات، الحذف، والنشر تحتاج موافقتك دائماً.',
     morning: 'التقرير التنفيذي الصباحي', generatedAt: 'تم التحديث', pending: 'بانتظار المراجعة', disputes: 'نزاعات مفتوحة', hosts: 'المضيفون', security: 'أحداث أمنية (٧ أيام)',
   },
   en: {
@@ -39,8 +39,8 @@ const copy = {
     host: 'Host',
     listing: 'Listing',
     message: 'Recommendation',
-    controls: 'AI section management', on: 'ON', off: 'OFF',
-    controlNote: 'When ON: AI monitors the section, detects problems, and recommends actions. Refunds, money release, account suspension, and deployment always require your approval.',
+    controls: 'Report and monitoring sections', on: 'INCLUDED', off: 'NOT INCLUDED',
+    controlNote: 'When included, this section is monitored in the morning report and recommendations are presented for review. AI does not execute actions by itself. Refunds, money release, account suspension, deletion, and deployment always require your approval.',
     morning: 'Morning executive report', generatedAt: 'Updated', pending: 'Awaiting review', disputes: 'Open disputes', hosts: 'Hosts', security: 'Security events (7 days)',
   },
 }

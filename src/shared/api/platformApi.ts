@@ -490,9 +490,9 @@ export type PlatformAdminMetrics = {
   paymentsByStatus: Record<string, number>
   giftsByStatus: Record<string, number>
   walletCount: number
-  walletBalanceMinor: number
+  walletBalancesByCurrency: Array<{ currency: string; amountMinor: number; count: number }>
   approvedPaymentCount: number
-  approvedPaymentVolumeMinor: number
+  approvedPaymentVolumeByCurrency: Array<{ currency: string; amountMinor: number; count: number }>
 }
 
 export type PlatformHealth = {
@@ -1889,7 +1889,7 @@ export async function fetchAdminHostInsights() {
 export type AiSectionControl = {
   section: 'str' | 'hosts' | 'realestate' | 'commerce' | 'transport' | 'finance' | 'trust' | 'operations'
   enabled: boolean
-  mode: 'MONITOR_RECOMMEND'
+  mode: 'REPORT_MONITOR'
   updatedAt: string | null
 }
 
@@ -2422,11 +2422,8 @@ export type OfficeDashboard = {
     cancellations7d: number
   }
   revenue: {
-    currency: string
-    grossApprovedMinor: number
-    approvedCount: number
-    refunded7dMinor: number
-    refunded7dCount: number
+    approvedByCurrency: Array<{ currency: string; amountMinor: number; count: number }>
+    walletRefunds7dByCurrency: Array<{ currency: string; amountMinor: number; count: number }>
   }
   pending: {
     listingsAwaitingReview: number
@@ -2484,7 +2481,10 @@ export async function adminCancelSrRide(rideId: string, reason?: string) {
 
 export type PlatformRevenueByCurrency = {
   currency: string
+  /** Net platform revenue after recorded revenue reversals. */
   totalRevenueMinor: number
+  grossRevenueMinor: number
+  reversedRevenueMinor: number
   sampleSize: number
   history: Array<{ day: string; amountMinor: number }>
   actual: {
@@ -2514,6 +2514,8 @@ export type PlatformRevenueSummary = {
   // default) — kept as separate per-currency totals rather than summed together, since adding
   // different currencies' minor units as one number would silently misreport the total.
   byCurrency: PlatformRevenueByCurrency[]
+  periodTimeZone: 'America/Toronto'
+  payoutsReadyCount: number
   srRidesCompletedCount: number
   srRidesFareVolumeMinor: number
 }

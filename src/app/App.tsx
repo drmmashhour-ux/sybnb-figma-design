@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState, type ComponentType } from 'react'
+import { Suspense, lazy, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { findDivisionByRoute } from '../engines/navigation/divisions'
 import type { Lang } from '../engines/language/languageEngine'
 import { getInitialLanguage, persistLanguage, text } from '../engines/language/languageEngine'
@@ -7,11 +7,13 @@ import { isSellerRoute } from '../modules/seller/sellerRoutes'
 import { isTrustProtectionRoute } from '../modules/trust/trustRoutes'
 import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
+import { AdminShell } from '../modules/admin/AdminShell'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AdminControlCenterPage = lazyNamed(() => import('../modules/admin/AdminControlCenterPage'), 'AdminControlCenterPage')
 const AdminOfficeDashboardPage = lazyNamed(() => import('../modules/admin/AdminOfficeDashboardPage'), 'AdminOfficeDashboardPage')
 const AdminSrDispatchPage = lazyNamed(() => import('../modules/admin/AdminSrDispatchPage'), 'AdminSrDispatchPage')
+const AdminSectionOverviewPage = lazyNamed(() => import('../modules/admin/AdminSectionOverviewPage'), 'AdminSectionOverviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
 const BookingReviewPage = lazyNamed(() => import('../modules/bookings/BookingReviewPage'), 'BookingReviewPage')
@@ -64,6 +66,10 @@ function lazyNamed<T extends Record<string, unknown>, K extends keyof T>(
   exportName: K,
 ) {
   return lazy(async () => ({ default: (await loader())[exportName] as ComponentType<any> }))
+}
+
+function AdminCapsule({ lang, active, title, subtitle, onLanguageChange, children }: { lang: Lang; active: string; title: string; subtitle: string; onLanguageChange: (lang: Lang) => void; children: ReactNode }) {
+  return <AdminShell lang={lang} active={active} title={title} subtitle={subtitle} onLanguageChange={onLanguageChange}>{children}</AdminShell>
 }
 
 export function App() {
@@ -167,19 +173,31 @@ export function App() {
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} onLanguageChange={setLang} />
         ) : path === '/admin/office' ? (
-          <AdminOfficeDashboardPage lang={lang} />
+          <AdminCapsule lang={lang} active="office" title={lang === 'ar' ? 'لوحة المكتب' : 'Office dashboard'} subtitle={lang === 'ar' ? 'ملخص تشغيلي مباشر.' : 'Live operational summary.'} onLanguageChange={setLang}><AdminOfficeDashboardPage lang={lang} /></AdminCapsule>
+        ) : path === '/admin/str' ? (
+          <AdminSectionOverviewPage lang={lang} section="str" onLanguageChange={setLang} />
+        ) : path === '/admin/real-estate' ? (
+          <AdminSectionOverviewPage lang={lang} section="realestate" onLanguageChange={setLang} />
+        ) : path === '/admin/marketplace' ? (
+          <AdminSectionOverviewPage lang={lang} section="marketplace" onLanguageChange={setLang} />
+        ) : path === '/admin/cars' ? (
+          <AdminSectionOverviewPage lang={lang} section="cars" onLanguageChange={setLang} />
+        ) : path === '/admin/advertising' ? (
+          <AdminSectionOverviewPage lang={lang} section="advertising" onLanguageChange={setLang} />
+        ) : path === '/admin/trust' ? (
+          <AdminSectionOverviewPage lang={lang} section="trust" onLanguageChange={setLang} />
         ) : path === '/admin/sr-dispatch' ? (
-          <AdminSrDispatchPage lang={lang} />
+          <AdminCapsule lang={lang} active="srDispatch" title={lang === 'ar' ? 'توجيه SR' : 'SR dispatch'} subtitle={lang === 'ar' ? 'الرحلات والسائقون من قاعدة البيانات.' : 'Database-backed rides and drivers.'} onLanguageChange={setLang}><AdminSrDispatchPage lang={lang} /></AdminCapsule>
         ) : path === '/ai-brain' ? (
-          <AiBrainPage lang={lang} />
+          <AdminCapsule lang={lang} active="aiBrain" title={lang === 'ar' ? 'إدارة الذكاء الاصطناعي' : 'AI management'} subtitle={lang === 'ar' ? 'المراقبة والتوصيات والتقرير اليومي.' : 'Monitoring, recommendations, and the daily report.'} onLanguageChange={setLang}><AiBrainPage lang={lang} /></AdminCapsule>
         ) : path === '/competitors' ? (
-          <CompetitorsPage lang={lang} />
+          <AdminCapsule lang={lang} active="competitors" title={lang === 'ar' ? 'تحليل المنافسين' : 'Competitor analysis'} subtitle={lang === 'ar' ? 'مرجع استراتيجي، وليس بيانات تشغيلية مباشرة.' : 'Strategic reference, not live operational data.'} onLanguageChange={setLang}><CompetitorsPage lang={lang} /></AdminCapsule>
         ) : path === '/operations' ? (
           <OperationsCalendarPage lang={lang} />
         ) : path === '/finance' ? (
-          <FinanceReconciliationPage lang={lang} />
+          <AdminCapsule lang={lang} active="financeCenter" title={lang === 'ar' ? 'التسوية المالية' : 'Finance reconciliation'} subtitle={lang === 'ar' ? 'الإيرادات والاستردادات والتحويلات.' : 'Revenue, refunds, and payout reconciliation.'} onLanguageChange={setLang}><FinanceReconciliationPage lang={lang} /></AdminCapsule>
         ) : path === '/status' ? (
-          <PlatformStatusPage lang={lang} />
+          <AdminCapsule lang={lang} active="status" title={lang === 'ar' ? 'حالة المنصة' : 'Platform status'} subtitle={lang === 'ar' ? 'فحص الخدمة وقاعدة البيانات.' : 'Service and database health checks.'} onLanguageChange={setLang}><PlatformStatusPage lang={lang} /></AdminCapsule>
         ) : path === '/terms' ? (
           <LegalPlaceholderPage lang={lang} page="terms" />
         ) : path === '/privacy' ? (
