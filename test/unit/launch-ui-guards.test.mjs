@@ -53,8 +53,11 @@ describe('launch UI safety guards', () => {
   it('keeps staff registration OTP-gated while letting the API authorize sign-in', () => {
     const source = read('src/modules/account/StaffAccessPage.tsx')
     expect(source).toContain("(mode === 'signUp' && !confirmed)")
+    expect(source).toContain("/^\\d{4,8}$/.test(code.trim())")
     expect(source).toContain("disabled={status === 'loading'}")
     expect(source).toContain('autoComplete="one-time-code"')
+    expect(source).toContain('aria-label={t.code}')
+    expect(source).toContain("event.target.value.replace(/\\D/g, '')")
     expect(source).toContain('autoComplete="new-password"')
     expect(source).toContain("if (!codeConfirmed && code.trim()) activeGrant = (await confirmCode()) || ''")
     expect(source).toContain('name="sybnb-new-password-confirmation"')

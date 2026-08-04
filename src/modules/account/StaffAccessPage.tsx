@@ -291,7 +291,10 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     // auto-confirm the entered code here. If it fails, confirmCode() already showed "code invalid".
     let confirmed = codeConfirmed
     let activeGrant = verificationGrant
-    if (!confirmed && code.trim() && identifierOk) {
+    // Password managers occasionally autofill the email identifier into the one-time-code input.
+    // Only a plausible numeric OTP should trigger verification; other autofill text must not block
+    // password-only continuity immediately after a verified reset.
+    if (!confirmed && /^\d{4,8}$/.test(code.trim()) && identifierOk) {
       activeGrant = (await confirmCode()) || ''
       confirmed = Boolean(activeGrant)
       if (!confirmed) return
@@ -510,19 +513,26 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               {codeConfirmed && <span style={styles.confirmedPill}>{usePhone ? t.phoneConfirmed : t.codeConfirmed}</span>}
             </div>
             <div style={styles.codeRow}>
-              <input
-                style={styles.input}
-                value={code}
-                placeholder="000000"
-                name="sybnb-staff-verification-code"
-                autoComplete="one-time-code"
-                onChange={(event) => {
-                  setCode(event.target.value)
-                  setCodeConfirmed(false)
-                  setCodeTryAgain(false)
-                }}
-                dir="ltr"
-              />
+              <label style={styles.codeInputLabel}>
+                <span>{t.code}</span>
+                <input
+                  style={styles.input}
+                  value={code}
+                  placeholder="000000"
+                  aria-label={t.code}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  name="sybnb-staff-verification-code"
+                  autoComplete="one-time-code"
+                  onChange={(event) => {
+                    setCode(event.target.value.replace(/\D/g, ''))
+                    setCodeConfirmed(false)
+                    setCodeTryAgain(false)
+                  }}
+                  dir="ltr"
+                />
+              </label>
               <button style={styles.codeButton} onClick={() => void sendCode()} disabled={(usePhone ? phone.trim().length < 8 : !email.includes('@')) || codeBusy !== 'idle'}>
                 {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : usePhone ? t.sendCodePhone : t.sendCode}
               </button>
@@ -654,6 +664,7 @@ const styles: Record<string, CSSProperties> = {
   confirmHeader: { alignItems: 'center', display: 'flex', gap: 10, justifyContent: 'space-between' },
   confirmedPill: { background: '#08251c', border: '1px solid #22d28f', borderRadius: 999, color: '#22d28f', padding: '6px 10px', fontSize: 12, fontWeight: 900 },
   codeRow: { display: 'grid', gridTemplateColumns: 'minmax(130px, 1fr) auto auto', gap: 8 },
+  codeInputLabel: { color: '#d9e1f5', display: 'grid', fontSize: 13, fontWeight: 800, gap: 6 },
   codeButton: { minHeight: 52, border: '1px solid #22d28f', borderRadius: 12, background: '#08251c', color: '#22d28f', fontWeight: 900, padding: '0 16px', cursor: 'pointer', whiteSpace: 'nowrap' },
   codeButtonConfirmed: { background: '#22d28f', color: '#06110e', border: '1px solid #22d28f' },
   codeButtonError: { background: '#3a0f14', color: '#ff9aa2', border: '1px solid #ff5f76' },

@@ -23,7 +23,7 @@ const ALLOWED_EMAIL_CODE_PURPOSES = new Set(['guest-signup', 'staff-login', 'pas
 // same real email-OTP gate as HOST/DRIVER at sign-up and sign-in — not the lighter guest flow.
 const STAFF_ROLES_REQUIRING_OTP = new Set(['ADMIN', 'HOST', 'DRIVER', 'SELLER'])
 const PARTNER_TYPES = new Set(['HOST', 'SELLER', 'RENTER', 'BUILDER', 'DEALER'])
-const RECENT_PASSWORD_RESET_LOGIN_MINUTES = 10
+const RECENT_PASSWORD_RESET_LOGIN_MINUTES = 30
 
 function resolveEmailCodePurpose(value) {
   return ALLOWED_EMAIL_CODE_PURPOSES.has(value) ? value : 'guest-signup'
