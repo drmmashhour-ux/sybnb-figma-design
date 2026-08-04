@@ -79,7 +79,7 @@ const labels = {
     signInRequired: 'أدخل البريد وكلمة المرور، ثم أكّد رمز البريد قبل الدخول.',
     signUpRequired: 'أدخل البريد والهاتف وكلمة المرور، واختر نوع الحساب، ثم أكّد رمز البريد.',
     passwordMismatch: 'تأكيد كلمة المرور غير مطابق.',
-    resetRequired: 'أدخل البريد وكلمة المرور الجديدة، ثم أكّد رمز البريد.',
+    resetRequired: 'أدخل البريد وكلمة المرور الجديدة مرتين، ثم أكّد رمز البريد.',
     resetSuccess: 'تم تحديث كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.',
     adminNoSignup: 'إنشاء حساب الإدارة مغلق. المالك فقط يضيف الإدارة.',
   },
@@ -133,7 +133,7 @@ const labels = {
     signInRequired: 'Enter email and password, then confirm the email code before signing in.',
     signUpRequired: 'Enter email, phone, password, account type, then confirm the email code.',
     passwordMismatch: 'Repeated password does not match.',
-    resetRequired: 'Enter your email and a new password, then confirm the email code.',
+    resetRequired: 'Enter your email and the new password twice, then confirm the email code.',
     resetSuccess: 'Password updated. Sign in with the new password.',
     adminNoSignup: 'Admin signup is closed. Only the owner can add admin accounts.',
   },
@@ -315,9 +315,14 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     const normalizedEmail = email.trim().toLowerCase()
     const normalizedEmailRepeat = emailRepeat.trim().toLowerCase()
     const identifierOk = usePhone ? phone.trim().length >= 8 : Boolean(email.trim()) && normalizedEmail === normalizedEmailRepeat
-    if (!identifierOk || !newPassword.trim()) {
+    if (!identifierOk || !newPassword.trim() || !passwordRepeat.trim()) {
       setIsErrorMessage(true)
       setMessage(email.trim() && normalizedEmail !== normalizedEmailRepeat ? t.emailMismatch : t.resetRequired)
+      return
+    }
+    if (newPassword !== passwordRepeat) {
+      setIsErrorMessage(true)
+      setMessage(t.passwordMismatch)
       return
     }
 
@@ -338,6 +343,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       else await resetPasswordWithEmailCode(normalizedEmail, newPassword, activeGrant)
       setStatus('idle')
       setNewPassword('')
+      setPasswordRepeat('')
       setIsErrorMessage(false)
       setMode('signIn')
       setCodeSent(false)
@@ -508,10 +514,16 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
           </section>
 
           {mode === 'forgotPassword' ? (
-            <label style={styles.labelWide}>
-              {t.newPassword}
-              <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" name="sybnb-new-password" autoComplete="new-password" dir="ltr" />
-            </label>
+            <>
+              <label style={styles.label}>
+                {t.newPassword}
+                <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" name="sybnb-new-password" autoComplete="new-password" dir="ltr" />
+              </label>
+              <label style={styles.label}>
+                {t.repeatPassword}
+                <input style={styles.input} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} type="password" name="sybnb-new-password-confirmation" autoComplete="new-password" dir="ltr" />
+              </label>
+            </>
           ) : (
             <>
               <label style={styles.label}>

@@ -57,6 +57,8 @@ describe('launch UI safety guards', () => {
     expect(source).toContain('autoComplete="one-time-code"')
     expect(source).toContain('autoComplete="new-password"')
     expect(source).toContain("if (!codeConfirmed && code.trim()) activeGrant = (await confirmCode()) || ''")
+    expect(source).toContain('name="sybnb-new-password-confirmation"')
+    expect(source).toContain('if (newPassword !== passwordRepeat)')
     expect(source).toContain("setMode('signIn')")
     expect(source.indexOf("setMode('signIn')")).toBeLessThan(source.indexOf('setMessage(t.resetSuccess)'))
   })
