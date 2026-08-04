@@ -133,7 +133,7 @@ const copy = {
     opsSupport: 'دعم العمليات',
     clientMessages: 'رسائل العملاء',
     qualityScore: 'جودة الإعلانات',
-    payoutReady: 'جاهز للصرف',
+    payoutReady: 'قيمة الحجوزات المؤكدة',
     responseSla: 'سرعة الرد',
     aiImprove: 'تحسين AI',
     aiImproveCopy: 'أضف صور أقوى، شارة الثقة، وسياسة إلغاء واضحة لرفع التحويل.',
@@ -275,7 +275,7 @@ const copy = {
     opsSupport: 'Operations support',
     clientMessages: 'Client messages',
     qualityScore: 'Listing quality',
-    payoutReady: 'Payout ready',
+    payoutReady: 'Confirmed booking value',
     responseSla: 'Response SLA',
     aiImprove: 'AI improvements',
     aiImproveCopy: 'Add stronger photos, trust badge, and clear cancellation policy to raise conversion.',
@@ -386,9 +386,16 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
       ? t.pendingVerification
       : t.notVerifiedYet
   const dashboardCurrency = visibleListings[0]?.currency || overview?.requests[0]?.currency || 'SYP'
-  const activeListingsLabel = isAr
-    ? `${visibleListings.length} ${providerCopy.activeUnit}`
-    : `${visibleListings.length} ${providerCopy.activeUnit}`
+  const confirmedValueByCurrency = visibleRequests
+    .filter((request) => request.status === 'CONFIRMED')
+    .reduce<Record<string, number>>((totals, request) => {
+      totals[request.currency] = (totals[request.currency] || 0) + request.amountMinor
+      return totals
+    }, {})
+  const confirmedValueText = Object.entries(confirmedValueByCurrency)
+    .map(([currency, amount]) => moneyText(amount, currency, lang))
+    .join(' · ') || moneyText(0, dashboardCurrency, lang)
+  const activeListingsLabel = `${approvedListingCount} ${providerCopy.activeUnit}`
 
   const hostDocumentsCopy = getHostDocumentsCopy(isAr, focus)
     || (isAr
@@ -637,11 +644,11 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
       <section style={styles.providerHealth}>
         <article style={styles.healthHero}>
           <span>SYBNB · {verificationStatusText}</span>
-          <strong>{trustScore}%</strong>
+          <strong>{isDocumentVerified ? '✓' : overview?.host.idDocumentStatus === 'PENDING_REVIEW' ? '◷' : '—'}</strong>
         </article>
         <div style={styles.hostMetric}>
           <span>{t.payoutReady}</span>
-          <strong>{moneyText(overview?.totals.revenueMinor || 0, dashboardCurrency, lang)}</strong>
+          <strong>{confirmedValueText}</strong>
           <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/earnings')}>
             {t.viewEarningsReport}
           </button>
@@ -711,7 +718,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                 <span style={{ ...styles.statusPill, ...statusTone }}>{statusLabel}</span>
                 <span>{listingViewCount(listing, visibleRequests)}</span>
                 <span>{listingInquiryCount(listing, visibleRequests)}</span>
-                <button style={styles.editButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>✎</button>
+                <button style={styles.editButton} onClick={() => startEditListing(listing)} aria-label={t.edit}>✎</button>
               </article>
             )
           })}
@@ -1232,17 +1239,16 @@ function listingQualityScore(listing: PlatformListing) {
 
 function listingViewCount(listing: PlatformListing, requests: PlatformHostOverview['requests']) {
   const stored = metadataNumber(listing.metadata, ['views', 'viewCount', 'listingViews'])
-  if (stored) return stored
-  const mediaCount = Array.isArray(listing.media) ? listing.media.length : 0
-  const requestCount = requests.filter((request) => request.listingId === listing.id).length
-  const approvalBoost = listing.status.toUpperCase() === 'APPROVED' ? 1 : 0
-  return requestCount * 35 + mediaCount * 12 + approvalBoost * 25
+  // There is no view-event table yet. Never manufacture a view count from photos/bookings.
+  return stored || '—'
 }
 
 function listingInquiryCount(listing: PlatformListing, requests: PlatformHostOverview['requests']) {
   const stored = metadataNumber(listing.metadata, ['inquiries', 'inquiryCount'])
   if (stored) return stored
-  return requests.filter((request) => request.listingId === listing.id).length
+  if (typeof listing.inquiryCount === 'number') return listing.inquiryCount
+  // Older API fallback for STAYS: booking requests are genuine customer contacts.
+  return listing.division === 'STAYS' ? requests.filter((request) => request.listingId === listing.id).length : 0
 }
 
 function metadataNumber(metadata: Record<string, unknown>, keys: string[]) {

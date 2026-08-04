@@ -79,6 +79,8 @@ export type PlatformListing = {
   // Guest-review aggregate for cards (Airbnb-style ★). Null average when there are no visible reviews.
   reviewAverage?: number | null
   reviewCount?: number
+  /** Real count of persisted listing inquiry threads, owner dashboards only. */
+  inquiryCount?: number
   // CarGurus-style Deal Rating (025/Carcad Phase E) -- CARS listings only, computed server-side
   // against a pool of comparable APPROVED listings. Absent/undefined for every other division.
   dealRating?: {
@@ -563,6 +565,7 @@ export type PlatformHostOverview = {
     requests: number
     requested: number
     confirmed: number
+    revenueByCurrency?: Record<string, number>
     revenueMinor: number
   }
   listings: Array<PlatformListing & { bookings?: PlatformBooking[] }>
@@ -2463,9 +2466,35 @@ export type SrDispatchBoard = {
   drivers: SrDispatchDriver[]
 }
 
+export type DriverPayoutView = { type: 'sham_cash'; accountHolder: string; last4: string; updatedAt: string | null }
+export type AdminSrPayout = { driverId: string; driverName: string; currency: string; accruedMinor: number; payoutMethod: DriverPayoutView | null }
+
 // SR live-ops dispatch board — active rides + online drivers with coordinates, for the admin map.
 export async function fetchSrDispatch() {
   return runAdminRequest((token) => apiRequest<{ ok: true } & SrDispatchBoard>('/api/admin/sr/dispatch', { token }))
+}
+
+export async function fetchDriverPayout() {
+  const session = getStoredStaffSession()
+  if (!session?.user.roles.includes('DRIVER')) throw new Error('Driver sign-in is required.')
+  const response = await apiRequest<{ ok: true; payout: DriverPayoutView | null }>('/api/driver/payout', { token: session.token })
+  return response.payout
+}
+
+export async function saveDriverPayout(input: { accountHolder: string; shamCashNumber: string }) {
+  const session = getStoredStaffSession()
+  if (!session?.user.roles.includes('DRIVER')) throw new Error('Driver sign-in is required.')
+  const response = await apiRequest<{ ok: true; payout: DriverPayoutView }>('/api/driver/payout', { method: 'PUT', token: session.token, body: input })
+  return response.payout
+}
+
+export async function fetchAdminSrPayouts() {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; payouts: AdminSrPayout[] }>('/api/admin/sr-payouts', { token }))
+  return response.payouts
+}
+
+export async function releaseAdminSrPayout(driverId: string, input: { currency: string; amountMinor?: number; payoutRef: string }) {
+  return runAdminRequest((token) => apiRequest<{ ok: true; walletEntry: { id: string; amountMinor: number; currency: string } }>(`/api/admin/sr-payouts/${driverId}/release`, { method: 'POST', token, body: input }))
 }
 
 // Admin force-cancel a stuck SR ride (releases the rider's reserved funds). ADMIN only.
@@ -3418,13 +3447,16 @@ export async function submitSellerPlanProof(input: {
   planCode?: string
   legalName?: string
   sellerType?: string
+  proofFile?: File
 }) {
   const session = getStoredSellerSession()
   if (!session) throw new Error('Sign in as a seller first.')
+  const { proofFile, ...body } = input
+  const fileBase64 = proofFile ? await readFileAsBase64(proofFile) : undefined
   const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof }>('/api/payments/seller-plan-proof', {
     method: 'POST',
     token: session.token,
-    body: input,
+    body: { ...body, fileBase64, mimeType: proofFile?.type },
   })
   return response.proof
 }

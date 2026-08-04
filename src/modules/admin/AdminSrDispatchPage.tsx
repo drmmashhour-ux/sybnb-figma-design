@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { adminCancelSrRide, fetchSrDispatch, type SrDispatchBoard } from '../../shared/api/platformApi'
+import { adminCancelSrRide, fetchAdminSrPayouts, fetchSrDispatch, releaseAdminSrPayout, type AdminSrPayout, type SrDispatchBoard } from '../../shared/api/platformApi'
+import { moneyText } from '../../shared/i18n/display'
 import { SrDispatchMap } from '../sr/SrDispatchMap'
 
 type Props = { lang: Lang }
@@ -26,6 +27,7 @@ const copy = {
     updated: 'آخر تحديث',
     cancel: 'إلغاء الرحلة',
     cancelConfirm: 'إلغاء هذه الرحلة إدارياً وتحرير مبلغ الراكب المحجوز؟',
+    payouts: 'أرباح السائقين الجاهزة للصرف', payoutRef: 'مرجع تحويل Sham Cash', release: 'تسجيل الصرف', noPayoutMethod: 'لا يوجد حساب صرف محفوظ', noPayouts: 'لا توجد أرباح جاهزة للصرف.',
   },
   en: {
     back: 'Back',
@@ -44,14 +46,34 @@ const copy = {
     updated: 'Updated',
     cancel: 'Cancel ride',
     cancelConfirm: 'Force-cancel this ride and release the rider’s reserved funds?',
+    payouts: 'Driver earnings ready for payout', payoutRef: 'Sham Cash transfer reference', release: 'Record payout', noPayoutMethod: 'No payout account saved', noPayouts: 'No driver earnings are ready for payout.',
   },
 }
 
 export function AdminSrDispatchPage({ lang }: Props) {
   const t = copy[lang]
   const [board, setBoard] = useState<SrDispatchBoard | null>(null)
-  const [error, setError] = useState(false)
+  const [error, setError] = useState('')
   const [cancelling, setCancelling] = useState('')
+  const [payouts, setPayouts] = useState<AdminSrPayout[]>([])
+  const [payoutRefs, setPayoutRefs] = useState<Record<string, string>>({})
+  const [releasing, setReleasing] = useState('')
+
+  const loadPayouts = () => fetchAdminSrPayouts().then(setPayouts).catch((cause) => setError(cause instanceof Error ? cause.message : t.error))
+
+  async function releasePayout(payout: AdminSrPayout) {
+    const key = `${payout.driverId}:${payout.currency}`
+    const payoutRef = (payoutRefs[key] || '').trim()
+    if (!payoutRef || !payout.payoutMethod) return
+    setReleasing(key)
+    try {
+      await releaseAdminSrPayout(payout.driverId, { currency: payout.currency, amountMinor: payout.accruedMinor, payoutRef })
+      setPayoutRefs((current) => ({ ...current, [key]: '' }))
+      await loadPayouts()
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : t.error)
+    } finally { setReleasing('') }
+  }
 
   async function cancelRide(rideId: string) {
     if (!window.confirm(t.cancelConfirm)) return
@@ -60,8 +82,8 @@ export function AdminSrDispatchPage({ lang }: Props) {
       await adminCancelSrRide(rideId)
       const next = await fetchSrDispatch()
       setBoard(next)
-    } catch {
-      /* surfaced by the next refresh */
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : t.error)
     } finally {
       setCancelling('')
     }
@@ -72,10 +94,11 @@ export function AdminSrDispatchPage({ lang }: Props) {
       fetchSrDispatch()
         .then((b) => {
           setBoard(b)
-          setError(false)
+          setError('')
         })
-        .catch(() => setError(true))
+        .catch((cause) => setError(cause instanceof Error && cause.message ? cause.message : t.error))
     void load()
+    void loadPayouts()
     const interval = window.setInterval(load, REFRESH_MS)
     return () => window.clearInterval(interval)
   }, [])
@@ -88,7 +111,7 @@ export function AdminSrDispatchPage({ lang }: Props) {
       <h1 style={styles.title}>{t.title}</h1>
       <p style={styles.subtitle}>{t.subtitle}</p>
 
-      {error && !board ? <p style={styles.err}>{t.error}</p> : null}
+      {error ? <p style={styles.err} role="alert">{error}</p> : null}
 
       {board ? (
         <>
@@ -125,6 +148,20 @@ export function AdminSrDispatchPage({ lang }: Props) {
           <p style={styles.updated}>
             {t.updated}: {new Date(board.generatedAt).toLocaleTimeString(lang === 'ar' ? 'ar-SY' : 'en-US')}
           </p>
+          <section style={{ marginTop: 24 }}>
+            <h2 style={styles.title}>{t.payouts}</h2>
+            <div style={styles.ridesList}>
+              {payouts.map((payout) => {
+                const key = `${payout.driverId}:${payout.currency}`
+                return <div key={key} style={styles.rideRow}>
+                  <span style={styles.rideInfo}><strong>{payout.driverName}</strong> · {moneyText(payout.accruedMinor, payout.currency, lang)} · {payout.payoutMethod ? `${payout.payoutMethod.accountHolder} •••• ${payout.payoutMethod.last4}` : t.noPayoutMethod}</span>
+                  <input value={payoutRefs[key] || ''} onChange={(event) => setPayoutRefs((current) => ({ ...current, [key]: event.target.value }))} placeholder={t.payoutRef} disabled={!payout.payoutMethod} />
+                  <button style={styles.rideCancel} disabled={!payout.payoutMethod || !payoutRefs[key]?.trim() || releasing === key} onClick={() => void releasePayout(payout)}>{releasing === key ? '…' : t.release}</button>
+                </div>
+              })}
+              {!payouts.length ? <p style={styles.muted}>{t.noPayouts}</p> : null}
+            </div>
+          </section>
         </>
       ) : (
         <p style={styles.muted}>{t.loading}</p>

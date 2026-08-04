@@ -187,6 +187,7 @@ export async function handleHost(req, res, url, context) {
         },
         media: true,
         location: true,
+        _count: { select: { inquiryThreads: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -212,6 +213,14 @@ export async function handleHost(req, res, url, context) {
       }
     }
 
+    // Inquiry threads are the real lead source for non-bookable divisions (property, cars,
+    // marketplace and projects). Keep the count on each owner-facing listing; bookings are not a
+    // substitute for leads and made every seller dashboard incorrectly show zero inquiries.
+    for (const listing of listings) {
+      listing.inquiryCount = listing._count?.inquiryThreads || 0
+      delete listing._count
+    }
+
     const requests = listings.flatMap((listing) =>
       listing.bookings.map((booking) => ({
         ...booking,
@@ -227,6 +236,12 @@ export async function handleHost(req, res, url, context) {
       })),
     )
 
+    const revenueByCurrency = requests
+      .filter((booking) => booking.status === 'CONFIRMED')
+      .reduce((totals, booking) => {
+        totals[booking.currency] = (totals[booking.currency] || 0) + booking.amountMinor
+        return totals
+      }, {})
     const totals = {
       listings: listings.length,
       approvedListings: listings.filter((listing) => listing.status === 'APPROVED').length,
@@ -234,9 +249,10 @@ export async function handleHost(req, res, url, context) {
       requests: requests.length,
       requested: requests.filter((booking) => booking.status === 'REQUESTED').length,
       confirmed: requests.filter((booking) => booking.status === 'CONFIRMED').length,
-      revenueMinor: requests
-        .filter((booking) => booking.status === 'CONFIRMED')
-        .reduce((sum, booking) => sum + booking.amountMinor, 0),
+      // Kept for old clients only. New clients use revenueByCurrency; adding SYP and USD minor
+      // units together is not a meaningful financial total.
+      revenueMinor: 0,
+      revenueByCurrency,
     }
 
     // Free, zero external-cost fact computation — safe to run on every dashboard load, unlike the

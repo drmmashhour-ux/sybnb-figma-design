@@ -60,13 +60,18 @@ export async function buildDailyExecutiveReport() {
   const revenueTypes = ['booking_admin_share', 'booking_protection_fee', 'booking_guest_cancel_fee', 'seller_plan_fee', 'str_host_plan_fee', 'sr_admin_commission', 'card_processing_fee']
   const controls = await readAiControls()
   const enabled = new Set(controls.filter((item) => item.enabled).map((item) => item.section))
+  const monitoredDivisions = [
+    ...(enabled.has('str') ? ['STAYS'] : []),
+    ...(enabled.has('realestate') ? ['BUY', 'RENTALS', 'NEW_CONSTRUCTION'] : []),
+    ...(enabled.has('commerce') ? ['MARKETPLACE', 'CARS'] : []),
+  ]
   const [revenue, reversals, refunds, releases, hosts, listingsPending, bookingsByStatus, disputes, rides, securityEvents] = await Promise.all([
     enabled.has('finance') ? db().walletEntry.findMany({ where: { type: 'CREDIT', referenceType: { in: revenueTypes }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true, referenceType: true } }) : [],
     enabled.has('finance') ? db().walletEntry.findMany({ where: { type: 'DEBIT', referenceType: { in: ['booking_admin_share_reversal', 'booking_dispute_refund_funding', 'sr_admin_commission_dispute_reversal'] }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }) : [],
     enabled.has('finance') ? db().walletEntry.findMany({ where: { OR: [{ type: 'REFUND', referenceType: 'booking_refund' }, { type: 'CREDIT', referenceType: { in: ['booking_refund', 'dispute_refund'] } }], createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }) : [],
-    db().walletEntry.findMany({ where: { type: 'DEBIT', referenceType: { in: ['booking_payout_disbursement', 'sr_driver_payout'] }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }),
+    enabled.has('finance') ? db().walletEntry.findMany({ where: { type: 'DEBIT', referenceType: { in: ['booking_payout_disbursement', 'sr_driver_payout'] }, createdAt: { gte: monthStart } }, select: { amountMinor: true, currency: true, createdAt: true } }) : [],
     enabled.has('hosts') ? db().userRole.count({ where: { role: 'HOST', user: { status: 'ACTIVE' } } }) : 0,
-    enabled.has('str') || enabled.has('realestate') || enabled.has('commerce') ? db().listing.count({ where: { status: 'PENDING_REVIEW' } }) : 0,
+    monitoredDivisions.length ? db().listing.count({ where: { status: 'PENDING_REVIEW', division: { in: monitoredDivisions } } }) : 0,
     enabled.has('str') ? db().booking.groupBy({ by: ['status'], _count: { _all: true } }) : [],
     enabled.has('trust') ? db().dispute.count({ where: { status: 'OPEN' } }) : 0,
     enabled.has('transport') ? db().rideRequest.groupBy({ by: ['status'], _count: { _all: true } }) : [],
@@ -1923,6 +1928,31 @@ export async function handleAdmin(req, res, url, context) {
   }
 
   // ---- SR MONEY (016): driver Sham-Cash payout ----
+  if (url.pathname === '/api/admin/sr-payouts') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const drivers = await db().user.findMany({
+      where: { status: 'ACTIVE', roles: { some: { role: 'DRIVER' } } },
+      select: { id: true, displayName: true, payoutMethod: true, wallets: { select: { id: true, currency: true, cachedBalanceMinor: true } } },
+      orderBy: { displayName: 'asc' }, take: 500,
+    })
+    const walletIds = drivers.flatMap((driver) => driver.wallets.map((wallet) => wallet.id))
+    const entries = walletIds.length ? await db().walletEntry.groupBy({
+      by: ['walletId', 'type', 'referenceType'], where: { walletId: { in: walletIds }, OR: [
+        { type: 'CREDIT', referenceType: { in: ['sr_driver_earning', 'sr_driver_tip', 'sr_cancellation_payout'] } },
+        { type: 'DEBIT', referenceType: 'sr_driver_payout' },
+      ] }, _sum: { amountMinor: true },
+    }) : []
+    const totals = new Map()
+    for (const entry of entries) totals.set(entry.walletId, (totals.get(entry.walletId) || 0) + (entry.type === 'CREDIT' ? 1 : -1) * (entry._sum.amountMinor || 0))
+    const payouts = drivers.flatMap((driver) => driver.wallets.map((wallet) => ({
+      driverId: driver.id, driverName: driver.displayName, currency: wallet.currency,
+      accruedMinor: Math.max(0, Math.min(totals.get(wallet.id) || 0, wallet.cachedBalanceMinor)),
+      payoutMethod: safeHostPayoutMethod(driver.payoutMethod),
+    }))).filter((row) => row.accruedMinor > 0)
+    return json(res, 200, { ok: true, payouts })
+  }
+
   const srPayoutReleaseMatch = url.pathname.match(/^\/api\/admin\/sr-payouts\/([^/]+)\/release$/)
   if (srPayoutReleaseMatch) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
@@ -1938,7 +1968,7 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
-    const driver = await db().user.findFirst({ where: { id: driverId, roles: { some: { role: 'DRIVER' } } }, include: { driverProfile: true } })
+    const driver = await db().user.findFirst({ where: { id: driverId, roles: { some: { role: 'DRIVER' } } } })
     if (!driver) {
       const error = new Error('Driver not found.')
       error.statusCode = 404
@@ -1946,7 +1976,8 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
-    if (!driver.driverProfile?.payoutMethod || !driver.driverProfile?.payoutAccountRef) {
+    const payoutAccount = decryptPayoutAccount(driver.payoutMethod)
+    if (!payoutAccount) {
       const error = new Error('This driver has no payout method on file. Add a Sham Cash payout method before releasing a payout.')
       error.statusCode = 400
       error.code = 'PAYOUT_METHOD_REQUIRED'
@@ -2004,7 +2035,7 @@ export async function handleAdmin(req, res, url, context) {
         userId: driverId, type: 'DEBIT', amountMinor: requestedMinor, currency,
         referenceType: 'sr_driver_payout', referenceId: driverId,
         keyParts: ['sr-driver-payout', driverId, payoutRef],
-        note: `SR driver earnings paid out via Sham Cash (${driver.driverProfile.payoutMethod}:${driver.driverProfile.payoutAccountRef}); ref ${payoutRef}.`,
+        note: `SR driver earnings paid out via Sham Cash (ending ${driver.payoutMethod?.last4 || 'unknown'}); ref ${payoutRef}.`,
       })
       await tx.adminAuditLog.create({
         data: { actorUserId: context.user.id, action: 'ADMIN_SR_PAYOUT_RELEASED', entityType: 'users', entityId: driverId, before: { accruedMinor, currency, payoutRef }, after: { walletEntry: released } },

@@ -198,7 +198,7 @@ tr.total td{font-size:18px;border-top:2px solid #111;border-bottom:none;padding-
         >
           ‹
         </button>
-        <button style={styles.arrowButton} onClick={() => (window.location.hash = '/')} aria-label={isAr ? 'التالي' : 'Next'}>
+        <button style={styles.arrowButton} onClick={() => (window.location.hash = '/trips')} aria-label={isAr ? 'التالي' : 'Next'}>
           ›
         </button>
       </section>

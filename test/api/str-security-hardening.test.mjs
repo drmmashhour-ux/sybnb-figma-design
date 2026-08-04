@@ -89,9 +89,22 @@ describe('STR security & money-integrity hardening', () => {
     const res = await request(app)
       .post('/api/payments/seller-plan-proof')
       .set('authorization', `Bearer ${seller.token}`)
-      .send({ planCode: 'premium', amountMinor: 1, providerRef: uniqueRef('s6a') })
+      .send({
+        planCode: 'premium', amountMinor: 1, providerRef: uniqueRef('s6a'), mimeType: 'image/png',
+        fileBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      })
     expect(res.status).toBe(201)
     expect(res.body.proof.amountMinor).toBe(49) // published premium price ($49 = 49 whole units), NOT the forged 1
+    expect(res.body.proof.proofAssetUrl).toContain('/api/payments/str-plan-sham-proof/')
+  })
+
+  it('S6: a paid seller plan cannot enter admin review with only a browser filename', async () => {
+    const seller = await registerGuest('s6-seller-no-proof')
+    const res = await request(app).post('/api/payments/seller-plan-proof')
+      .set('authorization', `Bearer ${seller.token}`)
+      .send({ planCode: 'plus', providerRef: uniqueRef('s6-proof'), proofAssetUrl: 'session://fake/receipt.png' })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('PAYMENT_PROOF_REQUIRED')
   })
 
   it('S6: an unknown planCode is rejected', async () => {

@@ -8,6 +8,7 @@ import { isTrustProtectionRoute } from '../modules/trust/trustRoutes'
 import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
 import { AdminShell } from '../modules/admin/AdminShell'
+import { getStoredSellerSession } from '../shared/api/platformApi'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AdminControlCenterPage = lazyNamed(() => import('../modules/admin/AdminControlCenterPage'), 'AdminControlCenterPage')
@@ -106,6 +107,7 @@ export function App() {
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
+  const providerMode = typeof window !== 'undefined' && getStoredSellerSession() ? 'seller' : 'host'
 
   const routed = (
       <Suspense fallback={<RouteLoading lang={lang} />}>
@@ -137,15 +139,15 @@ export function App() {
             focus={hostFocusFromPath(path)}
           />
         ) : path === '/host/bookings' ? (
-          <HostBookingsPage lang={lang} />
+          <HostBookingsPage lang={lang} mode={providerMode} />
         ) : path === '/host/payout' ? (
-          <HostPayoutPage lang={lang} />
+          <HostPayoutPage lang={lang} mode={providerMode} />
         ) : path === '/host/earnings' ? (
-          <HostEarningsPage lang={lang} />
+          <HostEarningsPage lang={lang} mode={providerMode} />
         ) : path === '/host/insights' ? (
           <HostInsightsPanel lang={lang} />
         ) : path === '/host/inquiries' ? (
-          <HostInquiriesPage lang={lang} />
+          <HostInquiriesPage lang={lang} mode={providerMode} />
         ) : path === '/driver/vehicles' ? (
           <DriverVehiclesPage lang={lang} />
         ) : path === '/driver' ? (

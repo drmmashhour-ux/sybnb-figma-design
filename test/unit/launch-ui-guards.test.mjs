@@ -81,11 +81,13 @@ describe('launch UI safety guards', () => {
     expect(guestAuth).toContain("event.target.value.replace(/\\D/g, '')")
   })
 
-  it('routes the advertising root into the advertising account flow', () => {
+  it('keeps advertising payments closed until a real campaign system exists', () => {
     const source = read('src/modules/seller/SellerDivisionRoutes.tsx')
     const routeGuard = read('src/modules/seller/sellerRoutes.ts')
     expect(source).toContain("path === '/advertising' || path === '/advertising/account'")
-    expect(source).toContain('<SellerAccountPage flow="advertising"')
+    expect(source).toContain('Advertising campaigns are not open yet')
+    expect(source).toContain('will not accept advertising payments')
+    expect(source).not.toContain('<SellerAccountPage flow="advertising"')
     expect(routeGuard).toContain("path === '/advertising'")
   })
 
@@ -128,6 +130,27 @@ describe('launch UI safety guards', () => {
     expect(cron).toContain('if (clock.hour !== 8)')
     expect(cron).toContain("reason: 'already_sent'")
     expect(cron).toContain('entityId: clock.date')
+  })
+
+  it('keeps driver actions inside driver-accessible surfaces and reports dispatch failures', () => {
+    const driver = read('src/modules/driver/DriverDashboardPage.tsx')
+    const dispatch = read('src/modules/admin/AdminSrDispatchPage.tsx')
+    expect(driver).toContain("window.location.hash = '/driver/vehicles'")
+    expect(driver).toContain("window.location.hash = '/wallet'")
+    expect(driver).not.toContain("window.location.hash = '/operations'")
+    expect(driver).not.toContain("window.location.hash = '/finance'")
+    expect(dispatch).toContain('role="alert"')
+    expect(dispatch).not.toContain('/* surfaced by the next refresh */')
+    expect(driver).toContain('saveDriverPayout')
+    expect(dispatch).toContain('releaseAdminSrPayout')
+  })
+
+  it('shows the real SR commission in finance projections', () => {
+    const finance = read('src/modules/finance/FinanceReconciliationPage.tsx')
+    expect(finance).toContain('the platform receives 15% commission')
+    expect(finance).toContain('srSypFareVolume * 0.15')
+    expect(finance).toContain('srUsdFareVolume * 0.15')
+    expect(finance).not.toContain('platform currently collects no commission on SR rides')
   })
 
   it('uses server email/phone OTP for seller signup and never compares a browser-generated code', () => {

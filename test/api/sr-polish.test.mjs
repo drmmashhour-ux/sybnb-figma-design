@@ -72,11 +72,17 @@ describe('SR polish fixes', () => {
       keyParts: ['sr-polish-topup', driver.user.id], note: 'simulated rider top-up',
     })
 
-    await db().driverProfile.upsert({
-      where: { userId: driver.user.id },
-      create: { userId: driver.user.id, payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
-      update: { payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
-    })
+    const saved = await request(app).put('/api/driver/payout').set('Authorization', `Bearer ${driver.token}`).send({ accountHolder: 'Test Driver', shamCashNumber: '0999000111' })
+    expect(saved.status).toBe(200)
+    expect(saved.body.payout).toMatchObject({ accountHolder: 'Test Driver', last4: '0111' })
+    expect(JSON.stringify(saved.body)).not.toContain('0999000111')
+    const stored = await db().user.findUnique({ where: { id: driver.user.id }, select: { payoutMethod: true } })
+    expect(stored.payoutMethod.ciphertext).toBeTruthy()
+    expect(JSON.stringify(stored.payoutMethod)).not.toContain('0999000111')
+
+    const queue = await request(app).get('/api/admin/sr-payouts').set('Authorization', `Bearer ${createSessionToken(admin)}`)
+    expect(queue.status).toBe(200)
+    expect(queue.body.payouts.find((row) => row.driverId === driver.user.id)).toMatchObject({ accruedMinor: earning, payoutMethod: { last4: '0111' } })
     const payout = await request(app)
       .post(`/api/admin/sr-payouts/${driver.user.id}/release`)
       .set('Authorization', `Bearer ${createSessionToken(admin)}`)

@@ -74,7 +74,7 @@ const copy = {
     next90Days: 'توقع ٩٠ يوماً القادمة',
     basedOnDays: 'بناءً على {days} يوماً من بيانات حقيقية',
     noRevenueYet: 'لا توجد عمولة محصّلة بعد — التوقع سيظهر بعد أول دفعة يوافق عليها المدير.',
-    srNote: 'رحلات SR: {count} رحلة مكتملة بقيمة أجرة إجمالية {fare} — هذه أرباح السائقين، والمنصة لا تُحصّل عمولة من رحلات SR حالياً.',
+    srNote: 'رحلات SR: {count} رحلة مكتملة بقيمة أجرة إجمالية {fare} — تحصل المنصة على عمولة ١٥٪، ويحصل السائق على ٨٥٪.',
     projectionCaveat: 'هذا امتداد خطي بسيط لمتوسط حقيقي، وليس تنبؤاً بالذكاء الاصطناعي — كلما زادت بيانات الحجوزات الحقيقية، زادت دقته.',
     whatIf: 'حاسبة افتراضية (ماذا لو)',
     whatIfNote: 'أدخل افتراضاتك الخاصة — هذه ليست بيانات حقيقية، لكن الحساب يستخدم نفس صيغة عمولة SYBNB الفعلية (تنظيف ٥٪ + ضريبة ٢٪ + عمولة استضافة ١٠٪ من الإيجار الصافي).',
@@ -87,7 +87,7 @@ const copy = {
     srUsdSharePercent: 'نسبة الدفع بالدولار (٪)',
     monthlyRevenue: 'الإيراد الشهري المتوقع',
     annualRevenue: 'الإيراد السنوي المتوقع',
-    srDriverVolumeNote: 'أجرة رحلات SR الشهرية المفترضة: {fare} — أرباح سائقين، ليست إيراد منصة (لا عمولة على SR حالياً).',
+    srDriverVolumeNote: 'أجرة رحلات SR الشهرية المفترضة: {fare} — تتضمن الحاسبة عمولة المنصة الفعلية ١٥٪.',
   },
   en: {
     back: 'Back to admin',
@@ -140,7 +140,7 @@ const copy = {
     next90Days: 'Next 90 days (projected)',
     basedOnDays: 'Based on {days} days of real data',
     noRevenueYet: 'No commission collected yet — a projection will appear after the first admin-approved payment.',
-    srNote: '{count} completed SR rides worth {fare} in total fares — that\'s driver earnings; the platform currently collects no commission on SR rides.',
+    srNote: '{count} completed SR rides worth {fare} in total fares — the platform receives 15% commission and the driver receives 85%.',
     projectionCaveat: 'This is a simple linear extrapolation of a real average, not an AI forecast — accuracy improves as more real booking data accumulates.',
     whatIf: 'What-if calculator',
     whatIfNote: 'Enter your own assumptions — this is not real data, but the math uses the real SYBNB commission formula (5% cleaning + 2% tax + 10% host commission on net rent).',
@@ -153,7 +153,7 @@ const copy = {
     srUsdSharePercent: 'Share paid in USD (%)',
     monthlyRevenue: 'Projected monthly revenue',
     annualRevenue: 'Projected annual revenue',
-    srDriverVolumeNote: 'Assumed monthly SR fare volume: {fare} — driver earnings, not platform revenue (no SR commission today).',
+    srDriverVolumeNote: 'Assumed monthly SR fare volume: {fare} — the calculator includes the real 15% platform commission.',
   },
 }
 
@@ -196,18 +196,20 @@ export function FinanceReconciliationPage({ lang }: Props) {
     const sypProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceSyp)
     const usdProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceUsd)
 
-    const monthlySypRevenue =
-      strSypBookings * sypCommissionPerBooking +
-      strSypBookings * (strProtectionPercent / 100) * sypProtectionPerBooking
-    const monthlyUsdRevenue =
-      strUsdBookings * usdCommissionPerBooking +
-      strUsdBookings * (strProtectionPercent / 100) * usdProtectionPerBooking
-
     const srUsdRides = Math.round(srRides * (srUsdPercent / 100))
     const srSypRides = srRides - srUsdRides
     const srAvgFareUsd = sypMinorToRoundedUsdMinor(srAvgFareSyp)
     const srSypFareVolume = srSypRides * srAvgFareSyp
     const srUsdFareVolume = srUsdRides * srAvgFareUsd
+
+    const monthlySypRevenue =
+      strSypBookings * sypCommissionPerBooking +
+      strSypBookings * (strProtectionPercent / 100) * sypProtectionPerBooking +
+      srSypFareVolume * 0.15
+    const monthlyUsdRevenue =
+      strUsdBookings * usdCommissionPerBooking +
+      strUsdBookings * (strProtectionPercent / 100) * usdProtectionPerBooking +
+      srUsdFareVolume * 0.15
 
     // Annual is derived from the same rounded monthly figure shown on screen (not the unrounded
     // intermediate), so it always reads as exactly 12x the displayed monthly number.

@@ -177,6 +177,12 @@ describe('Buy/Sale/Rent listing search + metadata filters', () => {
     expect(divisions).toEqual(['BUY', 'RENTALS']) // STAYS excluded
     const buyRow = res.body.properties.find((p) => p.id === buy.id)
     expect(buyRow.inquiryCount).toBe(1)
+    // The shared seller dashboard must use the same persisted inquiry thread, not booking counts or
+    // a locally invented estimate. BUY/CARS/MARKETPLACE/NEW_CONSTRUCTION do not create STR bookings.
+    const dashboard = await request(app).get('/api/host/overview').set('Authorization', `Bearer ${token}`)
+    expect(dashboard.status).toBe(200)
+    expect(dashboard.body.overview.listings.find((p) => p.id === buy.id).inquiryCount).toBe(1)
+    expect(dashboard.body.overview.totals.revenueByCurrency).toEqual({})
     // Anonymous request is rejected.
     expect((await request(app).get('/api/me/properties')).status).toBe(401)
   })

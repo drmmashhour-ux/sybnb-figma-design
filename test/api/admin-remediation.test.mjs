@@ -279,4 +279,21 @@ describe('Admin remediation controls', () => {
     expect(report.body.report.approvalRequired).toContain('payout releases')
     expect(report.body.text).toContain('SYBNB DAILY EXECUTIVE REPORT')
   })
+
+  it('scopes AI pending-listing totals to the enabled platform sections', async () => {
+    const owner = await makeUser('ai-scope-owner', 'HOST')
+    await db().listing.createMany({ data: [
+      { ownerId: owner.id, division: 'STAYS', titleAr: 'AI STR scope', priceMinor: 100, currency: 'USD', status: 'PENDING_REVIEW' },
+      { ownerId: owner.id, division: 'CARS', titleAr: 'AI cars scope', priceMinor: 100, currency: 'USD', status: 'PENDING_REVIEW' },
+      { ownerId: owner.id, division: 'BUY', titleAr: 'AI real estate scope', priceMinor: 100, currency: 'USD', status: 'PENDING_REVIEW' },
+    ] })
+    for (const [section, enabled] of [['str', false], ['commerce', false], ['realestate', true]]) {
+      const response = await request(app).put('/api/admin/ai-controls').set('Authorization', `Bearer ${admin.token}`).send({ section, enabled })
+      expect(response.status).toBe(200)
+    }
+    const expected = await db().listing.count({ where: { status: 'PENDING_REVIEW', division: { in: ['BUY', 'RENTALS', 'NEW_CONSTRUCTION'] } } })
+    const report = await request(app).get('/api/admin/ai-daily-report').set('Authorization', `Bearer ${admin.token}`)
+    expect(report.status).toBe(200)
+    expect(report.body.report.listingsPending).toBe(expected)
+  })
 })

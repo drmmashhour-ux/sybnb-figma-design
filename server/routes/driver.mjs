@@ -8,6 +8,7 @@ import { chargeCompletedRide, srRideFinanceSplit } from '../lib/sr-payments.mjs'
 import { assertVehicleEligible } from '../lib/fleet.mjs'
 import { assertSyriaCoords } from '../lib/sr-geocoding.mjs'
 import { sweepExpiredOffers } from '../lib/sr-dispatch.mjs'
+import { encryptPayoutAccount, payoutAccountLast4 } from '../lib/payout-account.mjs'
 
 const DRIVER_DOCUMENT_TYPES = ['LICENSE', 'VEHICLE_REGISTRATION', 'INSURANCE']
 // SECURITY (015): the private assetUrl/storage key is NEVER returned in JSON — bytes stream only via /file.
@@ -16,7 +17,34 @@ const DRIVER_DOCUMENT_SAFE_SELECT = {
   reviewedById: true, reviewedAt: true, createdAt: true, updatedAt: true,
 }
 
+function safeDriverPayoutView(payoutMethod) {
+  if (!payoutMethod || typeof payoutMethod !== 'object' || payoutMethod.type !== 'sham_cash') return null
+  return { type: 'sham_cash', accountHolder: payoutMethod.accountHolder || '', last4: payoutMethod.last4 || '', updatedAt: payoutMethod.updatedAt || null }
+}
+
 export async function handleDriver(req, res, url, context) {
+  if (url.pathname === '/api/driver/payout') {
+    requireAuth(context, ['DRIVER'])
+    if (req.method === 'GET') {
+      const user = await db().user.findUnique({ where: { id: context.user.id }, select: { payoutMethod: true } })
+      return json(res, 200, { ok: true, payout: safeDriverPayoutView(user?.payoutMethod) })
+    }
+    if (req.method !== 'PUT') return methodNotAllowed(res, ['GET', 'PUT'])
+    const body = await readJson(req)
+    assertNoUnknownFields(body, ['accountHolder', 'shamCashNumber'])
+    const accountHolder = assertBoundedString(body.accountHolder, { fieldName: 'accountHolder', maxLength: 120, required: true })
+    const digits = String(body.shamCashNumber || '').replace(/\D/g, '')
+    if (digits.length < 6 || digits.length > 24) {
+      const error = new Error('Sham Cash number must be between 6 and 24 digits.')
+      error.statusCode = 400; error.code = 'SHAM_CASH_NUMBER_INVALID'; error.expose = true; throw error
+    }
+    const payoutMethod = { type: 'sham_cash', accountHolder, last4: payoutAccountLast4(digits), ...encryptPayoutAccount(digits), updatedAt: new Date().toISOString() }
+    await db().$transaction([
+      db().user.update({ where: { id: context.user.id }, data: { payoutMethod } }),
+      db().adminAuditLog.create({ data: { actorUserId: context.user.id, action: 'DRIVER_PAYOUT_METHOD_UPDATED', entityType: 'users', entityId: context.user.id, before: {}, after: { type: 'sham_cash', last4: payoutMethod.last4 } } }),
+    ])
+    return json(res, 200, { ok: true, payout: safeDriverPayoutView(payoutMethod) })
+  }
   // SR DRIVER PRESENCE (Phase 1): go online/offline. Only a fully-vetted (road-ready) driver may go
   // ONLINE; going offline is always allowed. Optionally pins the driver's current location in the same
   // call so they start receiving nearby offers immediately.
@@ -175,8 +203,12 @@ export async function handleDriver(req, res, url, context) {
     // updatedAt is Prisma's @updatedAt column, last written on the COMPLETED transition itself
     // (that status is terminal — see assertDriverRideTransition — so no later write can move it
     // again), which makes it a reliable stand-in for "completed at" without a dedicated column.
-    const todayStart = new Date()
-    todayStart.setUTCHours(0, 0, 0, 0)
+    // The owner report and finance dashboard use Toronto business days; keep the driver's "today"
+    // card on the same boundary rather than resetting at UTC midnight.
+    const todayParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+    const noonUtc = Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day, 12)
+    const zonedNoon = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(noonUtc)).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+    const todayStart = new Date(noonUtc - (Date.UTC(zonedNoon.year, zonedNoon.month - 1, zonedNoon.day, zonedNoon.hour) - Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day)))
     const completedToday = completedRides.filter((ride) => ride.updatedAt >= todayStart)
 
     return json(res, 200, {

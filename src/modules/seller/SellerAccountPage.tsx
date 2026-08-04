@@ -166,6 +166,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentProofAdded, setPaymentProofAdded] = useState(false)
   const [paymentProofFiles, setPaymentProofFiles] = useState<string[]>([])
+  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null)
   const [paymentAmountConfirmed, setPaymentAmountConfirmed] = useState(false)
   const [paymentStarted, setPaymentStarted] = useState(false)
   const [cardNumber, setCardNumber] = useState('')
@@ -311,11 +312,13 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   }
 
   function addPaymentProofFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
+    const selected = Array.from(fileList || [])
+    const names = selected.map((file) => file.name).filter(Boolean)
     if (!names.length) return
 
     setPaymentProofFiles((current) => Array.from(new Set([...current, ...names])))
     setPaymentProofAdded(true)
+    setPaymentProofFile(selected[0] || null)
     setSubmitState('idle')
     setSubmitError('')
   }
@@ -343,6 +346,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
         planCode: plan.id,
         legalName: `${firstName.trim()} ${lastName.trim()}`.trim() || undefined,
         sellerType: role.id,
+        proofFile: paymentProofFile || undefined,
       })
       await refreshSellerPlanStatus()
       setPlanSubmitState('idle')
@@ -1044,6 +1048,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                       setPaymentReference('')
                       setPaymentProofAdded(false)
                       setPaymentProofFiles([])
+                      setPaymentProofFile(null)
                       setPaymentAmountConfirmed(false)
                       setPaymentStarted(false)
                       setCardNumber('')

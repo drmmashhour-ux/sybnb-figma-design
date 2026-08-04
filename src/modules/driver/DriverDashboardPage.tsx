@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -7,9 +7,11 @@ import {
   fetchDriverDocuments,
   fetchDriverVehicles,
   fetchPendingSrRides,
+  fetchDriverPayout,
   fetchPrototypeDriverOverview,
   postDriverLocation,
   setDriverAvailability,
+  saveDriverPayout,
   updatePrototypeDriverRideStatus,
   verifyDriverPickupPin,
   type PlatformDriverDocument,
@@ -65,8 +67,8 @@ const copy = {
     payout: 'صرف السائق',
     nextBest: 'أفضل إجراء',
     nextBestText: 'ابدأ بالرحلات النشطة، ثم حدّث الحالة فور الوصول لتفعيل ثقة العميل.',
-    openOperations: 'فتح العمليات',
-    openFinance: 'فتح المالية',
+    openOperations: 'إدارة المركبات والوثائق',
+    openFinance: 'فتح محفظتي',
     connected: 'متصل',
     disconnected: 'غير متصل',
     available: 'متاح',
@@ -96,6 +98,7 @@ const copy = {
     todayRidesCount: 'رحلة مكتملة اليوم',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
+    payoutAccount: 'حساب صرف الأرباح', payoutHolder: 'اسم صاحب الحساب', payoutNumber: 'رقم Sham Cash', payoutSave: 'حفظ حساب الصرف', payoutSaved: 'محفوظ وينتهي بـ', payoutSecure: 'الرقم الكامل مشفر ولا يظهر بعد الحفظ.',
   },
   en: {
     back: 'Back to landing',
@@ -138,8 +141,8 @@ const copy = {
     payout: 'Driver payout',
     nextBest: 'Best next action',
     nextBestText: 'Start with active rides, then update arrival state immediately to increase rider confidence.',
-    openOperations: 'Open operations',
-    openFinance: 'Open finance',
+    openOperations: 'Manage vehicles & documents',
+    openFinance: 'Open my wallet',
     connected: 'Connected',
     disconnected: 'Offline',
     available: 'Available',
@@ -169,6 +172,7 @@ const copy = {
     todayRidesCount: 'completed rides today',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
+    payoutAccount: 'Earnings payout account', payoutHolder: 'Account holder', payoutNumber: 'Sham Cash number', payoutSave: 'Save payout account', payoutSaved: 'Saved ending in', payoutSecure: 'The full number is encrypted and is not shown after saving.',
   },
 }
 
@@ -189,10 +193,15 @@ export function DriverDashboardPage({ lang }: Props) {
   const [online, setOnline] = useState(false)
   const [presenceBusy, setPresenceBusy] = useState(false)
   const [presenceMsg, setPresenceMsg] = useState('')
+  const [payoutHolder, setPayoutHolder] = useState('')
+  const [payoutNumber, setPayoutNumber] = useState('')
+  const [payoutLast4, setPayoutLast4] = useState('')
+  const [payoutMessage, setPayoutMessage] = useState('')
 
   useEffect(() => {
     void loadOverview()
     void loadPendingRides()
+    void fetchDriverPayout().then((payout) => { if (payout) { setPayoutHolder(payout.accountHolder); setPayoutLast4(payout.last4) } }).catch(() => {})
     const interval = window.setInterval(() => void loadPendingRides(), 6000)
     return () => window.clearInterval(interval)
   }, [])
@@ -336,6 +345,19 @@ export function DriverDashboardPage({ lang }: Props) {
     }
   }
 
+  async function submitPayoutAccount(event: FormEvent) {
+    event.preventDefault()
+    setPayoutMessage('')
+    try {
+      const payout = await saveDriverPayout({ accountHolder: payoutHolder, shamCashNumber: payoutNumber })
+      setPayoutLast4(payout.last4)
+      setPayoutNumber('')
+      setPayoutMessage(`${t.payoutSaved} ${payout.last4}`)
+    } catch (error) {
+      setPayoutMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <button style={styles.back} onClick={() => (window.location.hash = '/')}>
@@ -452,6 +474,17 @@ export function DriverDashboardPage({ lang }: Props) {
           <Info label={t.todayEarnings} value={moneyText(overview?.totals.todayEarningsMinor || 0, 'SYP', lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
           <Info label={t.todayRidesCount} value={String(overview?.totals.todayCompletedCount || 0)} />
         </article>
+        <article style={styles.docsPanel}>
+          <h2>{t.payoutAccount}</h2>
+          {payoutLast4 ? <p style={styles.presenceMsg}>{t.payoutSaved} •••• {payoutLast4}</p> : null}
+          <form onSubmit={(event) => void submitPayoutAccount(event)} style={{ display: 'grid', gap: 8 }}>
+            <input value={payoutHolder} onChange={(event) => setPayoutHolder(event.target.value)} placeholder={t.payoutHolder} maxLength={120} required />
+            <input value={payoutNumber} onChange={(event) => setPayoutNumber(event.target.value)} placeholder={t.payoutNumber} inputMode="numeric" autoComplete="off" required />
+            <small>{t.payoutSecure}</small>
+            <button style={styles.primaryButton} type="submit">{t.payoutSave}</button>
+            {payoutMessage ? <p style={styles.presenceMsg} role="status">{payoutMessage}</p> : null}
+          </form>
+        </article>
       </section>
 
       <section style={styles.driverCtas}>
@@ -466,8 +499,8 @@ export function DriverDashboardPage({ lang }: Props) {
           <strong>{t.nextBest}</strong>
           <p>{t.nextBestText}</p>
           <div style={styles.actions}>
-            <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/operations')}>{t.openOperations}</button>
-            <button style={styles.primaryButton} onClick={() => (window.location.hash = '/finance')}>{t.openFinance}</button>
+            <button style={styles.secondaryButton} onClick={() => (window.location.hash = '/driver/vehicles')}>{t.openOperations}</button>
+            <button style={styles.primaryButton} onClick={() => (window.location.hash = '/wallet')}>{t.openFinance}</button>
           </div>
         </article>
       </section>

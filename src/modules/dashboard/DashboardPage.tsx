@@ -283,7 +283,7 @@ export function DashboardPage({ lang }: Props) {
       [isAr ? 'مكان الإقامة' : 'Stay', activeTitle || '-'],
       [isAr ? 'التواريخ' : 'Dates', activeTripDates || '-'],
       [isAr ? 'الحالة' : 'Status', statusText(activeBooking.status, lang)],
-      [isAr ? 'المبلغ' : 'Amount', moneyText(activeBooking.amountMinor, 'USD', lang)],
+      [isAr ? 'المبلغ' : 'Amount', moneyText(activeBooking.amountMinor, activeBooking.currency, lang)],
       [isAr ? 'الضيف' : 'Guest', displayName],
     ]
     const body = rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('')
@@ -352,9 +352,16 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
     .slice(0, 6)
     .map((booking) => normalizePastTrip(booking, lang))
   const walletRows = normalizeWalletRows(overview, lang)
-  const protectedFunds = overview?.payments
+  const protectedByCurrency = (overview?.payments || [])
     .filter((payment) => ['PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED'].includes(payment.status))
-    .reduce((total, payment) => total + payment.amountMinor, 0) || activeBooking?.amountMinor || 0
+    .reduce<Record<string, number>>((totals, payment) => {
+      totals[payment.currency] = (totals[payment.currency] || 0) + payment.amountMinor
+      return totals
+    }, {})
+  if (!Object.keys(protectedByCurrency).length && activeBooking) protectedByCurrency[activeBooking.currency] = activeBooking.amountMinor
+  const protectedFundsText = Object.entries(protectedByCurrency).map(([currency, amount]) => moneyText(amount, currency, lang)).join(' · ') || moneyText(0, overview?.wallet?.currency || 'SYP', lang)
+  const approvedReceipt = activeBooking?.payments?.find((payment) => payment.status === 'APPROVED')
+  const walletCurrency = overview?.wallet?.currency || 'SYP'
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -461,8 +468,8 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
             <button style={styles.sosButton} onClick={() => (window.location.hash = activeBooking ? `/booking/dispute/${activeBooking.id}` : '/immocontact')}>
               {t.sos} ⚠
             </button>
-            {activeBooking?.payments?.[0]?.id ? (
-              <button style={styles.goldButton} onClick={() => (window.location.hash = `/payment/receipt/${activeBooking?.payments?.[0]?.id}`)}>
+            {approvedReceipt?.id ? (
+              <button style={styles.goldButton} onClick={() => (window.location.hash = `/payment/receipt/${approvedReceipt.id}`)}>
                 {t.invoice} ▤
               </button>
             ) : null}
@@ -480,7 +487,7 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
           <section style={styles.quickCards}>
             <button style={styles.paymentTile} onClick={() => (window.location.hash = '/wallet')}>
               <span>{t.availableBalance}</span>
-              <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, 'USD', lang)}</strong>
+              <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, walletCurrency, lang)}</strong>
               <small>{t.wallet}</small>
             </button>
             <button style={styles.trustTile} onClick={() => (window.location.hash = '/trust-center')}>
@@ -513,11 +520,11 @@ td.v{font-weight:600;text-align:${isAr ? 'left' : 'right'};direction:ltr;word-br
         <div style={styles.walletStats}>
           <article style={styles.walletStat}>
             <span>{t.availableBalance}</span>
-            <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, 'USD', lang)}</strong>
+            <strong>{moneyText(overview?.wallet?.cachedBalanceMinor || 0, walletCurrency, lang)}</strong>
           </article>
           <article style={styles.walletStatProtected}>
             <span>{t.protectedFunds}</span>
-            <strong>{moneyText(protectedFunds, 'USD', lang)}</strong>
+            <strong>{protectedFundsText}</strong>
           </article>
         </div>
 

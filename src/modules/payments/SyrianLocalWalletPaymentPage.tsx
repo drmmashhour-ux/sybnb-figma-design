@@ -298,7 +298,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
           <button className="wallet-primary" onClick={() => (window.location.hash = `/payment/receipt/${paymentProof?.id}`)}>
             {t.receipt}
           </button>
-          <button onClick={() => (window.location.hash = '/')}>{t.followTrip}</button>
+          <button onClick={() => (window.location.hash = '/trips')}>{t.followTrip}</button>
         </section>
       ) : (
         <>

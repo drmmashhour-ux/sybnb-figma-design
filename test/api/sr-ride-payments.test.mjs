@@ -238,12 +238,13 @@ describe('SR ride payments: cashless charge + driver settlement', () => {
     expect(noMethod.status).toBe(400)
     expect(noMethod.body.error.code).toBe('PAYOUT_METHOD_REQUIRED')
 
-    // Add a Sham Cash payout method.
-    await db().driverProfile.upsert({
-      where: { userId: driver.user.id },
-      create: { userId: driver.user.id, payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
-      update: { payoutMethod: 'SHAM_CASH', payoutAccountRef: '0999-000-111' },
-    })
+    // Driver adds the encrypted Sham Cash payout method through the real account tunnel.
+    const payoutSetup = await request(app)
+      .put('/api/driver/payout')
+      .set('Authorization', `Bearer ${driver.token}`)
+      .send({ accountHolder: 'Test Driver', shamCashNumber: '0999000111' })
+    expect(payoutSetup.status).toBe(200)
+    expect(payoutSetup.body.payout).toMatchObject({ accountHolder: 'Test Driver', last4: '0111' })
 
     // Pays the accrued balance once.
     const first = await request(app)

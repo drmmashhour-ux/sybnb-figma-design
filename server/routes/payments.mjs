@@ -781,6 +781,15 @@ export async function handlePayments(req, res, url, context) {
 
     const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+    if (amountMinor > 0 && (!fileBase64 || !mimeType)) {
+      const error = new Error('A real payment proof file is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_PROOF_REQUIRED'
+      error.expose = true
+      throw error
+    }
 
     const proof = await db().$transaction(async (tx) => {
       await lockPaymentReference(tx, 'seller_plan', providerRef)
@@ -799,16 +808,19 @@ export async function handlePayments(req, res, url, context) {
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
           currency: 'USD', // MKT-4: plan prices are a USD server table; never take the currency from the client
-          proofAssetUrl: body.proofAssetUrl || undefined,
           providerRef,
         },
       })
+      if (amountMinor > 0) {
+        await savePaymentProofFile(tx, created.id, fileBase64, mimeType)
+        await tx.paymentProof.update({ where: { id: created.id }, data: { proofAssetUrl: `/api/payments/str-plan-sham-proof/${created.id}/file` } })
+      }
       await tx.sellerProfile.upsert({
         where: { userId: context.user.id },
         create: { userId: context.user.id, legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
         update: { legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
       })
-      return created
+      return tx.paymentProof.findUnique({ where: { id: created.id } })
     })
 
     return json(res, 201, { ok: true, proof })

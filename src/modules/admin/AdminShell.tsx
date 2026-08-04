@@ -63,7 +63,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'ai', ar: '٧. إدارة الذكاء الاصطناعي', en: '7. AI Management',
     items: [
-      { key: 'aiBrain', hash: '/ai-brain', icon: '✦', ar: 'تشغيل وإيقاف أقسام AI', en: 'AI section controls' },
+      { key: 'aiBrain', hash: '/ai-brain', icon: '✦', ar: 'أقسام تقرير AI', en: 'AI report sections' },
       { key: 'aiReport', hash: '/ai-brain', icon: '▤', ar: 'التقرير الصباحي اليومي', en: 'Daily morning report' },
       { key: 'aiApprovals', hash: '/admin/review', icon: '✓', ar: 'قرارات تنتظر موافقتك', en: 'Decisions awaiting approval' },
     ],

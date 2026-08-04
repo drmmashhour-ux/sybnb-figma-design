@@ -80,7 +80,18 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
     }
   }
 
-  const currency = earnings?.totals.currency || 'USD'
+  // The API rows can legitimately contain more than one currency. Never add their minor units
+  // together or label the result with the first row's currency.
+  const totalsByCurrency = (earnings?.rows || []).reduce<Record<string, { forecastedMinor: number; grossEarnedMinor: number; releasedMinor: number; pendingMinor: number }>>((groups, row) => {
+    const totals = groups[row.currency] ||= { forecastedMinor: 0, grossEarnedMinor: 0, releasedMinor: 0, pendingMinor: 0 }
+    if (row.status === 'CONFIRMED') totals.forecastedMinor += row.hostGrossMinor
+    if (row.status === 'COMPLETED') {
+      totals.grossEarnedMinor += row.hostGrossMinor
+      if (row.payoutStatus === 'RELEASED') totals.releasedMinor += row.hostGrossMinor
+      else totals.pendingMinor += row.hostGrossMinor
+    }
+    return groups
+  }, {})
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -97,24 +108,14 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
 
       {earnings && (
         <>
-          <section style={styles.stats}>
-            <div style={styles.stat}>
-              <span>{t.forecasted}</span>
-              <b>{moneyText(earnings.totals.forecastedMinor, currency, lang)}</b>
-            </div>
-            <div style={styles.stat}>
-              <span>{t.earned}</span>
-              <b>{moneyText(earnings.totals.grossEarnedMinor, currency, lang)}</b>
-            </div>
-            <div style={styles.stat}>
-              <span>{t.released}</span>
-              <b style={{ color: '#20d29b' }}>{moneyText(earnings.totals.releasedMinor, currency, lang)}</b>
-            </div>
-            <div style={styles.stat}>
-              <span>{t.pending}</span>
-              <b style={{ color: '#e5b80b' }}>{moneyText(earnings.totals.pendingMinor, currency, lang)}</b>
-            </div>
-          </section>
+          {Object.entries(totalsByCurrency).map(([currency, totals]) => (
+            <section style={styles.stats} key={currency} aria-label={currency}>
+              <div style={styles.stat}><span>{t.forecasted} · {currency}</span><b>{moneyText(totals.forecastedMinor, currency, lang)}</b></div>
+              <div style={styles.stat}><span>{t.earned} · {currency}</span><b>{moneyText(totals.grossEarnedMinor, currency, lang)}</b></div>
+              <div style={styles.stat}><span>{t.released} · {currency}</span><b style={{ color: '#20d29b' }}>{moneyText(totals.releasedMinor, currency, lang)}</b></div>
+              <div style={styles.stat}><span>{t.pending} · {currency}</span><b style={{ color: '#e5b80b' }}>{moneyText(totals.pendingMinor, currency, lang)}</b></div>
+            </section>
+          ))}
 
           <section style={styles.table}>
             <div style={styles.tableHead}>
