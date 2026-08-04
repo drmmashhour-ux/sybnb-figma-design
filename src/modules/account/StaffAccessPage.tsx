@@ -48,6 +48,8 @@ const labels = {
     emailMismatch: 'البريد الإلكتروني وتأكيد البريد غير متطابقين.',
     password: 'كلمة المرور',
     repeatPassword: 'تأكيد كلمة المرور',
+    showPasswords: 'إظهار كلمتي المرور',
+    hidePasswords: 'إخفاء كلمتي المرور',
     newPassword: 'كلمة المرور الجديدة',
     phone: 'رقم الهاتف',
     partnerType: 'نوع الحساب',
@@ -102,6 +104,8 @@ const labels = {
     emailMismatch: 'Email and repeated email do not match.',
     password: 'Password',
     repeatPassword: 'Repeat password',
+    showPasswords: 'Show passwords',
+    hidePasswords: 'Hide passwords',
     newPassword: 'New password',
     phone: 'Phone number',
     partnerType: 'Account type',
@@ -153,6 +157,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [password, setPassword] = useState('')
   const [passwordRepeat, setPasswordRepeat] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [showResetPasswords, setShowResetPasswords] = useState(false)
   const [phone, setPhone] = useState('')
   const [partnerType, setPartnerType] = useState<PartnerType>('HOST')
   const [code, setCode] = useState('')
@@ -344,6 +349,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       setStatus('idle')
       setNewPassword('')
       setPasswordRepeat('')
+      setShowResetPasswords(false)
       setIsErrorMessage(false)
       setMode('signIn')
       setCodeSent(false)
@@ -517,12 +523,20 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             <>
               <label style={styles.label}>
                 {t.newPassword}
-                <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" name="sybnb-new-password" autoComplete="new-password" dir="ltr" />
+                <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type={showResetPasswords ? 'text' : 'password'} name="sybnb-new-password" autoComplete="new-password" dir="ltr" />
               </label>
               <label style={styles.label}>
                 {t.repeatPassword}
-                <input style={styles.input} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} type="password" name="sybnb-new-password-confirmation" autoComplete="new-password" dir="ltr" />
+                <input style={styles.input} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} type={showResetPasswords ? 'text' : 'password'} name="sybnb-new-password-confirmation" autoComplete="new-password" dir="ltr" />
               </label>
+              <button
+                type="button"
+                style={styles.showPasswordButton}
+                aria-pressed={showResetPasswords}
+                onClick={() => setShowResetPasswords((visible) => !visible)}
+              >
+                {showResetPasswords ? t.hidePasswords : t.showPasswords}
+              </button>
             </>
           ) : (
             <>
@@ -590,6 +604,7 @@ const styles: Record<string, CSSProperties> = {
   body: { color: '#aab4ca', lineHeight: 1.8, margin: '14px 0 24px' },
   primary: { width: '100%', minHeight: 62, border: 0, borderRadius: 12, background: '#4760ff', color: '#fff', fontWeight: 900, fontSize: 19, cursor: 'pointer', marginTop: 18 },
   linkButton: { background: 'transparent', border: 0, color: '#8fa2ff', fontWeight: 800, cursor: 'pointer', marginTop: 12, padding: 0 },
+  showPasswordButton: { background: 'transparent', border: '1px solid #4760ff', borderRadius: 10, color: '#aebaff', cursor: 'pointer', fontWeight: 850, gridColumn: '1 / -1', justifySelf: 'start', minHeight: 42, padding: '0 14px' },
   segmented: { display: 'grid', gap: 8, marginBottom: 18 },
   segment: { minHeight: 52, border: '1px solid #27324d', borderRadius: 12, background: '#0c111d', color: '#aab4ca', fontWeight: 900, cursor: 'pointer' },
   segmentActive: { minHeight: 52, border: '1px solid #4760ff', borderRadius: 12, background: '#18224a', color: '#fff', fontWeight: 900, cursor: 'pointer' },

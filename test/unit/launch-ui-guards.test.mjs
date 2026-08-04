@@ -59,6 +59,8 @@ describe('launch UI safety guards', () => {
     expect(source).toContain("if (!codeConfirmed && code.trim()) activeGrant = (await confirmCode()) || ''")
     expect(source).toContain('name="sybnb-new-password-confirmation"')
     expect(source).toContain('if (newPassword !== passwordRepeat)')
+    expect(source).toContain("type={showResetPasswords ? 'text' : 'password'}")
+    expect(source).toContain('aria-pressed={showResetPasswords}')
     expect(source).toContain("setMode('signIn')")
     expect(source.indexOf("setMode('signIn')")).toBeLessThan(source.indexOf('setMessage(t.resetSuccess)'))
   })
