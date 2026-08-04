@@ -324,6 +324,10 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const isAr = lang === 'ar'
   const isStaysHost = focus === 'stays'
   const providerCopy = getProviderCopy(t, isAr, focus)
+  const providerRoute = (suffix: string) => mode === 'seller' ? `/host/seller/${suffix}` : `/host/${suffix}`
+  const inventoryRoute = focus === 'cars' ? '/host/cars'
+    : focus === 'newConstruction' ? '/host/new-construction'
+      : focus === 'marketplace' ? '/host/marketplace' : '/host/stays'
   const [overview, setOverview] = useState<PlatformHostOverview | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
   const [message, setMessage] = useState('')
@@ -626,12 +630,12 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         <span style={styles.hostHubTitle}>{t.hubTitle}</span>
         <div style={styles.hostHubGrid}>
           {([
-            [t.hubMyListings, '/host/stays', '▤'],
-            [t.hubAvailability, '/host/stays', '▦'],
-            [t.hubBookings, '/host/bookings', '▧'],
-            [t.hubPayments, '/host/earnings', '▰'],
-            [t.hubPayout, '/host/payout', '⎘'],
-            [t.hubInquiries, '/host/inquiries', '✉'],
+            [t.hubMyListings, inventoryRoute, '▤'],
+            [t.hubAvailability, inventoryRoute, '▦'],
+            [t.hubBookings, providerRoute('bookings'), '▧'],
+            [t.hubPayments, providerRoute('earnings'), '▰'],
+            [t.hubPayout, providerRoute('payout'), '⎘'],
+            [t.hubInquiries, providerRoute('inquiries'), '✉'],
           ] as const).map(([label, route, icon]) => (
             <button key={label} style={styles.hostHubLink} onClick={() => (window.location.hash = route)}>
               <span style={styles.hostHubIcon} aria-hidden="true">{icon}</span>
@@ -649,7 +653,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         <div style={styles.hostMetric}>
           <span>{t.payoutReady}</span>
           <strong>{confirmedValueText}</strong>
-          <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/earnings')}>
+          <button style={styles.earningsLink} onClick={() => (window.location.hash = providerRoute('earnings'))}>
             {t.viewEarningsReport}
           </button>
         </div>
@@ -678,7 +682,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
             ? t.insightPanelBody(overview!.insightSignal!.listingsNeedingAttention)
             : t.insightPanelEmpty}
         </p>
-        <button style={styles.goldButton} onClick={() => (window.location.hash = '/host/insights')}>
+        <button style={styles.goldButton} onClick={() => (window.location.hash = providerRoute('insights'))}>
           {t.insightPanelCta}
         </button>
       </section>
@@ -688,11 +692,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <h2>{t.activeListings}</h2>
           <small>{providerCopy.subtitle}</small>
           <span>{activeListingsLabel}</span>
-          {mode === 'host' && (
-            <button style={styles.primaryButton} onClick={() => (window.location.hash = '/sell/listing-wizard')}>
-              + {t.createNewListing}
-            </button>
-          )}
+          <button style={styles.primaryButton} onClick={() => (window.location.hash = '/sell/listing-wizard')}>
+            + {t.createNewListing}
+          </button>
         </div>
         <div style={styles.hostTable}>
           <div style={styles.hostTableHead}>
@@ -1031,11 +1033,11 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           // These must point at HOST pages — /finance and /operations are ADMIN-only (a host clicking
           // them hit an access-denied screen). A host's money view is /host/earnings; payouts are
           // /host/payout; support is the host inbox.
-          [t.paymentState, '/host/earnings', '▰'],
-          [t.profitLog, '/host/earnings', '↗'],
+          [t.paymentState, providerRoute('earnings'), '▰'],
+          [t.profitLog, providerRoute('earnings'), '↗'],
           [t.trustCenter, '/trust-center', '♢'],
-          [t.opsSupport, '/host/inquiries', '?'],
-          [t.clientMessages, '/host/inquiries', '✉'],
+          [t.opsSupport, providerRoute('inquiries'), '?'],
+          [t.clientMessages, providerRoute('inquiries'), '✉'],
         ].map(([label, route, icon]) => (
           <button key={label} style={styles.quickLink} onClick={() => (window.location.hash = String(route))}>
             <strong>{label}</strong>

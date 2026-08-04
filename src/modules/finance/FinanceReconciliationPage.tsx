@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
+  fetchAdminPayoutAccount,
   fetchAdminRevenueSummary,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
@@ -43,6 +44,7 @@ const copy = {
     releaseError: 'تعذر تحرير هذا التحويل.',
     ledger: 'سجل التدقيق',
     release: 'تحرير التحويل',
+    revealAccount: 'عرض حساب الصرف', payoutReference: 'مرجع تحويل Sham Cash',
     review: 'مراجعة',
     receipt: 'الإيصال',
     booking: 'الحجز',
@@ -109,6 +111,7 @@ const copy = {
     releaseError: 'Could not release this payout.',
     ledger: 'Audit log',
     release: 'Release payout',
+    revealAccount: 'Reveal payout account', payoutReference: 'Sham Cash transfer reference',
     review: 'Review',
     receipt: 'Receipt',
     booking: 'Booking',
@@ -166,6 +169,8 @@ export function FinanceReconciliationPage({ lang }: Props) {
   const [payoutHoldDays, setPayoutHoldDays] = useState(14)
   const [releasingId, setReleasingId] = useState('')
   const [releaseError, setReleaseError] = useState('')
+  const [payoutRefs, setPayoutRefs] = useState<Record<string, string>>({})
+  const [revealedAccounts, setRevealedAccounts] = useState<Record<string, { accountHolder: string; number: string }>>({})
   const [revenue, setRevenue] = useState<PlatformRevenueSummary | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -261,10 +266,12 @@ export function FinanceReconciliationPage({ lang }: Props) {
   }
 
   async function releasePayout(bookingId: string) {
+    const payoutRef = (payoutRefs[bookingId] || '').trim()
+    if (!payoutRef) { setReleaseError(t.payoutReference); return }
     setReleasingId(bookingId)
     setReleaseError('')
     try {
-      await releaseAdminPayout(bookingId)
+      await releaseAdminPayout(bookingId, payoutRef)
       const nextPayouts = await fetchAdminPayouts()
       setPayouts(nextPayouts.payouts)
     } catch (error) {
@@ -274,14 +281,38 @@ export function FinanceReconciliationPage({ lang }: Props) {
     }
   }
 
+  async function revealPayoutAccount(bookingId: string) {
+    setReleaseError('')
+    try {
+      const account = await fetchAdminPayoutAccount(bookingId)
+      setRevealedAccounts((current) => ({ ...current, [bookingId]: account }))
+    } catch (error) {
+      setReleaseError(error instanceof Error ? error.message : t.releaseError)
+    }
+  }
+
   const payments = queue?.payments || []
   const bookings = queue?.bookings || []
-  const protectedMinor = useMemo(() => {
-    const paymentTotal = payments.reduce((sum, payment) => sum + payment.amountMinor, 0)
-    const bookingTotal = bookings.reduce((sum, booking) => sum + booking.amountMinor, 0)
-    return paymentTotal + bookingTotal
+  const protectedByCurrency = useMemo(() => {
+    const totals = new Map<string, number>()
+    const representedBookings = new Set<string>()
+    for (const payment of payments) {
+      totals.set(payment.currency, (totals.get(payment.currency) || 0) + payment.amountMinor)
+      if (payment.bookingId) representedBookings.add(payment.bookingId)
+    }
+    // REQUESTED bookings have no protected money yet. A DISPUTED booking does; add it only when a
+    // pending proof above did not already represent the same booking.
+    for (const booking of bookings) if (booking.status === 'DISPUTED' && !representedBookings.has(booking.id)) {
+      totals.set(booking.currency, (totals.get(booking.currency) || 0) + booking.amountMinor)
+    }
+    return Array.from(totals.entries()).map(([currency, amountMinor]) => ({ currency, amountMinor }))
   }, [bookings, payments])
-  const payoutHoldMinor = useMemo(() => payouts.reduce((sum, payout) => sum + payout.hostPayoutMinor, 0), [payouts])
+  const payoutHoldByCurrency = useMemo(() => {
+    const totals = new Map<string, number>()
+    for (const payout of payouts) totals.set(payout.currency, (totals.get(payout.currency) || 0) + payout.hostPayoutMinor)
+    return Array.from(totals.entries()).map(([currency, amountMinor]) => ({ currency, amountMinor }))
+  }, [payouts])
+  const moneyGroup = (rows: Array<{ currency: string; amountMinor: number }>) => rows.map((row) => moneyText(row.amountMinor, row.currency, lang)).join(' · ') || '0'
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -309,9 +340,9 @@ export function FinanceReconciliationPage({ lang }: Props) {
       )}
 
       <section style={styles.stats}>
-        <FinanceStat label={t.protectedFunds} value={moneyText(protectedMinor, 'SYP', lang)} tone="#20d29b" />
+        <FinanceStat label={t.protectedFunds} value={moneyGroup(protectedByCurrency)} tone="#20d29b" />
         <FinanceStat label={t.pendingProofs} value={String(payments.length)} tone="#5268ff" />
-        <FinanceStat label={t.payoutHold} value={moneyText(payoutHoldMinor, 'SYP', lang)} tone="#e5b80b" />
+        <FinanceStat label={t.payoutHold} value={moneyGroup(payoutHoldByCurrency)} tone="#e5b80b" />
       </section>
 
       <section style={styles.grid}>
@@ -358,8 +389,11 @@ export function FinanceReconciliationPage({ lang }: Props) {
               </div>
               <b>{moneyText(payout.hostPayoutMinor, payout.currency, lang)}</b>
               <span>{payout.eligibleNow ? t.readyToRelease : t.waitingHold}</span>
+              {payout.eligibleNow && payout.hostPayoutMethod ? <button type="button" onClick={() => void revealPayoutAccount(payout.bookingId)}>{t.revealAccount}</button> : null}
+              {revealedAccounts[payout.bookingId] ? <small dir="ltr">{revealedAccounts[payout.bookingId].accountHolder} · {revealedAccounts[payout.bookingId].number}</small> : null}
+              <input value={payoutRefs[payout.bookingId] || ''} onChange={(event) => setPayoutRefs((current) => ({ ...current, [payout.bookingId]: event.target.value }))} placeholder={t.payoutReference} disabled={!payout.eligibleNow || !revealedAccounts[payout.bookingId]} />
               <button
-                disabled={!payout.eligibleNow || releasingId === payout.bookingId}
+                disabled={!payout.eligibleNow || !revealedAccounts[payout.bookingId] || !payoutRefs[payout.bookingId]?.trim() || releasingId === payout.bookingId}
                 onClick={() => void releasePayout(payout.bookingId)}
               >
                 {releasingId === payout.bookingId ? t.releasing : t.release}

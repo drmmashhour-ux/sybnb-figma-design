@@ -8,7 +8,6 @@ import { isTrustProtectionRoute } from '../modules/trust/trustRoutes'
 import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
 import { AdminShell } from '../modules/admin/AdminShell'
-import { getStoredSellerSession } from '../shared/api/platformApi'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AdminControlCenterPage = lazyNamed(() => import('../modules/admin/AdminControlCenterPage'), 'AdminControlCenterPage')
@@ -107,7 +106,6 @@ export function App() {
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
-  const providerMode = typeof window !== 'undefined' && getStoredSellerSession() ? 'seller' : 'host'
 
   const routed = (
       <Suspense fallback={<RouteLoading lang={lang} />}>
@@ -138,16 +136,16 @@ export function App() {
             mode={path === '/host/stays' || path === '/host' ? 'host' : 'seller'}
             focus={hostFocusFromPath(path)}
           />
-        ) : path === '/host/bookings' ? (
-          <HostBookingsPage lang={lang} mode={providerMode} />
-        ) : path === '/host/payout' ? (
-          <HostPayoutPage lang={lang} mode={providerMode} />
-        ) : path === '/host/earnings' ? (
-          <HostEarningsPage lang={lang} mode={providerMode} />
-        ) : path === '/host/insights' ? (
-          <HostInsightsPanel lang={lang} />
-        ) : path === '/host/inquiries' ? (
-          <HostInquiriesPage lang={lang} mode={providerMode} />
+        ) : path === '/host/bookings' || path === '/host/seller/bookings' ? (
+          <HostBookingsPage lang={lang} mode={path.startsWith('/host/seller/') ? 'seller' : 'host'} />
+        ) : path === '/host/payout' || path === '/host/seller/payout' ? (
+          <HostPayoutPage lang={lang} mode={path.startsWith('/host/seller/') ? 'seller' : 'host'} />
+        ) : path === '/host/earnings' || path === '/host/seller/earnings' ? (
+          <HostEarningsPage lang={lang} mode={path.startsWith('/host/seller/') ? 'seller' : 'host'} />
+        ) : path === '/host/insights' || path === '/host/seller/insights' ? (
+          <HostInsightsPanel lang={lang} mode={path.startsWith('/host/seller/') ? 'seller' : 'host'} />
+        ) : path === '/host/inquiries' || path === '/host/seller/inquiries' ? (
+          <HostInquiriesPage lang={lang} mode={path.startsWith('/host/seller/') ? 'seller' : 'host'} />
         ) : path === '/driver/vehicles' ? (
           <DriverVehiclesPage lang={lang} />
         ) : path === '/driver' ? (

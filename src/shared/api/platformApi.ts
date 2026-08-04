@@ -2004,7 +2004,8 @@ export type PlatformHostInquiryThread = {
   guestId: string | null
   updatedAt: string
   listing: { id: string; titleAr: string; titleEn: string | null; division: string; priceMinor: number; currency: string } | null
-  guest: { id: string; displayName: string; email: string | null } | null
+  // Owner inbox deliberately never receives a customer's email; contact remains on-platform.
+  guest: { id: string; displayName: string } | null
   messages: PlatformMessage[]
   documents: PlatformThreadDocument[]
 }
@@ -2605,10 +2606,15 @@ export async function fetchAdminPayouts() {
   return response
 }
 
-export async function releaseAdminPayout(bookingId: string) {
+export async function fetchAdminPayoutAccount(bookingId: string) {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; account: { type: string; accountHolder: string; number: string } }>(`/api/admin/payouts/${bookingId}/account`, { token }))
+  return response.account
+}
+
+export async function releaseAdminPayout(bookingId: string, payoutRef: string) {
   const response = await runAdminRequest((token) => apiRequest<{ ok: true; walletEntry: Record<string, unknown> }>(
     `/api/admin/payouts/${bookingId}/release`,
-    { method: 'PATCH', token },
+    { method: 'PATCH', token, body: { payoutRef } },
   ))
   return response.walletEntry
 }

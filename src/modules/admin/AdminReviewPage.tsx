@@ -209,9 +209,11 @@ export function AdminReviewPage({ lang, onLanguageChange }: Props) {
   }
 
   async function releasePayout(bookingId: string) {
+    const payoutRef = window.prompt(isAr ? 'أدخل مرجع تحويل Sham Cash بعد تنفيذ التحويل' : 'Enter the Sham Cash transfer reference after completing the transfer')?.trim()
+    if (!payoutRef) return
     setReleasingPayoutId(bookingId)
     try {
-      await releaseAdminPayout(bookingId)
+      await releaseAdminPayout(bookingId, payoutRef)
       await loadPayouts()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t.error)

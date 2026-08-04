@@ -87,7 +87,7 @@ export function MyPropertiesPage({ lang }: Props) {
                       <button
                         style={styles.inquiryPill}
                         title={t.openInbox}
-                        onClick={() => { sessionStorage.setItem(SYNITRES_INQUIRY_FOCUS_LISTING_KEY, p.id); go('/host/inquiries') }}
+                        onClick={() => { sessionStorage.setItem(SYNITRES_INQUIRY_FOCUS_LISTING_KEY, p.id); go('/host/seller/inquiries') }}
                       >💬 {p.inquiryCount} {t.inquiries}</button>
                     ) : null}
                   </div>

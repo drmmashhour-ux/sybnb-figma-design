@@ -48,12 +48,14 @@ function torontoPeriodStarts(now = new Date()) {
   }
   const today = midnight(parts.year, parts.month, parts.day)
   const weekWall = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - 6))
-  return { today, last7Days: midnight(weekWall.getUTCFullYear(), weekWall.getUTCMonth() + 1, weekWall.getUTCDate()), currentMonth: midnight(parts.year, parts.month, 1) }
+  const tomorrowWall = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1))
+  return { today, tomorrow: midnight(tomorrowWall.getUTCFullYear(), tomorrowWall.getUTCMonth() + 1, tomorrowWall.getUTCDate()), last7Days: midnight(weekWall.getUTCFullYear(), weekWall.getUTCMonth() + 1, weekWall.getUTCDate()), currentMonth: midnight(parts.year, parts.month, 1) }
 }
 
 export async function buildDailyExecutiveReport() {
   const now = new Date()
-  const periods = torontoPeriodStarts(now)
+  const boundaries = torontoPeriodStarts(now)
+  const periods = { today: boundaries.today, last7Days: boundaries.last7Days, currentMonth: boundaries.currentMonth }
   const dayStart = periods.today
   const weekStart = periods.last7Days
   const monthStart = periods.currentMonth
@@ -1165,10 +1167,9 @@ export async function handleAdmin(req, res, url, context) {
     requireAuth(context, ['ADMIN', 'SUPPORT'])
 
     const now = new Date()
-    const startOfToday = new Date(now)
-    startOfToday.setHours(0, 0, 0, 0)
-    const endOfToday = new Date(startOfToday)
-    endOfToday.setDate(endOfToday.getDate() + 1)
+    const officePeriods = torontoPeriodStarts(now)
+    const startOfToday = officePeriods.today
+    const endOfToday = officePeriods.tomorrow
     const in7d = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
     const ago24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
     const ago7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
@@ -1184,7 +1185,7 @@ export async function handleAdmin(req, res, url, context) {
       refundedAgg,
       listingsAwaitingReview,
       openDisputes,
-      payoutsReady,
+      payoutCandidates,
       idChecksPending,
       activeLocks,
       lockouts24h,
@@ -1199,7 +1200,10 @@ export async function handleAdmin(req, res, url, context) {
       db().walletEntry.groupBy({ by: ['currency'], _sum: { amountMinor: true }, _count: { _all: true }, where: { createdAt: { gte: ago7d }, OR: [{ type: 'REFUND', referenceType: 'booking_refund' }, { type: 'CREDIT', referenceType: { in: ['booking_refund', 'dispute_refund'] } }] } }),
       db().listing.count({ where: { status: 'PENDING_REVIEW' } }),
       db().dispute.count({ where: { status: 'OPEN' } }),
-      db().booking.count({ where: { status: 'COMPLETED', checkOut: { lt: payoutHoldCutoff } } }),
+      db().booking.findMany({ where: { status: 'COMPLETED', checkOut: { lt: payoutHoldCutoff } }, include: {
+        listing: { include: { owner: { select: { payoutMethod: true } } } }, payments: true,
+        disputes: { where: { status: 'OPEN' }, select: { id: true } },
+      }, take: 500 }),
       db().user.count({ where: { idDocumentStatus: 'PENDING_REVIEW' } }),
       countActiveLoginLocks(),
       db().adminAuditLog.count({ where: { action: 'SECURITY_LOGIN_LOCKOUT', createdAt: { gte: ago24h } } }),
@@ -1224,6 +1228,15 @@ export async function handleAdmin(req, res, url, context) {
     ])
 
     const byStatus = Object.fromEntries(bookingsByStatus.map((row) => [row.status, row._count._all]))
+    const payoutCandidateIds = payoutCandidates.map((booking) => booking.id)
+    const releasedPayouts = payoutCandidateIds.length ? await db().walletEntry.findMany({
+      where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: { in: payoutCandidateIds } }, select: { referenceId: true },
+    }) : []
+    const releasedIds = new Set(releasedPayouts.map((entry) => entry.referenceId))
+    const payoutsReady = payoutCandidates.filter((booking) =>
+      !releasedIds.has(booking.id) && isPayoutEligible(booking) && booking.metadata?.payoutHeld !== true
+      && Boolean(booking.listing?.owner?.payoutMethod) && booking.payments.some((payment) => payment.status === 'APPROVED'),
+    ).length
 
     return json(res, 200, {
       ok: true,

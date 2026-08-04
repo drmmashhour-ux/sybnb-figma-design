@@ -153,6 +153,17 @@ describe('launch UI safety guards', () => {
     expect(finance).not.toContain('platform currently collects no commission on SR rides')
   })
 
+  it('keeps finance currencies separate and requires a reconciled host payout transfer', () => {
+    const finance = read('src/modules/finance/FinanceReconciliationPage.tsx')
+    const api = read('src/shared/api/platformApi.ts')
+    expect(finance).toContain('protectedByCurrency')
+    expect(finance).toContain('payoutHoldByCurrency')
+    expect(finance).not.toContain("moneyText(protectedMinor, 'SYP'")
+    expect(finance).toContain('fetchAdminPayoutAccount')
+    expect(finance).toContain('payoutRefs[bookingId]')
+    expect(api).toContain('body: { payoutRef }')
+  })
+
   it('uses server email/phone OTP for seller signup and never compares a browser-generated code', () => {
     const source = read('src/modules/seller/SellerAccountPage.tsx')
     expect(source).toContain("sendEmailVerificationCode(email.trim(), 'staff-login')")
