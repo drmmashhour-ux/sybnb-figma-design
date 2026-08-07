@@ -5,6 +5,7 @@ import { expireOldListings, purgeStaleListingMedia } from '../lib/listing-lifecy
 import { expireOpenAuctions } from '../lib/auction-lifecycle.mjs'
 import { purgeAssistantConfirmations } from '../lib/assistant-confirmations.mjs'
 import { retryPendingStripeDisputeRefunds } from './disputes.mjs'
+import { reconcileStripeCaptures } from './payments.mjs'
 import { buildDailyExecutiveReport, formatDailyExecutiveReport } from './admin.mjs'
 import { sendDailyAdminReportEmail } from '../lib/mailer.mjs'
 
@@ -41,12 +42,19 @@ function unauthorized() {
 }
 
 export async function handleCron(req, res, url) {
-  if (!['/api/cron/maintenance', '/api/cron/daily-report'].includes(url.pathname)) return false
+  if (!['/api/cron/maintenance', '/api/cron/daily-report', '/api/cron/keep-alive'].includes(url.pathname)) return false
 
   // Fail-closed: the CRON_SECRET bearer is the ONLY accepted credential. No secret configured → the
   // endpoint is disabled (the x-vercel-cron header is client-settable and must never be trusted alone).
   const secret = process.env.CRON_SECRET
   if (!secret || req.headers['authorization'] !== `Bearer ${secret}`) throw unauthorized()
+
+  if (url.pathname === '/api/cron/keep-alive') {
+    // A trivial query on a short interval prevents Neon compute autosuspend, so the first request after a
+    // quiet period doesn't eat a multi-second cold-start. Cheap and read-only.
+    await db().$queryRaw`SELECT 1`
+    return json(res, 200, { ok: true, keptAlive: true, at: new Date().toISOString() })
+  }
 
   if (url.pathname === '/api/cron/daily-report') {
     // Vercel cron schedules are UTC. It calls at both possible Toronto 08:00 UTC hours; this
@@ -92,6 +100,7 @@ export async function handleCron(req, res, url) {
     return email.count + phone.count
   })
   await runStep('retriedStripeDisputeRefunds', () => retryPendingStripeDisputeRefunds())
+  await runStep('reconciledStripeCaptures', () => reconcileStripeCaptures())
 
   if (AUDIT_LOG_RETENTION_DAYS > 0) {
     await runStep('auditLogPurged', async () => {
