@@ -187,6 +187,49 @@ export async function creditWalletTopupSession(session) {
   })
 }
 
+// Safety net for the "card captured but booking/top-up never recorded" gap: if BOTH the signature-verified
+// webhook AND the browser redirect-confirm fail to finalize a paid Checkout session, the booking would sit
+// PAYMENT_PENDING and eventually be reaped even though the card was charged. This re-pulls recent paid
+// sessions from Stripe and re-runs the SAME idempotent finalizers — a no-op for anything already recorded,
+// a recovery for anything missed. Invoked from the maintenance cron. Best-effort: never throws.
+export async function reconcileStripeCaptures({ lookbackMs = 48 * 60 * 60 * 1000, pageLimit = 100, maxPages = 5, minAgeMs = 120 * 1000 } = {}) {
+  if (!stripe) return 'skipped: stripe not configured'
+  const createdGte = Math.floor((Date.now() - lookbackMs) / 1000)
+  const olderThan = Math.floor((Date.now() - minAgeMs) / 1000)
+  let scanned = 0
+  let settled = 0
+  let startingAfter
+  for (let page = 0; page < maxPages; page += 1) {
+    let batch
+    try {
+      batch = await stripe.checkout.sessions.list({
+        created: { gte: createdGte },
+        limit: pageLimit,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      })
+    } catch (error) {
+      return { scanned, settled, error: error?.message || String(error) }
+    }
+    for (const session of batch.data) {
+      scanned += 1
+      // Give the primary paths (webhook + redirect) a head start; only reconcile sessions old enough that
+      // they should already have finalized. Idempotency still makes double-processing safe if this races.
+      if (session.payment_status !== 'paid' || session.created > olderThan) continue
+      try {
+        const result = session.metadata?.kind === 'wallet_topup'
+          ? await creditWalletTopupSession(session)
+          : await finalizeStripeSession(session)
+        if (result) settled += 1
+      } catch {
+        // A single bad session must not abort the sweep.
+      }
+    }
+    if (!batch.has_more || batch.data.length === 0) break
+    startingAfter = batch.data[batch.data.length - 1].id
+  }
+  return { scanned, settled }
+}
+
 export async function finalizeStripeSession(session) {
   // A wallet top-up is credited exclusively by creditWalletTopupSession() from the webhook — never here.
   if (session.metadata?.kind === 'wallet_topup') return null
